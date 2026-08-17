@@ -1,0 +1,22 @@
+{
+  "name": "booking",
+  "private": true,
+  "scripts": {
+    "turbo": "node --env-file-if-exists=.env node_modules/turbo/bin/turbo",
+    "build": "pnpm turbo run build",
+    "dev": "pnpm turbo run dev",
+    "lint": "pnpm turbo run lint",
+    "lint:fix": "pnpm turbo run lint:fix",
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "check-types": "pnpm turbo run check-types"
+  },
+  "devDependencies": {
+    "prettier": "^3.7.4",
+    "turbo": "^2.10.10",
+    "typescript": "5.9.2"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=22.9"
+  }
+}
