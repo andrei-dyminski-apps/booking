@@ -2,7 +2,19 @@
   "$schema": "https://turborepo.dev/schema.json",
   "ui": "tui",
   "globalDependencies": [".env"],
-  "globalEnv": ["WEB_PORT", "API_PORT", "API_HOST", "PORT", "WEB_ORIGIN", "NEXT_PUBLIC_API_URL"],
+  "globalEnv": [
+    "NODE_ENV",
+    "WEB_PORT",
+    "API_PORT",
+    "API_HOST",
+    "PORT",
+    "WEB_ORIGIN",
+    "NEXT_PUBLIC_API_URL",
+    "DATABASE_URL",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    "POSTGRES_DB"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -18,7 +30,16 @@
     "check-types": {
       "dependsOn": ["^check-types"]
     },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "test:e2e": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
     "dev": {
+      "dependsOn": ["^build"],
       "cache": false,
       "persistent": true
     }

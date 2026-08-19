@@ -1,0 +1,112 @@
+import { ConflictException, NotFoundException } from "@nestjs/common";
+import { Test } from "@nestjs/testing";
+import type { CreateBookingInput } from "@repo/contracts";
+import type { Booking as BookingRow } from "../generated/prisma/client";
+import { PrismaService } from "../prisma/prisma.service";
+import { BookingService } from "./booking.service";
+
+const input: CreateBookingInput = {
+  roomId: "101",
+  guestName: "Anna",
+  from: "2026-09-01",
+  to: "2026-09-05",
+};
+
+const row: BookingRow = {
+  id: "0b6f7f6e-2f4c-4a52-9a5e-8f1f6d2c3b4a",
+  roomId: "101",
+  guestName: "Anna",
+  from: new Date("2026-09-01"),
+  to: new Date("2026-09-05"),
+  createdAt: new Date("2026-08-17T12:00:00.000Z"),
+};
+
+// The date overlap is checked by the SQL query, so unit tests cover the service
+// logic around it: mapping rows to the contract and turning DB answers into HTTP errors.
+// The overlap semantics themselves are covered by e2e tests against a real database.
+const prisma = {
+  booking: {
+    findMany: jest.fn(),
+    findUnique: jest.fn(),
+    findFirst: jest.fn(),
+    create: jest.fn(),
+    deleteMany: jest.fn(),
+  },
+};
+
+describe("BookingService", () => {
+  let service: BookingService;
+
+  beforeEach(async () => {
+    // resetAllMocks, not clearAllMocks: the latter keeps mockResolvedValue in place,
+    // so a stub from one test would leak into the next.
+    jest.resetAllMocks();
+
+    const moduleRef = await Test.createTestingModule({
+      providers: [BookingService, { provide: PrismaService, useValue: prisma }],
+    }).compile();
+
+    service = moduleRef.get(BookingService);
+  });
+
+  it("creates a booking and converts dates into the contract format", async () => {
+    prisma.booking.findFirst.mockResolvedValue(null);
+    prisma.booking.create.mockResolvedValue(row);
+
+    const booking = await service.create(input);
+
+    expect(booking).toMatchObject(input);
+    expect(booking.id).toBe(row.id);
+    expect(booking.createdAt).toBe(row.createdAt.toISOString());
+  });
+
+  it("queries overlaps with strict inequalities, so back-to-back bookings pass", async () => {
+    prisma.booking.findFirst.mockResolvedValue(null);
+    prisma.booking.create.mockResolvedValue(row);
+
+    await service.create(input);
+
+    expect(prisma.booking.findFirst).toHaveBeenCalledWith({
+      where: {
+        roomId: input.roomId,
+        from: { lt: new Date(input.to) },
+        to: { gt: new Date(input.from) },
+      },
+    });
+  });
+
+  it("rejects creation when an overlapping booking is found", async () => {
+    prisma.booking.findFirst.mockResolvedValue(row);
+
+    await expect(service.create(input)).rejects.toThrow(ConflictException);
+    expect(prisma.booking.create).not.toHaveBeenCalled();
+  });
+
+  it("findAll sorts by check-in date and maps rows to the contract", async () => {
+    prisma.booking.findMany.mockResolvedValue([row]);
+
+    const bookings = await service.findAll();
+
+    expect(prisma.booking.findMany).toHaveBeenCalledWith({
+      orderBy: { from: "asc" },
+    });
+    expect(bookings).toEqual([
+      {
+        id: row.id,
+        roomId: row.roomId,
+        guestName: row.guestName,
+        from: "2026-09-01",
+        to: "2026-09-05",
+        createdAt: row.createdAt.toISOString(),
+      },
+    ]);
+  });
+
+  it("throws NotFoundException for an unknown id", async () => {
+    prisma.booking.findUnique.mockResolvedValue(null);
+    prisma.booking.deleteMany.mockResolvedValue({ count: 0 });
+
+    await expect(service.findOne(row.id)).rejects.toThrow(NotFoundException);
+    await expect(service.remove(row.id)).rejects.toThrow(NotFoundException);
+  });
+});

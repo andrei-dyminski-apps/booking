@@ -16,13 +16,14 @@ A booking service monorepo: a Next.js frontend and a NestJS backend in one repos
 pnpm install
 cp .env.example .env
 docker compose up -d                    # PostgreSQL
-pnpm --filter @repo/api db:migrate      # migrations (+ demo data seed)
+pnpm --filter @repo/api db:migrate      # create the schema
+pnpm --filter @repo/api db:seed         # demo data
 pnpm dev
 ```
 
 - bookings — http://localhost:3000/bookings
 - API — http://localhost:3001
-- OpenAPI — http://localhost:3001/docs
+- OpenAPI — http://localhost:3001/docs (not published when `NODE_ENV=production`)
 
 ## Layout
 
@@ -102,17 +103,18 @@ The `nest.json` preset adds what Nest cannot work without: decorators with metad
 
 All settings live in a single `.env` in the repository root — there are no per-app `.env` files inside `apps/*`.
 
-| Variable              | What it sets                                                     | Default                 |
-| --------------------- | ---------------------------------------------------------------- | ----------------------- |
-| `WEB_PORT`            | Next port (`apps/web`)                                           | `3000`                  |
-| `API_PORT`            | Nest port (`apps/api`)                                           | `3001`                  |
-| `API_HOST`            | the interface Nest listens on                                    | `0.0.0.0`               |
-| `NEXT_PUBLIC_API_URL` | API address for the browser (inlined into the bundle at `build`) | `http://localhost:3001` |
-| `WEB_ORIGIN`          | origin(s) for CORS in Nest, several — comma-separated            | `http://localhost:3000` |
-| `POSTGRES_USER`       | user inside the Postgres container                               | `booking`               |
-| `POSTGRES_PASSWORD`   | password inside the Postgres container                           | `booking`               |
-| `POSTGRES_DB`         | database name inside the Postgres container                      | `booking`               |
-| `DATABASE_URL`        | PostgreSQL connection string for the application                 | see `.env.example`      |
+| Variable              | What it sets                                                     | Default                             |
+| --------------------- | ---------------------------------------------------------------- | ----------------------------------- |
+| `NODE_ENV`            | `production` hides Swagger at `/docs`; set by the runtime        | unset                               |
+| `WEB_PORT`            | Next port (`apps/web`)                                           | `3000`                              |
+| `API_PORT`            | Nest port (`apps/api`)                                           | `3001`                              |
+| `API_HOST`            | the interface Nest listens on                                    | `0.0.0.0`                           |
+| `NEXT_PUBLIC_API_URL` | API address for the browser (inlined into the bundle at `build`) | required at build time, no fallback |
+| `WEB_ORIGIN`          | origin(s) for CORS in Nest, several — comma-separated            | `http://localhost:3000`             |
+| `POSTGRES_USER`       | user inside the Postgres container                               | `booking`                           |
+| `POSTGRES_PASSWORD`   | password inside the Postgres container                           | `booking`                           |
+| `POSTGRES_DB`         | database name inside the Postgres container                      | `booking`                           |
+| `DATABASE_URL`        | PostgreSQL connection string for the application                 | see `.env.example`                  |
 
 The root scripts start turbo through `node --env-file-if-exists=.env`, so the variables reach the environment of both tasks. The same `.env` is read by `docker compose` — it sits next to `docker-compose.yml`, so `POSTGRES_*` are substituted into the container without extra flags; compose declares defaults for them, so the database comes up even without a `.env`.
 
@@ -120,20 +122,24 @@ The root scripts start turbo through `node --env-file-if-exists=.env`, so the va
 
 A new variable has to be added in three places: `.env.example`, `globalEnv` in `turbo.json` and the table above. Without the `globalEnv` entry turbo will not account for it when computing the cache hash, and ESLint will report `turbo/no-undeclared-env-vars`.
 
-`NEXT_PUBLIC_API_URL` ends up in the client bundle at `next build` time — changing the API address requires rebuilding the frontend.
+`NEXT_PUBLIC_API_URL` ends up in the client bundle at `next build` time — changing the API address requires rebuilding the frontend. There is no fallback in the code (`apps/web/lib/api-url.ts`): with the variable unset `next build` itself fails with an explicit error while collecting page data, instead of quietly walking to `localhost`. So it has to be present in the environment of the build, not only in that of the running application — a deploy pipeline that only passes it to the runtime container will not start.
+
+A trailing slash in the value is cut by `api-url.ts`, so `http://localhost:3001` and `http://localhost:3001/` behave the same.
 
 ## Commands
 
 From the repository root, across all packages at once:
 
 ```sh
-pnpm dev            # web + api in parallel
+pnpm dev            # web + api in parallel, deps rebuilt on change
 pnpm build          # build every package
 pnpm lint           # ESLint (formatting check included)
 pnpm lint:fix       # ESLint --fix: autofixes + reformatting by Prettier
 pnpm check-types    # tsc --noEmit
 pnpm format         # Prettier over **/*.{ts,tsx,md}
 ```
+
+`pnpm dev` goes through `turbo watch dev`, so it is dependency-aware: edit a schema in `packages/contracts` and turbo rebuilds it and restarts `apps/api`, while `apps/web` picks the change up with its own watcher.
 
 `pnpm format` stays the only way to format `.md` — ESLint does not parse them. It runs from the root only; packages have no local `format` scripts.
 
@@ -153,12 +159,18 @@ pnpm --filter @repo/api db:seed       # load demo data
 pnpm --filter @repo/api db:generate   # regenerate the client (also runs in postinstall)
 ```
 
+Prisma 7 removed the automatic steps that v6 performed: `db:migrate` no longer runs the seed script and no longer regenerates the client. After changing `schema.prisma` run `db:generate` yourself, and after recreating the database run `db:seed`.
+
+The container keeps its data in the `db-data` volume, so `docker compose down` and `up -d` preserve the bookings. Data is lost only with `docker compose down -v` — which is also the only way to change `POSTGRES_*`, since those apply when the volume is first initialized.
+
 Backend tests:
 
 ```sh
-pnpm --filter @repo/api test        # unit, *.spec.ts next to the code; no database needed (Prisma is mocked)
-pnpm --filter @repo/api test:e2e    # e2e, test/*.e2e-spec.ts; needs the database from docker-compose running
+pnpm test           # unit, *.spec.ts next to the code; no database needed (Prisma is mocked)
+pnpm test:e2e       # e2e, test/*.e2e-spec.ts; needs the database from docker-compose running
 ```
+
+Both run through turbo, which builds `@repo/contracts` first — the specs import its schemas as values, and unlike `lint` and `check-types` they need the compiled `dist/`, not the sources.
 
 The e2e tests wipe the tables before every test — do not run them against a database whose data you care about.
 

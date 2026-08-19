@@ -1,0 +1,40 @@
+{
+  "name": "@repo/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./src/index.ts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./src/index.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
+    "eslint": "^9.39.1",
+    "tsup": "^8.5.1",
+    "typescript": "5.9.2"
+  }
+}

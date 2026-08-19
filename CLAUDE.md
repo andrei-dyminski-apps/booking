@@ -22,7 +22,7 @@ Node >= 22.9, the package manager is **pnpm 9** (`packageManager` in the root `p
 Everything runs **from the repository root**, through turbo:
 
 ```sh
-pnpm dev            # web + api in parallel (persistent, uncached)
+pnpm dev            # turbo watch dev: web + api, deps rebuilt on change
 pnpm build          # build every package
 pnpm lint           # ESLint across all packages (Prettier formatting included)
 pnpm lint:fix       # eslint --fix across all packages: autofixes + formatting
@@ -41,16 +41,18 @@ pnpm turbo run lint --filter=@repo/ui
 The database is PostgreSQL from `docker-compose.yml` in the root (`docker compose up -d`):
 
 ```sh
-pnpm --filter @repo/api db:migrate    # prisma migrate dev (+ seed)
-pnpm --filter @repo/api db:seed       # demo data
+pnpm --filter @repo/api db:migrate    # prisma migrate dev — schema only
+pnpm --filter @repo/api db:seed       # demo data (Prisma 7 never seeds automatically)
 ```
 
 API tests:
 
 ```sh
-pnpm --filter @repo/api test        # jest, *.spec.ts next to the code; no database needed
-pnpm --filter @repo/api test:e2e    # jest -c test/jest-e2e.json; needs the database, wipes tables
+pnpm test           # jest, *.spec.ts next to the code; no database needed
+pnpm test:e2e       # jest -c test/jest-e2e.json; needs the database, wipes tables
 ```
+
+Both go through turbo and declare `dependsOn: ["^build"]`: the specs import `@repo/contracts` schemas as values, so `dist/` has to exist. Running `pnpm --filter @repo/api test` directly skips that and fails on a fresh clone.
 
 Before considering a task done: `pnpm lint` and `pnpm check-types` have to pass.
 

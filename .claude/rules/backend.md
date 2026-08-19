@@ -35,6 +35,7 @@ src/
 - Database access goes through `PrismaService` only (injected; `PrismaModule` is imported by the feature module). Do not create `new PrismaClient` inside services.
 - The check-in/check-out columns are `@db.Date`, while dates are exposed as `YYYY-MM-DD` strings (the mapper in `BookingService`); the contract did not change when the storage did.
 - A model change means a migration (`db:migrate`), and the migration files are committed.
+- Prisma 7 dropped the automatic steps of v6: neither `migrate dev` nor `migrate reset` runs the seed script, and `migrate dev` no longer regenerates the client. So a schema change is `db:migrate` + `db:generate`, and a recreated database is `db:migrate` + `db:seed`.
 
 Generate scaffolding through the Nest CLI rather than by hand:
 
@@ -67,14 +68,16 @@ The class is needed because Nest takes the metatype of the parameter from the ru
 
 - listens on `API_PORT ?? PORT ?? 3001` at `API_HOST ?? '0.0.0.0'`;
 - CORS: the list of origins from `WEB_ORIGIN` (comma-separated), `credentials: true`;
-- Swagger at `/docs`: the document is built from the same zod schemas, and `cleanupOpenApiDoc` is mandatory (in `nestjs-zod` 5 it replaced `patchNestJsSwagger`).
+- Swagger at `/docs`: the document is built from the same zod schemas, and `cleanupOpenApiDoc` is mandatory (in `nestjs-zod` 5 it replaced `patchNestJsSwagger`). It is published only when `NODE_ENV !== "production"` — the document describes the whole API surface.
 
 Do not hardcode the port, the host or an origin. A new frontend origin goes into `.env`, not into the code.
 
 ## Tests
 
-- Unit: `*.spec.ts` next to the code, `rootDir: src`, run with `pnpm --filter @repo/api test`. No database needed: Prisma is mocked (`{ provide: PrismaService, useValue: ... }`), and the unit tests check the service logic around the queries.
-- E2E: `test/*.e2e-spec.ts`, config `test/jest-e2e.json`, run with `pnpm --filter @repo/api test:e2e`. They hit the real database from docker-compose (it needs `docker compose up -d` and applied migrations) and wipe the tables in `beforeEach`. The script loads the root `.env` and enables `--experimental-vm-modules`, which Prisma 7 needs under Jest — do not remove it.
+- Unit: `*.spec.ts` next to the code, `rootDir: src`, run with `pnpm test` from the root. No database needed: Prisma is mocked (`{ provide: PrismaService, useValue: ... }`), and the unit tests check the service logic around the queries. The script is a bare `jest` on purpose — see the note on `--experimental-vm-modules` below.
+- E2E: `test/*.e2e-spec.ts`, config `test/jest-e2e.json`, run with `pnpm test:e2e` from the root. They hit the real database from docker-compose (it needs `docker compose up -d` and applied migrations) and wipe the tables in `beforeEach`. The script loads the root `.env` and enables `--experimental-vm-modules` — do not remove it. `maxWorkers: 1` in the same config is not optional either: the spec files share one database, and in parallel workers one file's cleanup wipes rows another one is working with.
+- `--experimental-vm-modules` is needed by the tests that actually execute queries, not by every test that sees Prisma. Prisma 7 has no binary engine: with a driver adapter the generated client loads a WASM query compiler through `await import(...)` on `$connect()`, and Jest forbids a dynamic import inside its vm context without the flag. Unit tests replace `PrismaService` with a mock, so its constructor never runs and `$connect()` never happens — hence no flag there. If a unit spec starts failing with `A dynamic import callback was invoked without --experimental-vm-modules`, it has reached the real database: mock Prisma, do not add the flag.
+- Both test tasks are declared in `turbo.json` with `dependsOn: ["^build"]`, so run them from the root. The specs import `@repo/contracts` schemas as values and need the built `dist/`; a direct `pnpm --filter @repo/api test` skips the build and fails on a fresh clone.
 - A new controller or service comes with a spec modelled on `src/booking/booking.service.spec.ts` (`Test.createTestingModule`).
 - In e2e, check the response with a schema from `@repo/contracts` (`bookingSchema.parse(response.body)`) — that way the test catches a drift from the contract, not only a status code.
 

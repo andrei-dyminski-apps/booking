@@ -13,12 +13,15 @@ Next.js 16, App Router, Turbopack, React 19, TypeScript strict, ESM (`"type": "m
 
 ## Data and API
 
+- **Every call to the API goes through `lib/api-client.ts`.** No `fetch` to the backend from a component or a page: a route is written down there once — method, path and the schema of its answer — so the parse cannot be forgotten and the path cannot drift. A new endpoint means a new method on `bookingsApi` (or a sibling object for a new domain area), not a `fetch` at the call site.
+- The client throws two errors and nothing else swallows the rest: `ApiUnreachableError` (the API never answered) and `ApiResponseError` (a non-2xx answer; `issues` carries the per-field validation problems from `apiErrorSchema`). Anything else — a `ZodError` above all — is a drift from the contract and has to propagate.
 - Response types and request schemas come from `@repo/contracts`. Do not describe the shape of a response by hand — that is the main source of drift from the backend.
+- The error body is part of the contract too (`apiErrorSchema`): do not read `message`/`errors` out of an `unknown` body by hand.
 - Parse the API response with a schema (`bookingListSchema.parse(...)`) instead of casting with `as`: a mismatch with the contract has to fail immediately and loudly.
 - Validate forms with the same schema that validates the request on the server (`createBookingSchema.safeParse(...)`) — see `app/bookings/booking-form.tsx`. Do not write duplicate rules in the component.
 - The backend address is `process.env.NEXT_PUBLIC_API_URL` only. Do not hardcode `http://localhost:3001`.
-- The variable is inlined at `next build` time, so changing the address requires a rebuild — take that into account in deployment instructions.
-- Server-side fetches carry an explicit `cache`/`next.revalidate`; do not silently rely on the default.
+- The variable is inlined at `next build` time and `lib/api-url.ts` is evaluated while Next collects page data, so an unset value fails the build rather than a request: it belongs to the build environment, and changing the address requires a rebuild.
+- Server-side fetches carry an explicit `cache`/`next.revalidate`; do not silently rely on the default. The read methods of the client take those options as a required argument, so the decision stays at the call site.
 
 ## Styling
 

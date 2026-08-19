@@ -11,7 +11,7 @@ pnpm lint
 pnpm check-types
 ```
 
-For changes in `apps/api`, additionally `pnpm --filter @repo/api test`.
+For changes in `apps/api`, additionally `pnpm test`.
 
 4. Code formatting is done by `pnpm lint:fix` from the root — Prettier is wired into ESLint through the `prettier/prettier` rule. `pnpm format` remains for `.md`, which ESLint does not parse. Do not align code by hand and do not argue with Prettier.
 
@@ -19,9 +19,9 @@ For changes in `apps/api`, additionally `pnpm --filter @repo/api test`.
 
 - The language of code, names and comments is English. Comments only where the "why" is not obvious; do not retell the code.
 - The rule covers comments in every file of the repository, not only `.ts`/`.tsx`: `docker-compose.yml`, `.env.example`, `.gitignore`, `schema.prisma`, the ESLint and tsup configs are English too.
-- Strings addressed to a developer are English as well: test descriptions in `it(...)`/`describe(...)`, Nest exception messages, error texts in the `@repo/contracts` schemas, output of scripts such as the seed.
+- Strings addressed to a developer are English as well: test descriptions in `it(...)`/`describe(...)` and the fixtures next to them, Nest exception messages, error texts in the `@repo/contracts` schemas, the output of scripts such as the seed and the demo data it writes.
 - Documentation is English: every `README.md`, `CLAUDE.md`, `docs/`, this file and the rest of `.claude/`.
-- Russian is left for what the end user reads: interface labels and texts in `apps/web` and the demo data of the seed.
+- Russian is left for what the end user reads: interface labels and texts in `apps/web`. Everything else in the repository, the seed included, is English.
 - Messages from the contract schemas and API exceptions reach the interface as they are — the interface is therefore bilingual until i18n appears; new user-facing texts in `apps/web` are written in Russian.
 - The conversation with the user and commit messages are in Russian.
 - TypeScript strict in every package, `apps/api` included: no `any`, no `@ts-ignore`, no `!` to silence `noUncheckedIndexedAccess`. If a type is not inferred — describe it explicitly.

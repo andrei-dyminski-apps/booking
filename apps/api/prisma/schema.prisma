@@ -1,0 +1,23 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "cjs"
+  // No extensions in imports: both tsc (nest build) and ts-node (seed) resolve the .ts files.
+  importFileExtension = ""
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Booking {
+  id        String   @id @default(uuid()) @db.Uuid
+  roomId    String   @map("room_id")
+  guestName String   @map("guest_name")
+  from      DateTime @map("from_date") @db.Date
+  to        DateTime @map("to_date") @db.Date
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([roomId, from, to])
+  @@map("bookings")
+}

@@ -11,4 +11,8 @@ export default [
       },
     },
   },
+  {
+    // The generated Prisma client is not linted: prisma generate recreates it.
+    ignores: ["src/generated/**"],
+  },
 ];

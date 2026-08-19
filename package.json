@@ -4,11 +4,13 @@
   "scripts": {
     "turbo": "node --env-file-if-exists=.env node_modules/turbo/bin/turbo",
     "build": "pnpm turbo run build",
-    "dev": "pnpm turbo run dev",
+    "dev": "pnpm turbo watch dev",
     "lint": "pnpm turbo run lint",
     "lint:fix": "pnpm turbo run lint:fix",
     "format": "prettier --write \"**/*.{ts,tsx,md}\"",
-    "check-types": "pnpm turbo run check-types"
+    "check-types": "pnpm turbo run check-types",
+    "test": "pnpm turbo run test",
+    "test:e2e": "pnpm turbo run test:e2e"
   },
   "devDependencies": {
     "prettier": "^3.7.4",

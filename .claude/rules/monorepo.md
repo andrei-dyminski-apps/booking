@@ -24,12 +24,27 @@ Internal packages are wired in as `"@repo/ui": "workspace:*"` — not through a 
 
 ## Two kinds of packages
 
-`@repo/ui` ships sources (`.tsx`) — Next transpiles them. `@repo/contracts` is built by tsup into `.mjs` + `.js` + `.d.ts`.
+Turborepo names three strategies for internal packages; two of them are in use here.
 
-The difference is not stylistic: `apps/api` is compiled by `tsc`, which does not compile `.ts` from `node_modules`, and Node does not strip types from files inside `node_modules` either. Hence a simple rule:
+- **Just-in-Time** — `@repo/ui` ships sources (`.tsx`) and the consumer's bundler compiles them. That works because only `apps/web` consumes it and Turbopack compiles TypeScript.
+- **Compiled** — `@repo/contracts` is built by tsup into `.mjs` + `.js` + `.d.ts`, because `apps/api` consumes it and does not bundle: `nest build` is `tsc`, which emits `require("@repo/contracts")` and leaves the resolution to Node at runtime.
 
-- the package is consumed only by `apps/web` and contains any runtime at all → shipping sources is fine;
-- the package is consumed by `apps/api` → either types only (`type`/`interface`, erased at compile time) or a built package with `declaration: true`, otherwise consumers get `any`.
+So the rule is about the consumer, not about the package: anything with a runtime that reaches `apps/api` has to be a compiled package. A types-only package (`type`/`interface`, erased at compile time) needs no build either way.
+
+`@repo/contracts` points `types` at the sources and `default` at `dist` — the shape Turborepo recommends for compiled packages:
+
+```json
+"exports": {
+  ".": {
+    "import": { "types": "./src/index.ts", "default": "./dist/index.mjs" },
+    "require": { "types": "./src/index.ts", "default": "./dist/index.js" }
+  }
+}
+```
+
+Type-checking therefore reads the sources and needs no build: `lint` and `check-types` pass on a fresh clone with no `dist/`, and only `build` and the runtime need it. The price is deliberate — the sources of the package land in the consumer's `tsc` program, so compiler strictness has to match. It does, because every package extends the same `base.json`.
+
+One thing worth writing down, because the opposite is a common belief: the reason `apps/api` cannot consume sources is _not_ that `tsc` refuses to compile `.ts` from `node_modules`, nor that Node refuses to strip types there. pnpm links workspace packages and both tools resolve the realpath, which lands outside `node_modules` — Node 24 strips types there without complaint. It fails for other reasons: `allowImportingTsExtensions` has to be enabled in every consumer rather than in the package, and runtime type stripping breaks the moment a deploy materializes the files back under `node_modules`.
 
 ## Configs
 
@@ -51,7 +66,9 @@ The base tsconfig enables `strict` and `noUncheckedIndexedAccess`. Indexed acces
 
 - Describe a new task in `tasks`, with `dependsOn: ["^task"]` if it depends on the result of its dependencies.
 - `outputs` is mandatory for cacheable tasks, otherwise the cache will be empty. Right now `build` writes into `.next/**` (web) and `dist/**` (api) — a new build directory goes into that list.
-- `dev` is `cache: false`, `persistent: true`. Do not change it.
+- `dev` is `cache: false`, `persistent: true`. The root script runs `turbo watch dev`, so editing `packages/*` re-runs that package's `build` and restarts whoever consumes it. Do not change those two flags.
+- `lint` and `check-types` deliberately do **not** declare `dependsOn: ["^build"]` — see "Two kinds of packages". `build` and `dev` do, and that is what guarantees `dist/` exists before anything runs.
+- A package-specific override goes into a `turbo.json` inside that package with `"extends": ["//"]`, not into the root file. `apps/api/turbo.json` is the only one so far: it adds `interruptible: true`, because `nest start --watch` does not notice a rebuilt dependency and has to be restarted by `turbo watch`. `next dev` notices on its own, so `apps/web` has no such file.
 - A new env variable goes into `globalEnv` (see CLAUDE.md).
 
 ## What not to touch
