@@ -9,10 +9,10 @@ import { PrismaService } from "../prisma/prisma.service";
 
 @Injectable()
 export class BookingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prismaService: PrismaService) {}
 
   async findAll(): Promise<Booking[]> {
-    const rows = await this.prisma.booking.findMany({
+    const rows = await this.prismaService.booking.findMany({
       orderBy: { from: "asc" },
     });
 
@@ -20,7 +20,7 @@ export class BookingService {
   }
 
   async findOne(id: string): Promise<Booking> {
-    const row = await this.prisma.booking.findUnique({ where: { id } });
+    const row = await this.prismaService.booking.findUnique({ where: { id } });
 
     if (row === null) {
       throw new NotFoundException(`Booking ${id} not found`);
@@ -32,7 +32,7 @@ export class BookingService {
   async create(input: CreateBookingInput): Promise<Booking> {
     // The check and the insert are not atomic — phase 4 of the plan closes the
     // race between concurrent requests (transaction + EXCLUDE constraint in the DB).
-    const conflict = await this.prisma.booking.findFirst({
+    const conflict = await this.prismaService.booking.findFirst({
       where: {
         roomId: input.roomId,
         from: { lt: new Date(input.to) },
@@ -46,7 +46,7 @@ export class BookingService {
       );
     }
 
-    const row = await this.prisma.booking.create({
+    const row = await this.prismaService.booking.create({
       data: {
         roomId: input.roomId,
         guestName: input.guestName,
@@ -59,7 +59,9 @@ export class BookingService {
   }
 
   async remove(id: string): Promise<void> {
-    const { count } = await this.prisma.booking.deleteMany({ where: { id } });
+    const { count } = await this.prismaService.booking.deleteMany({
+      where: { id },
+    });
 
     if (count === 0) {
       throw new NotFoundException(`Booking ${id} not found`);

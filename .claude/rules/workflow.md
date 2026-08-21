@@ -21,9 +21,9 @@ For changes in `apps/api`, additionally `pnpm test`.
 - The rule covers comments in every file of the repository, not only `.ts`/`.tsx`: `docker-compose.yml`, `.env.example`, `.gitignore`, `schema.prisma`, the ESLint and tsup configs are English too.
 - Strings addressed to a developer are English as well: test descriptions in `it(...)`/`describe(...)` and the fixtures next to them, Nest exception messages, error texts in the `@repo/contracts` schemas, the output of scripts such as the seed and the demo data it writes.
 - Documentation is English: every `README.md`, `CLAUDE.md`, `docs/`, this file and the rest of `.claude/`.
-- Russian is left for what the end user reads: interface labels and texts in `apps/web`. Everything else in the repository, the seed included, is English.
-- Messages from the contract schemas and API exceptions reach the interface as they are — the interface is therefore bilingual until i18n appears; new user-facing texts in `apps/web` are written in Russian.
-- The conversation with the user and commit messages are in Russian.
+- **The whole repository is English, the interface included.** Labels, headings, button texts, `aria-label`s and the `lang` of the document in `apps/web` are English too — there is no Russian anywhere in the tree. That also keeps one language on both sides of the wire: messages from the `@repo/contracts` schemas and from API exceptions reach the interface as they are.
+- When i18n appears, Russian comes back as a translation catalogue, not as a string typed into a component.
+- The conversation with the user and commit messages are in Russian — they are not part of the tree.
 - TypeScript strict in every package, `apps/api` included: no `any`, no `@ts-ignore`, no `!` to silence `noUncheckedIndexedAccess`. If a type is not inferred — describe it explicitly.
 - Do not add new dependencies without need; first check whether something suitable is already in the repository.
 
@@ -31,7 +31,7 @@ For changes in `apps/api`, additionally `pnpm test`.
 
 - The main branch is `main`. Work happens in a separate branch off `main`, and the PR is opened into it.
 - Commit and push only when explicitly asked.
-- One commit is one meaningful change. The message is in Russian, in the imperative: «добавь эндпоинт бронирования», «почини CORS для нескольких origin».
+- One commit is one meaningful change. The message is in Russian, in the imperative mood — the equivalent of "add the booking endpoint" or "fix CORS for several origins". The examples are spelled out in English here so that the tree itself stays free of Cyrillic; the commit still is not.
 - Do not commit `.env` or the contents of `dist/`, `.next/`, `.turbo/`, `coverage/`.
 
 ## Documentation

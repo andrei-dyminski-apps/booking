@@ -11,7 +11,7 @@ Instructions for Claude Code when working in this repository.
 | `apps/web`                   | Next.js 16 (App Router, Turbopack), React 19        |
 | `apps/api`                   | NestJS 11 (Express), REST, Prisma 7 + PostgreSQL    |
 | `packages/contracts`         | `@repo/contracts` — zod schemas of the API contract |
-| `packages/ui`                | `@repo/ui` — shared React components                |
+| `packages/ui`                | `@repo/ui` — design system: Tailwind 4 + shadcn/ui  |
 | `packages/eslint-config`     | `@repo/eslint-config` — shared ESLint configs       |
 | `packages/typescript-config` | `@repo/typescript-config` — base tsconfigs          |
 
@@ -43,6 +43,7 @@ The database is PostgreSQL from `docker-compose.yml` in the root (`docker compos
 ```sh
 pnpm --filter @repo/api db:migrate    # prisma migrate dev — schema only
 pnpm --filter @repo/api db:seed       # demo data (Prisma 7 never seeds automatically)
+pnpm --filter @repo/api db:deploy     # prisma migrate deploy — production only, applies committed migrations
 ```
 
 API tests:

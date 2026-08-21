@@ -1,0 +1,22 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "buildCommand": "pnpm turbo run build --filter=@repo/api",
+    "watchPatterns": [
+      "apps/api/**",
+      "packages/contracts/**",
+      "packages/typescript-config/**",
+      "package.json",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+      "turbo.json",
+      "railway.json"
+    ]
+  },
+  "deploy": {
+    "preDeployCommand": ["pnpm --filter @repo/api db:deploy"],
+    "startCommand": "node apps/api/dist/main",
+    "healthcheckPath": "/",
+    "restartPolicyType": "ON_FAILURE"
+  }
+}

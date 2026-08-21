@@ -2,7 +2,7 @@
 
 A booking service monorepo: a Next.js frontend and a NestJS backend in one repository, managed by Turborepo and pnpm workspaces.
 
-> Status: a working vertical slice — bookings are created, checked for date overlaps and rendered on the frontend. Storage is PostgreSQL via Prisma 7. The next phases are in [docs/plan.md](docs/plan.md).
+> Status: the API is a working vertical slice — bookings are created and checked for date overlaps. Storage is PostgreSQL via Prisma 7, and the API is behind hand-written authentication: argon2, a JWT pair in httpOnly cookies, refresh-token rotation. The next phases are in [docs/plan.md](docs/plan.md).
 
 ## Requirements
 
@@ -25,6 +25,8 @@ pnpm dev
 - API — http://localhost:3001
 - OpenAPI — http://localhost:3001/docs (not published when `NODE_ENV=production`)
 
+The seed also creates three demo logins, one per role: `guest@example.com`, `owner@example.com`, `admin@example.com` — password `password123`.
+
 ## Layout
 
 ```
@@ -33,12 +35,12 @@ apps/
   api/                    # NestJS 11 on Express, Prisma 7 + PostgreSQL
 packages/
   contracts/              # @repo/contracts — zod schemas of the API contract
-  ui/                     # @repo/ui — shared React components
+  ui/                     # @repo/ui — design system: Tailwind 4 tokens + shadcn/ui
   eslint-config/          # @repo/eslint-config — shared ESLint configs (flat config)
   typescript-config/      # @repo/typescript-config — base tsconfigs
 ```
 
-The applications never import each other: `web` talks to `api` over HTTP at the address from `NEXT_PUBLIC_API_URL`. Shared frontend code goes to `@repo/ui`, which exports components file by file — `import { Button } from "@repo/ui/button"`.
+The applications never import each other: `web` talks to `api` over HTTP at the address from `NEXT_PUBLIC_API_URL`. Shared frontend code goes to `@repo/ui`, which exports file by file — `import { Button } from "@repo/ui/components/button"`.
 
 ## API contract
 
@@ -69,16 +71,68 @@ const parsed = createBookingSchema.safeParse(raw);
 
 Change the data format — change the schema; `pnpm check-types` shows what fell out of sync on both sides. Details on why this package is built while `@repo/ui` is not — in [packages/contracts/README.md](packages/contracts/README.md).
 
+## Interface
+
+The frontend is built on **Tailwind CSS 4** and **shadcn/ui** over Base UI primitives (preset `base-nova`, icons from `lucide-react`). shadcn is a generator rather than a dependency: the components land in `packages/ui/src/components` as ordinary source files of this repository, so the design system is versioned and reviewed along with everything else.
+
+```
+packages/ui/
+  components.json            # what the shadcn CLI writes and where
+  src/
+    components/              # the primitives generated so far: button, sonner
+    lib/utils.ts             # cn() — clsx + tailwind-merge
+    styles/globals.css       # tokens, dark theme, @source directives for Tailwind
+```
+
+The tokens are the only place colours and radii are defined; `apps/web/app/globals.css` is a single `@import "@repo/ui/globals.css"`. Tailwind is run by the PostCSS pipeline of `apps/web` and scans the sources named by the `@source` directives — the package itself and the `app/` and `components/` of every application.
+
+The faces are the one thing the tokens do not own: `apps/web` loads them with `next/font` into `--app-font-sans` / `--app-font-mono`, and the token file maps those onto `--font-sans` / `--font-mono`. The names differ on purpose — a token defined as `var(--font-sans)` would reference itself, and would then hold only while the `next/font` class outranks the `@layer theme` rule Tailwind emits for it.
+
+Primitives are generated when a screen needs one, not up front: only `button` and `sonner` are here so far.
+
+A new primitive is added by the CLI from inside the package, never written by hand:
+
+```sh
+cd packages/ui && pnpm dlx shadcn@latest add dialog
+pnpm lint:fix                          # from the root: the generator formats its own way
+```
+
+The import is per file — `@repo/ui/components/dialog`; inside the package the components reach each other through the `imports` map (`#components/button`, `#lib/utils`). The theme is switched by `next-themes` through a class on `<html>`.
+
 ## Endpoints
 
-| Method   | Path            | What it does                                               |
-| -------- | --------------- | ---------------------------------------------------------- |
-| `GET`    | `/bookings`     | list of bookings, sorted by check-in date                  |
-| `GET`    | `/bookings/:id` | a single booking, `404` if missing                         |
-| `POST`   | `/bookings`     | create; `400` — failed the schema, `409` — dates are taken |
-| `DELETE` | `/bookings/:id` | delete, `204`                                              |
+Every route below except `/` and the four public `/auth/*` ones is behind the global
+`JwtAuthGuard` and answers `401` without a session.
+
+| Method   | Path             | What it does                                                                   |
+| -------- | ---------------- | ------------------------------------------------------------------------------ |
+| `POST`   | `/auth/register` | register and open a session; `400` — failed the schema, `409` — email is taken |
+| `POST`   | `/auth/login`    | log in; `401` — wrong email or password                                        |
+| `POST`   | `/auth/refresh`  | rotate the token pair; `401` — missing, spent or forged token, cookies cleared |
+| `POST`   | `/auth/logout`   | end the session, `204`; answers the same without one                           |
+| `GET`    | `/auth/me`       | the current user; `401` — no session, or the user is gone                      |
+| `GET`    | `/bookings`      | list of bookings, sorted by check-in date                                      |
+| `GET`    | `/bookings/:id`  | a single booking, `404` if missing                                             |
+| `POST`   | `/bookings`      | create; `400` — failed the schema, `409` — dates are taken                     |
+| `DELETE` | `/bookings/:id`  | delete, `204`                                                                  |
 
 Overlapping dates in the same room are rejected; back-to-back bookings (check-out on the day the next guest checks in) are allowed.
+
+## Authentication
+
+Implemented by hand rather than taken from Auth.js or Clerk — the parts an interview asks about are exactly the ones a library hides.
+
+- **Passwords** are hashed with **argon2id**. A wrong password and an unknown address produce the same `401` with the same message — and take the same time to produce it: an unknown address is verified against a throwaway hash rather than answered early, because a reply that arrives in 2 ms instead of 30 names a registered user just as plainly as a different message would.
+- **A pair of JWTs.** The access token is short-lived (`JWT_ACCESS_TTL`, 15 minutes by default) and nothing can revoke it before it expires — hence its lifetime. The refresh token is long-lived and revocable: it has a row in `refresh_tokens`.
+- **Cookies only, never a response body.** Both tokens leave as `httpOnly` cookies, so an XSS on the frontend can act as the user but cannot carry the session away; `localStorage` never sees them. `access_token` is scoped to `/`, `refresh_token` to `/auth` — a request to `/bookings` does not carry the credential that mints new sessions. `SameSite` is `lax` in both environments: the frontend and the API are always the same site — one `localhost` host locally, `example.com` next to `api.example.com` in production — and cross-origin is not cross-site, so a `lax` cookie does reach a sibling subdomain. `AUTH_COOKIE_DOMAIN` is what makes the browser hand that cookie to both of them.
+- **Rotation with reuse detection.** Every `/auth/refresh` burns the token it was given and issues the next one in the same family. Only the SHA-256 of a token is stored: a leaked table yields nothing usable, and unlike a salted password hash a digest can be looked up by equality. A token that comes back after it was already burned means a copy of it exists somewhere else — and since the two copies are indistinguishable, the whole family is revoked and the real user logs in again.
+- **The guard is global.** `JwtAuthGuard` is registered through `APP_GUARD`, so a new endpoint is closed until someone marks it `@Public()`. The open ones are `/`, `/auth/register`, `/auth/login`, `/auth/refresh` and `/auth/logout` — the last two because the access token is expected to be expired exactly there.
+- **Rate limiting.** `ThrottlerGuard` is registered before `JwtAuthGuard` — the limiter has to answer `429` before anything hashes a password, because argon2 spends 64 MB per attempt and an unauthenticated flood of `/auth/login` would otherwise be a flood of that. The API-wide ceiling is 120 requests a minute per address; `/auth/register` and `/auth/login`, the two endpoints that answer a guess, allow 10. The key is the client address, so `TRUST_PROXY` has to match the deployment — behind an unaccounted proxy every client shares one bucket.
+- The `registerSchema` and `loginSchema` rules live in `@repo/contracts` like every other contract rule, so the browser and the server validate a sign-up form with the same code.
+
+The secrets have no fallback in the code: an unset `JWT_ACCESS_SECRET` stops the process at boot instead of shipping a key that is in a public repository. `.env.example` carries development values — replace them anywhere else, `openssl rand -hex 32` generates one.
+
+`pnpm --filter @repo/api db:seed` creates three demo logins, one per role — `guest@example.com`, `owner@example.com` and `admin@example.com`, all with the password `password123`. The roles themselves start meaning something in phase 3.
 
 ## Shared configuration
 
@@ -105,7 +159,7 @@ All settings live in a single `.env` in the repository root — there are no per
 
 | Variable              | What it sets                                                     | Default                             |
 | --------------------- | ---------------------------------------------------------------- | ----------------------------------- |
-| `NODE_ENV`            | `production` hides Swagger at `/docs`; set by the runtime        | unset                               |
+| `NODE_ENV`            | `production` hides Swagger and marks the auth cookies `Secure`   | unset, set by the runtime           |
 | `WEB_PORT`            | Next port (`apps/web`)                                           | `3000`                              |
 | `API_PORT`            | Nest port (`apps/api`)                                           | `3001`                              |
 | `API_HOST`            | the interface Nest listens on                                    | `0.0.0.0`                           |
@@ -115,6 +169,12 @@ All settings live in a single `.env` in the repository root — there are no per
 | `POSTGRES_PASSWORD`   | password inside the Postgres container                           | `booking`                           |
 | `POSTGRES_DB`         | database name inside the Postgres container                      | `booking`                           |
 | `DATABASE_URL`        | PostgreSQL connection string for the application                 | see `.env.example`                  |
+| `JWT_ACCESS_SECRET`   | signing key of the access token                                  | required, no fallback               |
+| `JWT_REFRESH_SECRET`  | signing key of the refresh token — a different one on purpose    | required, no fallback               |
+| `JWT_ACCESS_TTL`      | access token lifetime, seconds (also the cookie Max-Age)         | `900`                               |
+| `JWT_REFRESH_TTL`     | refresh token lifetime, seconds                                  | `604800`                            |
+| `AUTH_COOKIE_DOMAIN`  | Domain of the auth cookies; empty means the host that set them   | empty                               |
+| `TRUST_PROXY`         | number of proxies in front of the API — the rate limiter's key   | `0`                                 |
 
 The root scripts start turbo through `node --env-file-if-exists=.env`, so the variables reach the environment of both tasks. The same `.env` is read by `docker compose` — it sits next to `docker-compose.yml`, so `POSTGRES_*` are substituted into the container without extra flags; compose declares defaults for them, so the database comes up even without a `.env`.
 
@@ -157,6 +217,7 @@ Database (`apps/api`, Prisma 7; the CLI picks up the root `.env` itself through 
 pnpm --filter @repo/api db:migrate    # create/apply migrations (dev)
 pnpm --filter @repo/api db:seed       # load demo data
 pnpm --filter @repo/api db:generate   # regenerate the client (also runs in postinstall)
+pnpm --filter @repo/api db:deploy     # apply committed migrations (production; never `migrate dev`)
 ```
 
 Prisma 7 removed the automatic steps that v6 performed: `db:migrate` no longer runs the seed script and no longer regenerates the client. After changing `schema.prisma` run `db:generate` yourself, and after recreating the database run `db:seed`.
@@ -187,6 +248,21 @@ pnpm add -w <pkg>                     # repository-wide tooling
 ```
 
 Internal packages are wired in as `"@repo/ui": "workspace:*"`.
+
+## Deployment
+
+`apps/web` on Vercel, `apps/api` on Railway, one domain across both: `example.com` for the frontend and `api.example.com` for the API. That split is what the cookie configuration above assumes — the two stay the same site, so `SameSite=Lax` is enough and `AUTH_COOKIE_DOMAIN=example.com` hands one session to the middleware of the frontend and to the API alike.
+
+`railway.json` in the root describes the API service. Railway's Root Directory stays the repository root — pnpm workspaces do not build from a subdirectory — so the service is narrowed by its commands instead:
+
+- `buildCommand` filters turbo down to `@repo/api`, which builds `@repo/contracts` on the way;
+- `watchPatterns` keeps a frontend-only push from redeploying the backend;
+- `preDeployCommand` runs `db:deploy` before the new instance starts — committed migrations only, never `migrate dev`;
+- `startCommand` is a plain `node apps/api/dist/main`: the port comes from Railway's `PORT` and the host from `API_HOST`, both of which `src/main.ts` already reads.
+
+Postgres is a service in the same Railway project, and `DATABASE_URL` is set as a reference to it (`${{Postgres.DATABASE_URL}}`) rather than copied — the credentials then survive a rotation. The rest of the variables from the table above are set by hand; the JWT secrets are generated (`openssl rand -hex 32`), not taken from `.env.example`.
+
+On the Vercel side `NEXT_PUBLIC_API_URL` has to be present in the environment of the **build**, not only of the running application. Preview deployments live on `*.vercel.app`, which is a different site from `api.example.com`, so a session against the production API does not follow them there — a preview that needs a login points at a staging API instead.
 
 ## Build cache
 

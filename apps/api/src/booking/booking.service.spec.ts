@@ -24,7 +24,7 @@ const row: BookingRow = {
 // The date overlap is checked by the SQL query, so unit tests cover the service
 // logic around it: mapping rows to the contract and turning DB answers into HTTP errors.
 // The overlap semantics themselves are covered by e2e tests against a real database.
-const prisma = {
+const prismaService = {
   booking: {
     findMany: jest.fn(),
     findUnique: jest.fn(),
@@ -43,15 +43,18 @@ describe("BookingService", () => {
     jest.resetAllMocks();
 
     const moduleRef = await Test.createTestingModule({
-      providers: [BookingService, { provide: PrismaService, useValue: prisma }],
+      providers: [
+        BookingService,
+        { provide: PrismaService, useValue: prismaService },
+      ],
     }).compile();
 
     service = moduleRef.get(BookingService);
   });
 
   it("creates a booking and converts dates into the contract format", async () => {
-    prisma.booking.findFirst.mockResolvedValue(null);
-    prisma.booking.create.mockResolvedValue(row);
+    prismaService.booking.findFirst.mockResolvedValue(null);
+    prismaService.booking.create.mockResolvedValue(row);
 
     const booking = await service.create(input);
 
@@ -61,12 +64,12 @@ describe("BookingService", () => {
   });
 
   it("queries overlaps with strict inequalities, so back-to-back bookings pass", async () => {
-    prisma.booking.findFirst.mockResolvedValue(null);
-    prisma.booking.create.mockResolvedValue(row);
+    prismaService.booking.findFirst.mockResolvedValue(null);
+    prismaService.booking.create.mockResolvedValue(row);
 
     await service.create(input);
 
-    expect(prisma.booking.findFirst).toHaveBeenCalledWith({
+    expect(prismaService.booking.findFirst).toHaveBeenCalledWith({
       where: {
         roomId: input.roomId,
         from: { lt: new Date(input.to) },
@@ -76,18 +79,18 @@ describe("BookingService", () => {
   });
 
   it("rejects creation when an overlapping booking is found", async () => {
-    prisma.booking.findFirst.mockResolvedValue(row);
+    prismaService.booking.findFirst.mockResolvedValue(row);
 
     await expect(service.create(input)).rejects.toThrow(ConflictException);
-    expect(prisma.booking.create).not.toHaveBeenCalled();
+    expect(prismaService.booking.create).not.toHaveBeenCalled();
   });
 
   it("findAll sorts by check-in date and maps rows to the contract", async () => {
-    prisma.booking.findMany.mockResolvedValue([row]);
+    prismaService.booking.findMany.mockResolvedValue([row]);
 
     const bookings = await service.findAll();
 
-    expect(prisma.booking.findMany).toHaveBeenCalledWith({
+    expect(prismaService.booking.findMany).toHaveBeenCalledWith({
       orderBy: { from: "asc" },
     });
     expect(bookings).toEqual([
@@ -103,8 +106,8 @@ describe("BookingService", () => {
   });
 
   it("throws NotFoundException for an unknown id", async () => {
-    prisma.booking.findUnique.mockResolvedValue(null);
-    prisma.booking.deleteMany.mockResolvedValue({ count: 0 });
+    prismaService.booking.findUnique.mockResolvedValue(null);
+    prismaService.booking.deleteMany.mockResolvedValue({ count: 0 });
 
     await expect(service.findOne(row.id)).rejects.toThrow(NotFoundException);
     await expect(service.remove(row.id)).rejects.toThrow(NotFoundException);
