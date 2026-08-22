@@ -51,6 +51,9 @@ export const nextJsConfig = [
       ...pluginReactHooks.configs.recommended.rules,
       // React scope no longer necessary with new JSX transform.
       "react/react-in-jsx-scope": "off",
+      // Props are described by TypeScript here, so the runtime propTypes check has
+      // nothing to add and only fires on inline components typed by a generic parent.
+      "react/prop-types": "off",
     },
   },
   eslintPluginPrettierRecommended,

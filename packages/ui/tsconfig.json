@@ -1,8 +1,10 @@
 {
   "extends": "@repo/typescript-config/react-library.json",
   "compilerOptions": {
-    "outDir": "dist",
-    "strictNullChecks": true
+    // The `imports` map of package.json points at sources under `src`; TypeScript needs
+    // an unambiguous project root to resolve `#components/*` and `#lib/*` through it.
+    "rootDir": ".",
+    "outDir": "dist"
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist"]

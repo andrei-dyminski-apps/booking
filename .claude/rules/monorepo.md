@@ -20,7 +20,9 @@ Internal packages are wired in as `"@repo/ui": "workspace:*"` — not through a 
 - `apps/web` and `apps/api` **never import each other**. They talk over HTTP through `NEXT_PUBLIC_API_URL`, and the shared contract lives in `packages/contracts`.
 - The shape of a request and a response → `packages/contracts` (zod schemas). A contract rule is written there once and works on both sides: request validation in Nest, form validation and response parsing in Next.
 - Shared UI and frontend helpers → `packages/ui`. Do not copy components between applications.
-- `@repo/ui` exports file by file: `"./*": "./src/*.tsx"`. The import is `@repo/ui/button`, not `@repo/ui`. A new component means a new file in `packages/ui/src/`; there is no barrel file and none should be added.
+- `@repo/ui` is the design system: Tailwind tokens plus shadcn/ui primitives generated into `src/components`. It exports file by file — `"./components/*": "./src/components/*.tsx"`, the same for `./lib/*` and `./hooks/*`, and `./globals.css` for the tokens. The import is `@repo/ui/components/button`, not `@repo/ui`; there is no barrel file and none should be added.
+- Inside the package the files reach each other through the `imports` map of its `package.json` (`#components/button`, `#lib/utils`) — that is what the shadcn CLI generates. It is also why `packages/ui/tsconfig.json` declares `rootDir`: without an unambiguous project root TypeScript refuses to resolve an import map pointing at sources.
+- How a primitive is added and the conventions around it — in `.claude/rules/frontend.md`.
 
 ## Two kinds of packages
 
