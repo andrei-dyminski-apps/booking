@@ -3,19 +3,24 @@
 @import "shadcn/tailwind.css";
 
 /* Tailwind scans from the directory of this file, so both trees are named explicitly:
-   the components of this package and every app that imports these tokens. */
+   the components of this package and the frontend that imports these tokens — its
+   Next.js routing folder and the FSD layers under `src/`. The application is named
+   rather than globbed as `apps/*`: that pattern also matches `apps/api/src`, and a
+   class-looking string anywhere in a Nest service would then emit CSS nobody asked for.
+   A second frontend is a line of its own here. */
 @source "../**/*.{ts,tsx}";
-@source "../../../../apps/*/app/**/*.{ts,tsx}";
-@source "../../../../apps/*/components/**/*.{ts,tsx}";
+@source "../../../../apps/web/app/**/*.{ts,tsx}";
+@source "../../../../apps/web/src/**/*.{ts,tsx}";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
   /* The application loads its own faces and writes them into `--app-font-*` (see the
-     `localFont` calls in `apps/web/app/layout.tsx`). The names differ on purpose: a token
-     defined as `var(--font-sans)` would reference itself, and the value would hold only
-     while the font class outranks the `@layer theme` rule Tailwind emits for it. The
-     fallback keeps the tokens usable in an app that loads no faces at all. */
+     `localFont` calls in `apps/web/src/_app/layout/root-layout.tsx`). The names differ
+     on purpose: a token defined as `var(--font-sans)` would reference itself, and the
+     value would hold only while the font class outranks the `@layer theme` rule
+     Tailwind emits for it. The fallback keeps the tokens usable in an app that loads no
+     faces at all. */
   --font-sans: var(--app-font-sans, ui-sans-serif, system-ui, sans-serif);
   --font-mono: var(
     --app-font-mono,

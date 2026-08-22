@@ -8,7 +8,7 @@ Instructions for Claude Code when working in this repository.
 
 | Package                      | What it is                                          |
 | ---------------------------- | --------------------------------------------------- |
-| `apps/web`                   | Next.js 16 (App Router, Turbopack), React 19        |
+| `apps/web`                   | Next.js 16 (App Router, Turbopack), React 19, FSD   |
 | `apps/api`                   | NestJS 11 (Express), REST, Prisma 7 + PostgreSQL    |
 | `packages/contracts`         | `@repo/contracts` — zod schemas of the API contract |
 | `packages/ui`                | `@repo/ui` — design system: Tailwind 4 + shadcn/ui  |
@@ -24,7 +24,7 @@ Everything runs **from the repository root**, through turbo:
 ```sh
 pnpm dev            # turbo watch dev: web + api, deps rebuilt on change
 pnpm build          # build every package
-pnpm lint           # ESLint across all packages (Prettier formatting included)
+pnpm lint           # ESLint across all packages (Prettier included; plus Steiger over the FSD structure of apps/web)
 pnpm lint:fix       # eslint --fix across all packages: autofixes + formatting
 pnpm check-types    # tsc --noEmit across all packages
 pnpm format         # prettier --write over **/*.{ts,tsx,md} — needed for .md

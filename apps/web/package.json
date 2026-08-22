@@ -4,14 +4,15 @@
   "type": "module",
   "private": true,
   "imports": {
-    "#components/*": "./components/*.tsx",
-    "#lib/*": "./lib/*.ts"
+    "#_app/*": "./src/_app/*/index.ts",
+    "#_pages/*": "./src/_pages/*/index.ts",
+    "#shared/*": "./src/shared/*/index.ts"
   },
   "scripts": {
     "dev": "next dev --port ${WEB_PORT:-3000}",
     "build": "next build",
     "start": "next start --port ${WEB_PORT:-3000}",
-    "lint": "eslint --max-warnings 0",
+    "lint": "eslint --max-warnings 0 && steiger ./src",
     "lint:fix": "eslint --fix",
     "check-types": "next typegen && tsc --noEmit"
   },
@@ -26,6 +27,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@feature-sliced/steiger-plugin": "^0.7.0",
     "@repo/eslint-config": "workspace:*",
     "@repo/typescript-config": "workspace:*",
     "@tailwindcss/postcss": "^4.3.3",
@@ -34,6 +36,7 @@
     "@types/react-dom": "19.2.2",
     "eslint": "^9.39.1",
     "postcss": "^8.5.26",
+    "steiger": "^0.6.0",
     "tailwindcss": "^4.3.3",
     "typescript": "5.9.2"
   }
