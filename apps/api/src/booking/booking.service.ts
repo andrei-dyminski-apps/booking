@@ -1,86 +1,133 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import type { Booking, CreateBookingInput } from "@repo/contracts";
-import type { Booking as BookingRow } from "../generated/prisma/client";
-import { PrismaService } from "../prisma/prisma.service";
+import { Role, type Booking, type CreateBookingInput } from "@repo/contracts";
+import type { AuthenticatedUser } from "../auth/auth.types";
+import { ownsOrIsAdmin } from "../auth/ownership";
+import {
+  BookingRepository,
+  ListingNotFoundError,
+  type BookingWithListingOwner,
+} from "./booking.repository";
 
 @Injectable()
 export class BookingService {
-  constructor(private readonly prismaService: PrismaService) {}
+  constructor(private readonly bookingRepository: BookingRepository) {}
 
-  async findAll(): Promise<Booking[]> {
-    const rows = await this.prismaService.booking.findMany({
-      orderBy: { from: "asc" },
-    });
+  /**
+   * Not a filter the client may pass, but the scope its role gives it: a guest sees the
+   * stays they booked, an owner the stays booked against their listings, an admin all of
+   * them. A `?guestId=` parameter would leave the same rule to be re-checked on every
+   * call — this way the query cannot return a row the caller may not see.
+   *
+   * A role picks one of three named queries rather than assembling a `where`, so there is
+   * no shape an unhandled role could fall through to. The switch is exhaustive on purpose
+   * — a fourth role added to the contract stops compiling here — and its `default` assigns
+   * the role to `never` and throws, because the type is not the whole guarantee: the role
+   * arrives in a signed access token that `JwtStrategy` does not parse against the
+   * contract, so one minted before a role was renamed still carries the old name for as
+   * long as `JWT_ACCESS_TTL`.
+   *
+   * An owner sees the stays against their listings and not the ones they took as a guest —
+   * a role is one persona here, and `@Roles(Role.USER)` on `create` keeps it that way.
+   */
+  findAll(user: AuthenticatedUser): Promise<Booking[]> {
+    switch (user.role) {
+      case Role.ADMIN:
+        return this.bookingRepository.findAll();
+      case Role.OWNER:
+        return this.bookingRepository.findByListingOwner(user.id);
+      case Role.USER:
+        return this.bookingRepository.findByGuest(user.id);
+      default: {
+        const unknownRole: never = user.role;
 
-    return rows.map(toBooking);
+        throw new ForbiddenException(
+          `Unknown role ${JSON.stringify(unknownRole)}`,
+        );
+      }
+    }
   }
 
-  async findOne(id: string): Promise<Booking> {
-    const row = await this.prismaService.booking.findUnique({ where: { id } });
+  async findOne(id: string, user: AuthenticatedUser): Promise<Booking> {
+    return (await this.getReadable(id, user)).booking;
+  }
 
-    if (row === null) {
-      throw new NotFoundException(`Booking ${id} not found`);
+  async create(guestId: string, input: CreateBookingInput): Promise<Booking> {
+    if (!(await this.bookingRepository.listingExists(input.listingId))) {
+      throw new NotFoundException(`Listing ${input.listingId} not found`);
     }
 
-    return toBooking(row);
-  }
-
-  async create(input: CreateBookingInput): Promise<Booking> {
     // The check and the insert are not atomic — phase 4 of the plan closes the
     // race between concurrent requests (transaction + EXCLUDE constraint in the DB).
-    const conflict = await this.prismaService.booking.findFirst({
-      where: {
-        roomId: input.roomId,
-        from: { lt: new Date(input.to) },
-        to: { gt: new Date(input.from) },
-      },
-    });
+    const conflict = await this.bookingRepository.findOverlapping(input);
 
     if (conflict !== null) {
       throw new ConflictException(
-        `Room ${input.roomId} is already booked from ${toIsoDate(conflict.from)} to ${toIsoDate(conflict.to)}`,
+        `Listing ${input.listingId} is already booked from ${conflict.from} to ${conflict.to}`,
       );
     }
 
-    const row = await this.prismaService.booking.create({
-      data: {
-        roomId: input.roomId,
-        guestName: input.guestName,
-        from: new Date(input.from),
-        to: new Date(input.to),
-      },
-    });
+    try {
+      return await this.bookingRepository.create(guestId, input);
+    } catch (error) {
+      // The listing was deleted between the check above and the insert; nothing was
+      // booked against it yet, so the delete was allowed to go through.
+      if (error instanceof ListingNotFoundError) {
+        throw new NotFoundException(error.message);
+      }
 
-    return toBooking(row);
+      throw error;
+    }
   }
 
-  async remove(id: string): Promise<void> {
-    const { count } = await this.prismaService.booking.deleteMany({
-      where: { id },
-    });
+  /**
+   * Cancelling is the guest's decision and an admin's, and deliberately not the owner's:
+   * an owner reads the bookings against their listings and cannot cancel one out from
+   * under a guest. Who may read and who may write are separate rules over the same row,
+   * which is why the 403 below sits after the read gate rather than replacing it — an
+   * owner who may see the booking is told "not yours to cancel", a stranger who may not
+   * see it at all is told nothing, and gets the 404 `getReadable` throws.
+   */
+  async remove(id: string, user: AuthenticatedUser): Promise<void> {
+    const { booking } = await this.getReadable(id, user);
 
-    if (count === 0) {
+    if (!ownsOrIsAdmin(user, booking.guestId)) {
+      throw new ForbiddenException("This booking cannot be cancelled by you");
+    }
+
+    if (!(await this.bookingRepository.delete(id))) {
       throw new NotFoundException(`Booking ${id} not found`);
     }
   }
-}
 
-/** @db.Date columns arrive as a Date at UTC midnight, so slicing the ISO string is exact. */
-function toIsoDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
-}
+  /**
+   * 404 rather than 403 for a booking the caller may not read, and unlike the listing
+   * catalogue that is not a formality: nothing lets a stranger list bookings, so a 403
+   * here would be the one way to learn that an id exists at all. What the caller may not
+   * see is therefore indistinguishable from what is not there.
+   *
+   * Who may read: the guest who booked it, the owner of the listing it takes, an admin.
+   * `ownsOrIsAdmin` covers the first and the last; the owner of the listing is the reason
+   * the repository hands the booking back with that column beside it.
+   */
+  private async getReadable(
+    id: string,
+    user: AuthenticatedUser,
+  ): Promise<BookingWithListingOwner> {
+    const found = await this.bookingRepository.findByIdWithListingOwner(id);
 
-function toBooking(row: BookingRow): Booking {
-  return {
-    id: row.id,
-    roomId: row.roomId,
-    guestName: row.guestName,
-    from: toIsoDate(row.from),
-    to: toIsoDate(row.to),
-    createdAt: row.createdAt.toISOString(),
-  };
+    if (
+      found === null ||
+      (!ownsOrIsAdmin(user, found.booking.guestId) &&
+        !ownsOrIsAdmin(user, found.listingOwnerId))
+    ) {
+      throw new NotFoundException(`Booking ${id} not found`);
+    }
+
+    return found;
+  }
 }

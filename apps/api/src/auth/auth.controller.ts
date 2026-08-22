@@ -10,6 +10,7 @@ import {
 } from "@nestjs/common";
 import { Throttle, minutes } from "@nestjs/throttler";
 import type { Response } from "express";
+import type { User } from "@repo/contracts";
 import { AUTH_CONFIG, type AuthConfig } from "./auth.config";
 import { AuthService, type AuthResult } from "./auth.service";
 import type { AuthenticatedUser } from "./auth.types";
@@ -17,7 +18,7 @@ import { clearAuthCookies, setAuthCookies } from "./cookies";
 import { CurrentUser } from "./decorators/current-user.decorator";
 import { Public } from "./decorators/public.decorator";
 import { RefreshToken } from "./decorators/refresh-token.decorator";
-import { LoginDto, RegisterDto, UserDto } from "./dto/auth.dto";
+import { LoginDto, RegisterDto } from "./dto/auth.dto";
 
 /**
  * The tokens never appear in a response body — they leave only as httpOnly cookies, so
@@ -42,7 +43,7 @@ export class AuthController {
   async register(
     @Body() dto: RegisterDto,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<UserDto> {
+  ): Promise<User> {
     return this.respondWithSession(res, await this.authService.register(dto));
   }
 
@@ -53,7 +54,7 @@ export class AuthController {
   async login(
     @Body() dto: LoginDto,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<UserDto> {
+  ): Promise<User> {
     return this.respondWithSession(res, await this.authService.login(dto));
   }
 
@@ -67,7 +68,7 @@ export class AuthController {
   async refresh(
     @RefreshToken() token: string | null,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<UserDto> {
+  ): Promise<User> {
     try {
       return this.respondWithSession(
         res,
@@ -95,11 +96,11 @@ export class AuthController {
   }
 
   @Get("me")
-  me(@CurrentUser() user: AuthenticatedUser): Promise<UserDto> {
+  me(@CurrentUser() user: AuthenticatedUser): Promise<User> {
     return this.authService.findById(user.id);
   }
 
-  private respondWithSession(res: Response, result: AuthResult): UserDto {
+  private respondWithSession(res: Response, result: AuthResult): User {
     setAuthCookies(res, this.authConfig, result.tokens);
 
     return result.user;

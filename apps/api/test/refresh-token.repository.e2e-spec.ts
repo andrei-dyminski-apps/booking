@@ -6,6 +6,7 @@ import { AppModule } from "./../src/app.module";
 import type { IssuedRefreshToken } from "./../src/auth/auth.types";
 import { RefreshTokenRepository } from "./../src/auth/refresh-token.repository";
 import { PrismaService } from "./../src/prisma/prisma.service";
+import { resetDatabase } from "./database";
 
 /**
  * The rotation transaction is the one part of the module the unit spec cannot reach: it
@@ -33,7 +34,7 @@ describe("RefreshTokenRepository (e2e)", () => {
     prismaService = app.get(PrismaService);
     refreshTokenRepository = app.get(RefreshTokenRepository);
 
-    await prismaService.user.deleteMany();
+    await resetDatabase(app);
 
     const user = await prismaService.user.create({
       data: { email: "rotation@example.com", passwordHash: "hash" },

@@ -1,7 +1,14 @@
 import { z } from "zod";
 
-/** Kept in sync with the `Role` enum of the Prisma schema; the checks themselves arrive in phase 3. */
+/** Kept in sync with the `Role` enum of the Prisma schema; `RolesGuard` in `apps/api` is what enforces it. */
 export const roleSchema = z.enum(["USER", "OWNER", "ADMIN"]);
+
+/**
+ * The same three names as a runtime value, so `@Roles(Role.OWNER)` reads like an enum
+ * without there being a second list to keep in step — zod derives it from the schema
+ * above, and the type of the same name below is derived from it too.
+ */
+export const Role = roleSchema.enum;
 
 /**
  * Checks run in the order they are written, so the address is validated first and

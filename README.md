@@ -2,7 +2,7 @@
 
 A booking service monorepo: a Next.js frontend and a NestJS backend in one repository, managed by Turborepo and pnpm workspaces.
 
-> Status: the API is a working vertical slice — bookings are created and checked for date overlaps. Storage is PostgreSQL via Prisma 7, and the API is behind hand-written authentication: argon2, a JWT pair in httpOnly cookies, refresh-token rotation. The next phases are in [docs/plan.md](docs/plan.md).
+> Status: the API is a working vertical slice — owners publish listings, guests book them and the dates are checked for overlaps. Storage is PostgreSQL via Prisma 7, and the API is behind hand-written authentication: argon2, a JWT pair in httpOnly cookies, refresh-token rotation, and role-based authorization on top. The next phases are in [docs/plan.md](docs/plan.md).
 
 ## Requirements
 
@@ -84,7 +84,7 @@ packages/ui/
     styles/globals.css       # tokens, dark theme, @source directives for Tailwind
 ```
 
-The tokens are the only place colours and radii are defined; `apps/web/app/globals.css` is a single `@import "@repo/ui/globals.css"`. Tailwind is run by the PostCSS pipeline of `apps/web` and scans the sources named by the `@source` directives — the package itself and the `app/` and `components/` of every application.
+The tokens are the only place colours and radii are defined; `apps/web/src/_app/styles/globals.css` is a single `@import "@repo/ui/globals.css"`. Tailwind is run by the PostCSS pipeline of `apps/web` and scans the sources named by the `@source` directives — the package itself, and the `app/` and `src/` of `apps/web`. The frontend is named there rather than globbed as `apps/*`: that pattern would also drag `apps/api/src` into the scan.
 
 The faces are the one thing the tokens do not own: `apps/web` loads them with `next/font` into `--app-font-sans` / `--app-font-mono`, and the token file maps those onto `--font-sans` / `--font-mono`. The names differ on purpose — a token defined as `var(--font-sans)` would reference itself, and would then hold only while the `next/font` class outranks the `@layer theme` rule Tailwind emits for it.
 
@@ -111,12 +111,18 @@ Every route below except `/` and the four public `/auth/*` ones is behind the gl
 | `POST`   | `/auth/refresh`  | rotate the token pair; `401` — missing, spent or forged token, cookies cleared |
 | `POST`   | `/auth/logout`   | end the session, `204`; answers the same without one                           |
 | `GET`    | `/auth/me`       | the current user; `401` — no session, or the user is gone                      |
-| `GET`    | `/bookings`      | list of bookings, sorted by check-in date                                      |
-| `GET`    | `/bookings/:id`  | a single booking, `404` if missing                                             |
-| `POST`   | `/bookings`      | create; `400` — failed the schema, `409` — dates are taken                     |
-| `DELETE` | `/bookings/:id`  | delete, `204`                                                                  |
+| `GET`    | `/listings`      | the catalogue, newest first                                                    |
+| `GET`    | `/listings/mine` | the caller's own listings; OWNER only                                          |
+| `GET`    | `/listings/:id`  | a single listing, `404` if missing                                             |
+| `POST`   | `/listings`      | create, the owner taken from the session; OWNER only                           |
+| `PATCH`  | `/listings/:id`  | edit; OWNER (their own) or ADMIN, `403` otherwise                              |
+| `DELETE` | `/listings/:id`  | delete, `204`; `409` — bookings exist against it                               |
+| `GET`    | `/bookings`      | the bookings the caller may see, sorted by check-in date                       |
+| `GET`    | `/bookings/:id`  | a single booking; the guest, the owner of the listing or an admin              |
+| `POST`   | `/bookings`      | create; USER only, `404` — no such listing, `409` — dates are taken            |
+| `DELETE` | `/bookings/:id`  | cancel, `204`; the guest or an admin                                           |
 
-Overlapping dates in the same room are rejected; back-to-back bookings (check-out on the day the next guest checks in) are allowed.
+Overlapping dates on the same listing are rejected; back-to-back bookings (check-out on the day the next guest checks in) are allowed.
 
 ## Authentication
 
@@ -132,7 +138,31 @@ Implemented by hand rather than taken from Auth.js or Clerk — the parts an int
 
 The secrets have no fallback in the code: an unset `JWT_ACCESS_SECRET` stops the process at boot instead of shipping a key that is in a public repository. `.env.example` carries development values — replace them anywhere else, `openssl rand -hex 32` generates one.
 
-`pnpm --filter @repo/api db:seed` creates three demo logins, one per role — `guest@example.com`, `owner@example.com` and `admin@example.com`, all with the password `password123`. The roles themselves start meaning something in phase 3.
+`pnpm --filter @repo/api db:seed` creates three demo logins, one per role — `guest@example.com`, `owner@example.com` and `admin@example.com`, all with the password `password123` — three listings owned by the owner and four bookings taken by the guest, so every rule below has something to act on from the first request. The stays are dated from the day the seed runs: a check-in in the past is refused by the contract, and demo data the API itself would not accept ages into a puzzle.
+
+## Roles
+
+Authorization is two checks, and they are deliberately not the same check.
+
+- **The role check** is `RolesGuard`, registered globally right after `JwtAuthGuard` so that it reads the user that one put on the request. It answers "may this kind of user call this endpoint at all" from the access token alone — no query, no row — which is why it fits a guard. `@Roles(Role.OWNER)` is what turns it on; a route without the decorator is open to every signed-in role.
+- **The ownership check** lives in the service, next to the read, because it cannot be answered before the row is there: whether _this_ listing belongs to _this_ owner is a property of the row, and a guard that decided it would have to fetch the row the handler is about to fetch anyway. A `403` from the guard means "not your kind of endpoint", a `403` from the service means "not your row".
+
+The guard is membership of a set, not a hierarchy: an ADMIN does not pass an `@Roles(Role.OWNER)` check by being senior to an owner. A route admins may use names `ADMIN` itself, so what each role can reach is readable where the route is written rather than hidden in a comparison inside the guard — and `@Roles(Role.USER)` on "create a booking" keeps meaning what it says instead of quietly admitting the two roles above it. The one place a hierarchy exists is the ownership check, where an admin passes without owning anything, and that is a rule about rows.
+
+|                         | USER      | OWNER                  | ADMIN |
+| ----------------------- | --------- | ---------------------- | ----- |
+| read the catalogue      | ✅        | ✅                     | ✅    |
+| create a listing        | —         | ✅                     | —     |
+| edit / delete a listing | —         | their own              | any   |
+| create a booking        | ✅        | —                      | —     |
+| read bookings           | their own | against their listings | all   |
+| cancel a booking        | their own | —                      | any   |
+
+Reading and writing are separate rules over the same row: an owner sees the stays booked against their listing and cannot cancel one out from under a guest. `GET /bookings` narrows by the role of the caller inside the `where` rather than through a query parameter, so the query cannot return a row the caller may not see.
+
+Whether a refusal is a `403` or a `404` follows from what the caller could have found anyway. A listing that belongs to another owner answers `403` — the catalogue is readable by everyone signed in, so "exists, but not yours" says nothing new. A booking answers `404`, because nothing lets a stranger list bookings and a `403` would be the one way to learn that an id exists. The `403` on cancelling is the exception that proves it: it goes to the owner of the listing, who may already read that booking, and refuses them the second right rather than the first.
+
+Registration always writes a `USER` — the only safe default for a public endpoint. The other two roles are set in the database (the seed does it for the demo logins), and since `JwtStrategy` reads no database, a change of role takes effect at the next refresh: `JWT_ACCESS_TTL` is the upper bound on that lag.
 
 ## Shared configuration
 
@@ -182,7 +212,7 @@ The root scripts start turbo through `node --env-file-if-exists=.env`, so the va
 
 A new variable has to be added in three places: `.env.example`, `globalEnv` in `turbo.json` and the table above. Without the `globalEnv` entry turbo will not account for it when computing the cache hash, and ESLint will report `turbo/no-undeclared-env-vars`.
 
-`NEXT_PUBLIC_API_URL` ends up in the client bundle at `next build` time — changing the API address requires rebuilding the frontend. There is no fallback in the code (`apps/web/lib/api-url.ts`): with the variable unset `next build` itself fails with an explicit error while collecting page data, instead of quietly walking to `localhost`. So it has to be present in the environment of the build, not only in that of the running application — a deploy pipeline that only passes it to the runtime container will not start.
+`NEXT_PUBLIC_API_URL` ends up in the client bundle at `next build` time — changing the API address requires rebuilding the frontend. There is no fallback in the code (`apps/web/src/shared/config/api-url.ts`): with the variable unset `next build` itself fails with an explicit error while collecting page data, instead of quietly walking to `localhost`. So it has to be present in the environment of the build, not only in that of the running application — a deploy pipeline that only passes it to the runtime container will not start.
 
 A trailing slash in the value is cut by `api-url.ts`, so `http://localhost:3001` and `http://localhost:3001/` behave the same.
 
@@ -193,7 +223,7 @@ From the repository root, across all packages at once:
 ```sh
 pnpm dev            # web + api in parallel, deps rebuilt on change
 pnpm build          # build every package
-pnpm lint           # ESLint (formatting check included)
+pnpm lint           # ESLint (formatting check included) + Steiger over the FSD structure of apps/web
 pnpm lint:fix       # ESLint --fix: autofixes + reformatting by Prettier
 pnpm check-types    # tsc --noEmit
 pnpm format         # Prettier over **/*.{ts,tsx,md}
@@ -236,6 +266,8 @@ Both run through turbo, which builds `@repo/contracts` first — the specs impor
 The e2e tests wipe the tables before every test — do not run them against a database whose data you care about.
 
 Linting is strict: `--max-warnings 0` combined with `eslint-plugin-only-warn` means any remark fails the check. Formatting falls under the same umbrella through `eslint-plugin-prettier` — a file that drifted from `.prettierrc` fails `pnpm lint`. One command fixes it: `pnpm lint:fix`. Both `pnpm lint` and `pnpm check-types` must pass before a push.
+
+In `apps/web` the same script runs [Steiger](https://github.com/feature-sliced/steiger) after ESLint: the frontend is organized by Feature-Sliced Design, and Steiger owns that half of the checks entirely — layer boundaries, cross-imports between slices, sidesteps of a public API and the shape of the tree. ESLint keeps only the ordinary rules; it resolves nothing, and duplicating architecture rules there would just give them a second place to drift. The layout is described in [apps/web/README.md](apps/web/README.md).
 
 ## Installing dependencies
 

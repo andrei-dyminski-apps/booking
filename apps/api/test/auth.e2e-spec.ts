@@ -8,7 +8,7 @@ import {
   ACCESS_TOKEN_COOKIE,
   REFRESH_TOKEN_COOKIE,
 } from "./../src/auth/cookies";
-import { PrismaService } from "./../src/prisma/prisma.service";
+import { resetDatabase } from "./database";
 import { readSetCookie, signIn, testCredentials } from "./session";
 
 describe("AuthController (e2e)", () => {
@@ -26,7 +26,7 @@ describe("AuthController (e2e)", () => {
 
     // Tests hit the real database from docker-compose — wipe it before each one.
     // Deleting the users takes their refresh tokens along (onDelete: Cascade).
-    await app.get(PrismaService).user.deleteMany();
+    await resetDatabase(app);
   });
 
   afterEach(async () => {

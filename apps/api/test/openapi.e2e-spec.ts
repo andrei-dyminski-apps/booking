@@ -5,7 +5,10 @@ import { App } from "supertest/types";
 import { AppModule } from "./../src/app.module";
 import { ACCESS_TOKEN_COOKIE } from "./../src/auth/cookies";
 
-type Operation = { security?: unknown[] };
+type Operation = {
+  security?: unknown[];
+  responses?: Record<string, unknown>;
+};
 
 /**
  * `OpenAPIObject` types the paths as a union of fixed method keys, and these checks index
@@ -75,10 +78,40 @@ describe("OpenAPI document (e2e)", () => {
       ["/bookings", "get"],
       ["/bookings", "post"],
       ["/bookings/{id}", "delete"],
+      ["/listings", "get"],
+      ["/listings", "post"],
+      ["/listings/mine", "get"],
+      ["/listings/{id}", "get"],
+      ["/listings/{id}", "patch"],
+      ["/listings/{id}", "delete"],
     ] as const) {
       // No `security` of its own: in OpenAPI 3 an operation that says nothing inherits the
       // root requirement, which is exactly what a route without @Public() should do.
       expect(operation(path, method).security).toBeUndefined();
+    }
+  });
+
+  it("names the roles a route wants, so the document cannot disagree with RolesGuard", () => {
+    // @Roles() documents itself through ApiForbiddenResponse — the 403 is in the document
+    // only where the guard can actually produce one.
+    for (const [path, method] of [
+      ["/listings", "post"],
+      ["/listings/mine", "get"],
+      ["/listings/{id}", "patch"],
+      ["/listings/{id}", "delete"],
+      ["/bookings", "post"],
+    ] as const) {
+      expect(operation(path, method).responses?.["403"]).toBeDefined();
+    }
+
+    // And absent from the routes every signed-in role may call.
+    for (const [path, method] of [
+      ["/listings", "get"],
+      ["/listings/{id}", "get"],
+      ["/bookings", "get"],
+      ["/bookings/{id}", "get"],
+    ] as const) {
+      expect(operation(path, method).responses?.["403"]).toBeUndefined();
     }
   });
 

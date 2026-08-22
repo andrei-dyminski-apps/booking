@@ -10,16 +10,46 @@ datasource db {
   provider = "postgresql"
 }
 
+/// A stay taken by a guest on one listing. The two relations are what the authorization
+/// rules of phase 3 are written against: the guest may cancel their own booking, the owner
+/// of the listing may read the bookings against it, an admin may do both.
 model Booking {
   id        String   @id @default(uuid()) @db.Uuid
-  roomId    String   @map("room_id")
-  guestName String   @map("guest_name")
+  listingId String   @map("listing_id") @db.Uuid
+  guestId   String   @map("guest_id") @db.Uuid
   from      DateTime @map("from_date") @db.Date
   to        DateTime @map("to_date") @db.Date
   createdAt DateTime @default(now()) @map("created_at")
 
-  @@index([roomId, from, to])
+  /// Restrict, not Cascade: a listing with stays booked against it is not something an
+  /// owner may make disappear, and the service answers 409 rather than letting the
+  /// database quietly delete the bookings of other people.
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  guest   User    @relation(fields: [guestId], references: [id], onDelete: Cascade)
+
+  @@index([listingId, from, to])
+  @@index([guestId])
   @@map("bookings")
+}
+
+/// A place to stay. `price_per_night` is an integer in the minor unit of the currency:
+/// money in a float accumulates rounding across the nights of a stay, and phase 5 hands
+/// this value to a Stripe PaymentIntent, which takes minor units as well.
+model Listing {
+  id            String   @id @default(uuid()) @db.Uuid
+  ownerId       String   @map("owner_id") @db.Uuid
+  title         String
+  description   String
+  pricePerNight Int      @map("price_per_night")
+  capacity      Int
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  owner    User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  bookings Booking[]
+
+  @@index([ownerId])
+  @@map("listings")
 }
 
 enum Role {
@@ -37,6 +67,8 @@ model User {
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   refreshTokens RefreshToken[]
+  listings      Listing[]
+  bookings      Booking[]
 
   @@map("users")
 }

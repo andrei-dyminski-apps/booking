@@ -1,12 +1,22 @@
 import type { INestApplication } from "@nestjs/common";
+import { Role } from "@repo/contracts";
 import request from "supertest";
 import type { App } from "supertest/types";
+import { PrismaService } from "./../src/prisma/prisma.service";
 
 /** The credentials every e2e spec registers with; the tables are wiped before each test. */
 export const testCredentials = {
   email: "e2e@example.com",
   password: "password123",
 };
+
+/** One address per role, so a spec can hold several agents at once. */
+export const credentialsFor: Record<Role, { email: string; password: string }> =
+  {
+    USER: testCredentials,
+    OWNER: { email: "e2e-owner@example.com", password: "password123" },
+    ADMIN: { email: "e2e-admin@example.com", password: "password123" },
+  };
 
 export type Agent = ReturnType<typeof request.agent>;
 
@@ -21,6 +31,30 @@ export async function signIn(
   const agent = request.agent(app.getHttpServer());
 
   await agent.post("/auth/register").send(credentials).expect(201);
+
+  return agent;
+}
+
+/**
+ * The same, for a role registration cannot produce: `/auth/register` always writes a USER,
+ * which is the only safe default for a public endpoint. So the row is promoted directly
+ * and the agent logs in again — the access token minted at registration still carries the
+ * old role, and JwtStrategy reads no database, which is exactly the lag RolesGuard would
+ * otherwise be tested against by accident.
+ */
+export async function signInAs(
+  app: INestApplication<App>,
+  role: Role,
+  credentials = credentialsFor[role],
+): Promise<Agent> {
+  const agent = await signIn(app, credentials);
+
+  if (role === Role.USER) return agent;
+
+  await app
+    .get(PrismaService)
+    .user.update({ where: { email: credentials.email }, data: { role } });
+  await agent.post("/auth/login").send(credentials).expect(200);
 
   return agent;
 }

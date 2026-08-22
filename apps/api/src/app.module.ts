@@ -6,7 +6,9 @@ import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/guards/jwt-auth.guard";
+import { RolesGuard } from "./auth/guards/roles.guard";
 import { BookingModule } from "./booking/booking.module";
+import { ListingModule } from "./listing/listing.module";
 
 @Module({
   imports: [
@@ -18,6 +20,7 @@ import { BookingModule } from "./booking/booking.module";
     }),
     AuthModule,
     BookingModule,
+    ListingModule,
   ],
   controllers: [AppController],
   providers: [
@@ -30,6 +33,9 @@ import { BookingModule } from "./booking/booking.module";
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     // Closes every route by default; @Public() is what opens one.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // After it, and for the same reason the limiter comes first: this one reads the user
+    // JwtAuthGuard put on the request. It does nothing until a route carries @Roles().
+    { provide: APP_GUARD, useClass: RolesGuard },
   ],
 })
 export class AppModule {}

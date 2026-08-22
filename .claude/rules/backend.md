@@ -29,14 +29,23 @@ src/
     token.service.ts     # signs and hashes tokens; touches no database
     jwt.strategy.ts      # passport-jwt, the token is read from the cookie
     cookies.ts           # cookie names, attributes and a reader for them
-    guards/              # JwtAuthGuard — registered globally in app.module.ts
-    decorators/          # @Public(), @CurrentUser(), @RefreshToken()
-  booking/               # the reference for new domain areas
+    ownership.ts         # the half of authorization a guard cannot answer
+    guards/              # JwtAuthGuard, RolesGuard — both global in app.module.ts
+    decorators/          # @Public(), @Roles(), @CurrentUser(), @RefreshToken()
+  listing/               # the reference for new domain areas: CRUD plus ownership
+    listing.module.ts
+    listing.controller.ts
+    listing.service.ts       # who may edit and delete a row; sees no Prisma
+    listing.repository.ts    # the queries, the booking count, the FK violation
+    listing.service.spec.ts
+    dto/listing.dto.ts   # createZodDto on top of the @repo/contracts schemas
+  booking/               # rules over rows; phases 4-5 give it a domain of its own
     booking.module.ts
     booking.controller.ts
-    booking.service.ts
+    booking.service.ts     # who may read and cancel what; sees no Prisma
+    booking.repository.ts  # the queries, the date mapping, the FK violation
     booking.service.spec.ts
-    dto/booking.dto.ts   # createZodDto on top of the @repo/contracts schemas
+    dto/booking.dto.ts
 ```
 
 ## Prisma
@@ -44,9 +53,11 @@ src/
 - Prisma 7 does not read `.env` on its own — `prisma.config.ts` loads the root `.env` through `process.loadEnvFile`; run the CLI only through the `db:*` scripts of `apps/api` (`pnpm --filter @repo/api db:migrate` and so on).
 - The client is generated into `src/generated/prisma` (`prisma generate`, which also runs in `postinstall`); the directory is gitignored and in the ESLint ignores. The generator sets `importFileExtension = ""` — otherwise ts-node does not resolve the `.js` imports in the seed.
 - Database access goes through `PrismaService` only (injected; `PrismaModule` is imported by the feature module). Do not create `new PrismaClient` inside services.
-- Where a module has rules worth testing on their own, the queries move one step further out, into a `*.repository.ts` next to the service: `auth/` is the reference. The repository owns the query, the transaction and the mapping of rows onto the contract types, and it translates driver-specific failures (a `P2002` becomes `EmailAlreadyRegisteredError`) so that no Prisma symbol reaches the service. The service keeps the rules and the HTTP exceptions. The direction holds both ways: a type both layers need (`IssuedRefreshToken`) lives in `auth.types.ts`, so the repository never imports from a service. A repository is a plain `@Injectable()` class injected by its own type — not an interface behind a token: a second implementation of "Postgres" is never coming, and the seam that does need one is an external service (Stripe), not the database.
-- A repository is worth its files where the rules are; a plain service on `PrismaService` stays right for a module that is CRUD. `booking` gets one in phase 4, together with the locking transaction it will hide.
+- **Every entity gets a repository.** The queries never sit in a service: they move one step further out, into a `*.repository.ts` next to it — `auth/`, `listing/` and `booking/` all have one, and a new domain area comes with one in the same change. The repository owns the query, the transaction and the mapping of rows onto the contract types, and it translates driver-specific failures (a `P2002` becomes `EmailAlreadyRegisteredError`) so that no Prisma symbol reaches the service. The service keeps the rules and the HTTP exceptions. The direction holds both ways: a type both layers need (`IssuedRefreshToken`) lives in `auth.types.ts`, so the repository never imports from a service. A repository is a plain `@Injectable()` class injected by its own type — not an interface behind a token: a second implementation of "Postgres" is never coming, and the seam that does need one is an external service (Stripe), not the database.
+- The rule holds even where the module is plain CRUD, and `listing` is that case: the two files buy a service that can be unit-tested against a fake instead of a query builder, one place for `P2003` and `P2025` to become `ListingHasBookingsError` and a `null`, and no second decision to take the day the module grows a rule. `booking` shows what that day looks like — it owns rules about who may read and cancel a row, and phase 4 adds the locking transaction to the repository that is already there. What a repository does not get is an interface behind a token, see the line above: the split is between the rules and the queries, not between two implementations of Postgres.
 - The check-in/check-out columns are `@db.Date`, while dates are exposed as `YYYY-MM-DD` strings (the mapper in `BookingService`); the contract did not change when the storage did.
+- Money is an integer in the minor unit of the currency (`listings.price_per_night`), never a float: rounding accumulates across the nights of a stay, and Stripe takes minor units as well.
+- A booking references a listing with `onDelete: Restrict` and a guest with `onDelete: Cascade`. The restrict is deliberate — deleting a listing somebody has booked answers `409` instead of taking their stay down with it — and it dictates the delete order everywhere rows are wiped: bookings, then listings, then users (`test/database.ts`, `prisma/seed.ts`).
 - A model change means a migration (`db:migrate`), and the migration files are committed.
 - `db:migrate` is `prisma migrate dev` and belongs to a developer machine only — it can decide to reset the database. A deployed environment runs `db:deploy` (`prisma migrate deploy`), which only applies what is already committed; that is what `railway.json` hangs on `preDeployCommand`.
 - Prisma 7 dropped the automatic steps of v6: neither `migrate dev` nor `migrate reset` runs the seed script, and `migrate dev` no longer regenerates the client. So a schema change is `db:migrate` + `db:generate`, and a recreated database is `db:migrate` + `db:seed`.
@@ -74,7 +85,8 @@ export class CreateBookingDto extends createZodDto(createBookingSchema) {}
 The class is needed because Nest takes the metatype of the parameter from the runtime — an interface does not work here. The global `ZodValidationPipe` is already wired through `APP_PIPE` in `app.module.ts`, so per-route `@UsePipes` are unnecessary.
 
 - Do not use `class-validator` and `class-transformer`: their decorators are not reused by the frontend, and the contract drifts apart.
-- Format rules and relations between fields (including cross-field ones, such as "check-out after check-in") live in the contract schema. What stays in the service is what requires state: checks against other bookings, permissions, the database.
+- Format rules and relations between fields (including cross-field ones, such as "check-out after check-in" and "check-in not in the past") live in the contract schema. What stays in the service is what requires state: checks against other bookings, permissions, the database.
+- A rule that reads the clock makes the schema time-dependent, and the fixtures with it: `createBookingSchema` refuses a check-in before today in UTC, so every date an e2e spec or the seed books is derived from the day it runs (`test/dates.ts`, `inDays` in `prisma/seed.ts`) rather than written down. A literal date in a fixture passes until it arrives and fails every run after.
 - Errors go through the built-in Nest exceptions (`NotFoundException`, `BadRequestException`), not through a manual `res.status(...)`.
 
 ## Authentication
@@ -133,6 +145,57 @@ cookies, refresh tokens rotated with reuse detection.
   the password rules of `register`: an old password that no longer passes the policy still
   has to get its owner in.
 
+## Authorization
+
+Two checks, and the split between them is the point.
+
+- **The role check is a guard.** `RolesGuard` is registered through `APP_GUARD` right after
+  `JwtAuthGuard` — guards run in registration order, and this one reads the user that one
+  put on the request. It answers "may this kind of user call this endpoint at all" from the
+  access token alone: no query, no row, nothing the handler would have to repeat.
+- **`@Roles()` is opt-in**, unlike `@Public()`. A route with no decorator is open to every
+  signed-in role, because "is there a session" has one right default and "which roles" does
+  not — a guessed one would either lock out or let through. At least one role has to be
+  named; `@Roles()` would read like a restriction and be none.
+- **Membership of a set, not a hierarchy.** ADMIN does not pass an `@Roles(Role.OWNER)`
+  check by being senior to an owner. A route admins may use names `ADMIN` itself, so what a
+  role can reach is readable where the route is written — and `@Roles(Role.USER)` on
+  "create a booking" keeps meaning what it says instead of quietly admitting the two roles
+  above it.
+- **The ownership check is not a guard**, and `src/auth/ownership.ts` says why: a role is a
+  claim of the token and is known before the handler runs, while ownership is a property of
+  a row and cannot be known until the row is read. A guard that decided it would fetch the
+  row the handler is about to fetch anyway. So it lives in the service, next to the read.
+  A `403` from the guard means "not your kind of endpoint", a `403` from the service means
+  "not your row". `ownsOrIsAdmin` is where the one real hierarchy lives — an admin passes
+  without owning anything, and that is a rule about rows rather than about endpoints.
+- **A scope is neither of the two.** What `GET /bookings` returns depends on the role, and
+  that goes into the `where` of the query (`scopeFor` in `BookingService`), not into a
+  filter the client may pass: a query that cannot return a forbidden row needs no check
+  after it. The switch over the role is exhaustive on purpose — a fourth role stops
+  compiling there instead of falling through to a scope somebody has to guess at — and it
+  picks one of three named queries on `BookingRepository` rather than assembling a `where`,
+  so an unhandled role reaches no query at all instead of an unscoped one. Its `default`
+  assigns the role to `never` and throws, because the type is not the whole guarantee: the
+  role arrives in a signed access token that `JwtStrategy` does not parse against the
+  contract, so one minted before a role was renamed still carries the old name for as long
+  as `JWT_ACCESS_TTL`.
+- **Reading and writing are separate rules over the same row.** An owner reads the bookings
+  against their listing and cannot cancel one; that is why `BookingService.remove` does not
+  reuse the check in `findOne`.
+- **403 or 404 depends on whether the caller could have found the row anyway.** A listing
+  refused to another owner answers `403`: the catalogue is readable by every signed-in
+  user, so "exists, but not yours" tells them what `GET /listings` told them a moment
+  earlier. A booking is the other case — nothing lets a stranger list bookings, so a `403`
+  would be the one way to learn that an id exists at all, and `getReadableRow` answers
+  `404` for a row the caller may not read. The `403` on cancelling stays: it goes to
+  someone who may already read the booking (the owner of the listing), and denies them the
+  second right rather than the first.
+- **Roles come from the database, never from a request.** `/auth/register` always writes a
+  `USER`. `JwtStrategy` reads no database, so a promoted user carries the old role until
+  the next refresh — the e2e helper `signInAs` logs in again after promoting the row for
+  exactly that reason.
+
 ## main.ts
 
 `src/main.ts` is already set up and driven by environment variables:
@@ -146,14 +209,15 @@ Do not hardcode the port, the host or an origin. A new frontend origin goes into
 
 ## Tests
 
-- Unit: `*.spec.ts` next to the code, `rootDir: src`, run with `pnpm test` from the root. No database needed: Prisma is mocked (`{ provide: PrismaService, useValue: ... }`), and the unit tests check the service logic around the queries. The script is a bare `jest` on purpose — see the note on `--experimental-vm-modules` below.
+- Unit: `*.spec.ts` next to the code, `rootDir: src`, run with `pnpm test` from the root. No database needed: a service is given fakes of its repositories and a repository spec mocks `PrismaService` (`{ provide: PrismaService, useValue: ... }`), so what a unit test checks is the logic around the queries rather than the queries. The script is a bare `jest` on purpose — see the note on `--experimental-vm-modules` below.
 - E2E: `test/*.e2e-spec.ts`, config `test/jest-e2e.json`, run with `pnpm test:e2e` from the root. They hit the real database from docker-compose (it needs `docker compose up -d` and applied migrations) and wipe the tables in `beforeEach`. The script loads the root `.env` and enables `--experimental-vm-modules` — do not remove it. `maxWorkers: 1` in the same config is not optional either: the spec files share one database, and in parallel workers one file's cleanup wipes rows another one is working with.
-- `--experimental-vm-modules` is needed by the tests that actually execute queries, not by every test that sees Prisma. Prisma 7 has no binary engine: with a driver adapter the generated client loads a WASM query compiler through `await import(...)` on `$connect()`, and Jest forbids a dynamic import inside its vm context without the flag. Unit tests replace `PrismaService` with a mock, so its constructor never runs and `$connect()` never happens — hence no flag there. If a unit spec starts failing with `A dynamic import callback was invoked without --experimental-vm-modules`, it has reached the real database: mock Prisma, do not add the flag.
+- `--experimental-vm-modules` is needed by the tests that actually execute queries, not by every test that sees Prisma. Prisma 7 has no binary engine: with a driver adapter the generated client loads a WASM query compiler through `await import(...)` on `$connect()`, and Jest forbids a dynamic import inside its vm context without the flag. No unit test ever gets the real `PrismaService` — a service sees fakes of its repositories, a repository spec a mock — so its constructor never runs and `$connect()` never happens; hence no flag there. If a unit spec starts failing with `A dynamic import callback was invoked without --experimental-vm-modules`, it has reached the real database: mock Prisma, do not add the flag.
 - Both test tasks are declared in `turbo.json` with `dependsOn: ["^build"]`, so run them from the root. The specs import `@repo/contracts` schemas as values and need the built `dist/`; a direct `pnpm --filter @repo/api test` skips the build and fails on a fresh clone.
 - A new controller or service comes with a spec modelled on `src/booking/booking.service.spec.ts` (`Test.createTestingModule`).
-- Where a module has repositories, the spec fakes them instead of mocking Prisma: `src/auth/auth.service.spec.ts` runs `AuthService` against in-memory stores and asserts what ends up stored, so the test states the rule ("a replayed token revokes the family") rather than the call the service happens to make. The fakes are typed `PublicOf<Repository>` — a mapped type keeps only the public surface, so a fake needs no inheritance and still stops compiling when the real class gains or drops a method, or changes what one returns. An argument added to an existing method it does not catch: a shorter signature stays assignable to a longer one, and method parameters are compared bivariantly even under `strictFunctionTypes`. With the repository faked, the Prisma code paths of that module are covered by e2e alone; that is the trade, and it is why `test/auth.e2e-spec.ts` has to keep exercising them. Where a query decides something HTTP cannot provoke on demand, the e2e spec takes the repository out of the container and calls it directly instead of going through the API: `test/refresh-token.repository.e2e-spec.ts` is the one so far, because which of two parallel refreshes reads the row first is a matter of timing — reading it after the winner burned it is a replay, not the race the conditional update exists for.
+- A service spec fakes the repositories instead of mocking Prisma — every module has them, so the only spec left holding a `PrismaService` mock is the one written for a repository itself (`src/auth/user.repository.spec.ts`): `src/auth/auth.service.spec.ts`, `src/listing/listing.service.spec.ts` and `src/booking/booking.service.spec.ts` run their service against in-memory stores and assert what ends up stored, so the test states the rule ("a replayed token revokes the family", "an owner may read the stay and not cancel it") rather than the call the service happens to make. The fakes are typed `PublicOf<Repository>` — a mapped type keeps only the public surface, so a fake needs no inheritance and still stops compiling when the real class gains or drops a method, or changes what one returns. An argument added to an existing method it does not catch: a shorter signature stays assignable to a longer one, and method parameters are compared bivariantly even under `strictFunctionTypes`. With the repository faked, the Prisma code paths of that module are covered by e2e alone; that is the trade, and it is why `test/auth.e2e-spec.ts` and `test/listing.e2e-spec.ts` have to keep exercising them. Where a query decides something HTTP cannot provoke on demand, the e2e spec takes the repository out of the container and calls it directly instead of going through the API: `test/refresh-token.repository.e2e-spec.ts` is the one so far, because which of two parallel refreshes reads the row first is a matter of timing — reading it after the winner burned it is a replay, not the race the conditional update exists for.
 - In e2e, check the response with a schema from `@repo/contracts` (`bookingSchema.parse(response.body)`) — that way the test catches a drift from the contract, not only a status code.
-- Every route except the `@Public()` ones is behind the global guard, so an e2e spec talks to the API through the agent from `test/session.ts` (`signIn(app)`) — a `request(app.getHttpServer())` without cookies only ever gets a 401. The cleanup deletes the users too; their refresh tokens go with them through `onDelete: Cascade`.
+- Every route except the `@Public()` ones is behind the global guard, so an e2e spec talks to the API through the agent from `test/session.ts` (`signIn(app)`) — a `request(app.getHttpServer())` without cookies only ever gets a 401. A rule that differs by role needs an agent per role: `signInAs(app, Role.OWNER)` registers, promotes the row and logs in again, because the token minted at registration still says `USER`.
+- The cleanup is `resetDatabase(app)` from `test/database.ts` rather than a `deleteMany` in each spec. The order is the reason it lives in one place: bookings restrict the listings they point at, and deleting users first would cascade into listings the bookings still reference. Refresh tokens go with their user through `onDelete: Cascade`.
 
 ## Checks
 
