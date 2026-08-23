@@ -60,3 +60,17 @@ export type Role = z.infer<typeof roleSchema>;
 export type User = z.infer<typeof userSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+
+/**
+ * The session never travels in a body, so the names of the cookies that carry it are as
+ * much a part of the contract as any field: `apps/api` writes them, and `apps/web` reads
+ * the access one in `proxy.ts` to decide whether a protected route is worth rendering at
+ * all, and again in its transport to forward the session from a server render.
+ *
+ * The scopes belong to the contract as well, and the refresh one is what shapes the
+ * frontend: that cookie is limited to the `/auth` path, so the browser hands it to the
+ * API and never to the Next.js server. A dead session can therefore only be revived from
+ * the browser — see the login page.
+ */
+export const ACCESS_TOKEN_COOKIE = "access_token";
+export const REFRESH_TOKEN_COOKIE = "refresh_token";

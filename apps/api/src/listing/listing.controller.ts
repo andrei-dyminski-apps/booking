@@ -10,12 +10,34 @@ import {
   Patch,
   Post,
 } from "@nestjs/common";
+import {
+  ApiConflictResponse,
+  ApiCreatedResponse,
+  ApiForbiddenResponse,
+  ApiNoContentResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+} from "@nestjs/swagger";
 import { Role, type Listing } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { Roles } from "../auth/decorators/roles.decorator";
+import { ApiErrorDto } from "../common/dto/api-error.dto";
 import { ListingService } from "./listing.service";
-import { CreateListingDto, UpdateListingDto } from "./dto/listing.dto";
+import {
+  CreateListingDto,
+  ListingDto,
+  UpdateListingDto,
+} from "./dto/listing.dto";
+
+/**
+ * The second reason the two managing routes answer 403, and the only one they state here:
+ * `@Roles` already documents the first, and Nest joins the two descriptions rather than
+ * replacing one with the other, so repeating the role would read back doubled. A route the
+ * guard alone can refuse keeps relying on `@Roles` by itself.
+ */
+const NOT_YOUR_LISTING =
+  "The listing exists but belongs to another owner; an admin passes without owning it";
 
 /**
  * Reading the catalogue is open to every signed-in role; writing to it is the owner's
@@ -32,6 +54,7 @@ export class ListingController {
   constructor(private readonly listingService: ListingService) {}
 
   @Get()
+  @ApiOkResponse({ type: ListingDto, isArray: true })
   findAll(): Promise<Listing[]> {
     return this.listingService.findAll();
   }
@@ -39,17 +62,24 @@ export class ListingController {
   /** Declared before `:id`: Nest matches routes in declaration order. */
   @Get("mine")
   @Roles(Role.OWNER)
+  @ApiOkResponse({ type: ListingDto, isArray: true })
   findMine(@CurrentUser() user: AuthenticatedUser): Promise<Listing[]> {
     return this.listingService.findByOwner(user.id);
   }
 
   @Get(":id")
+  @ApiOkResponse({ type: ListingDto })
+  @ApiNotFoundResponse({
+    description: "The listing does not exist",
+    type: ApiErrorDto,
+  })
   findOne(@Param("id", ParseUUIDPipe) id: string): Promise<Listing> {
     return this.listingService.findOne(id);
   }
 
   @Post()
   @Roles(Role.OWNER)
+  @ApiCreatedResponse({ type: ListingDto })
   create(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateListingDto,
@@ -59,6 +89,15 @@ export class ListingController {
 
   @Patch(":id")
   @Roles(Role.OWNER, Role.ADMIN)
+  @ApiOkResponse({ type: ListingDto })
+  @ApiNotFoundResponse({
+    description: "The listing does not exist",
+    type: ApiErrorDto,
+  })
+  @ApiForbiddenResponse({
+    description: NOT_YOUR_LISTING,
+    type: ApiErrorDto,
+  })
   update(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() dto: UpdateListingDto,
@@ -70,6 +109,19 @@ export class ListingController {
   @Delete(":id")
   @Roles(Role.OWNER, Role.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiNoContentResponse()
+  @ApiNotFoundResponse({
+    description: "The listing does not exist",
+    type: ApiErrorDto,
+  })
+  @ApiConflictResponse({
+    description: "The listing has bookings and cannot be deleted",
+    type: ApiErrorDto,
+  })
+  @ApiForbiddenResponse({
+    description: NOT_YOUR_LISTING,
+    type: ApiErrorDto,
+  })
   remove(
     @Param("id", ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,

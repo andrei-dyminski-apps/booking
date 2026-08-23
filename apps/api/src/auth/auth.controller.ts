@@ -9,8 +9,16 @@ import {
   Res,
 } from "@nestjs/common";
 import { Throttle, minutes } from "@nestjs/throttler";
+import {
+  ApiConflictResponse,
+  ApiCreatedResponse,
+  ApiNoContentResponse,
+  ApiOkResponse,
+  ApiUnauthorizedResponse,
+} from "@nestjs/swagger";
 import type { Response } from "express";
 import type { User } from "@repo/contracts";
+import { ApiErrorDto } from "../common/dto/api-error.dto";
 import { AUTH_CONFIG, type AuthConfig } from "./auth.config";
 import { AuthService, type AuthResult } from "./auth.service";
 import type { AuthenticatedUser } from "./auth.types";
@@ -18,7 +26,7 @@ import { clearAuthCookies, setAuthCookies } from "./cookies";
 import { CurrentUser } from "./decorators/current-user.decorator";
 import { Public } from "./decorators/public.decorator";
 import { RefreshToken } from "./decorators/refresh-token.decorator";
-import { LoginDto, RegisterDto } from "./dto/auth.dto";
+import { LoginDto, RegisterDto, UserDto } from "./dto/auth.dto";
 
 /**
  * The tokens never appear in a response body — they leave only as httpOnly cookies, so
@@ -40,6 +48,11 @@ export class AuthController {
   @Public()
   @Throttle({ default: { ttl: minutes(1), limit: 10 } })
   @Post("register")
+  @ApiCreatedResponse({ type: UserDto })
+  @ApiConflictResponse({
+    description: "Email is already registered",
+    type: ApiErrorDto,
+  })
   async register(
     @Body() dto: RegisterDto,
     @Res({ passthrough: true }) res: Response,
@@ -51,6 +64,11 @@ export class AuthController {
   @Throttle({ default: { ttl: minutes(1), limit: 10 } })
   @Post("login")
   @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ type: UserDto })
+  @ApiUnauthorizedResponse({
+    description: "Invalid email or password",
+    type: ApiErrorDto,
+  })
   async login(
     @Body() dto: LoginDto,
     @Res({ passthrough: true }) res: Response,
@@ -65,6 +83,12 @@ export class AuthController {
   @Public()
   @Post("refresh")
   @HttpCode(HttpStatus.OK)
+  @ApiOkResponse({ type: UserDto })
+  @ApiUnauthorizedResponse({
+    description:
+      "The refresh token is missing, invalid, expired, or already used",
+    type: ApiErrorDto,
+  })
   async refresh(
     @RefreshToken() token: string | null,
     @Res({ passthrough: true }) res: Response,
@@ -87,6 +111,7 @@ export class AuthController {
   @Public()
   @Post("logout")
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiNoContentResponse()
   async logout(
     @RefreshToken() token: string | null,
     @Res({ passthrough: true }) res: Response,
@@ -96,6 +121,11 @@ export class AuthController {
   }
 
   @Get("me")
+  @ApiOkResponse({ type: UserDto })
+  @ApiUnauthorizedResponse({
+    description: "Session no longer exists",
+    type: ApiErrorDto,
+  })
   me(@CurrentUser() user: AuthenticatedUser): Promise<User> {
     return this.authService.findById(user.id);
   }

@@ -3,12 +3,14 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from "@nestjs/common";
 import { Role, type Booking, type CreateBookingInput } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { ownsOrIsAdmin } from "../auth/ownership";
 import {
   BookingRepository,
+  GuestNotFoundError,
   ListingNotFoundError,
   type BookingWithListingOwner,
 } from "./booking.repository";
@@ -78,6 +80,13 @@ export class BookingService {
       // booked against it yet, so the delete was allowed to go through.
       if (error instanceof ListingNotFoundError) {
         throw new NotFoundException(error.message);
+      }
+
+      // The guest is gone instead: nothing checks that row beforehand, because the token
+      // names it and JwtStrategy reads no database. A signed token whose row is gone is an
+      // ended session, so this is the 401 of `/auth/me` and not a 404 about the listing.
+      if (error instanceof GuestNotFoundError) {
+        throw new UnauthorizedException("Session no longer exists");
       }
 
       throw error;

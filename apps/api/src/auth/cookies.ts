@@ -1,9 +1,15 @@
 import { parseCookie } from "cookie";
 import type { Request, Response } from "express";
+import { ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE } from "@repo/contracts";
 import type { AuthConfig } from "./auth.config";
 
-export const ACCESS_TOKEN_COOKIE = "access_token";
-export const REFRESH_TOKEN_COOKIE = "refresh_token";
+/**
+ * The names come from the contract rather than from here: `apps/web` reads the access
+ * cookie in its proxy and in its server-side transport, and a name that both sides spell
+ * on their own would drift the first time one of them changed it. They are re-exported
+ * so that everything on this side keeps reaching them next to the code that sets them.
+ */
+export { ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE };
 
 /**
  * The refresh token is only ever sent to the two routes that consume it, so a request to

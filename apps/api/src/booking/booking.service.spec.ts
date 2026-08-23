@@ -2,12 +2,14 @@ import {
   ConflictException,
   ForbiddenException,
   NotFoundException,
+  UnauthorizedException,
 } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { Role, type Booking, type CreateBookingInput } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import {
   BookingRepository,
+  GuestNotFoundError,
   ListingNotFoundError,
   type BookingWithListingOwner,
 } from "./booking.repository";
@@ -56,6 +58,9 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
   /** Set to have `create` lose the race the pre-flight check cannot close. */
   vanishingListing = false;
 
+  /** Set to have `create` fail on the other key: the account behind the token is gone. */
+  vanishingGuest = false;
+
   findAll(): Promise<Booking[]> {
     return Promise.resolve(this.all());
   }
@@ -98,6 +103,10 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
   create(guestId: string, booking: CreateBookingInput): Promise<Booking> {
     if (this.vanishingListing) {
       return Promise.reject(new ListingNotFoundError(booking.listingId));
+    }
+
+    if (this.vanishingGuest) {
+      return Promise.reject(new GuestNotFoundError(guestId));
     }
 
     const stored: Booking = {
@@ -165,6 +174,17 @@ describe("BookingService", () => {
 
     await expect(service.create(GUEST_ID, input)).rejects.toThrow(
       NotFoundException,
+    );
+  });
+
+  // The token names the guest and JwtStrategy reads no database, so nothing checks that row
+  // before the insert. A gone account is an ended session — the 401 of `/auth/me` — and not
+  // a 404 about a listing that is sitting there unbooked.
+  it("answers 401 when the account behind the token is gone", async () => {
+    bookingRepository.vanishingGuest = true;
+
+    await expect(service.create(GUEST_ID, input)).rejects.toThrow(
+      UnauthorizedException,
     );
   });
 

@@ -1,3 +1,5 @@
+import { TZDate } from "@date-fns/tz";
+import { format } from "date-fns";
 import { z } from "zod";
 
 /**
@@ -24,7 +26,7 @@ export const bookingSchema = z.object({
  * of the boundary it can refuse what is still today somewhere. The exact cut-off belongs
  * with the availability rules of phase 4, which know the listing's own time zone.
  */
-const today = (): string => new Date().toISOString().slice(0, 10);
+const today = (): string => format(TZDate.tz("UTC"), "yyyy-MM-dd");
 
 /** `guestId` comes from the session, so a request cannot book in another person's name. */
 export const createBookingSchema = bookingSchema

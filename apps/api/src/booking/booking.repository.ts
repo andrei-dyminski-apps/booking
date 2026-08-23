@@ -1,6 +1,17 @@
+import { tz } from "@date-fns/tz";
 import { Injectable } from "@nestjs/common";
 import type { Booking, CreateBookingInput } from "@repo/contracts";
-import { Prisma, type Booking as BookingRow } from "../generated/prisma/client";
+import { format } from "date-fns";
+import { z } from "zod";
+import {
+  type Prisma,
+  type Booking as BookingRow,
+} from "../generated/prisma/client";
+import {
+  isPrismaError,
+  PrismaErrorCode,
+  violatedConstraint,
+} from "../prisma/prisma.errors";
 import { PrismaService } from "../prisma/prisma.service";
 
 /**
@@ -14,6 +25,20 @@ export class ListingNotFoundError extends Error {
   constructor(listingId: string) {
     super(`Listing ${listingId} not found`);
     this.name = "ListingNotFoundError";
+  }
+}
+
+/**
+ * The other row an insert can fail on, and the one nothing checks beforehand: the guest is
+ * whoever the access token names, and `JwtStrategy` reads no database, so an account
+ * deleted mid-session keeps minting valid requests for as long as `JWT_ACCESS_TTL`. That
+ * is an ended session rather than a missing listing — the service answers it the way
+ * `/auth/me` answers a token whose row is gone.
+ */
+export class GuestNotFoundError extends Error {
+  constructor(guestId: string) {
+    super(`Guest ${guestId} not found`);
+    this.name = "GuestNotFoundError";
   }
 }
 
@@ -104,11 +129,15 @@ export class BookingRepository {
 
       return toBooking(row);
     } catch (error) {
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2003"
-      ) {
-        throw new ListingNotFoundError(input.listingId);
+      if (isPrismaError(error, PrismaErrorCode.ForeignKeyViolation)) {
+        // Which of the two keys gave way decides the answer, and guessing is not an
+        // option: the listing is the 404 the client can act on, the guest is a 401.
+        switch (violatedForeignKey(error)) {
+          case LISTING_FOREIGN_KEY:
+            throw new ListingNotFoundError(input.listingId);
+          case GUEST_FOREIGN_KEY:
+            throw new GuestNotFoundError(guestId);
+        }
       }
 
       throw error;
@@ -138,9 +167,36 @@ export class BookingRepository {
   }
 }
 
-/** @db.Date columns arrive as a Date at UTC midnight, so slicing the ISO string is exact. */
+/**
+ * The names Postgres gives the two foreign keys of `bookings`; they are written down in
+ * `migration.sql` under `prisma/migrations`, which is what makes them a fact of the
+ * schema rather than a guess about Prisma's naming.
+ */
+const LISTING_FOREIGN_KEY = "bookings_listing_id_fkey";
+const GUEST_FOREIGN_KEY = "bookings_guest_id_fkey";
+
+/**
+ * A foreign key violation names the key by index rather than by column, unlike the unique
+ * conflict in `user.repository.ts`; the path to the constraint is the shared one.
+ */
+const foreignKeyConstraintSchema = z.object({ index: z.string() });
+
+/**
+ * `null` for a constraint this cannot read, and the caller then rethrows the Prisma error
+ * as a 500. That is deliberate, and the opposite of what `conflictsOnEmail` decides: with
+ * two candidate keys a fallback would have to pick one, and both wrong answers are worse
+ * than an honest failure — a 404 about a listing that is there, or a 401 that ends a
+ * session which never expired.
+ */
+function violatedForeignKey(
+  error: Prisma.PrismaClientKnownRequestError,
+): string | null {
+  return violatedConstraint(error, foreignKeyConstraintSchema)?.index ?? null;
+}
+
+/** @db.Date columns arrive as a Date at UTC midnight, so formatting in UTC is exact. */
 function toIsoDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  return format(date, "yyyy-MM-dd", { in: tz("UTC") });
 }
 
 function toBooking(row: BookingRow): Booking {

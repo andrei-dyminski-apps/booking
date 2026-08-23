@@ -36,6 +36,6 @@ The skill states the methodology; `rules/frontend.md` states what this repositor
 to do with it, and wins where the two disagree — the section "The methodology itself"
 there lists the disagreements.
 
-These files are written in English, like everything else in the repository — code, comments, tests, READMEs, `docs/`. What stays in Russian is the interface text of `apps/web`, the demo data of the seed, and the conversation with the assistant itself, including commit messages.
+These files are written in English, like everything else in the repository — code, comments, tests, READMEs, `docs/`, and the interface of `apps/web` down to its `aria-label`s and the demo data of the seed. What stays in Russian is what never lands in the tree: the conversation with the assistant, and commit messages. The rule in full is in `rules/workflow.md`.
 
 The rules describe what cannot be derived from the code: agreements and boundaries. There is no need to duplicate the directory layout or the contents of `package.json` in them — that goes stale first.

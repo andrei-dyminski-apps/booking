@@ -2,7 +2,7 @@
 
 A booking service monorepo: a Next.js frontend and a NestJS backend in one repository, managed by Turborepo and pnpm workspaces.
 
-> Status: the API is a working vertical slice — owners publish listings, guests book them and the dates are checked for overlaps. Storage is PostgreSQL via Prisma 7, and the API is behind hand-written authentication: argon2, a JWT pair in httpOnly cookies, refresh-token rotation, and role-based authorization on top. The next phases are in [docs/plan.md](docs/plan.md).
+> Status: the API is a working vertical slice — owners publish listings, guests book them and the dates are checked for overlaps. Storage is PostgreSQL via Prisma 7, and the API is behind hand-written authentication: argon2, a JWT pair in httpOnly cookies, refresh-token rotation, and role-based authorization on top. The frontend has the session half of it — sign up, sign in, a guarded profile page rendered on the server as the visitor, and a session that survives an expired access token. The next phases are in [docs/plan.md](docs/plan.md).
 
 ## Requirements
 
@@ -21,7 +21,7 @@ pnpm --filter @repo/api db:seed         # demo data
 pnpm dev
 ```
 
-- bookings — http://localhost:3000/bookings
+- the application — http://localhost:3000 (`/login`, `/register`, `/profile`)
 - API — http://localhost:3001
 - OpenAPI — http://localhost:3001/docs (not published when `NODE_ENV=production`)
 
@@ -79,7 +79,8 @@ The frontend is built on **Tailwind CSS 4** and **shadcn/ui** over Base UI primi
 packages/ui/
   components.json            # what the shadcn CLI writes and where
   src/
-    components/              # the primitives generated so far: button, sonner
+    components/              # the primitives generated so far: button, card, field,
+                             #   input, label, separator, sonner
     lib/utils.ts             # cn() — clsx + tailwind-merge
     styles/globals.css       # tokens, dark theme, @source directives for Tailwind
 ```
@@ -88,7 +89,7 @@ The tokens are the only place colours and radii are defined; `apps/web/src/_app/
 
 The faces are the one thing the tokens do not own: `apps/web` loads them with `next/font` into `--app-font-sans` / `--app-font-mono`, and the token file maps those onto `--font-sans` / `--font-mono`. The names differ on purpose — a token defined as `var(--font-sans)` would reference itself, and would then hold only while the `next/font` class outranks the `@layer theme` rule Tailwind emits for it.
 
-Primitives are generated when a screen needs one, not up front: only `button` and `sonner` are here so far.
+Primitives are generated when a screen needs one, not up front: `button`, `sonner`, and the `card`, `field`, `input`, `label` and `separator` the auth forms of phase 2 asked for.
 
 A new primitive is added by the CLI from inside the package, never written by hand:
 
@@ -139,6 +140,15 @@ Implemented by hand rather than taken from Auth.js or Clerk — the parts an int
 The secrets have no fallback in the code: an unset `JWT_ACCESS_SECRET` stops the process at boot instead of shipping a key that is in a public repository. `.env.example` carries development values — replace them anywhere else, `openssl rand -hex 32` generates one.
 
 `pnpm --filter @repo/api db:seed` creates three demo logins, one per role — `guest@example.com`, `owner@example.com` and `admin@example.com`, all with the password `password123` — three listings owned by the owner and four bookings taken by the guest, so every rule below has something to act on from the first request. The stays are dated from the day the seed runs: a check-in in the past is refused by the contract, and demo data the API itself would not accept ages into a puzzle.
+
+### The same session on the frontend
+
+The two cookie scopes are what shape the browser half of it, so it is worth reading them together: the access token is scoped to `/` and the refresh token to `/auth` on the API's host. The Next.js server therefore receives a visitor's access token and never their refresh token.
+
+- **`apps/web/proxy.ts`** (Next.js 16 renamed `middleware.ts` to that) guards `/profile` and answers one question — is there an access cookie. It cannot answer more: the cookie is httpOnly and only the API holds the secret that would verify it, so this only spares the server a render nobody could see. The page behind it reads `/auth/me` anyway and copes with a `401` of its own.
+- **A server render reads the API as the visitor.** `credentials: "include"` is a rule for browsers and does nothing in Node, so the transport copies the access cookie out of the request Next.js is answering. It does that for uncached reads only: the answer to a cached one goes into the Data Cache under its URL and is then served to whoever asks next.
+- **An expired access token is not a signed-out user.** The browser drops that cookie after fifteen minutes while the refresh token lives a week, so the login page spends one `/auth/refresh` before it shows a form and sends the visitor on where they were going. It has to happen there: the refresh cookie's path means it is attached to a request that leaves the browser for the API and to nothing that leaves the Next.js server — neither the proxy nor a render can perform that trade.
+- **The forms post straight to the API**, not through a server action that would have to re-issue both cookies with attributes copied from the backend, and they validate with `loginSchema` / `registerSchema` — the same schemas that refuse the request on the other side, so a message reads the same wherever it was produced.
 
 ## Roles
 

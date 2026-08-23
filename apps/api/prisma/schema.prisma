@@ -45,7 +45,12 @@ model Listing {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  owner    User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  /// Restrict, not Cascade, for the reason the booking above is: a cascade from `users`
+  /// would have to delete listings that bookings restrict, so it would promise an account
+  /// deletion the database refuses to perform. Removing an owner therefore lets go of the
+  /// listings first, and a listing with stays booked against it refuses to go — the same
+  /// 409 the API answers when that listing is deleted on its own.
+  owner    User      @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   bookings Booking[]
 
   @@index([ownerId])

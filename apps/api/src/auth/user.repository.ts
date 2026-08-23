@@ -1,7 +1,12 @@
 import { Injectable } from "@nestjs/common";
 import type { User } from "@repo/contracts";
 import { z } from "zod";
-import { Prisma, type User as UserRow } from "../generated/prisma/client";
+import { type Prisma, type User as UserRow } from "../generated/prisma/client";
+import {
+  isPrismaError,
+  PrismaErrorCode,
+  violatedConstraint,
+} from "../prisma/prisma.errors";
 import { PrismaService } from "../prisma/prisma.service";
 
 /**
@@ -37,8 +42,7 @@ export class UserRepository {
       // The unique index decides, not a preceding SELECT: two simultaneous registrations
       // of the same address would both pass such a check.
       if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2002" &&
+        isPrismaError(error, PrismaErrorCode.UniqueViolation) &&
         conflictsOnEmail(error)
       ) {
         throw new EmailAlreadyRegisteredError(input.email);
@@ -64,42 +68,25 @@ export class UserRepository {
   }
 }
 
-/**
- * Not `z.strictObject`: `meta` carries sibling keys — `modelName`, whatever the adapter
- * adds — and rejecting them would make every conflict unreadable, which the fallback below
- * answers with "the email". That would turn the check into a no-op.
- */
-const uniqueConstraintSchema = z.object({
-  driverAdapterError: z.object({
-    cause: z.object({
-      constraint: z.object({ fields: z.array(z.string()) }),
-    }),
-  }),
-});
+/** A unique violation names the columns it happened on; the path there is the shared one. */
+const uniqueConstraintSchema = z.object({ fields: z.array(z.string()) });
 
 /**
  * `email` is the only unique column on the model today, so this is not what makes the
  * answer right — it is what keeps it right once a second one arrives: a conflict on a
  * future `username` must not come back to its owner as a taken email address.
  *
- * Not `meta.target`, which every recipe for this reaches for: Prisma 7 talks to Postgres
- * through a driver adapter, and an adapter error leaves that field unset. What the driver
- * knows arrives nested instead — `meta.driverAdapterError.cause.constraint` holds
- * `{ fields: ["email"] }` — and only for the adapters that report a constraint at all.
- *
- * A shape the schema cannot read counts as the email: the model has no other unique column
+ * A constraint this cannot read counts as the email: the model has no other unique column
  * to confuse it with, and answering a duplicate registration with a 500 would be a worse
- * mistake than naming the wrong field in a case that does not exist yet.
+ * mistake than naming the wrong field in a case that does not exist yet. `bookings` has
+ * two candidate keys and therefore takes the opposite decision — see `violatedConstraint`.
  */
 function conflictsOnEmail(
   error: Prisma.PrismaClientKnownRequestError,
 ): boolean {
-  const parsed = uniqueConstraintSchema.safeParse(error.meta);
+  const constraint = violatedConstraint(error, uniqueConstraintSchema);
 
-  return (
-    !parsed.success ||
-    parsed.data.driverAdapterError.cause.constraint.fields.includes("email")
-  );
+  return constraint === null || constraint.fields.includes("email");
 }
 
 /** Exported for RefreshTokenRepository, which reads the user row through its relation. */

@@ -1,6 +1,7 @@
 import { SetMetadata, applyDecorators } from "@nestjs/common";
 import { ApiForbiddenResponse } from "@nestjs/swagger";
 import type { Role } from "@repo/contracts";
+import { ApiErrorDto } from "../../common/dto/api-error.dto";
 
 export const ROLES_KEY = "roles";
 
@@ -22,5 +23,6 @@ export const Roles = (...roles: [Role, ...Role[]]) =>
     SetMetadata(ROLES_KEY, roles),
     ApiForbiddenResponse({
       description: `Requires the role ${roles.join(" or ")}`,
+      type: ApiErrorDto,
     }),
   );

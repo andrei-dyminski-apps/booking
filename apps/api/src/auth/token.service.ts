@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import type { Role } from "@repo/contracts";
+import { addSeconds } from "date-fns";
 import { AUTH_CONFIG, type AuthConfig } from "./auth.config";
 import type {
   AccessTokenPayload,
@@ -66,7 +67,7 @@ export class TokenService {
         familyId: family,
         hash: this.hash(refreshToken),
         // The row expires with the token, so an expired session is also expired storage.
-        expiresAt: new Date(Date.now() + this.authConfig.refreshTtl * 1000),
+        expiresAt: addSeconds(new Date(), this.authConfig.refreshTtl),
       },
     };
   }

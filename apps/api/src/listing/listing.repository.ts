@@ -4,7 +4,11 @@ import type {
   Listing,
   UpdateListingInput,
 } from "@repo/contracts";
-import { Prisma, type Listing as ListingRow } from "../generated/prisma/client";
+import {
+  type Prisma,
+  type Listing as ListingRow,
+} from "../generated/prisma/client";
+import { isPrismaError, PrismaErrorCode } from "../prisma/prisma.errors";
 import { PrismaService } from "../prisma/prisma.service";
 
 /**
@@ -70,7 +74,7 @@ export class ListingRepository {
 
       return toListing(row);
     } catch (error) {
-      if (isPrismaError(error, "P2025")) return null;
+      if (isPrismaError(error, PrismaErrorCode.RecordNotFound)) return null;
 
       throw error;
     }
@@ -87,11 +91,11 @@ export class ListingRepository {
 
       return true;
     } catch (error) {
-      if (isPrismaError(error, "P2003")) {
+      if (isPrismaError(error, PrismaErrorCode.ForeignKeyViolation)) {
         throw new ListingHasBookingsError(id);
       }
 
-      if (isPrismaError(error, "P2025")) return false;
+      if (isPrismaError(error, PrismaErrorCode.RecordNotFound)) return false;
 
       throw error;
     }
@@ -105,16 +109,6 @@ export class ListingRepository {
 
     return rows.map(toListing);
   }
-}
-
-/**
- * `P2003` is a foreign key violation, `P2025` a row that was already gone: the two answers
- * a read-then-write can get when it loses the race between its check and its write.
- */
-function isPrismaError(error: unknown, code: string): boolean {
-  return (
-    error instanceof Prisma.PrismaClientKnownRequestError && error.code === code
-  );
 }
 
 function toListing(row: ListingRow): Listing {

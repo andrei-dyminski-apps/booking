@@ -5,9 +5,14 @@ import { App } from "supertest/types";
 import { AppModule } from "./../src/app.module";
 import { ACCESS_TOKEN_COOKIE } from "./../src/auth/cookies";
 
+type ResponseObject = {
+  content?: Record<string, unknown>;
+  description?: string;
+};
+
 type Operation = {
   security?: unknown[];
-  responses?: Record<string, unknown>;
+  responses?: Record<string, ResponseObject>;
 };
 
 /**
@@ -39,6 +44,31 @@ describe("OpenAPI document (e2e)", () => {
 
     return found;
   };
+
+  /** Every operation the document holds, so a new route joins these checks by existing. */
+  const routes = (): [path: string, method: string, operation: Operation][] =>
+    Object.entries(document.paths).flatMap(([path, methods]) =>
+      Object.entries(methods).map(
+        ([method, found]): [string, string, Operation] => [path, method, found],
+      ),
+    );
+
+  const successResponses = (): [
+    path: string,
+    method: string,
+    status: string,
+    response: ResponseObject,
+  ][] =>
+    routes().flatMap(([path, method, found]) =>
+      Object.entries(found.responses ?? {})
+        .filter(([status]) => status.startsWith("2"))
+        .map(([status, response]): [string, string, string, ResponseObject] => [
+          path,
+          method,
+          status,
+          response,
+        ]),
+    );
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -113,6 +143,59 @@ describe("OpenAPI document (e2e)", () => {
     ] as const) {
       expect(operation(path, method).responses?.["403"]).toBeUndefined();
     }
+  });
+
+  it("keeps both reasons for a 403 the guard and the service can each give", () => {
+    // The two managing routes are refused by RolesGuard for the role and by the service for
+    // the row, and Nest joins the descriptions of the two decorators instead of letting one
+    // replace the other. Decorators apply bottom-up, so a reordering would silently drop a
+    // half — this is what notices.
+    for (const [path, method] of [
+      ["/listings/{id}", "patch"],
+      ["/listings/{id}", "delete"],
+    ] as const) {
+      const { description } = operation(path, method).responses?.["403"] ?? {};
+
+      expect(description).toContain("belongs to another owner");
+      expect(description).toContain("Requires the role OWNER or ADMIN");
+    }
+  });
+
+  it("carries a JSON schema on every success response that has a body", () => {
+    // Walked out of the document rather than listed here, and that is the whole point: a
+    // route added without @ApiOkResponse/@ApiCreatedResponse gets a bare success entry from
+    // Nest with no `content`, and a list repeated in this file would simply not mention it.
+    for (const [path, method, status, response] of successResponses()) {
+      // The one route that answers 200 with no schema, and may: it returns a bare string
+      // rather than a contract type, so there is no DTO to hand to a decorator.
+      if (path === "/") continue;
+
+      const documented = { route: `${method} ${path} -> ${status}` };
+
+      // 204 is the other legitimate shape — declared by @ApiNoContentResponse and empty by
+      // definition, so content there would be the mistake.
+      expect({
+        ...documented,
+        hasContent: response.content !== undefined,
+      }).toEqual({ ...documented, hasContent: status !== "204" });
+    }
+  });
+
+  it("documents exactly one success status per route", () => {
+    // Two of them means a decorator disagrees with @HttpCode — which is how a route ends up
+    // drawn as answering 200 while it really answers 204, and none means it is undocumented.
+    const counted = new Map<string, number>();
+
+    for (const [path, method] of successResponses()) {
+      const route = `${method} ${path}`;
+
+      counted.set(route, (counted.get(route) ?? 0) + 1);
+    }
+
+    expect(
+      [...counted].filter(([, count]) => count !== 1).map(([route]) => route),
+    ).toEqual([]);
+    expect(counted.size).toBe(routes().length);
   });
 
   it("drops the requirement on the routes @Public() opens", () => {

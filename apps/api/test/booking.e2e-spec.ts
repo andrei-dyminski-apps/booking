@@ -10,9 +10,10 @@ import {
   type CreateListingInput,
 } from "@repo/contracts";
 import { AppModule } from "./../src/app.module";
+import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
-import { signInAs, type Agent } from "./session";
+import { credentialsFor, signInAs, type Agent } from "./session";
 
 const listingInput: CreateListingInput = {
   title: "Loft above the harbour",
@@ -121,6 +122,24 @@ describe("BookingController (e2e)", () => {
       .post("/bookings")
       .send({ ...input, listingId: "8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f" })
       .expect(404);
+  });
+
+  /**
+   * The one foreign key nothing checks before the insert: the guest is whoever the access
+   * token names, and JwtStrategy reads no database, so a deleted account keeps making
+   * valid-looking requests until the token expires. The two keys of `bookings` fail with
+   * the same Prisma code, and this is what tells them apart — the listing is there.
+   */
+  it("answers 401 when the account behind the token was deleted mid-session", async () => {
+    await app
+      .get(PrismaService)
+      .user.delete({ where: { email: credentialsFor[Role.USER].email } });
+
+    const response = await guest.post("/bookings").send(input).expect(401);
+
+    expect(apiErrorSchema.parse(response.body).message).toBe(
+      "Session no longer exists",
+    );
   });
 
   it("answers 409 when the dates overlap an existing booking", async () => {

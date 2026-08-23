@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import type { LoginInput, RegisterInput, User } from "@repo/contracts";
 import * as argon2 from "argon2";
+import { isPast } from "date-fns";
 import { RefreshTokenRepository } from "./refresh-token.repository";
 import { TokenService, type TokenPair } from "./token.service";
 import { EmailAlreadyRegisteredError, UserRepository } from "./user.repository";
@@ -116,7 +117,7 @@ export class AuthService {
 
     // The row outlives nothing: the JWT check above already rejects an expired token, and
     // this covers a row whose lifetime was cut short another way.
-    if (stored.expiresAt.getTime() <= Date.now()) {
+    if (isPast(stored.expiresAt)) {
       throw new UnauthorizedException("Refresh token is invalid or expired");
     }
 

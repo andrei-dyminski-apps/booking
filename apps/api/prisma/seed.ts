@@ -1,5 +1,7 @@
+import { TZDate } from "@date-fns/tz";
 import { PrismaPg } from "@prisma/adapter-pg";
 import * as argon2 from "argon2";
+import { addDays, format } from "date-fns";
 import { PrismaClient, Role } from "../src/generated/prisma/client";
 
 const connectionString = process.env.DATABASE_URL;
@@ -52,11 +54,10 @@ const listings = [
  * after which the API can no longer create what the seed just wrote.
  */
 function inDays(days: number): Date {
-  const date = new Date();
-
-  date.setUTCDate(date.getUTCDate() + days);
-
-  return new Date(date.toISOString().slice(0, 10));
+  return TZDate.tz(
+    "UTC",
+    format(addDays(TZDate.tz("UTC"), days), "yyyy-MM-dd"),
+  );
 }
 
 /** Indexes into `listings`; the ids only exist once the rows are written. */
@@ -68,10 +69,11 @@ const bookings = [
 ];
 
 async function main(): Promise<void> {
-  // Order matters: bookings reference listings with onDelete: Restrict, and deleting the
-  // users would otherwise cascade into listings the bookings still point at. Deleting the
-  // users also takes their refresh tokens with them (onDelete: Cascade), so a re-seed ends
-  // every session issued against the previous data.
+  // Order matters, and both steps are refusals rather than cascades: bookings reference
+  // listings with onDelete: Restrict, and listings reference their owner the same way, so
+  // deleting the users first fails on the foreign key instead of taking the rows with it.
+  // Deleting the users does take their refresh tokens (onDelete: Cascade), so a re-seed
+  // ends every session issued against the previous data.
   await prisma.booking.deleteMany();
   await prisma.listing.deleteMany();
   await prisma.user.deleteMany();
