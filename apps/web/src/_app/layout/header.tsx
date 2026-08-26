@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Button } from "@repo/ui/components/button";
 import { currentUser } from "#shared/api";
 import { ROUTES } from "#shared/config";
+import { SessionRecovery } from "./session-recovery";
 import { ThemeToggle } from "./theme-toggle";
 
 /**
@@ -10,6 +11,9 @@ import { ThemeToggle } from "./theme-toggle";
  * static rendering — the header differs per visitor, so no page above it can be a shared
  * document. That is the right trade while every screen is behind a login; the catalogue
  * of phase 6 is the first one that will want the opposite and will have to say so.
+ *
+ * `null` here means "no live access token", which is not the same as "signed out" — hence
+ * `SessionRecovery` beside it, the one thing about the session this side cannot settle.
  */
 export const Header = async () => {
   const user = await currentUser({ cache: "no-store" });
@@ -20,6 +24,8 @@ export const Header = async () => {
         <Link href={ROUTES.home} className="font-semibold tracking-tight">
           Booking
         </Link>
+
+        <SessionRecovery signedIn={user !== null} />
 
         <nav className="flex items-center gap-2">
           {user ? (

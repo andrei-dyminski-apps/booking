@@ -40,7 +40,7 @@ packages/
   typescript-config/      # @repo/typescript-config — base tsconfigs
 ```
 
-The applications never import each other: `web` talks to `api` over HTTP at the address from `NEXT_PUBLIC_API_URL`. Shared frontend code goes to `@repo/ui`, which exports file by file — `import { Button } from "@repo/ui/components/button"`.
+The applications never import each other: `web` talks to `api` over HTTP at the address from `API_ORIGIN`. The browser does not make that call itself — it goes to `/api` on the frontend's own origin, and a route handler there forwards it, which is what keeps the session a first-party cookie (see [Deployment](#deployment)). Shared frontend code goes to `@repo/ui`, which exports file by file — `import { Button } from "@repo/ui/components/button"`.
 
 ## API contract
 
@@ -131,7 +131,8 @@ Implemented by hand rather than taken from Auth.js or Clerk — the parts an int
 
 - **Passwords** are hashed with **argon2id**. A wrong password and an unknown address produce the same `401` with the same message — and take the same time to produce it: an unknown address is verified against a throwaway hash rather than answered early, because a reply that arrives in 2 ms instead of 30 names a registered user just as plainly as a different message would.
 - **A pair of JWTs.** The access token is short-lived (`JWT_ACCESS_TTL`, 15 minutes by default) and nothing can revoke it before it expires — hence its lifetime. The refresh token is long-lived and revocable: it has a row in `refresh_tokens`.
-- **Cookies only, never a response body.** Both tokens leave as `httpOnly` cookies, so an XSS on the frontend can act as the user but cannot carry the session away; `localStorage` never sees them. `access_token` is scoped to `/`, `refresh_token` to `/auth` — a request to `/bookings` does not carry the credential that mints new sessions. `SameSite` is `lax` in both environments: the frontend and the API are always the same site — one `localhost` host locally, `example.com` next to `api.example.com` in production — and cross-origin is not cross-site, so a `lax` cookie does reach a sibling subdomain. `AUTH_COOKIE_DOMAIN` is what makes the browser hand that cookie to both of them.
+- **Cookies only, never a response body.** Both tokens leave as `httpOnly` cookies, so an XSS on the frontend can act as the user but cannot carry the session away; `localStorage` never sees them. `access_token` is scoped to `/`, `refresh_token` to `/auth` — a request to `/bookings` does not carry the credential that mints new sessions. `SameSite` is `lax`, which is the CSRF defence: a cross-site POST carries no `lax` cookie.
+- **The browser holds the frontend's copy of that pair, not the API's.** The API answers the frontend's proxy, which drops those `Set-Cookie` headers and re-issues the same two tokens for its own origin, translating the scopes (`/` and `/api/auth`). So the session is first-party wherever the two services are deployed, `Max-Age` still comes from `JWT_*_TTL`, and `AUTH_COOKIE_DOMAIN` matters only to a browser poking at `/docs`.
 - **Rotation with reuse detection.** Every `/auth/refresh` burns the token it was given and issues the next one in the same family. Only the SHA-256 of a token is stored: a leaked table yields nothing usable, and unlike a salted password hash a digest can be looked up by equality. A token that comes back after it was already burned means a copy of it exists somewhere else — and since the two copies are indistinguishable, the whole family is revoked and the real user logs in again.
 - **The guard is global.** `JwtAuthGuard` is registered through `APP_GUARD`, so a new endpoint is closed until someone marks it `@Public()`. The open ones are `/`, `/auth/register`, `/auth/login`, `/auth/refresh` and `/auth/logout` — the last two because the access token is expected to be expired exactly there.
 - **Rate limiting.** `ThrottlerGuard` is registered before `JwtAuthGuard` — the limiter has to answer `429` before anything hashes a password, because argon2 spends 64 MB per attempt and an unauthenticated flood of `/auth/login` would otherwise be a flood of that. The API-wide ceiling is 120 requests a minute per address; `/auth/register` and `/auth/login`, the two endpoints that answer a guess, allow 10. The key is the client address, so `TRUST_PROXY` has to match the deployment — behind an unaccounted proxy every client shares one bucket.
@@ -197,24 +198,24 @@ The `nest.json` preset adds what Nest cannot work without: decorators with metad
 
 All settings live in a single `.env` in the repository root — there are no per-app `.env` files inside `apps/*`.
 
-| Variable              | What it sets                                                     | Default                             |
-| --------------------- | ---------------------------------------------------------------- | ----------------------------------- |
-| `NODE_ENV`            | `production` hides Swagger and marks the auth cookies `Secure`   | unset, set by the runtime           |
-| `WEB_PORT`            | Next port (`apps/web`)                                           | `3000`                              |
-| `API_PORT`            | Nest port (`apps/api`)                                           | `3001`                              |
-| `API_HOST`            | the interface Nest listens on                                    | `0.0.0.0`                           |
-| `NEXT_PUBLIC_API_URL` | API address for the browser (inlined into the bundle at `build`) | required at build time, no fallback |
-| `WEB_ORIGIN`          | origin(s) for CORS in Nest, several — comma-separated            | `http://localhost:3000`             |
-| `POSTGRES_USER`       | user inside the Postgres container                               | `booking`                           |
-| `POSTGRES_PASSWORD`   | password inside the Postgres container                           | `booking`                           |
-| `POSTGRES_DB`         | database name inside the Postgres container                      | `booking`                           |
-| `DATABASE_URL`        | PostgreSQL connection string for the application                 | see `.env.example`                  |
-| `JWT_ACCESS_SECRET`   | signing key of the access token                                  | required, no fallback               |
-| `JWT_REFRESH_SECRET`  | signing key of the refresh token — a different one on purpose    | required, no fallback               |
-| `JWT_ACCESS_TTL`      | access token lifetime, seconds (also the cookie Max-Age)         | `900`                               |
-| `JWT_REFRESH_TTL`     | refresh token lifetime, seconds                                  | `604800`                            |
-| `AUTH_COOKIE_DOMAIN`  | Domain of the auth cookies; empty means the host that set them   | empty                               |
-| `TRUST_PROXY`         | number of proxies in front of the API — the rate limiter's key   | `0`                                 |
+| Variable             | What it sets                                                   | Default                   |
+| -------------------- | -------------------------------------------------------------- | ------------------------- |
+| `NODE_ENV`           | `production` hides Swagger and marks the auth cookies `Secure` | unset, set by the runtime |
+| `WEB_PORT`           | Next port (`apps/web`)                                         | `3000`                    |
+| `API_PORT`           | Nest port (`apps/api`)                                         | `3001`                    |
+| `API_HOST`           | the interface Nest listens on                                  | `0.0.0.0`                 |
+| `API_ORIGIN`         | API address the Next.js server forwards to (server-side only)  | required, no fallback     |
+| `WEB_ORIGIN`         | origin(s) for CORS in Nest, several — comma-separated          | `http://localhost:3000`   |
+| `POSTGRES_USER`      | user inside the Postgres container                             | `booking`                 |
+| `POSTGRES_PASSWORD`  | password inside the Postgres container                         | `booking`                 |
+| `POSTGRES_DB`        | database name inside the Postgres container                    | `booking`                 |
+| `DATABASE_URL`       | PostgreSQL connection string for the application               | see `.env.example`        |
+| `JWT_ACCESS_SECRET`  | signing key of the access token                                | required, no fallback     |
+| `JWT_REFRESH_SECRET` | signing key of the refresh token — a different one on purpose  | required, no fallback     |
+| `JWT_ACCESS_TTL`     | access token lifetime, seconds (also the cookie Max-Age)       | `900`                     |
+| `JWT_REFRESH_TTL`    | refresh token lifetime, seconds                                | `604800`                  |
+| `AUTH_COOKIE_DOMAIN` | Domain of the auth cookies; empty means the host that set them | empty                     |
+| `TRUST_PROXY`        | trusted `X-Forwarded-For` entries — the rate limiter's key     | `0`                       |
 
 The root scripts start turbo through `node --env-file-if-exists=.env`, so the variables reach the environment of both tasks. The same `.env` is read by `docker compose` — it sits next to `docker-compose.yml`, so `POSTGRES_*` are substituted into the container without extra flags; compose declares defaults for them, so the database comes up even without a `.env`.
 
@@ -222,9 +223,13 @@ The root scripts start turbo through `node --env-file-if-exists=.env`, so the va
 
 A new variable has to be added in three places: `.env.example`, `globalEnv` in `turbo.json` and the table above. Without the `globalEnv` entry turbo will not account for it when computing the cache hash, and ESLint will report `turbo/no-undeclared-env-vars`.
 
-`NEXT_PUBLIC_API_URL` ends up in the client bundle at `next build` time — changing the API address requires rebuilding the frontend. There is no fallback in the code (`apps/web/src/shared/config/api-url.ts`): with the variable unset `next build` itself fails with an explicit error while collecting page data, instead of quietly walking to `localhost`. So it has to be present in the environment of the build, not only in that of the running application — a deploy pipeline that only passes it to the runtime container will not start.
+`API_ORIGIN` is read on the server and on demand (`apps/web/src/shared/config/api-url.ts`). It is deliberately not a `NEXT_PUBLIC_` variable: the browser has no use for the address, because everything it sends reaches the API through the frontend's own `/api` proxy. So it is not inlined into the bundle, changing it is a restart rather than a rebuild, and a pipeline that passes it only to the runtime container is right. There is still no fallback — an unset value fails the request with its own name in the message rather than walking to `localhost`.
 
 A trailing slash in the value is cut by `api-url.ts`, so `http://localhost:3001` and `http://localhost:3001/` behave the same.
+
+`TRUST_PROXY` is the number of `X-Forwarded-For` entries the API may believe, and Express counts them from the right. That makes it the number of proxies that actually **append** to the header, not the number of hops a request makes — and the frontend proxy is not one of them, because it forwards the header exactly as it received it. What appends an entry is the proxy in front of the API, which sees the frontend server as an ordinary client. Locally there is none, hence `0`; on Railway there is one, and reaching past it to the address Vercel wrote takes `2`.
+
+Never set it higher than the truth. One entry too many and `req.ip` stops being the client address and becomes a field the client fills in — with `TRUST_PROXY=1` and nothing actually appending, `curl -H 'X-Forwarded-For: 9.9.9.9'` picks its own bucket and the limit on `/auth/login` never fires.
 
 ## Commands
 
@@ -236,6 +241,7 @@ pnpm build          # build every package
 pnpm lint           # ESLint (formatting check included) + Steiger over the FSD structure of apps/web
 pnpm lint:fix       # ESLint --fix: autofixes + reformatting by Prettier
 pnpm check-types    # tsc --noEmit
+pnpm test           # unit tests: jest in apps/api, vitest in apps/web
 pnpm format         # Prettier over **/*.{ts,tsx,md}
 ```
 
@@ -264,14 +270,16 @@ Prisma 7 removed the automatic steps that v6 performed: `db:migrate` no longer r
 
 The container keeps its data in the `db-data` volume, so `docker compose down` and `up -d` preserve the bookings. Data is lost only with `docker compose down -v` — which is also the only way to change `POSTGRES_*`, since those apply when the volume is first initialized.
 
-Backend tests:
+Tests:
 
 ```sh
-pnpm test           # unit, *.spec.ts next to the code; no database needed (Prisma is mocked)
-pnpm test:e2e       # e2e, test/*.e2e-spec.ts; needs the database from docker-compose running
+pnpm test           # unit, *.spec.ts next to the code; no database needed
+pnpm test:e2e       # e2e, apps/api/test/*.e2e-spec.ts; needs the database from docker-compose running
 ```
 
-Both run through turbo, which builds `@repo/contracts` first — the specs import its schemas as values, and unlike `lint` and `check-types` they need the compiled `dist/`, not the sources.
+`pnpm test` covers both applications, with a runner each: **Jest** in `apps/api`, where the specs run a service against fakes of its repositories through Nest's testing module, and **Vitest** in `apps/web`. What has a spec on the frontend is deliberately narrow — a parser whose input somebody else writes, which today means `?next=` after signing in ([`next-path.ts`](apps/web/src/shared/lib/next-path.ts)) and the `Set-Cookie` the proxy re-issues ([`session-cookies.ts`](apps/web/src/shared/api/session-cookies.ts)). Both are security decisions that a diff does not show, and neither is a component: a component that would break is one `check-types` and Steiger already refuse.
+
+All of them run through turbo, which builds `@repo/contracts` first — the specs import its schemas as values, and unlike `lint` and `check-types` they need the compiled `dist/`, not the sources.
 
 The e2e tests wipe the tables before every test — do not run them against a database whose data you care about.
 
@@ -293,7 +301,9 @@ Internal packages are wired in as `"@repo/ui": "workspace:*"`.
 
 ## Deployment
 
-`apps/web` on Vercel, `apps/api` on Railway, one domain across both: `example.com` for the frontend and `api.example.com` for the API. That split is what the cookie configuration above assumes — the two stay the same site, so `SameSite=Lax` is enough and `AUTH_COOKIE_DOMAIN=example.com` hands one session to the middleware of the frontend and to the API alike.
+`apps/web` on Vercel, `apps/api` on Railway. The two are different sites however the domains are arranged, and a preview deployment on a throwaway `*.vercel.app` hostname is a different site again — which is why the browser never talks to the API directly. It calls `/api/...` on the frontend, `apps/web/app/api/[...path]/route.ts` forwards the request, and the session it holds is a first-party cookie of whatever hostname it happens to be visiting.
+
+That removes three deployment problems rather than one. There is no `SameSite=None` for Safari's tracking prevention to drop. There is no CORS to keep in step with a list of origins. And a preview deployment can be pointed at any API and still log in, instead of needing a staging backend of its own.
 
 `railway.json` in the root describes the API service. Railway's Root Directory stays the repository root — pnpm workspaces do not build from a subdirectory — so the service is narrowed by its commands instead:
 
@@ -304,7 +314,7 @@ Internal packages are wired in as `"@repo/ui": "workspace:*"`.
 
 Postgres is a service in the same Railway project, and `DATABASE_URL` is set as a reference to it (`${{Postgres.DATABASE_URL}}`) rather than copied — the credentials then survive a rotation. The rest of the variables from the table above are set by hand; the JWT secrets are generated (`openssl rand -hex 32`), not taken from `.env.example`.
 
-On the Vercel side `NEXT_PUBLIC_API_URL` has to be present in the environment of the **build**, not only of the running application. Preview deployments live on `*.vercel.app`, which is a different site from `api.example.com`, so a session against the production API does not follow them there — a preview that needs a login points at a staging API instead.
+On the Vercel side `API_ORIGIN` is a runtime variable of the frontend — it is read on the server, never inlined into the bundle, so a changed API address is a redeploy without a rebuild. `TRUST_PROXY` on the Railway side has to account for the extra `X-Forwarded-For` entry the frontend server's own request produces, or the rate limiter buckets every visitor together.
 
 ## Build cache
 

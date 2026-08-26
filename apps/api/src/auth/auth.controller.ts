@@ -36,7 +36,8 @@ import { LoginDto, RegisterDto, UserDto } from "./dto/auth.dto";
  * endpoints that answer such a guess carry a limit far below the rest of the API. It stays
  * off /auth/me and /auth/refresh, which a legitimate client calls often. The bucket is per
  * address (`req.ip`), which is the real client only when `TRUST_PROXY` matches the
- * deployment — otherwise everything behind the proxy shares one.
+ * deployment: too low and everything behind the proxy shares one bucket, too high and the
+ * caller picks its own with a header.
  */
 @Controller("auth")
 export class AuthController {

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { Providers } from "../providers";
+import { Header } from "./header";
 import "../styles/globals.css";
 
 // The application supplies the faces, the design system names the token: the loader
@@ -35,7 +36,10 @@ export const RootLayout = ({
     suppressHydrationWarning
   >
     <body className="min-h-svh antialiased">
-      <Providers>{children}</Providers>
+      <Providers>
+        <Header />
+        <main className="mx-auto w-full max-w-5xl px-4 py-10">{children}</main>
+      </Providers>
     </body>
   </html>
 );

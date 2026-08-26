@@ -9,7 +9,7 @@
     "API_HOST",
     "PORT",
     "WEB_ORIGIN",
-    "NEXT_PUBLIC_API_URL",
+    "API_ORIGIN",
     "DATABASE_URL",
     "POSTGRES_USER",
     "POSTGRES_PASSWORD",

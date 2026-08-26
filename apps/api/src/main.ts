@@ -10,9 +10,15 @@ async function bootstrap() {
 
   // Behind a proxy every request arrives from the proxy's address, and the rate limiter
   // would then put all clients in one bucket — one attacker locking everyone else out.
-  // The value is the number of proxies in front of the service (Railway puts exactly one),
-  // and 0 means none: only then is req.ip the socket address. It must not be set higher
-  // than the truth — each trusted hop is one more X-Forwarded-For entry a client can forge.
+  //
+  // The value is how many X-Forwarded-For entries to believe, and Express counts them from
+  // the right: it is the number of proxies that APPEND to the header, not the number of
+  // hops. The frontend's BFF is not one of them — it forwards the header untouched — so
+  // what it changes is the entry the proxy in front of this service appends for the
+  // frontend server. 0 means believe nothing and use the socket address.
+  //
+  // It must not be set higher than the truth. One entry too many and req.ip stops being
+  // the client address and becomes a header the client writes.
   const trustedProxies = Number(process.env.TRUST_PROXY ?? 0);
 
   if (Number.isInteger(trustedProxies) && trustedProxies > 0) {

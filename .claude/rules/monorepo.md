@@ -17,7 +17,7 @@ Internal packages are wired in as `"@repo/ui": "workspace:*"` — not through a 
 ## Package boundaries
 
 - `apps/*` may depend on `packages/*`. The reverse dependency is forbidden.
-- `apps/web` and `apps/api` **never import each other**. They talk over HTTP through `NEXT_PUBLIC_API_URL`, and the shared contract lives in `packages/contracts`.
+- `apps/web` and `apps/api` **never import each other**. They talk over HTTP at the address from `API_ORIGIN`, and the shared contract lives in `packages/contracts`. The browser makes that call through a proxy on the frontend's own origin rather than directly — see "The BFF" in `.claude/rules/frontend.md`.
 - The shape of a request and a response → `packages/contracts` (zod schemas). A contract rule is written there once and works on both sides: request validation in Nest, form validation and response parsing in Next.
 - Shared UI and frontend helpers → `packages/ui`. Do not copy components between applications.
 - `@repo/ui` is the design system: Tailwind tokens plus shadcn/ui primitives generated into `src/components`. It exports file by file — `"./components/*": "./src/components/*.tsx"`, the same for `./lib/*` and `./hooks/*`, and `./globals.css` for the tokens. The import is `@repo/ui/components/button`, not `@repo/ui`; there is no barrel file and none should be added.

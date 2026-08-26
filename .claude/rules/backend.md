@@ -107,8 +107,8 @@ cookies, refresh tokens rotated with reuse detection.
   registration order, and the limiter has to answer `429` before argon2 spends 64 MB on a
   password nobody asked it to check. 120 requests a minute per address API-wide, 10 on
   `/auth/register` and `/auth/login` (`@Throttle` on the handlers). The bucket key is
-  `req.ip`, which is only the real client when `TRUST_PROXY` names the number of proxies in
-  front of the service — `main.ts` turns it into Express's `trust proxy`.
+  `req.ip`, which is only the real client when `TRUST_PROXY` names how many
+  `X-Forwarded-For` entries to believe — `main.ts` turns it into Express's `trust proxy`.
 - **The tokens live in cookies only** and never appear in a response body. `access_token`
   is scoped to `/`, `refresh_token` to `/auth`, so a request to `/bookings` does not carry
   the credential that can mint new sessions. The attributes are assembled once in
@@ -205,7 +205,7 @@ Two checks, and the split between them is the point.
 
 - listens on `API_PORT ?? PORT ?? 3001` at `API_HOST ?? '0.0.0.0'`;
 - CORS: the list of origins from `WEB_ORIGIN` (comma-separated), `credentials: true`;
-- `trust proxy` from `TRUST_PROXY` (the number of proxies in front of the service, 0 = none). It is what makes `req.ip` — and with it the rate limiter's bucket — the client rather than the proxy. Never set above the number of proxies that exist: each trusted hop is one more forgeable `X-Forwarded-For` entry.
+- `trust proxy` from `TRUST_PROXY`. Express counts `X-Forwarded-For` from the right, so the value is the number of proxies that **append** to it, not the number of hops a request makes — the frontend's BFF forwards the header untouched and is therefore not one of them, while the proxy in front of this service is (it appends the frontend server's address). 0 means believe nothing and use the socket address. It is what makes `req.ip` — and with it the rate limiter's bucket — the client rather than the proxy. Never set above the truth: one entry too many and `req.ip` becomes a header the client writes rather than an address.
 - Swagger at `/docs`: the document is built from the same zod schemas, and `cleanupOpenApiDoc` is mandatory (in `nestjs-zod` 5 it replaced `patchNestJsSwagger`). It is published only when `NODE_ENV !== "production"` — the document describes the whole API surface. `addCookieAuth(ACCESS_TOKEN_COOKIE)` declares the session and `addSecurityRequirements` applies it to every operation, matching the global guard; `@Public()` is what drops it again. The credential is a cookie, so "Try it out" works from a browser that logged in through `/auth/login` and not from a pasted bearer header.
 
 Do not hardcode the port, the host or an origin. A new frontend origin goes into `.env`, not into the code.

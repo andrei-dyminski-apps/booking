@@ -1,13 +1,19 @@
 import { z } from "zod";
-import { apiErrorSchema, type ApiErrorIssue } from "@repo/contracts";
-import { API_URL } from "../config";
+import {
+  ACCESS_TOKEN_COOKIE,
+  apiErrorSchema,
+  userSchema,
+  type ApiErrorIssue,
+} from "@repo/contracts";
+import { apiOrigin, BFF_BASE_PATH, HTTP_STATUS } from "../config";
 
 /**
- * The transport every call to the API goes through: the base URL, the two errors and the
- * parse of the answer live here once, so an entity only writes down its own routes.
+ * The transport every call to the API goes through: the base URL, the two errors, the
+ * parse of the answer and the one retry a dead access token is worth all live here once,
+ * so an entity only writes down its own routes.
  */
 
-/** The API never answered: it is down, DNS failed, CORS rejected the request. */
+/** The API never answered: it is down, DNS failed, the proxy could not reach it. */
 export class ApiUnreachableError extends Error {
   constructor(cause: unknown) {
     super("API is unreachable", { cause });
@@ -41,6 +47,18 @@ type RequestOptions<T> = {
   schema: z.ZodType<T>;
   body?: unknown;
   read?: ReadOptions;
+  /**
+   * Handed the raw answer before it is parsed. The session routes are the only ones with
+   * a reason to look: they mirror the API's `Set-Cookie` into this server's own jar, and
+   * that header is gone by the time a body has been turned into a `User`.
+   */
+  onResponse?: (response: Response) => Promise<void>;
+  /**
+   * Off for the routes of the session itself. A 401 from `/auth/login` is a wrong
+   * password and from `/auth/refresh` a dead session — refreshing and trying again would
+   * be nonsense in the first case and endless recursion in the second.
+   */
+  retryOnUnauthorized?: boolean;
 };
 
 /**
@@ -56,46 +74,245 @@ type RequestOptions<T> = {
  */
 const REQUEST_TIMEOUT_MS = 10_000;
 
-export async function apiRequest<T>({
-  method,
-  path,
-  schema,
-  body,
-  read,
-}: RequestOptions<T>): Promise<T> {
-  let response: Response;
+export async function apiRequest<T>(options: RequestOptions<T>): Promise<T> {
+  const response = await send(options);
+
+  if (response.ok) return await settle(response, options);
+
+  const error = await toResponseError(response);
+
+  // An expired access token is not a signed-out visitor: the refresh token outlives it by
+  // a week. So a 401 in the browser is worth one rotation and one replay — and exactly
+  // one, because `refreshSession` reports its failure instead of throwing and the replay
+  // is not given a second chance of its own.
+  if (!canRetry(error, options)) throw error;
+  if (!(await refreshSession())) throw error;
+
+  const retried = await send(options);
+
+  if (!retried.ok) throw await toResponseError(retried);
+
+  return await settle(retried, options);
+}
+
+/**
+ * One refresh at a time, and one for the whole browser rather than one per tab.
+ *
+ * Rotation burns the token it is given, so several tabs waking up together used to be a
+ * queue of requests each spending the successor of the last. The promise below collapses
+ * that within a tab; `navigator.locks` — the only mutex a browser has that spans its tabs
+ * — collapses it across them.
+ *
+ * It lives with the transport rather than with the other session routes because the
+ * transport is what has to perform it in the middle of somebody else's request; a
+ * `shared/api/auth.ts` that owned it would be imported by the module it imports.
+ */
+export function refreshSession(): Promise<boolean> {
+  refreshInFlight ??= runRefresh().finally(() => {
+    refreshInFlight = null;
+  });
+
+  return refreshInFlight;
+}
+
+const SESSION_REFRESH_LOCK = "booking:session-refresh";
+const REFRESH_MARK_KEY = "booking:session-refreshed-at";
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function runRefresh(): Promise<boolean> {
+  const locks = globalThis.navigator?.locks;
+  // Read before the wait and compared after it. The mark is not evidence that a rotation
+  // happened recently — it is evidence that one happened *while this call was queued*,
+  // which is the only reading that survives a logout: cookies can be thrown away without
+  // the mark going with them, and a mark trusted on its own would then report a session
+  // that no longer exists. Sampling it here is what dates it to this attempt.
+  const before = readRefreshMark();
+
+  // An insecure context or an old browser has no Web Locks. The promise above still keeps
+  // this tab honest, and what a second tab then costs is an extra rotation rather than a
+  // broken session: the API burns the token it is handed and the next tab spends its
+  // successor.
+  if (locks === undefined) return await attemptRefresh(before);
+
+  // The lib types the callback's result as the value of the lock, so the promise it
+  // hands back is one layer deeper than it looks.
+  return await locks.request(
+    SESSION_REFRESH_LOCK,
+    async () => await attemptRefresh(before),
+  );
+}
+
+async function attemptRefresh(before: string | null): Promise<boolean> {
+  // Whoever held the lock while this call waited for it has already replaced the cookies,
+  // and the request behind it only needs to be retried. The cookie itself cannot be
+  // consulted — it is httpOnly — so the winner leaves a mark where the others can see it.
+  // An unchanged mark means nobody did, however recent it looks.
+  if (readRefreshMark() !== before) return true;
 
   try {
-    response = await fetch(`${API_URL}${path}`, {
+    await apiRequest({
+      method: "POST",
+      path: "/auth/refresh",
+      schema: userSchema,
+      retryOnUnauthorized: false,
+    });
+  } catch {
+    // Every way this fails means the same thing to the caller: there is no session to
+    // repair, and the 401 it was about to receive stands.
+    return false;
+  }
+
+  markRefreshed();
+
+  return true;
+}
+
+function readRefreshMark(): string | null {
+  try {
+    return window.localStorage.getItem(REFRESH_MARK_KEY);
+  } catch {
+    // A browser that refuses storage costs one redundant rotation, not a session: the two
+    // reads then agree on `null` and this call rotates for itself.
+    return null;
+  }
+}
+
+function markRefreshed(): void {
+  try {
+    // Only ever compared for equality, so what it has to be is different from the last
+    // one rather than a time. Two rotations in the same millisecond would otherwise read
+    // as none, and the cost of that is one more rotation — the case the mark exists to
+    // spare, spent on the case it cannot see.
+    window.localStorage.setItem(
+      REFRESH_MARK_KEY,
+      `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+  } catch {
+    // Same trade as above.
+  }
+}
+
+async function send<T>({
+  method,
+  path,
+  body,
+  read,
+}: RequestOptions<T>): Promise<Response> {
+  const headers = {
+    ...(await serverHeaders(read)),
+    ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+  };
+
+  try {
+    return await fetch(`${baseUrl()}${path}`, {
       method,
-      // The session is an httpOnly cookie issued by another origin — the API is a
-      // separate host in every environment — and a cross-origin fetch leaves it behind
-      // unless it is asked for. Without this every guarded route answers 401.
-      credentials: "include",
+      // Same-origin now: the browser calls the BFF, so the session is a first-party
+      // cookie and travels by default. `include` would still work and would still be
+      // describing a topology this application no longer has.
+      credentials: "same-origin",
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      ...(body === undefined
-        ? {}
-        : {
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          }),
+      headers,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       ...read,
     });
   } catch (cause) {
     // Only a transport error means the API is not running: any status code is an answer.
     throw new ApiUnreachableError(cause);
   }
+}
 
-  if (!response.ok) throw await toResponseError(response);
+/** The browser reaches the API through the proxy of this origin; the server goes direct. */
+function baseUrl(): string {
+  return typeof window === "undefined" ? apiOrigin() : BFF_BASE_PATH;
+}
+
+async function settle<T>(
+  response: Response,
+  { schema, onResponse }: RequestOptions<T>,
+): Promise<T> {
+  await onResponse?.(response);
 
   // The answer is checked with the same schema the backend built it from. The parse is
-  // deliberately outside the try above: a drift from the contract has to throw, not
+  // deliberately outside the try in `send`: a drift from the contract has to throw, not
   // disguise itself as an unavailable API.
   if (hasNoBody(response)) return schema.parse(undefined);
 
   const payload: unknown = await response.json();
 
   return schema.parse(payload);
+}
+
+function canRetry<T>(
+  error: ApiResponseError,
+  options: RequestOptions<T>,
+): boolean {
+  // Only the browser holds a refresh token: it is scoped to the proxied `/auth` path, so
+  // a server render is never handed one and has nothing to rotate.
+  return (
+    typeof window !== "undefined" &&
+    error.status === HTTP_STATUS.UNAUTHORIZED &&
+    options.retryOnUnauthorized !== false
+  );
+}
+
+/**
+ * What a request made on the server has to carry over from the request Next.js is
+ * currently answering. A browser request needs none of it: the cookie is first-party and
+ * travels by itself, and the address it comes from is the one the API sees anyway.
+ *
+ * The session is the first half. A server render has no cookie jar of its own, so the
+ * access cookie is copied out by hand. Only that one is there to copy — the refresh
+ * cookie is scoped to the `/auth` path of the proxy and never travels with a request for
+ * a page, which is why a session that has outlived its access token can only be revived
+ * from the browser (see `refreshSession` above and the login page).
+ *
+ * The client address is the second, and it matters because this is the one path that does
+ * not go through the BFF: a Server Action and a server render reach Nest directly, so the
+ * hop the proxy performs — and with it the `x-forwarded-for` it forwards — never happens.
+ * Without this the API sees every visitor arriving from this server's address and buckets
+ * them together, which would make the rate limit on `/auth/login` a limit for the whole
+ * site rather than for one attacker.
+ *
+ * A cached read is left out of both deliberately. Its answer goes into Next's Data Cache
+ * under the URL and is then served to whoever asks for it next, so attaching one person's
+ * credential to it would hand their data to the following visitor. It keeps the reads that
+ * need no session out of `cookies()` as well, and with it out of dynamic rendering.
+ */
+async function serverHeaders(
+  read: ReadOptions | undefined,
+): Promise<HeadersInit> {
+  if (typeof window !== "undefined" || isCached(read)) return {};
+
+  const { cookies, headers } = await import("next/headers");
+  const result: Record<string, string> = {};
+
+  const token = (await cookies()).get(ACCESS_TOKEN_COOKIE)?.value;
+
+  if (token !== undefined) {
+    result.cookie = `${ACCESS_TOKEN_COOKIE}=${token}`;
+  }
+
+  // Passed on rather than written: the platform in front of this server is what states the
+  // client address, and a value invented here would be one more entry `TRUST_PROXY` has to
+  // believe. An absent header means nothing is in front, and then the socket address the
+  // API already sees is the right answer.
+  const forwardedFor = (await headers()).get("x-forwarded-for");
+
+  if (forwardedFor !== null) {
+    result["x-forwarded-for"] = forwardedFor;
+  }
+
+  return result;
+}
+
+/** A mutation carries no `read` and is never cached; the rest say so themselves. */
+function isCached(read: ReadOptions | undefined): boolean {
+  if (read === undefined) return false;
+
+  return "cache" in read
+    ? read.cache !== "no-store"
+    : read.next.revalidate !== 0;
 }
 
 /**
@@ -105,8 +322,8 @@ export async function apiRequest<T>({
  */
 function hasNoBody(response: Response): boolean {
   return (
-    response.status === 204 ||
-    response.status === 205 ||
+    response.status === HTTP_STATUS.NO_CONTENT ||
+    response.status === HTTP_STATUS.RESET_CONTENT ||
     response.headers.get("content-length") === "0"
   );
 }

@@ -46,14 +46,16 @@ pnpm --filter @repo/api db:seed       # demo data (Prisma 7 never seeds automati
 pnpm --filter @repo/api db:deploy     # prisma migrate deploy — production only, applies committed migrations
 ```
 
-API tests:
+Tests:
 
 ```sh
-pnpm test           # jest, *.spec.ts next to the code; no database needed
+pnpm test           # *.spec.ts next to the code: jest in apps/api, vitest in apps/web
 pnpm test:e2e       # jest -c test/jest-e2e.json; needs the database, wipes tables
 ```
 
-Both go through turbo and declare `dependsOn: ["^build"]`: the specs import `@repo/contracts` schemas as values, so `dist/` has to exist. Running `pnpm --filter @repo/api test` directly skips that and fails on a fresh clone.
+The runners differ because the packages do: `apps/api` is CommonJS with Nest's testing module, `apps/web` is ESM and needed nothing beyond a runner. `pnpm test` covers both through turbo.
+
+All three tasks declare `dependsOn: ["^build"]`: the specs import `@repo/contracts` schemas as values, so `dist/` has to exist. Running `pnpm --filter @repo/api test` directly skips that and fails on a fresh clone.
 
 Before considering a task done: `pnpm lint` and `pnpm check-types` have to pass.
 

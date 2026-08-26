@@ -12,6 +12,7 @@
     "dev": "next dev --port ${WEB_PORT:-3000}",
     "build": "next build",
     "start": "next start --port ${WEB_PORT:-3000}",
+    "test": "vitest run",
     "lint": "eslint --max-warnings 0 && steiger ./src",
     "lint:fix": "eslint --fix",
     "check-types": "next typegen && tsc --noEmit"
@@ -38,6 +39,7 @@
     "postcss": "^8.5.26",
     "steiger": "^0.6.0",
     "tailwindcss": "^4.3.3",
-    "typescript": "5.9.2"
+    "typescript": "5.9.2",
+    "vitest": "^4.1.11"
   }
 }
