@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Role } from "@repo/contracts";
 import { Button } from "@repo/ui/components/button";
 import { currentUser } from "#shared/api";
 import { ROUTES } from "#shared/config";
@@ -29,9 +30,27 @@ export const Header = async () => {
 
         <nav className="flex items-center gap-2">
           {user ? (
-            <Button variant="ghost" render={<Link href={ROUTES.profile} />}>
-              {user.email}
-            </Button>
+            <>
+              {/*
+                The role decides what is worth offering, not what is allowed: the section
+                behind this link answers the same way with or without it, because the API
+                reads the role out of the access token on every request. An owner is the
+                only role with listings of their own — an admin edits other people's and
+                reaches them from the catalogue, not from here.
+              */}
+              {user.role === Role.OWNER && (
+                <Button
+                  variant="ghost"
+                  render={<Link href={ROUTES.dashboard} />}
+                >
+                  Dashboard
+                </Button>
+              )}
+
+              <Button variant="ghost" render={<Link href={ROUTES.profile} />}>
+                {user.email}
+              </Button>
+            </>
           ) : (
             <>
               <Button variant="ghost" render={<Link href={ROUTES.login} />}>

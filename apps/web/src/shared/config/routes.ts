@@ -5,10 +5,16 @@
  *
  * The matcher of `proxy.ts` is the one place that cannot use them — Next.js reads it
  * while building, before any import of ours is evaluated.
+ *
+ * A route with a dynamic segment is a function rather than a template a caller assembles:
+ * the id is encoded here, once, instead of at every link that carries one.
  */
 export const ROUTES = {
   home: "/",
   login: "/login",
   register: "/register",
   profile: "/profile",
+  dashboard: "/dashboard",
+  newListing: "/dashboard/listings/new",
+  editListing: (id: string) => `/dashboard/listings/${encodeURIComponent(id)}`,
 } as const;

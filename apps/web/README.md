@@ -19,7 +19,7 @@ app/                     # layout.tsx, page.tsx — re-exports; favicon.ico
 src/
   _app/                  # the shell in segments: layout, providers, styles, fonts
   _pages/                # one slice per route, with everything that route needs
-  features/              # a user action a second page also runs (none yet)
+  features/              # a user action a second page also runs (the listing form)
   entities/              # a domain model a second page also needs (none yet)
   shared/                # no domain knowledge: api transport and routes, config
 ```
@@ -36,9 +36,10 @@ when a second page needs it, `widgets/` is not adopted at all, and CRUD over a r
 ## Notable points
 
 - Pages are server components by default. `"use client"` goes on the specific interactive component, not on the whole page — `src/_pages/home/ui/theme-toggle.tsx` is the reference. Nothing inside `src/` has a default export; the one a route needs is produced by the re-export in `app/`.
-- Every call to the API goes through `src/shared/api`: `http-client.ts` is the transport, `bookings.ts` the routes of the resource. The segment exports the resource and the two errors, not `apiRequest`. Types and request schemas come from `@repo/contracts`; the response is parsed with a schema, and a submitted form is validated by the same schema as the request on the backend.
+- Every call to the API goes through `src/shared/api`: `http-client.ts` is the transport, `bookings.ts` and `listings.ts` the routes of each resource. The segment exports the resource and the two errors, not `apiRequest`. Types and request schemas come from `@repo/contracts`; the response is parsed with a schema, and a submitted form is validated by the same schema as the request on the backend.
 - The browser never calls the API directly. It calls `/api/...` on this origin and `app/api/[...path]/route.ts` forwards the request, which is what makes the session a first-party cookie of whatever hostname the frontend is deployed to; a server render skips the proxy and goes straight to `API_ORIGIN`. The transport aborts a request that has taken more than ten seconds, and answers a 401 in the browser with one refresh and one replay — deduplicated across tabs through `navigator.locks`.
 - A form that opens a session submits to a Server Action (`src/_pages/{login,register}/api/*-action.ts`): cookies are written on the server, and the form works before React has hydrated. Closing one is the exception — revoking the refresh family needs the refresh token, which is scoped to `/api/auth` and therefore reaches the browser only, so `logout-button.tsx` calls the API itself and follows it with `router.refresh()`.
+- The role of the session decides which screens are offered and which one a visitor is shown, never what is allowed: `requireRole` sends the wrong role to `notFound()`, the header renders the owner's link for owners, and every request behind both is still refused on its own merits by the guards in `apps/api`. The owner's own section is `/dashboard`, with the listings CRUD on it.
 - The header renders on the server and sees only the access token, so a visitor whose fifteen minutes lapsed reads as a stranger. `src/_app/layout/session-recovery.tsx` is what spends the week-long refresh token in that case — once per visit, and only when the server reported nobody.
 - The interface is built from `@repo/ui`: Tailwind CSS 4 tokens and shadcn/ui primitives on Base UI, generated into the package as source files. That package is the design system — the `shared/ui` of this project — and the import is per file: `import { Button } from "@repo/ui/components/button"`.
 - A new primitive is added by the CLI from `packages/ui` (`pnpm dlx shadcn@latest add dialog`), followed by `pnpm lint:fix` from the root. Composition specific to one screen stays in the `ui/` segment of that page's slice.

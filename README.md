@@ -2,7 +2,7 @@
 
 A booking service monorepo: a Next.js frontend and a NestJS backend in one repository, managed by Turborepo and pnpm workspaces.
 
-> Status: the API is a working vertical slice — owners publish listings, guests book them and the dates are checked for overlaps. Storage is PostgreSQL via Prisma 7, and the API is behind hand-written authentication: argon2, a JWT pair in httpOnly cookies, refresh-token rotation, and role-based authorization on top. The frontend has the session half of it — sign up, sign in, a guarded profile page rendered on the server as the visitor, and a session that survives an expired access token. The next phases are in [docs/plan.md](docs/plan.md).
+> Status: the API is a working vertical slice — owners publish listings, guests book them and the dates are checked for overlaps. Storage is PostgreSQL via Prisma 7, and the API is behind hand-written authentication: argon2, a JWT pair in httpOnly cookies, refresh-token rotation, and role-based authorization on top. The frontend has the session half of it — sign up, sign in, a guarded profile page rendered on the server as the visitor, and a session that survives an expired access token — plus the owner's dashboard, where a listing is published, edited and taken down. The next phases are in [docs/plan.md](docs/plan.md).
 
 ## Requirements
 
@@ -117,7 +117,7 @@ Every route below except `/` and the four public `/auth/*` ones is behind the gl
 | `GET`    | `/listings/:id`  | a single listing, `404` if missing                                             |
 | `POST`   | `/listings`      | create, the owner taken from the session; OWNER only                           |
 | `PATCH`  | `/listings/:id`  | edit; OWNER (their own) or ADMIN, `403` otherwise                              |
-| `DELETE` | `/listings/:id`  | delete, `204`; `409` — bookings exist against it                               |
+| `DELETE` | `/listings/:id`  | retire, `204`; out of the catalogue, booked stays keep their record            |
 | `GET`    | `/bookings`      | the bookings the caller may see, sorted by check-in date                       |
 | `GET`    | `/bookings/:id`  | a single booking; the guest, the owner of the listing or an admin              |
 | `POST`   | `/bookings`      | create; USER only, `404` — no such listing, `409` — dates are taken            |

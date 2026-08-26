@@ -76,8 +76,8 @@ export class BookingService {
     try {
       return await this.bookingRepository.create(guestId, input);
     } catch (error) {
-      // The listing was deleted between the check above and the insert; nothing was
-      // booked against it yet, so the delete was allowed to go through.
+      // The listing row is gone between the check above and the insert — a hard delete
+      // from outside the API, since retiring one leaves the row in place.
       if (error instanceof ListingNotFoundError) {
         throw new NotFoundException(error.message);
       }

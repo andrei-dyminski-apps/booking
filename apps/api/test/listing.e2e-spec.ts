@@ -3,7 +3,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { App } from "supertest/types";
 import {
   Role,
-  apiErrorSchema,
+  bookingListSchema,
   listingListSchema,
   listingSchema,
   type CreateListingInput,
@@ -130,15 +130,44 @@ describe("ListingController (e2e)", () => {
     await owner.get(`/listings/${listingId}`).expect(404);
   });
 
-  it("refuses to delete a listing with bookings against it", async () => {
+  it("retires a booked listing rather than refusing to let go of it", async () => {
     await guest
       .post("/bookings")
       .send({ listingId, from: inDays(10), to: inDays(14) })
       .expect(201);
 
-    const response = await owner.delete(`/listings/${listingId}`).expect(409);
+    await owner.delete(`/listings/${listingId}`).expect(204);
 
-    expect(apiErrorSchema.parse(response.body).message).toContain(listingId);
+    // Gone everywhere it was on offer...
+    await owner.get(`/listings/${listingId}`).expect(404);
+    const mine = await owner.get("/listings/mine").expect(200);
+    expect(listingListSchema.parse(mine.body)).toHaveLength(0);
+
+    // ...and the stay taken against it still has its record, still readable by the owner
+    // of the listing it names. That is the whole reason the row outlives the offer.
+    const stays = await owner.get("/bookings").expect(200);
+    expect(bookingListSchema.parse(stays.body)).toHaveLength(1);
+  });
+
+  it("takes no new booking against a retired listing", async () => {
+    await owner.delete(`/listings/${listingId}`).expect(204);
+
+    // The row is still there, so the foreign key is satisfied and would let this insert
+    // through — the pre-flight check in BookingService is what answers instead.
+    await guest
+      .post("/bookings")
+      .send({ listingId, from: inDays(10), to: inDays(14) })
+      .expect(404);
+  });
+
+  it("refuses to edit a listing that has been retired", async () => {
+    await owner.delete(`/listings/${listingId}`).expect(204);
+
+    await owner
+      .patch(`/listings/${listingId}`)
+      .send({ pricePerNight: 13500 })
+      .expect(404);
+    await owner.delete(`/listings/${listingId}`).expect(404);
   });
 
   it("rejects a body that does not pass the schema", async () => {

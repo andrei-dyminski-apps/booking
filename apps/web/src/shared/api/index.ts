@@ -1,5 +1,6 @@
-export { authApi, currentUser, requireUser } from "./auth";
+export { authApi, currentUser, requireRole, requireUser } from "./auth";
 export { bookingsApi } from "./bookings";
+export { listingsApi } from "./listings";
 export {
   ApiResponseError,
   ApiUnreachableError,

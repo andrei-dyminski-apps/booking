@@ -12,28 +12,22 @@ import { isPrismaError, PrismaErrorCode } from "../prisma/prisma.errors";
 import { PrismaService } from "../prisma/prisma.service";
 
 /**
- * What `delete` throws instead of letting a Prisma error code reach the service. The
- * bookings are counted before the delete, so this is only the race the count cannot
- * close: a stay taken against the listing since it was counted. Which driver reports a
- * foreign key violation, and under which code, is exactly the knowledge this layer exists
- * to keep on its own side.
- */
-export class ListingHasBookingsError extends Error {
-  constructor(listingId: string) {
-    super(`Listing ${listingId} has bookings and cannot be deleted`);
-    this.name = "ListingHasBookingsError";
-  }
-}
-
-/**
  * Every query the module makes, and the whole of its knowledge about how a listing is
- * stored: the row shape, its projection onto the contract, and the two codes a
- * read-then-write can lose its race to. The service above keeps the rules and the HTTP
- * exceptions and sees neither Prisma nor a row.
+ * stored: the row shape, its projection onto the contract, and the code a read-then-write
+ * can lose its race to. The service above keeps the rules and the HTTP exceptions and
+ * sees neither Prisma nor a row.
  *
- * The booking count lives here rather than in `BookingRepository`: it answers a question
- * about a listing — whether this one may still be deleted — and phase 4 moves it inside
- * the transaction that locks the listing row, which is a transaction of this module.
+ * It is also where the application keeps its knowledge that a retired listing is a row
+ * rather than an absence. The condition is `STILL_OFFERED` below, every read of this
+ * class is already narrowed by it, and a caller cannot forget a filter it has no way to
+ * spell. That is what makes the soft delete affordable — the rule is written once.
+ *
+ * Two queries over `listings` are written outside this file, both in `BookingRepository`,
+ * and each says which of the two it is: `listingExists` narrows through the same exported
+ * constant rather than a second copy of `deletedAt: null`, and `findByIdWithListingOwner`
+ * deliberately does not narrow at all, because it resolves the listing of a stay whether
+ * or not it is retired and the stay is what the row was kept for. Phase 4's locking
+ * transaction will be the third, and it has to answer the same question.
  */
 @Injectable()
 export class ListingRepository {
@@ -47,8 +41,11 @@ export class ListingRepository {
     return this.findWhere({ ownerId });
   }
 
+  /** `null` for a retired row as well: to everyone reading it, that listing is gone. */
   async findById(id: string): Promise<Listing | null> {
-    const row = await this.prismaService.listing.findUnique({ where: { id } });
+    const row = await this.prismaService.listing.findFirst({
+      where: { id, ...STILL_OFFERED },
+    });
 
     return row === null ? null : toListing(row);
   }
@@ -62,13 +59,15 @@ export class ListingRepository {
   }
 
   /**
-   * `null` is the row already being gone — deleted by its owner or an admin between the
-   * read that authorized this update and the update itself.
+   * `null` is the row already being gone — retired by its owner or an admin between the
+   * read that authorized this update and the update itself. Retired is gone here too:
+   * editing a listing nobody is offered is a write the owner has no way to see the result
+   * of.
    */
   async update(id: string, input: UpdateListingInput): Promise<Listing | null> {
     try {
       const row = await this.prismaService.listing.update({
-        where: { id },
+        where: { id, ...STILL_OFFERED },
         data: input,
       });
 
@@ -80,36 +79,40 @@ export class ListingRepository {
     }
   }
 
-  countBookings(listingId: string): Promise<number> {
-    return this.prismaService.booking.count({ where: { listingId } });
-  }
+  /**
+   * Stamps the row instead of removing it, so the bookings pointing at it keep naming
+   * where the stay was. `false` is the same race as in `update`: another request retired
+   * the listing first. `updateMany` reports that in a count rather than an exception,
+   * which is the whole reason it is used for a single row — the same trade
+   * `BookingRepository.delete` makes with `deleteMany`.
+   */
+  async softDelete(id: string): Promise<boolean> {
+    const { count } = await this.prismaService.listing.updateMany({
+      where: { id, ...STILL_OFFERED },
+      data: { deletedAt: new Date() },
+    });
 
-  /** `false` is the same race as in `update`: another request deleted the row first. */
-  async delete(id: string): Promise<boolean> {
-    try {
-      await this.prismaService.listing.delete({ where: { id } });
-
-      return true;
-    } catch (error) {
-      if (isPrismaError(error, PrismaErrorCode.ForeignKeyViolation)) {
-        throw new ListingHasBookingsError(id);
-      }
-
-      if (isPrismaError(error, PrismaErrorCode.RecordNotFound)) return false;
-
-      throw error;
-    }
+    return count > 0;
   }
 
   private async findWhere(where: Prisma.ListingWhereInput): Promise<Listing[]> {
     const rows = await this.prismaService.listing.findMany({
-      where,
+      where: { ...where, ...STILL_OFFERED },
       orderBy: { createdAt: "desc" },
     });
 
     return rows.map(toListing);
   }
 }
+
+/**
+ * The one condition every read of a listing shares. Spelled once so that a new query
+ * cannot be written without it and a reader can see that none of them was; exported
+ * because `BookingRepository` reads this table too — see the note on the class.
+ */
+export const STILL_OFFERED = {
+  deletedAt: null,
+} satisfies Prisma.ListingWhereInput;
 
 function toListing(row: ListingRow): Listing {
   return {

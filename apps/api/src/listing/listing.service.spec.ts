@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  ForbiddenException,
-  NotFoundException,
-} from "@nestjs/common";
+import { ForbiddenException, NotFoundException } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import {
   Role,
@@ -11,10 +7,7 @@ import {
   type UpdateListingInput,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
-import {
-  ListingHasBookingsError,
-  ListingRepository,
-} from "./listing.repository";
+import { ListingRepository } from "./listing.repository";
 import { ListingService } from "./listing.service";
 
 const OWNER_ID = "6d0f2c1e-1a2b-4c3d-8e5f-9a0b1c2d3e4f";
@@ -49,29 +42,34 @@ type PublicOf<T> = { [K in keyof T]: T[K] };
  * now belong to the repository and are covered by e2e against a real database.
  */
 class FakeListingRepository implements PublicOf<ListingRepository> {
+  /** Every row the table holds, the retired ones included — storage, not the catalogue. */
   readonly rows = new Map<string, Listing>();
 
-  /** Stays booked against a listing — what `remove` counts before it deletes. */
-  readonly bookings = new Map<string, number>();
+  /** The ids `softDelete` has stamped: still stored, no longer offered to anybody. */
+  readonly retired = new Set<string>();
 
-  /** Set to have a write lose the race against a delete the read before it could not see. */
+  /**
+   * Set to have a write lose the race against a retirement the read before it could not
+   * see.
+   */
   vanishingListing = false;
 
-  /** Set to have `delete` lose the race the booking count cannot close. */
-  bookedDuringDelete = false;
-
   findAll(): Promise<Listing[]> {
-    return Promise.resolve([...this.rows.values()]);
+    return Promise.resolve(this.offered());
   }
 
   findByOwner(ownerId: string): Promise<Listing[]> {
     return Promise.resolve(
-      [...this.rows.values()].filter((listing) => listing.ownerId === ownerId),
+      this.offered().filter((listing) => listing.ownerId === ownerId),
     );
   }
 
   findById(id: string): Promise<Listing | null> {
-    return Promise.resolve(this.rows.get(id) ?? null);
+    const stored = this.rows.get(id);
+
+    return Promise.resolve(
+      stored === undefined || this.retired.has(id) ? null : stored,
+    );
   }
 
   create(ownerId: string, listing: CreateListingInput): Promise<Listing> {
@@ -91,7 +89,7 @@ class FakeListingRepository implements PublicOf<ListingRepository> {
   update(id: string, listing: UpdateListingInput): Promise<Listing | null> {
     const stored = this.rows.get(id);
 
-    if (stored === undefined || this.vanishingListing) {
+    if (stored === undefined || this.retired.has(id) || this.vanishingListing) {
       return Promise.resolve(null);
     }
 
@@ -106,17 +104,19 @@ class FakeListingRepository implements PublicOf<ListingRepository> {
     return Promise.resolve(updated);
   }
 
-  countBookings(listingId: string): Promise<number> {
-    return Promise.resolve(this.bookings.get(listingId) ?? 0);
-  }
-
-  delete(id: string): Promise<boolean> {
-    if (this.bookedDuringDelete) {
-      return Promise.reject(new ListingHasBookingsError(id));
+  softDelete(id: string): Promise<boolean> {
+    if (!this.rows.has(id) || this.retired.has(id) || this.vanishingListing) {
+      return Promise.resolve(false);
     }
 
-    return Promise.resolve(
-      this.vanishingListing ? false : this.rows.delete(id),
+    this.retired.add(id);
+
+    return Promise.resolve(true);
+  }
+
+  private offered(): Listing[] {
+    return [...this.rows.values()].filter(
+      (listing) => !this.retired.has(listing.id),
     );
   }
 }
@@ -188,35 +188,40 @@ describe("ListingService", () => {
     ).resolves.toMatchObject({ id });
 
     await service.remove(id, admin);
-    expect(listingRepository.rows.size).toBe(0);
+    await expect(service.findOne(id)).rejects.toThrow(NotFoundException);
   });
 
-  it("deletes a listing nothing is booked against", async () => {
+  it("retires the listing instead of deleting the row a stay would point at", async () => {
     const id = await listedByOwner();
 
     await service.remove(id, owner);
 
-    expect(listingRepository.rows.size).toBe(0);
+    expect(listingRepository.rows.has(id)).toBe(true);
+    expect(listingRepository.retired.has(id)).toBe(true);
   });
 
-  it("answers 409 rather than taking somebody's booking down with the listing", async () => {
+  it("takes a retired listing out of the catalogue and its owner's dashboard", async () => {
     const id = await listedByOwner();
 
-    listingRepository.bookings.set(id, 2);
+    await service.remove(id, owner);
 
-    await expect(service.remove(id, owner)).rejects.toThrow(ConflictException);
-    expect(listingRepository.rows.size).toBe(1);
+    await expect(service.findAll()).resolves.toHaveLength(0);
+    await expect(service.findByOwner(OWNER_ID)).resolves.toHaveLength(0);
+    await expect(service.findOne(id)).rejects.toThrow(NotFoundException);
   });
 
-  it("answers 409, not 500, when a stay is booked between the count and the delete", async () => {
+  it("refuses to edit or retire a listing that is already retired", async () => {
     const id = await listedByOwner();
 
-    listingRepository.bookedDuringDelete = true;
+    await service.remove(id, owner);
 
-    await expect(service.remove(id, owner)).rejects.toThrow(ConflictException);
+    await expect(service.update(id, { capacity: 6 }, owner)).rejects.toThrow(
+      NotFoundException,
+    );
+    await expect(service.remove(id, owner)).rejects.toThrow(NotFoundException);
   });
 
-  it("answers 404 when the listing is deleted just before the write", async () => {
+  it("answers 404 when the listing is retired just before the write", async () => {
     const id = await listedByOwner();
 
     listingRepository.vanishingListing = true;

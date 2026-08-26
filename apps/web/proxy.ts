@@ -12,5 +12,5 @@ export { proxy } from "#_app/proxy";
  * guarded the day it appears.
  */
 export const config = {
-  matcher: ["/profile/:path*"],
+  matcher: ["/profile/:path*", "/dashboard/:path*"],
 };

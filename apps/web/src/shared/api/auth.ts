@@ -1,9 +1,10 @@
 import { z } from "zod";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import {
   userSchema,
   type LoginInput,
   type RegisterInput,
+  type Role,
   type User,
 } from "@repo/contracts";
 import { HTTP_STATUS, ROUTES } from "../config";
@@ -110,4 +111,23 @@ export async function requireUser(next: string): Promise<User> {
   if (user !== null) return user;
 
   redirect(`${ROUTES.login}?next=${encodeURIComponent(next)}`);
+}
+
+/**
+ * The same read for a section that belongs to one role. It is not the access check — the
+ * role is a claim of the access token and only the API holds the secret that verifies it,
+ * so every request the page makes is refused on its own merits regardless of what happens
+ * here. What this decides is what the visitor is shown instead of a screen full of 403s.
+ *
+ * A wrong role answers `notFound()` rather than a message: the dashboard is the owner's
+ * own section, and to everybody else it is a URL with nothing behind it. Membership of a
+ * set rather than a hierarchy, exactly as `RolesGuard` reads it — an admin does not reach
+ * an owner's screen by being senior to an owner.
+ */
+export async function requireRole(role: Role, next: string): Promise<User> {
+  const user = await requireUser(next);
+
+  if (user.role !== role) notFound();
+
+  return user;
 }

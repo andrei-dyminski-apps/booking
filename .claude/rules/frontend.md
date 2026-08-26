@@ -22,6 +22,9 @@ apps/web/
     login/page.tsx            # one line per route, and nothing else
     register/page.tsx
     profile/page.tsx
+    dashboard/page.tsx
+    dashboard/listings/new/page.tsx
+    dashboard/listings/[id]/page.tsx
     api/[...path]/route.ts    # the BFF: one line, the four methods of the proxy
   proxy.ts                    # what Next.js 16 calls middleware; re-export + the matcher
   src/
@@ -54,13 +57,27 @@ apps/web/
       profile/ui/profile-page.tsx
       profile/ui/logout-button.tsx        # the browser's call: only it holds a refresh token
       profile/index.ts
-    features/                 # a user action a second page also runs (none yet)
+      dashboard/ui/dashboard-page.tsx     # the owner's listings, read by the session
+      dashboard/ui/listing-card.tsx
+      dashboard/index.ts
+      listing-new/ui/new-listing-page.tsx
+      listing-new/index.ts
+      listing-edit/ui/edit-listing-page.tsx
+      listing-edit/ui/delete-listing-button.tsx
+      listing-edit/api/own-listing.ts     # the row of this screen, or a 404
+      listing-edit/api/delete-listing-action.ts
+      listing-edit/index.ts
+    features/                 # a user action a second page also runs
+      save-listing/ui/listing-form.tsx    # the one form the new and the edit screen run
+      save-listing/api/save-listing-action.ts
+      save-listing/index.ts
     entities/                 # a domain model a second page also needs (none yet)
     shared/                   # no domain knowledge: transport, routes, config
       api/http-client.ts      # apiRequest(), refreshSession(), the two errors
-      api/auth.ts             # authApi, currentUser(), requireUser()
+      api/auth.ts             # authApi, currentUser(), requireUser(), requireRole()
       api/session-cookies.ts  # the API's Set-Cookie, re-issued for this origin
       api/bookings.ts         # bookingsApi — the routes of the resource
+      api/listings.ts         # listingsApi — the same, for the catalogue rows
       api/index.ts
       config/api-url.ts       # apiOrigin() and BFF_BASE_PATH
       config/routes.ts        # ROUTES — every path of this application
@@ -138,9 +155,10 @@ with the linter configured to match. The three that come up:
 - **`widgets/`.** v2.1 discourages adopting the layer, and this repository does not: the
   name appears nowhere — not in the `imports` map, not in the tree. A composition specific
   to one screen stays in its page; the frame around every screen is `_app`.
-- **Extraction.** "Start simple, extract when needed" holds literally — `features/` and
-  `entities/` are empty, `fsd/insignificant-slice` is on, and a slice appears the day a
-  second consumer does.
+- **Extraction.** "Start simple, extract when needed" holds literally —
+  `fsd/insignificant-slice` is on and a slice appears the day a second consumer does, not
+  the day it looks reusable. `features/save-listing` is the whole of that layer so far, and
+  it was written the moment the second screen needed the form; `entities/` is still empty.
 - **Aliases.** The skill writes `@/features/auth`; here it is `#features/auth`, the
   `imports` map of `package.json`. The mechanism differs, the rule it enforces does not.
 
@@ -358,6 +376,37 @@ their refresh token, and only the browser can turn an expired session into a liv
   make the login page an open redirect. The action checks it again after the page has:
   an action is an endpoint of its own, and this one ends in a redirect.
 
+## Roles
+
+The role arrives in the session (`/auth/me`) and decides two things on this side: which
+screens are offered, and which one a visitor is shown. Neither of them is the access
+check — the role is a claim of a signed access token, only the API holds the secret that
+verifies it, and `RolesGuard` refuses every request on its own merits regardless of what
+this side decided.
+
+- **`requireRole(role, next)` is what a section of one role calls**, not a `currentUser`
+  followed by a comparison at the top of each page. It is `requireUser` plus one
+  comparison, and the argument is the same "where to come back to" a server render is
+  never told about itself.
+- **A wrong role answers `notFound()`.** The dashboard is the owner's own section; to
+  everybody else it is a URL with nothing behind it, and a message explaining what they
+  are missing would state that an owner's section exists and that they are not one.
+- **Membership of a set, not a hierarchy**, exactly as the guard reads it in `apps/api`:
+  an admin does not reach an owner's dashboard by being senior to an owner. `/listings/mine`
+  is scoped to the caller, and an admin has no listings of their own to put on it.
+- **The proxy cannot help.** It sees an httpOnly cookie it cannot open, so the gate in
+  front of `/dashboard` is the same "is there an access token" it performs for `/profile`.
+  A new protected route is still a line in the matcher of `proxy.ts`.
+- **The header offers, it does not permit** (`_app/layout/header.tsx`). The link is
+  rendered for the role that has a use for it; the section behind it answers the same way
+  whether or not the link was there.
+- **Ownership of a row is read, not guessed** (`_pages/listing-edit/api/own-listing.ts`).
+  Every signed-in role may read a listing — the catalogue is not a secret — so a row
+  belonging to somebody else comes back with a 200 and would render a form the `PATCH`
+  refuses. Inside the owner's own section that is the same 404 as a row that does not
+  exist. The rule that matters still lives in `ListingService`, which compares the owner
+  on every write.
+
 ## Mutations and revalidation
 
 Where a mutation goes:
@@ -395,6 +444,26 @@ How the result is made visible, by what kind of data it is:
 - A cached read has to name its tags at the call site, in the `ReadOptions` the read
   methods already take. Nothing checks that a tag exists; the linter cannot see it, so it
   is a matter of review.
+
+### Confirming a destructive action
+
+A mutation nobody can undo — deleting a row, revoking access, anything the API answers
+with a `DELETE` — asks first, in an `AlertDialog` from `@repo/ui`
+(`_pages/listing-edit/ui/delete-listing-button.tsx` is the one so far). Not a second
+button that takes the place of the first: a modal takes the focus and refuses a click
+outside itself, which is what stops the confirmation being hit by the hand that was
+already moving.
+
+- **The form goes inside the popup**, not around it. The popup is portalled out of the
+  subtree that renders it, so a submit button left behind in a form up here stops
+  belonging to that form. `className="contents"` on the `<form>` keeps the grid of the
+  dialog intact around it.
+- **The dialog stays open when the action comes back with a message.** A refusal the form
+  could not prevent — a `404` for a row an admin retired first, an unreachable API —
+  belongs next to the button that provoked it, under the same `FormErrors` shape every
+  other form shows. A success never reaches that branch: the action redirects.
+- **What is reversible does not ask.** Signing out is a click away from being undone, and
+  a dialog in front of it only adds one. The rule is the undo, not the danger of the word.
 
 ## Styling and components
 

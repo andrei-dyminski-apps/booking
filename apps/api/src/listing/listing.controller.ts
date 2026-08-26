@@ -11,7 +11,6 @@ import {
   Post,
 } from "@nestjs/common";
 import {
-  ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNoContentResponse,
@@ -109,13 +108,12 @@ export class ListingController {
   @Delete(":id")
   @Roles(Role.OWNER, Role.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiNoContentResponse()
-  @ApiNotFoundResponse({
-    description: "The listing does not exist",
-    type: ApiErrorDto,
+  @ApiNoContentResponse({
+    description:
+      "The listing is retired: out of the catalogue and closed to new bookings. The stays already taken against it keep their record",
   })
-  @ApiConflictResponse({
-    description: "The listing has bookings and cannot be deleted",
+  @ApiNotFoundResponse({
+    description: "The listing does not exist, or is already retired",
     type: ApiErrorDto,
   })
   @ApiForbiddenResponse({

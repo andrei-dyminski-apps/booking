@@ -7,6 +7,7 @@ import {
   type Prisma,
   type Booking as BookingRow,
 } from "../generated/prisma/client";
+import { STILL_OFFERED } from "../listing/listing.repository";
 import {
   isPrismaError,
   PrismaErrorCode,
@@ -15,11 +16,13 @@ import {
 import { PrismaService } from "../prisma/prisma.service";
 
 /**
- * What `create` throws instead of letting a Prisma error code reach the service. The
- * listing is checked before the insert, so this is only the race: it was deleted in
- * between, which the delete was allowed to do because nothing was booked against it yet.
- * Which driver reports a foreign key violation, and under which code, is exactly the
- * knowledge this layer exists to keep on its own side.
+ * What `create` throws instead of letting a Prisma error code reach the service. Nothing
+ * the API offers reaches it any more: `DELETE /listings/:id` retires a listing instead of
+ * removing the row, so the key it points at stays satisfied. What is left is a hard
+ * delete from outside — the seed, the cleanup of a test, whatever account deletion turns
+ * out to be — and `test/booking.repository.e2e-spec.ts` provokes exactly that, because
+ * which driver reports a foreign key violation, and under which code, is knowledge this
+ * layer has to keep even when the branch is hard to reach through HTTP.
  */
 export class ListingNotFoundError extends Error {
   constructor(listingId: string) {
@@ -78,6 +81,12 @@ export class BookingRepository {
     return this.findWhere({ listing: { ownerId } });
   }
 
+  /**
+   * The other query over `listings` from here, and the one that deliberately does not
+   * narrow: the listing is resolved whether or not it has been retired, because the stay
+   * is what its row was kept for and the owner who may read this booking is still its
+   * owner.
+   */
   async findByIdWithListingOwner(
     id: string,
   ): Promise<BookingWithListingOwner | null> {
@@ -91,9 +100,17 @@ export class BookingRepository {
     return { booking: toBooking(row), listingOwnerId: row.listing.ownerId };
   }
 
+  /**
+   * A retired listing does not exist as far as a new stay is concerned, and this is the
+   * only thing that says so: its row is still there, so the foreign key is satisfied and
+   * the insert would go through. What "still offered" means is imported rather than
+   * spelled again — `ListingRepository` owns that condition, and this is one of the two
+   * queries over `listings` written outside it. Phase 4 is where the check stops being a
+   * pre-flight and moves inside the transaction that locks the listing row.
+   */
   async listingExists(listingId: string): Promise<boolean> {
-    const listing = await this.prismaService.listing.findUnique({
-      where: { id: listingId },
+    const listing = await this.prismaService.listing.findFirst({
+      where: { id: listingId, ...STILL_OFFERED },
       select: { id: true },
     });
 
