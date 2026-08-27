@@ -10,14 +10,19 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { ownsOrIsAdmin } from "../auth/ownership";
 import {
   BookingRepository,
+  DatesUnavailableError,
   GuestNotFoundError,
   ListingNotFoundError,
   type BookingWithListingOwner,
 } from "./booking.repository";
+import { BookingExpiryQueue } from "./booking-expiry.queue";
 
 @Injectable()
 export class BookingService {
-  constructor(private readonly bookingRepository: BookingRepository) {}
+  constructor(
+    private readonly bookingRepository: BookingRepository,
+    private readonly bookingExpiryQueue: BookingExpiryQueue,
+  ) {}
 
   /**
    * Not a filter the client may pass, but the scope its role gives it: a guest sees the
@@ -58,39 +63,49 @@ export class BookingService {
     return (await this.getReadable(id, user)).booking;
   }
 
+  /**
+   * The atomicity lives one layer down: `BookingRepository.create` locks the listing row
+   * and settles overlaps inside a transaction, and this method only translates the three
+   * failures it can raise. On success it schedules the hold's expiry, and that call cannot
+   * fail this request: the booking is committed by then, so a Redis that is down would
+   * otherwise answer an existing booking with a 500 and never hand the caller its id. The
+   * repeatable sweep behind the queue releases a hold whose job never got written.
+   */
   async create(guestId: string, input: CreateBookingInput): Promise<Booking> {
-    if (!(await this.bookingRepository.listingExists(input.listingId))) {
-      throw new NotFoundException(`Listing ${input.listingId} not found`);
-    }
-
-    // The check and the insert are not atomic — phase 4 of the plan closes the
-    // race between concurrent requests (transaction + EXCLUDE constraint in the DB).
-    const conflict = await this.bookingRepository.findOverlapping(input);
-
-    if (conflict !== null) {
-      throw new ConflictException(
-        `Listing ${input.listingId} is already booked from ${conflict.from} to ${conflict.to}`,
-      );
-    }
+    let booking: Booking;
 
     try {
-      return await this.bookingRepository.create(guestId, input);
+      booking = await this.bookingRepository.create(guestId, input);
     } catch (error) {
-      // The listing row is gone between the check above and the insert — a hard delete
-      // from outside the API, since retiring one leaves the row in place.
+      // A hard delete of the listing from outside the API — retiring one leaves the row.
       if (error instanceof ListingNotFoundError) {
         throw new NotFoundException(error.message);
       }
 
-      // The guest is gone instead: nothing checks that row beforehand, because the token
-      // names it and JwtStrategy reads no database. A signed token whose row is gone is an
-      // ended session, so this is the 401 of `/auth/me` and not a 404 about the listing.
+      // The guest is gone: nothing checks that row beforehand, because the token names it
+      // and JwtStrategy reads no database. A signed token whose row is gone is an ended
+      // session, so this is the 401 of `/auth/me` and not a 404 about the listing.
       if (error instanceof GuestNotFoundError) {
         throw new UnauthorizedException("Session no longer exists");
       }
 
+      // An overlap with an active stay, caught by the in-transaction check or the
+      // EXCLUDE constraint behind it.
+      if (error instanceof DatesUnavailableError) {
+        throw new ConflictException(error.message);
+      }
+
       throw error;
     }
+
+    if (booking.expiresAt !== null) {
+      await this.bookingExpiryQueue.scheduleExpiry(
+        booking.id,
+        new Date(booking.expiresAt),
+      );
+    }
+
+    return booking;
   }
 
   /**
@@ -108,9 +123,13 @@ export class BookingService {
       throw new ForbiddenException("This booking cannot be cancelled by you");
     }
 
-    if (!(await this.bookingRepository.delete(id))) {
+    if (!(await this.bookingRepository.cancel(id))) {
       throw new NotFoundException(`Booking ${id} not found`);
     }
+
+    // The hold no longer needs releasing; the job is idempotent, so this is a tidy-up and
+    // fails silently for the same reason scheduling one does.
+    await this.bookingExpiryQueue.cancelExpiry(id);
   }
 
   /**
@@ -118,6 +137,11 @@ export class BookingService {
    * catalogue that is not a formality: nothing lets a stranger list bookings, so a 403
    * here would be the one way to learn that an id exists at all. What the caller may not
    * see is therefore indistinguishable from what is not there.
+   *
+   * A cancelled or expired stay is not in that category: its guest may read it, and the
+   * `status` on the answer is what says the slot was let go of. Cancelling it a second
+   * time is refused one step further on, by the repository, which narrows to the active
+   * set the way every rule about the slot does.
    *
    * Who may read: the guest who booked it, the owner of the listing it takes, an admin.
    * `ownsOrIsAdmin` covers the first and the last; the owner of the listing is the reason

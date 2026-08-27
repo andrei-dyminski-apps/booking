@@ -21,6 +21,19 @@ model Booking {
   to        DateTime @map("to_date") @db.Date
   createdAt DateTime @default(now()) @map("created_at")
 
+  /// The lifecycle of the stay. A booking is born a hold (`PENDING_PAYMENT`) that holds
+  /// the slot for the length of `expiresAt`; phase 5 turns a paid one `CONFIRMED`.
+  /// `CANCELLED` and `EXPIRED` are terminal and free the slot — only the first two count
+  /// as active, which is the set the overlap check and the `EXCLUDE` constraint act on.
+  status BookingStatus @default(PENDING_PAYMENT)
+
+  /// When the hold lapses. A BullMQ job scheduled for this moment flips a still-pending
+  /// hold to `EXPIRED`, a repeatable sweep catches the ones whose job was lost, and the
+  /// locking transaction that creates the next booking does the same lazily. The column
+  /// is not cleared when the booking leaves `PENDING_PAYMENT`: when a hold stopped
+  /// holding is what a refund asks about, and `status` is what says whether it still does.
+  expiresAt DateTime? @map("expires_at")
+
   /// Restrict, not Cascade: the bookings of other people are not something a listing may
   /// quietly take down with it. What an owner asks for is answered without ever reaching
   /// this key — `DELETE /listings/:id` retires the listing and leaves the row where it
@@ -30,7 +43,20 @@ model Booking {
 
   @@index([listingId, from, to])
   @@index([guestId])
+  /// Serves both halves of hold expiry: the repeatable sweep, which asks for every lapsed
+  /// hold there is, and the lazy one inside `create`, which asks the same question and
+  /// then filters by listing. `listingId` is deliberately not the leading column — that
+  /// would leave the sweep without an index — and the job that releases one named hold
+  /// goes by primary key, so it needs none of this.
+  @@index([status, expiresAt])
   @@map("bookings")
+}
+
+enum BookingStatus {
+  PENDING_PAYMENT
+  CONFIRMED
+  CANCELLED
+  EXPIRED
 }
 
 /// A place to stay. `price_per_night` is an integer in the minor unit of the currency:

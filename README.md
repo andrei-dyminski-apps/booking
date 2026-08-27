@@ -15,7 +15,7 @@ A booking service monorepo: a Next.js frontend and a NestJS backend in one repos
 ```sh
 pnpm install
 cp .env.example .env
-docker compose up -d                    # PostgreSQL
+docker compose up -d                    # PostgreSQL + Redis
 pnpm --filter @repo/api db:migrate      # create the schema
 pnpm --filter @repo/api db:seed         # demo data
 pnpm dev
@@ -105,25 +105,50 @@ The import is per file — `@repo/ui/components/dialog`; inside the package the 
 Every route below except `/` and the four public `/auth/*` ones is behind the global
 `JwtAuthGuard` and answers `401` without a session.
 
-| Method   | Path             | What it does                                                                   |
-| -------- | ---------------- | ------------------------------------------------------------------------------ |
-| `POST`   | `/auth/register` | register and open a session; `400` — failed the schema, `409` — email is taken |
-| `POST`   | `/auth/login`    | log in; `401` — wrong email or password                                        |
-| `POST`   | `/auth/refresh`  | rotate the token pair; `401` — missing, spent or forged token, cookies cleared |
-| `POST`   | `/auth/logout`   | end the session, `204`; answers the same without one                           |
-| `GET`    | `/auth/me`       | the current user; `401` — no session, or the user is gone                      |
-| `GET`    | `/listings`      | the catalogue, newest first                                                    |
-| `GET`    | `/listings/mine` | the caller's own listings; OWNER only                                          |
-| `GET`    | `/listings/:id`  | a single listing, `404` if missing                                             |
-| `POST`   | `/listings`      | create, the owner taken from the session; OWNER only                           |
-| `PATCH`  | `/listings/:id`  | edit; OWNER (their own) or ADMIN, `403` otherwise                              |
-| `DELETE` | `/listings/:id`  | retire, `204`; out of the catalogue, booked stays keep their record            |
-| `GET`    | `/bookings`      | the bookings the caller may see, sorted by check-in date                       |
-| `GET`    | `/bookings/:id`  | a single booking; the guest, the owner of the listing or an admin              |
-| `POST`   | `/bookings`      | create; USER only, `404` — no such listing, `409` — dates are taken            |
-| `DELETE` | `/bookings/:id`  | cancel, `204`; the guest or an admin                                           |
+| Method   | Path             | What it does                                                                         |
+| -------- | ---------------- | ------------------------------------------------------------------------------------ |
+| `POST`   | `/auth/register` | register and open a session; `400` — failed the schema, `409` — email is taken       |
+| `POST`   | `/auth/login`    | log in; `401` — wrong email or password                                              |
+| `POST`   | `/auth/refresh`  | rotate the token pair; `401` — missing, spent or forged token, cookies cleared       |
+| `POST`   | `/auth/logout`   | end the session, `204`; answers the same without one                                 |
+| `GET`    | `/auth/me`       | the current user; `401` — no session, or the user is gone                            |
+| `GET`    | `/listings`      | the catalogue, newest first                                                          |
+| `GET`    | `/listings/mine` | the caller's own listings; OWNER only                                                |
+| `GET`    | `/listings/:id`  | a single listing, `404` if missing                                                   |
+| `POST`   | `/listings`      | create, the owner taken from the session; OWNER only                                 |
+| `PATCH`  | `/listings/:id`  | edit; OWNER (their own) or ADMIN, `403` otherwise                                    |
+| `DELETE` | `/listings/:id`  | retire, `204`; out of the catalogue, booked stays keep their record                  |
+| `GET`    | `/bookings`      | the bookings the caller may see, sorted by check-in date                             |
+| `GET`    | `/bookings/:id`  | a single booking; the guest, the owner of the listing or an admin                    |
+| `POST`   | `/bookings`      | create a 15-minute hold; USER only, `404` — no such listing, `409` — dates are taken |
+| `DELETE` | `/bookings/:id`  | cancel, `204`; the guest or an admin. The row stays, with `status: CANCELLED`        |
 
 Overlapping dates on the same listing are rejected; back-to-back bookings (check-out on the day the next guest checks in) are allowed.
+
+### Concurrent booking
+
+`POST /bookings` creates the booking as a `PENDING_PAYMENT` hold with `expiresAt = now + 15
+min` — the slot is taken while the guest pays (phase 6). Three layers keep two guests from
+taking the same nights:
+
+1. **A locking transaction.** Creating a booking is an interactive transaction that begins
+   with `SELECT ... FOR UPDATE` on the listing row, so competing requests for one listing
+   serialise instead of racing; the second gets an honest `409`. `deleted_at` is read
+   under that lock, and the transaction also flips this listing's lapsed holds to
+   `EXPIRED` first, so a stale one neither blocks the slot nor trips the constraint below.
+2. **An `EXCLUDE` constraint** (`btree_gist`, a raw-SQL migration) over
+   `daterange(from, to)` for active bookings — even a bug in the service cannot write two
+   overlapping active stays.
+3. **A BullMQ job** (Redis) scheduled for `expiresAt` releases a still-unpaid hold, and a
+   repeatable sweep once a minute releases the ones whose job never ran. Redis has no
+   volume under it, so a restart drops every scheduled job — the sweep is what keeps that
+   from turning into a slot nobody can book, and it is why scheduling a job is allowed to
+   fail without failing the request that created the booking.
+
+A booking that leaves the active set — cancelled or expired — frees its slot immediately
+and keeps its row: phase 6 refunds against it, so it goes on answering `GET /bookings/:id`
+for the people who could read it before, with `status` saying what became of it. What is
+refused afterwards is cancelling it a second time.
 
 ## Authentication
 
@@ -209,7 +234,10 @@ All settings live in a single `.env` in the repository root — there are no per
 | `POSTGRES_USER`      | user inside the Postgres container                             | `booking`                 |
 | `POSTGRES_PASSWORD`  | password inside the Postgres container                         | `booking`                 |
 | `POSTGRES_DB`        | database name inside the Postgres container                    | `booking`                 |
+| `POSTGRES_PORT`      | host port the Postgres container publishes                     | `5432`                    |
 | `DATABASE_URL`       | PostgreSQL connection string for the application               | see `.env.example`        |
+| `REDIS_PORT`         | host port the Redis container publishes                        | `6379`                    |
+| `REDIS_URL`          | Redis for the BullMQ hold-expiry queue; no fallback            | see `.env.example`        |
 | `JWT_ACCESS_SECRET`  | signing key of the access token                                | required, no fallback     |
 | `JWT_REFRESH_SECRET` | signing key of the refresh token — a different one on purpose  | required, no fallback     |
 | `JWT_ACCESS_TTL`     | access token lifetime, seconds (also the cookie Max-Age)       | `900`                     |
@@ -217,9 +245,9 @@ All settings live in a single `.env` in the repository root — there are no per
 | `AUTH_COOKIE_DOMAIN` | Domain of the auth cookies; empty means the host that set them | empty                     |
 | `TRUST_PROXY`        | trusted `X-Forwarded-For` entries — the rate limiter's key     | `0`                       |
 
-The root scripts start turbo through `node --env-file-if-exists=.env`, so the variables reach the environment of both tasks. The same `.env` is read by `docker compose` — it sits next to `docker-compose.yml`, so `POSTGRES_*` are substituted into the container without extra flags; compose declares defaults for them, so the database comes up even without a `.env`.
+The root scripts start turbo through `node --env-file-if-exists=.env`, so the variables reach the environment of both tasks. The same `.env` is read by `docker compose` — it sits next to `docker-compose.yml`, so `POSTGRES_*` and `REDIS_PORT` are substituted into the services without extra flags; compose declares defaults for them, so the database comes up even without a `.env`.
 
-`POSTGRES_*` and `DATABASE_URL` describe the same credentials from two sides — Compose cannot assemble a URL from parts. Change the user, the password or the database name and you have to update both places, otherwise the container comes up with one set of credentials and the application arrives with another. The credentials of an already created database are fixed at the first initialization of the volume: after a change you need `docker compose down -v`.
+`POSTGRES_*` and `DATABASE_URL` describe the same connection from two sides — Compose cannot assemble a URL from parts. Change the user, the password, the database name or `POSTGRES_PORT` and you have to update both places, otherwise the container comes up one way and the application arrives another; `REDIS_PORT` and `REDIS_URL` are the same pair. Only the host side of a published port is a variable — inside the container the images listen on 5432 and 6379 as they always did. The API compares the two sides at boot (`apps/api/src/common/env-consistency.ts`) and refuses to start while they disagree, naming both values — a mismatch is otherwise a refused connection with nothing pointing at its cause. The check runs only where the `POSTGRES_*` parts are set, so a deployment that supplies a ready `DATABASE_URL` and nothing else is unaffected. It does not check that the URL reaches anything: the credentials of an already created database are fixed at the first initialization of the volume, so after a change you still need `docker compose down -v`.
 
 A new variable has to be added in three places: `.env.example`, `globalEnv` in `turbo.json` and the table above. Without the `globalEnv` entry turbo will not account for it when computing the cache hash, and ESLint will report `turbo/no-undeclared-env-vars`.
 

@@ -2,7 +2,11 @@ import { TZDate } from "@date-fns/tz";
 import { PrismaPg } from "@prisma/adapter-pg";
 import * as argon2 from "argon2";
 import { addDays, format } from "date-fns";
-import { PrismaClient, Role } from "../src/generated/prisma/client";
+import {
+  BookingStatus,
+  PrismaClient,
+  Role,
+} from "../src/generated/prisma/client";
 
 const connectionString = process.env.DATABASE_URL;
 
@@ -115,6 +119,9 @@ async function main(): Promise<void> {
         guestId: guest.id,
         from: booking.from,
         to: booking.to,
+        // Confirmed, not holds: a PENDING_PAYMENT booking would lapse 15 minutes after
+        // the seed runs and disappear from the demo.
+        status: BookingStatus.CONFIRMED,
       };
     }),
   });

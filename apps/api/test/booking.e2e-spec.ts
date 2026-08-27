@@ -13,6 +13,8 @@ import { AppModule } from "./../src/app.module";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
+import { HOLD_TTL_MS } from "./../src/booking/domain/booking-status";
+import { resetQueue } from "./queue";
 import { credentialsFor, signInAs, type Agent } from "./session";
 
 const listingInput: CreateListingInput = {
@@ -42,8 +44,9 @@ describe("BookingController (e2e)", () => {
     app = moduleFixture.createNestApplication();
     await app.init();
 
-    // Tests hit the real database from docker-compose — wipe it before each one.
+    // Tests hit the real database and Redis from docker-compose — reset both.
     await resetDatabase(app);
+    await resetQueue(app);
 
     guest = await signInAs(app, Role.USER);
     otherGuest = await signInAs(app, Role.USER, {
@@ -76,6 +79,13 @@ describe("BookingController (e2e)", () => {
 
     // The guest is the session, not a field of the request.
     expect(booking.guestId).toBe((session.body as { id: string }).id);
+    // A fresh booking is a hold, and the deadline is the payment window rather than any
+    // non-null moment: HOLD_TTL_MS after the row was written. A second of tolerance,
+    // because the two timestamps are taken by different statements.
+    expect(booking.status).toBe("PENDING_PAYMENT");
+    expect(
+      Date.parse(String(booking.expiresAt)) - Date.parse(booking.createdAt),
+    ).toBeCloseTo(HOLD_TTL_MS, -3);
   });
 
   it("books for guests only — an owner rents out, an admin moderates", async () => {
@@ -210,7 +220,13 @@ describe("BookingController (e2e)", () => {
     await owner.delete(`/bookings/${id}`).expect(403);
     await otherGuest.delete(`/bookings/${id}`).expect(404);
     await guest.delete(`/bookings/${id}`).expect(204);
-    await guest.get(`/bookings/${id}`).expect(404);
+
+    // Not gone: the row is what phase 5 refunds against, so it keeps answering its guest
+    // and says what happened. Cancelling it again is what is refused.
+    const cancelled = await guest.get(`/bookings/${id}`).expect(200);
+
+    expect(bookingSchema.parse(cancelled.body).status).toBe("CANCELLED");
+    await guest.delete(`/bookings/${id}`).expect(404);
 
     const second = await guest.post("/bookings").send(input).expect(201);
 

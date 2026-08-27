@@ -1,3 +1,4 @@
+import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
 import { APP_GUARD, APP_PIPE } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule, minutes } from "@nestjs/throttler";
@@ -17,6 +18,14 @@ import { ListingModule } from "./listing/listing.module";
     // single client from monopolising the service.
     ThrottlerModule.forRoot({
       throttlers: [{ ttl: minutes(1), limit: 120 }],
+    }),
+    // Backs the delayed job that releases an unpaid hold. No fallback URL, the same rule
+    // as the JWT secrets and DATABASE_URL: a missing REDIS_URL stops the process at boot.
+    // Read in a factory rather than in the decorator argument, because the argument is
+    // evaluated when this file is imported: the throw would then be an import error, and
+    // every spec that so much as mentions AppModule would fail before Nest is involved.
+    BullModule.forRootAsync({
+      useFactory: () => ({ connection: { url: requireRedisUrl() } }),
     }),
     AuthModule,
     BookingModule,
@@ -39,3 +48,13 @@ import { ListingModule } from "./listing/listing.module";
   ],
 })
 export class AppModule {}
+
+function requireRedisUrl(): string {
+  const url = process.env.REDIS_URL;
+
+  if (url === undefined || url === "") {
+    throw new Error("REDIS_URL is not set — copy .env.example to .env");
+  }
+
+  return url;
+}

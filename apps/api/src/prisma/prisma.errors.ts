@@ -13,6 +13,15 @@ export const PrismaErrorCode = {
   RecordNotFound: "P2025",
 } as const;
 
+/**
+ * The SQLSTATE Postgres raises for an `EXCLUDE` constraint violation. Prisma has no code
+ * of its own for it — a `.create()` that hits `bookings_no_overlap` surfaces as a generic
+ * `PrismaClientKnownRequestError` (`P2039` in Prisma 7) whose only dependable signal is
+ * this class code, carried nested under the driver adapter error like every other
+ * adapter-reported detail (see `violatedConstraint`).
+ */
+const EXCLUSION_VIOLATION_SQLSTATE = "23P01";
+
 export type PrismaErrorCode =
   (typeof PrismaErrorCode)[keyof typeof PrismaErrorCode];
 
@@ -66,5 +75,27 @@ export function violatedConstraint<Constraint>(
 const constraintPathSchema = z.object({
   driverAdapterError: z.object({
     cause: z.object({ constraint: z.unknown() }),
+  }),
+});
+
+/**
+ * True for a write that lost to the `EXCLUDE` constraint on `bookings` — two overlapping
+ * active stays on one listing. The repository's locking transaction already refuses that,
+ * so this only fires if a bug slips past it; the caller answers it the same `409` an
+ * ordinary overlap gets. Read through the nested SQLSTATE rather than Prisma's own code,
+ * which is generic here and could shift between versions.
+ */
+export function isExclusionViolation(error: unknown): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+
+  return (
+    sqlStatePathSchema.safeParse(error.meta).data?.driverAdapterError.cause
+      .code === EXCLUSION_VIOLATION_SQLSTATE
+  );
+}
+
+const sqlStatePathSchema = z.object({
+  driverAdapterError: z.object({
+    cause: z.object({ code: z.string() }),
   }),
 });

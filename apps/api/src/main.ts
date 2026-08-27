@@ -4,8 +4,14 @@ import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { cleanupOpenApiDoc } from "nestjs-zod";
 import { AppModule } from "./app.module";
 import { ACCESS_TOKEN_COOKIE } from "./auth/cookies";
+import { assertConnectionUrlsMatchCompose } from "./common/env-consistency";
 
 async function bootstrap() {
+  // Before Nest, and deliberately: creating the module connects Prisma, so a URL that
+  // disagrees with the containers would otherwise be reported as a refused connection
+  // rather than as the two lines of .env that stopped matching.
+  assertConnectionUrlsMatchCompose();
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // Behind a proxy every request arrives from the proxy's address, and the rate limiter
@@ -54,6 +60,12 @@ async function bootstrap() {
     .map((origin) => origin.trim())
     .filter(Boolean);
   app.enableCors({ origin: origins, credentials: true });
+
+  // SIGTERM is how a container is asked to stop, and without this Nest never hears it: the
+  // process would exit with the BullMQ worker mid-job and its Redis connection open. The
+  // job it was running is idempotent, so what this buys is a clean close rather than
+  // correctness — the worker stops taking new jobs and finishes the one it holds.
+  app.enableShutdownHooks();
 
   await app.listen(
     process.env.API_PORT ?? process.env.PORT ?? 3001,

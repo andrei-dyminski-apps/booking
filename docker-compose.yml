@@ -1,7 +1,9 @@
 # Local development infrastructure: docker compose up -d
 # Compose reads the root .env on its own — it sits next to this file.
-# The values are duplicated in DATABASE_URL: Compose cannot assemble a URL from parts,
-# so when the credentials change, update it too or the app will fail to connect.
+# The values are duplicated in DATABASE_URL and REDIS_URL: Compose cannot assemble a URL
+# from parts, so when the credentials or the published port change, update those too or
+# the app will fail to connect. Only the host side of a mapping is a variable — the port
+# inside the container is what the image listens on and is not ours to move.
 services:
   db:
     image: postgres:17-alpine
@@ -11,11 +13,32 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-booking}
       POSTGRES_DB: ${POSTGRES_DB:-booking}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - db-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-booking} -d $${POSTGRES_DB:-booking}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Backing store for BullMQ: the delayed job that releases an unpaid hold after 15 min.
+  # No volume, deliberately — a restart therefore loses every scheduled job, and what makes
+  # that survivable is the repeatable sweep in BookingExpiryQueue, which re-reads the
+  # bookings themselves once a minute. Losing the queue costs precision, not a slot.
+  #
+  # noeviction is what BullMQ requires: under any other policy Redis is free to drop the
+  # keys a queue is made of, and a job would disappear without anything failing. The
+  # default image sets no maxmemory, so nothing is evicted today — this makes it a stated
+  # property of the service rather than a side effect of leaving maxmemory unset.
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory-policy", "noeviction"]
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10

@@ -5,15 +5,23 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { Role, type Booking, type CreateBookingInput } from "@repo/contracts";
+import {
+  BookingStatus,
+  Role,
+  type Booking,
+  type CreateBookingInput,
+} from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import {
   BookingRepository,
+  DatesUnavailableError,
   GuestNotFoundError,
   ListingNotFoundError,
   type BookingWithListingOwner,
 } from "./booking.repository";
 import { BookingService } from "./booking.service";
+import { BookingExpiryQueue } from "./booking-expiry.queue";
+import { ACTIVE_STATUSES, holdExpiry } from "./domain/booking-status";
 
 const GUEST_ID = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
 const OWNER_ID = "6d0f2c1e-1a2b-4c3d-8e5f-9a0b1c2d3e4f";
@@ -41,16 +49,23 @@ const admin = userWith(STRANGER_ID, Role.ADMIN);
 /** See `auth.service.spec.ts` for what this mapped type does and does not catch. */
 type PublicOf<T> = { [K in keyof T]: T[K] };
 
+const isActive = (booking: Booking): boolean =>
+  ACTIVE_STATUSES.includes(booking.status);
+
 /**
  * The repository is faked rather than mocked: what the rules here decide is which rows a
- * caller ends up with and which ones are refused, and a mock that records arguments can
- * only assert the call the service happens to make today. The overlap semantics and the
- * date mapping now belong to the repository, so they are covered by e2e against a real
- * database instead of restated here.
+ * caller ends up with and which ones are refused. The overlap semantics, the locking
+ * transaction and the date mapping belong to the repository, so they are covered by e2e
+ * against a real database instead of restated here — the fake only has to reject an
+ * overlap with an active row so the service's `409` translation is exercised.
+ *
+ * Reads return a row whatever its status, and only the rules about the slot — the overlap
+ * on create, what `cancel` will still accept — narrow to the active ones. That is the
+ * repository's shape, and getting it wrong here would let the spec assert a booking
+ * disappears when the API says it turns `CANCELLED`.
  */
 class FakeBookingRepository implements PublicOf<BookingRepository> {
   readonly rows = new Map<string, BookingWithListingOwner>();
-  readonly listings = new Set<string>([LISTING_ID, OTHER_LISTING_ID]);
 
   /** The listing this fake creates bookings against, unless the row says otherwise. */
   listingOwnerId = OWNER_ID;
@@ -62,12 +77,12 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
   vanishingGuest = false;
 
   findAll(): Promise<Booking[]> {
-    return Promise.resolve(this.all());
+    return Promise.resolve(this.allBookings());
   }
 
   findByGuest(guestId: string): Promise<Booking[]> {
     return Promise.resolve(
-      this.all().filter((booking) => booking.guestId === guestId),
+      this.allBookings().filter((booking) => booking.guestId === guestId),
     );
   }
 
@@ -85,21 +100,6 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
     return Promise.resolve(this.rows.get(id) ?? null);
   }
 
-  listingExists(listingId: string): Promise<boolean> {
-    return Promise.resolve(this.listings.has(listingId));
-  }
-
-  findOverlapping(booking: CreateBookingInput): Promise<Booking | null> {
-    const overlap = this.all().find(
-      (stay) =>
-        stay.listingId === booking.listingId &&
-        stay.from < booking.to &&
-        stay.to > booking.from,
-    );
-
-    return Promise.resolve(overlap ?? null);
-  }
-
   create(guestId: string, booking: CreateBookingInput): Promise<Booking> {
     if (this.vanishingListing) {
       return Promise.reject(new ListingNotFoundError(booking.listingId));
@@ -109,12 +109,27 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
       return Promise.reject(new GuestNotFoundError(guestId));
     }
 
+    const overlaps = this.allBookings()
+      .filter(isActive)
+      .some(
+        (stay) =>
+          stay.listingId === booking.listingId &&
+          stay.from < booking.to &&
+          stay.to > booking.from,
+      );
+
+    if (overlaps) {
+      return Promise.reject(new DatesUnavailableError(booking));
+    }
+
     const stored: Booking = {
       id: `booking-${String(this.rows.size + 1)}`,
       listingId: booking.listingId,
       guestId,
       from: booking.from,
       to: booking.to,
+      status: BookingStatus.PENDING_PAYMENT,
+      expiresAt: holdExpiry(new Date()).toISOString(),
       createdAt: "2026-08-17T12:00:00.000Z",
     };
 
@@ -126,18 +141,66 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
     return Promise.resolve(stored);
   }
 
-  delete(id: string): Promise<boolean> {
-    return Promise.resolve(this.rows.delete(id));
+  cancel(id: string): Promise<boolean> {
+    const found = this.rows.get(id);
+
+    if (found === undefined || !isActive(found.booking)) {
+      return Promise.resolve(false);
+    }
+
+    found.booking.status = BookingStatus.CANCELLED;
+
+    return Promise.resolve(true);
   }
 
-  private all(): Booking[] {
+  expireHold(id: string): Promise<void> {
+    const found = this.rows.get(id);
+
+    if (found?.booking.status === BookingStatus.PENDING_PAYMENT) {
+      found.booking.status = BookingStatus.EXPIRED;
+    }
+
+    return Promise.resolve();
+  }
+
+  expireLapsedHolds(): Promise<number> {
+    return Promise.resolve(0);
+  }
+
+  private allBookings(): Booking[] {
     return [...this.rows.values()].map((found) => found.booking);
+  }
+}
+
+/**
+ * `runAt` is taken as an argument rather than ignored, because that is the only thing the
+ * service decides about the deadline: it forwards the one the repository wrote. A fake
+ * with the shorter signature stays assignable (see `PublicOf` above), so nothing but this
+ * would notice a service that scheduled the job for the wrong moment — or for `now`.
+ */
+class FakeBookingExpiryQueue implements PublicOf<BookingExpiryQueue> {
+  readonly scheduled: { bookingId: string; runAt: Date }[] = [];
+  readonly cancelled: string[] = [];
+
+  onApplicationBootstrap(): void {}
+
+  scheduleExpiry(bookingId: string, runAt: Date): Promise<void> {
+    this.scheduled.push({ bookingId, runAt });
+
+    return Promise.resolve();
+  }
+
+  cancelExpiry(bookingId: string): Promise<void> {
+    this.cancelled.push(bookingId);
+
+    return Promise.resolve();
   }
 }
 
 describe("BookingService", () => {
   let service: BookingService;
   let bookingRepository: FakeBookingRepository;
+  let bookingExpiryQueue: FakeBookingExpiryQueue;
 
   /** A booking `guest` took against a listing `owner` owns — the row every rule acts on. */
   const bookedByGuest = async (): Promise<string> =>
@@ -145,28 +208,36 @@ describe("BookingService", () => {
 
   beforeEach(async () => {
     bookingRepository = new FakeBookingRepository();
+    bookingExpiryQueue = new FakeBookingExpiryQueue();
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         BookingService,
         { provide: BookingRepository, useValue: bookingRepository },
+        { provide: BookingExpiryQueue, useValue: bookingExpiryQueue },
       ],
     }).compile();
 
     service = moduleRef.get(BookingService);
   });
 
-  it("stores the booking in the name of the signed-in guest", async () => {
+  it("stores the booking as a hold in the name of the signed-in guest", async () => {
     const booking = await service.create(GUEST_ID, input);
 
-    expect(booking).toMatchObject({ ...input, guestId: GUEST_ID });
+    expect(booking).toMatchObject({
+      ...input,
+      guestId: GUEST_ID,
+      status: BookingStatus.PENDING_PAYMENT,
+    });
+    expect(booking.expiresAt).not.toBeNull();
   });
 
-  it("refuses to book a listing that does not exist", async () => {
-    await expect(
-      service.create(GUEST_ID, { ...input, listingId: STRANGER_ID }),
-    ).rejects.toThrow(NotFoundException);
-    expect(bookingRepository.rows.size).toBe(0);
+  it("schedules the hold's expiry for the deadline the row carries", async () => {
+    const booking = await service.create(GUEST_ID, input);
+
+    expect(bookingExpiryQueue.scheduled).toEqual([
+      { bookingId: booking.id, runAt: new Date(String(booking.expiresAt)) },
+    ]);
   });
 
   it("answers 404, not 500, when the listing is deleted just before the insert", async () => {
@@ -188,7 +259,7 @@ describe("BookingService", () => {
     );
   });
 
-  it("rejects creation when an overlapping booking is found", async () => {
+  it("turns an overlap raised by the repository into a 409", async () => {
     await bookedByGuest();
 
     await expect(
@@ -229,7 +300,7 @@ describe("BookingService", () => {
     await expect(service.remove(id, stranger)).rejects.toThrow(
       NotFoundException,
     );
-    expect(bookingRepository.rows.size).toBe(1);
+    await expect(service.findOne(id, guest)).resolves.toMatchObject({ id });
   });
 
   it("lets the guest and an admin cancel, and the owner of the listing only look", async () => {
@@ -237,13 +308,34 @@ describe("BookingService", () => {
 
     // Reading the bookings against your listing is not the same right as cancelling one.
     await expect(service.remove(id, owner)).rejects.toThrow(ForbiddenException);
-    expect(bookingRepository.rows.size).toBe(1);
+    await expect(service.findOne(id, owner)).resolves.toMatchObject({ id });
 
     await service.remove(id, guest);
-    expect(bookingRepository.rows.size).toBe(0);
+    expect(bookingExpiryQueue.cancelled).toContain(id);
 
-    await service.remove(await bookedByGuest(), admin);
-    expect(bookingRepository.rows.size).toBe(0);
+    const second = await bookedByGuest();
+    await service.remove(second, admin);
+
+    await expect(service.findAll(admin)).resolves.toHaveLength(2);
+  });
+
+  /**
+   * A cancelled stay is a record, not a deletion — phase 5 refunds against it. So it keeps
+   * answering its guest, with the status saying what happened and the deadline the hold
+   * had still on it, and only a second cancellation is refused.
+   */
+  it("keeps the cancelled booking readable, and refuses to cancel it twice", async () => {
+    const id = await bookedByGuest();
+    const held = await service.findOne(id, guest);
+
+    await service.remove(id, guest);
+
+    await expect(service.findOne(id, guest)).resolves.toMatchObject({
+      id,
+      status: BookingStatus.CANCELLED,
+      expiresAt: held.expiresAt,
+    });
+    await expect(service.remove(id, guest)).rejects.toThrow(NotFoundException);
   });
 
   it("throws NotFoundException for an unknown id", async () => {

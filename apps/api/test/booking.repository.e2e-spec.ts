@@ -5,26 +5,30 @@ import { App } from "supertest/types";
 import { AppModule } from "./../src/app.module";
 import {
   BookingRepository,
+  DatesUnavailableError,
   GuestNotFoundError,
   ListingNotFoundError,
 } from "./../src/booking/booking.repository";
 import { PrismaService } from "./../src/prisma/prisma.service";
+import { HOLD_TTL_MS } from "./../src/booking/domain/booking-status";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
+import { resetQueue } from "./queue";
 
 /**
- * `bookings` has two foreign keys and Postgres reports both with the same Prisma code, so
- * which one gave way is read out of the constraint the driver adapter names. That is a
- * nested, adapter-specific shape rather than a documented field, and the branch is one
- * Prisma upgrade away from silently falling through to a 500 — hence a spec against the
- * real database rather than trust in the parse.
+ * Two adapter-specific error shapes this layer has to keep reading correctly, and both are
+ * a nested, undocumented path one Prisma upgrade away from falling through to a 500 —
+ * hence a spec against the real database rather than trust in the parse:
  *
- * The unit spec cannot reach it: it fakes the repository, so the translation from a driver
- * error into a domain one never runs there. Neither can the HTTP tests reach both halves —
- * the missing guest is provokable (delete the account behind a valid token), but the
- * missing listing is the losing side of a race with `listingExists`, so the API answers 404
- * from the pre-flight check long before the insert. Called directly, both are ordinary
- * arguments.
+ *  - a foreign key violation on the guest key (`23503` → which key, read out of the
+ *    constraint the driver names);
+ *  - an `EXCLUDE` constraint violation (`23P01`) when two overlapping active stays race
+ *    past the in-transaction overlap check.
+ *
+ * The unit spec cannot reach either: it fakes the repository, so no driver error is ever
+ * translated. The HTTP tests reach the guest key (delete the account behind a valid token)
+ * but not the listing key — a missing listing is now refused by the `FOR UPDATE` read
+ * before any insert. Called directly, these are ordinary arguments.
  */
 describe("BookingRepository foreign keys (e2e)", () => {
   let app: INestApplication<App>;
@@ -45,6 +49,7 @@ describe("BookingRepository foreign keys (e2e)", () => {
     bookingRepository = app.get(BookingRepository);
 
     await resetDatabase(app);
+    await resetQueue(app);
 
     const guest = await prismaService.user.create({
       data: { email: "keys-guest@example.com", passwordHash: "hash" },
@@ -76,22 +81,62 @@ describe("BookingRepository foreign keys (e2e)", () => {
 
   const dates = { from: inDays(30), to: inDays(34) };
 
-  it("writes a booking when both rows are there", async () => {
+  it("writes a booking as a pending hold when both rows are there", async () => {
     const booking = await bookingRepository.create(guestId, {
       listingId,
       ...dates,
     });
 
-    expect(booking).toMatchObject({ guestId, listingId, ...dates });
+    expect(booking).toMatchObject({
+      guestId,
+      listingId,
+      ...dates,
+      status: "PENDING_PAYMENT",
+    });
+    // The deadline is the payment window, not merely some moment: this is the one place
+    // that decides it, so this is where the fifteen minutes are asserted.
+    expect(
+      Date.parse(String(booking.expiresAt)) - Date.parse(booking.createdAt),
+    ).toBeCloseTo(HOLD_TTL_MS, -3);
   });
 
-  // The branch the API cannot provoke: the listing was deleted between `listingExists` and
-  // the insert. It has to stay a 404 about the listing rather than the 500 an unread
-  // constraint would produce.
-  it("names the listing when its key is the one that gave way", async () => {
+  // A missing listing is now refused by the `FOR UPDATE` read at the top of the
+  // transaction, before any insert — but it still has to be a `ListingNotFoundError`.
+  it("names the listing when it is missing under the lock", async () => {
     await expect(
       bookingRepository.create(guestId, { listingId: randomUUID(), ...dates }),
     ).rejects.toThrow(ListingNotFoundError);
+  });
+
+  // The overlap the in-transaction check catches — the informative path.
+  it("refuses an overlapping range with DatesUnavailableError", async () => {
+    await bookingRepository.create(guestId, { listingId, ...dates });
+
+    await expect(
+      bookingRepository.create(guestId, {
+        listingId,
+        from: inDays(32),
+        to: inDays(36),
+      }),
+    ).rejects.toThrow(DatesUnavailableError);
+  });
+
+  // Racing past that check lands on the EXCLUDE constraint (`23P01`); the point is that it
+  // still resolves to the domain error rather than a raw Prisma one.
+  it("refuses a racing overlap with the same domain error", async () => {
+    const results = await Promise.allSettled(
+      Array.from({ length: 6 }, () =>
+        bookingRepository.create(guestId, { listingId, ...dates }),
+      ),
+    );
+
+    const fulfilled = results.filter((r) => r.status === "fulfilled");
+    const rejected = results.filter((r) => r.status === "rejected");
+
+    expect(fulfilled).toHaveLength(1);
+    for (const result of rejected) {
+      expect(result.reason).toBeInstanceOf(DatesUnavailableError);
+    }
   });
 
   // The other key, from the other side: nothing checks the guest before the insert, because

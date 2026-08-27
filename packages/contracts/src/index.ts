@@ -1,7 +1,9 @@
 export {
   bookingSchema,
+  bookingStatusSchema,
   bookingListSchema,
   createBookingSchema,
+  BookingStatus,
   type Booking,
   type CreateBookingInput,
 } from "./booking.js";
