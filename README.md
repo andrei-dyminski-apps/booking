@@ -2,7 +2,7 @@
 
 A booking service monorepo: a Next.js frontend and a NestJS backend in one repository, managed by Turborepo and pnpm workspaces.
 
-> Status: the API is a working vertical slice — owners publish listings, guests book them and the dates are checked for overlaps. Storage is PostgreSQL via Prisma 7, and the API is behind hand-written authentication: argon2, a JWT pair in httpOnly cookies, refresh-token rotation, and role-based authorization on top. The frontend has the session half of it — sign up, sign in, a guarded profile page rendered on the server as the visitor, and a session that survives an expired access token — plus the owner's dashboard, where a listing is published, edited and taken down. The next phases are in [docs/plan.md](docs/plan.md).
+> Status: the API is a working vertical slice — owners publish listings, guests book them and the dates are checked for overlaps. Storage is PostgreSQL via Prisma 7, and the API is behind hand-written authentication: argon2, a JWT pair in httpOnly cookies, refresh-token rotation, and role-based authorization on top. The frontend has the session half of it — sign up, sign in, a guarded profile page rendered on the server as the visitor, and a session that survives an expired access token — plus the owner's dashboard, where a listing is published, edited and taken down, and the catalogue: a filtered, cursor-paged list of stays whose filters live in the URL, a listing page with an availability calendar and the form that takes a hold, and a "my bookings" screen that shows every role its own scope. What a hold cannot do yet is turn into a paid stay; that is the next phase. The rest are in [docs/plan.md](docs/plan.md).
 
 ## Requirements
 
@@ -79,8 +79,9 @@ The frontend is built on **Tailwind CSS 4** and **shadcn/ui** over Base UI primi
 packages/ui/
   components.json            # what the shadcn CLI writes and where
   src/
-    components/              # the primitives generated so far: button, card, field,
-                             #   input, label, separator, sonner
+    components/              # the primitives generated so far: alert-dialog, badge,
+                             #   button, card, dialog, empty, field, input, label,
+                             #   select, separator, sheet, skeleton, sonner, textarea
     lib/utils.ts             # cn() — clsx + tailwind-merge
     styles/globals.css       # tokens, dark theme, @source directives for Tailwind
 ```
@@ -89,7 +90,7 @@ The tokens are the only place colours and radii are defined; `apps/web/src/_app/
 
 The faces are the one thing the tokens do not own: `apps/web` loads them with `next/font` into `--app-font-sans` / `--app-font-mono`, and the token file maps those onto `--font-sans` / `--font-mono`. The names differ on purpose — a token defined as `var(--font-sans)` would reference itself, and would then hold only while the `next/font` class outranks the `@layer theme` rule Tailwind emits for it.
 
-Primitives are generated when a screen needs one, not up front: `button`, `sonner`, and the `card`, `field`, `input`, `label` and `separator` the auth forms of phase 2 asked for.
+Primitives are generated when a screen needs one, not up front: `button`, `sonner`, the `card`, `field`, `input`, `label` and `separator` the auth forms of phase 2 asked for, the `textarea` and `alert-dialog` the owner's listing form and its confirmation needed, the `badge` that names the four states of a booking, the `dialog`, `select` and `sheet` the catalogue's filters, its ordering and the mobile navigation are drawn with, and the `empty` and `skeleton` every screen that can answer with nothing — or has yet to answer at all — shares.
 
 A new primitive is added by the CLI from inside the package, never written by hand:
 
@@ -100,30 +101,109 @@ pnpm lint:fix                          # from the root: the generator formats it
 
 The import is per file — `@repo/ui/components/dialog`; inside the package the components reach each other through the `imports` map (`#components/button`, `#lib/utils`). The theme is switched by `next-themes` through a class on `<html>`.
 
+### Screens
+
+Routing belongs to Next.js and everything else to Feature-Sliced Design, so each file under `apps/web/app` is a one-line re-export of a slice in `apps/web/src/_pages` — the rules are in [`.claude/rules/frontend.md`](.claude/rules/frontend.md).
+
+| Route                              | What it is                                                            | Who sees it |
+| ---------------------------------- | --------------------------------------------------------------------- | ----------- |
+| `/`                                | the landing, one link into the catalogue                              | everyone    |
+| `/listings`                        | the catalogue: filters in the URL, keyset pages, cached and tagged    | everyone    |
+| `/listings/:id`                    | one listing, its availability calendar and the form that takes a hold | everyone    |
+| `/bookings`                        | stays, in the scope the caller's role gives them, with cancellation   | signed in   |
+| `/login`, `/register`              | the session forms, submitted to Server Actions                        | everyone    |
+| `/profile`                         | the session as the API sees it, and "Sign out"                        | signed in   |
+| `/dashboard`                       | the owner's own listings                                              | OWNER       |
+| `/dashboard/listings/new`, `…/:id` | publishing, editing and retiring a listing                            | OWNER       |
+
+Every screen sits inside one shell (`apps/web/src/_app/layout`): a sidebar from `lg` up, the same list in a sheet behind the menu button below it, and a header with the theme and the two calls to action a stranger has. The shell reads `/auth/me` once for all three, and `currentUser()` is memoized for the render so the page under it does not ask again. A route that reads the API has a `loading.tsx` skeleton beside it, `notFound()` has a screen of its own, and there are two error boundaries — one under the shell and one that replaces the document when the shell itself cannot render.
+
+On the catalogue the filters are the URL. Every one of them lives behind a "Filters" modal — a plain `GET` form, so submitting it is the browser navigating to the search it spells rather than an action keeping state in step — the ordering beside it is a box over the same four links, and what is applied is spelled out as chips, each of them a link to the same search without that filter. The price of the compact toolbar is that asking a question of your own needs JavaScript: without it the catalogue still reads, and a chip still takes a filter off a search somebody sent.
+
+The three catalogue routes are the first cached reads in the application: `GET /listings`, one listing and its availability are public and identical for every visitor, so they are stored under their URL and tagged, and a mutation of a listing or a booking invalidates the tags it actually changed. Everything personal — the session, a visitor's stays, an owner's own listings — is read `no-store` and never tagged, because the Data Cache is keyed by URL and shared with whoever asks next.
+
 ## Endpoints
 
-Every route below except `/` and the four public `/auth/*` ones is behind the global
-`JwtAuthGuard` and answers `401` without a session.
+Every route below except `/`, the four public `/auth/*` ones and the three reading routes
+of the catalogue is behind the global `JwtAuthGuard` and answers `401` without a session.
 
-| Method   | Path             | What it does                                                                         |
-| -------- | ---------------- | ------------------------------------------------------------------------------------ |
-| `POST`   | `/auth/register` | register and open a session; `400` — failed the schema, `409` — email is taken       |
-| `POST`   | `/auth/login`    | log in; `401` — wrong email or password                                              |
-| `POST`   | `/auth/refresh`  | rotate the token pair; `401` — missing, spent or forged token, cookies cleared       |
-| `POST`   | `/auth/logout`   | end the session, `204`; answers the same without one                                 |
-| `GET`    | `/auth/me`       | the current user; `401` — no session, or the user is gone                            |
-| `GET`    | `/listings`      | the catalogue, newest first                                                          |
-| `GET`    | `/listings/mine` | the caller's own listings; OWNER only                                                |
-| `GET`    | `/listings/:id`  | a single listing, `404` if missing                                                   |
-| `POST`   | `/listings`      | create, the owner taken from the session; OWNER only                                 |
-| `PATCH`  | `/listings/:id`  | edit; OWNER (their own) or ADMIN, `403` otherwise                                    |
-| `DELETE` | `/listings/:id`  | retire, `204`; out of the catalogue, booked stays keep their record                  |
-| `GET`    | `/bookings`      | the bookings the caller may see, sorted by check-in date                             |
-| `GET`    | `/bookings/:id`  | a single booking; the guest, the owner of the listing or an admin                    |
-| `POST`   | `/bookings`      | create a 15-minute hold; USER only, `404` — no such listing, `409` — dates are taken |
-| `DELETE` | `/bookings/:id`  | cancel, `204`; the guest or an admin. The row stays, with `status: CANCELLED`        |
+| Method   | Path                         | What it does                                                                         |
+| -------- | ---------------------------- | ------------------------------------------------------------------------------------ |
+| `POST`   | `/auth/register`             | register and open a session; `400` — failed the schema, `409` — email is taken       |
+| `POST`   | `/auth/login`                | log in; `401` — wrong email or password                                              |
+| `POST`   | `/auth/refresh`              | rotate the token pair; `401` — missing, spent or forged token, cookies cleared       |
+| `POST`   | `/auth/logout`               | end the session, `204`; answers the same without one                                 |
+| `GET`    | `/auth/me`                   | the current user; `401` — no session, or the user is gone                            |
+| `GET`    | `/listings`                  | the catalogue: filters, an ordering and a cursor; public                             |
+| `GET`    | `/listings/mine`             | the caller's own listings; OWNER only                                                |
+| `GET`    | `/listings/:id`              | a single listing, `404` if missing or retired; public                                |
+| `GET`    | `/listings/:id/availability` | the nights already taken, for a `from`/`to` window; public                           |
+| `POST`   | `/listings`                  | create, the owner taken from the session; OWNER only                                 |
+| `PATCH`  | `/listings/:id`              | edit; OWNER (their own) or ADMIN, `403` otherwise                                    |
+| `DELETE` | `/listings/:id`              | retire, `204`; out of the catalogue, booked stays keep their record                  |
+| `GET`    | `/bookings`                  | the bookings the caller may see, sorted by check-in date                             |
+| `GET`    | `/bookings/:id`              | a single booking; the guest, the owner of the listing or an admin                    |
+| `POST`   | `/bookings`                  | create a 15-minute hold; USER only, `404` — no such listing, `409` — dates are taken |
+| `DELETE` | `/bookings/:id`              | cancel, `204`; the guest or an admin. The row stays, with `status: CANCELLED`        |
 
 Overlapping dates on the same listing are rejected; back-to-back bookings (check-out on the day the next guest checks in) are allowed.
+
+### The catalogue
+
+`GET /listings` is the one read of this API that is a search rather than a lookup, and
+everything about it is in the query string, so a filtered catalogue is a link somebody can
+send:
+
+| Parameter              | What it narrows                                              |
+| ---------------------- | ------------------------------------------------------------ |
+| `from`, `to`           | free for those nights — both or neither, check-out exclusive |
+| `minPrice`, `maxPrice` | the nightly price, to the cent like the column               |
+| `guests`               | listings that hold at least that many                        |
+| `sort`                 | `newest` (the default), `oldest`, `priceAsc`, `priceDesc`    |
+| `cursor`, `limit`      | the page: a cursor from the previous answer, at most 50 rows |
+
+The answer is `{ items, nextCursor }`, and `nextCursor` is `null` on the last page.
+
+- **The pages are keyset, not offset.** A listing published while somebody is paging shifts
+  every offset after it — one row shown twice, another skipped. The cursor names the row a
+  page ended on (the key its ordering sorts by, the `id` beside it and the `sort` itself,
+  base64 and opaque) and the next page is everything that sorts after it. It does not have
+  to still exist, which is why the comparison is written out instead of handed to Prisma's
+  own `cursor` option: a listing retired between two pages would otherwise end the
+  catalogue early. A cursor this API did not issue is a `400` rather than a silent first
+  page.
+- **A cursor names a place in one ordering and in no other**, so it travels with the `sort`
+  it was issued under and handing it back under another is a `400` of its own. Changing
+  what the catalogue is ordered by starts the pages again, which is what dropping the
+  cursor does — a client that changes `sort` drops `cursor` with it.
+- **The ordering, the cursor and the index are one decision.** Four values out of two keys,
+  because the tiebreaker follows the direction of the key: `price ASC, id ASC` and
+  `price DESC, id DESC` are exact reverses, so one btree read forwards and backwards
+  answers both — two columns disagreeing about direction would need an index apiece. Hence
+  two indexes rather than four (`created_at DESC, id DESC` and `price_per_night, id`), both
+  partial on `deleted_at IS NULL` — the condition every read of that table already carries,
+  which keeps the retired rows out of the index that serves the catalogue. `@@index` can
+  express neither the `WHERE` nor the direction, so they are raw-SQL migrations like the
+  `EXCLUDE` constraint below.
+- **The page starts with a seek, and that costs one redundant comparison.** `key > X OR
+(key = X AND id > Y)` says exactly where the page begins, but Postgres cannot read a start
+  position out of an `OR` — it would walk the index from the top and filter, so a page deep
+  in the catalogue would cost what an offset costs. The `where` therefore also carries
+  `key >= X`, which is implied by the `OR` and is the condition the index actually seeks
+  on. A row comparison would say both at once; Prisma cannot spell one.
+- **"Free for those nights" is the same predicate that refuses a booking.** The filter asks
+  for listings with no stay that both holds its slot and overlaps the window, and both
+  halves come from `BookingRepository`, so the catalogue and the transaction cannot
+  disagree about what "taken" means. A lapsed hold holds nothing, whether or not the job
+  that was to release it has run yet.
+- **`GET /listings/:id/availability`** answers the same question for one listing and a
+  window: the ranges already taken, whole rather than clipped to the window, so a calendar
+  drawing its last day knows the nights continue. It decides nothing — `POST /bookings` is
+  still refused, or not, inside the locking transaction.
+- **The three reading routes are public.** A catalogue nobody may see before signing up is
+  not a catalogue, and the frontend caches those answers in a store keyed by URL and shared
+  between visitors, so a read that needed a session could not be cached at all. Nothing
+  personal is in them.
 
 ### Concurrent booking
 
@@ -159,19 +239,19 @@ Implemented by hand rather than taken from Auth.js or Clerk — the parts an int
 - **Cookies only, never a response body.** Both tokens leave as `httpOnly` cookies, so an XSS on the frontend can act as the user but cannot carry the session away; `localStorage` never sees them. `access_token` is scoped to `/`, `refresh_token` to `/auth` — a request to `/bookings` does not carry the credential that mints new sessions. `SameSite` is `lax`, which is the CSRF defence: a cross-site POST carries no `lax` cookie.
 - **The browser holds the frontend's copy of that pair, not the API's.** The API answers the frontend's proxy, which drops those `Set-Cookie` headers and re-issues the same two tokens for its own origin, translating the scopes (`/` and `/api/auth`). So the session is first-party wherever the two services are deployed, `Max-Age` still comes from `JWT_*_TTL`, and `AUTH_COOKIE_DOMAIN` matters only to a browser poking at `/docs`.
 - **Rotation with reuse detection.** Every `/auth/refresh` burns the token it was given and issues the next one in the same family. Only the SHA-256 of a token is stored: a leaked table yields nothing usable, and unlike a salted password hash a digest can be looked up by equality. A token that comes back after it was already burned means a copy of it exists somewhere else — and since the two copies are indistinguishable, the whole family is revoked and the real user logs in again.
-- **The guard is global.** `JwtAuthGuard` is registered through `APP_GUARD`, so a new endpoint is closed until someone marks it `@Public()`. The open ones are `/`, `/auth/register`, `/auth/login`, `/auth/refresh` and `/auth/logout` — the last two because the access token is expected to be expired exactly there.
-- **Rate limiting.** `ThrottlerGuard` is registered before `JwtAuthGuard` — the limiter has to answer `429` before anything hashes a password, because argon2 spends 64 MB per attempt and an unauthenticated flood of `/auth/login` would otherwise be a flood of that. The API-wide ceiling is 120 requests a minute per address; `/auth/register` and `/auth/login`, the two endpoints that answer a guess, allow 10. The key is the client address, so `TRUST_PROXY` has to match the deployment — behind an unaccounted proxy every client shares one bucket.
+- **The guard is global.** `JwtAuthGuard` is registered through `APP_GUARD`, so a new endpoint is closed until someone marks it `@Public()`. The open ones are `/`, `/auth/register`, `/auth/login`, `/auth/refresh` and `/auth/logout` — the last two because the access token is expected to be expired exactly there — and the three reading routes of the catalogue, which show the same thing to everybody.
+- **Rate limiting.** `ThrottlerGuard` is registered before `JwtAuthGuard` — the limiter has to answer `429` before anything hashes a password, because argon2 spends 64 MB per attempt and an unauthenticated flood of `/auth/login` would otherwise be a flood of that. The API-wide ceiling is 120 requests a minute per address; `/auth/register` and `/auth/login`, the two endpoints that answer a guess, allow 10. The three public reads of the catalogue go the other way and allow 600: the frontend caches them, so what reaches the API is a cache miss arriving from that server's single address rather than from a visitor's — and a `X-Forwarded-For` that would split the bucket back apart would split the shared cache entry with it. The key is the client address, so `TRUST_PROXY` has to match the deployment — behind an unaccounted proxy every client shares one bucket.
 - The `registerSchema` and `loginSchema` rules live in `@repo/contracts` like every other contract rule, so the browser and the server validate a sign-up form with the same code.
 
 The secrets have no fallback in the code: an unset `JWT_ACCESS_SECRET` stops the process at boot instead of shipping a key that is in a public repository. `.env.example` carries development values — replace them anywhere else, `openssl rand -hex 32` generates one.
 
-`pnpm --filter @repo/api db:seed` creates three demo logins, one per role — `guest@example.com`, `owner@example.com` and `admin@example.com`, all with the password `password123` — three listings owned by the owner and four bookings taken by the guest, so every rule below has something to act on from the first request. The stays are dated from the day the seed runs: a check-in in the past is refused by the contract, and demo data the API itself would not accept ages into a puzzle.
+`pnpm --filter @repo/api db:seed` creates three demo logins, one per role — `guest@example.com`, `owner@example.com` and `admin@example.com`, all with the password `password123` — eight listings owned by the owner and six bookings taken by the guest — enough for the catalogue's filters to have something to keep as well as something to drop — so every rule below has something to act on from the first request. The stays are dated from the day the seed runs: a check-in in the past is refused by the contract, and demo data the API itself would not accept ages into a puzzle.
 
 ### The same session on the frontend
 
 The two cookie scopes are what shape the browser half of it, so it is worth reading them together: the access token is scoped to `/` and the refresh token to `/auth` on the API's host. The Next.js server therefore receives a visitor's access token and never their refresh token.
 
-- **`apps/web/proxy.ts`** (Next.js 16 renamed `middleware.ts` to that) guards `/profile` and answers one question — is there an access cookie. It cannot answer more: the cookie is httpOnly and only the API holds the secret that would verify it, so this only spares the server a render nobody could see. The page behind it reads `/auth/me` anyway and copes with a `401` of its own.
+- **`apps/web/proxy.ts`** (Next.js 16 renamed `middleware.ts` to that) guards `/profile`, `/bookings` and `/dashboard`, and answers one question — is there an access cookie. It cannot answer more: the cookie is httpOnly and only the API holds the secret that would verify it, so this only spares the server a render nobody could see. The page behind it reads `/auth/me` anyway and copes with a `401` of its own.
 - **A server render reads the API as the visitor.** `credentials: "include"` is a rule for browsers and does nothing in Node, so the transport copies the access cookie out of the request Next.js is answering. It does that for uncached reads only: the answer to a cached one goes into the Data Cache under its URL and is then served to whoever asks next.
 - **An expired access token is not a signed-out user.** The browser drops that cookie after fifteen minutes while the refresh token lives a week, so the login page spends one `/auth/refresh` before it shows a form and sends the visitor on where they were going. It has to happen there: the refresh cookie's path means it is attached to a request that leaves the browser for the API and to nothing that leaves the Next.js server — neither the proxy nor a render can perform that trade.
 - **The forms post straight to the API**, not through a server action that would have to re-issue both cookies with attributes copied from the backend, and they validate with `loginSchema` / `registerSchema` — the same schemas that refuse the request on the other side, so a message reads the same wherever it was produced.

@@ -3,7 +3,7 @@
 import { useActionState, useState } from "react";
 import Link from "next/link";
 import type { Listing } from "@repo/contracts";
-import { Button } from "@repo/ui/components/button";
+import { Button, buttonVariants } from "@repo/ui/components/button";
 import {
   Field,
   FieldDescription,
@@ -14,7 +14,7 @@ import {
 import { Input } from "@repo/ui/components/input";
 import { Textarea } from "@repo/ui/components/textarea";
 import { ROUTES } from "#shared/config";
-import { NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
+import { fieldMessages, NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
 import { saveListingAction } from "../api/save-listing-action";
 
 /**
@@ -54,9 +54,7 @@ export const ListingForm = ({ listing }: { listing?: Listing }) => {
             aria-invalid={errors.fields.title !== undefined}
             disabled={pending}
           />
-          <FieldError
-            errors={errors.fields.title?.map((message) => ({ message }))}
-          />
+          <FieldError errors={fieldMessages(errors.fields.title)} />
         </Field>
 
         <Field data-invalid={errors.fields.description !== undefined}>
@@ -72,9 +70,7 @@ export const ListingForm = ({ listing }: { listing?: Listing }) => {
             aria-invalid={errors.fields.description !== undefined}
             disabled={pending}
           />
-          <FieldError
-            errors={errors.fields.description?.map((message) => ({ message }))}
-          />
+          <FieldError errors={fieldMessages(errors.fields.description)} />
         </Field>
 
         <Field data-invalid={errors.fields.pricePerNight !== undefined}>
@@ -83,7 +79,12 @@ export const ListingForm = ({ listing }: { listing?: Listing }) => {
             id="pricePerNight"
             name="pricePerNight"
             type="number"
-            inputMode="numeric"
+            inputMode="decimal"
+            // The cent is the scale the contract refuses to go finer than, so the box
+            // steps in cents rather than leaving the browser to allow a third decimal the
+            // action would then have to refuse.
+            step="0.01"
+            min="0.01"
             value={pricePerNight}
             onChange={(event) => {
               setPricePerNight(event.target.value);
@@ -91,19 +92,10 @@ export const ListingForm = ({ listing }: { listing?: Listing }) => {
             aria-invalid={errors.fields.pricePerNight !== undefined}
             disabled={pending}
           />
-          {/*
-            The column stores minor units and the payment of phase 5 will hand this value
-            straight to Stripe, so the box takes what is stored rather than a price that
-            has to be converted twice on its way there.
-          */}
           <FieldDescription>
-            In minor units: 12000 is 120.00 a night.
+            Per night, to the cent: 120.50 is a hundred and twenty fifty.
           </FieldDescription>
-          <FieldError
-            errors={errors.fields.pricePerNight?.map((message) => ({
-              message,
-            }))}
-          />
+          <FieldError errors={fieldMessages(errors.fields.pricePerNight)} />
         </Field>
 
         <Field data-invalid={errors.fields.capacity !== undefined}>
@@ -121,9 +113,7 @@ export const ListingForm = ({ listing }: { listing?: Listing }) => {
             disabled={pending}
           />
           <FieldDescription>How many guests it sleeps.</FieldDescription>
-          <FieldError
-            errors={errors.fields.capacity?.map((message) => ({ message }))}
-          />
+          <FieldError errors={fieldMessages(errors.fields.capacity)} />
         </Field>
 
         {errors.message !== null && <FieldError>{errors.message}</FieldError>}
@@ -132,13 +122,12 @@ export const ListingForm = ({ listing }: { listing?: Listing }) => {
           <Button type="submit" size="lg" loading={pending}>
             {listing === undefined ? "Create listing" : "Save changes"}
           </Button>
-          <Button
-            variant="ghost"
-            size="lg"
-            render={<Link href={ROUTES.dashboard} />}
+          <Link
+            href={ROUTES.dashboard}
+            className={buttonVariants({ variant: "ghost", size: "lg" })}
           >
             Cancel
-          </Button>
+          </Link>
         </div>
       </FieldGroup>
     </form>

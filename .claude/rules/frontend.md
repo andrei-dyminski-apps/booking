@@ -22,17 +22,35 @@ apps/web/
     login/page.tsx            # one line per route, and nothing else
     register/page.tsx
     profile/page.tsx
+    listings/page.tsx
+    listings/loading.tsx      # the skeleton of the screen behind it, one line as well
+    listings/[id]/page.tsx
+    listings/[id]/loading.tsx
+    bookings/page.tsx
+    bookings/loading.tsx
     dashboard/page.tsx
+    dashboard/loading.tsx
     dashboard/listings/new/page.tsx
     dashboard/listings/[id]/page.tsx
+    not-found.tsx             # what notFound() renders — an id, a role, a retired row
+    error.tsx                 # the boundary under the shell; "use client" + re-export
+    global-error.tsx          # the boundary above it, for a shell that cannot render
     api/[...path]/route.ts    # the BFF: one line, the four methods of the proxy
   proxy.ts                    # what Next.js 16 calls middleware; re-export + the matcher
   src/
     _app/                     # the shell, in segments — the app layer has no `ui`
-      layout/root-layout.tsx  # <html>, <body>, metadata, the header
-      layout/header.tsx       # the frame: brand, the session links, the theme toggle
+      layout/root-layout.tsx  # <html>, <body>, metadata, the fonts
+      layout/app-shell.tsx    # the sidebar, the header and the one read of the session
+      layout/sidebar.tsx      # the navigation as a column, from `lg` up
+      layout/mobile-nav.tsx   # the same list in a sheet, below it
+      layout/nav-links.tsx    # the links, and the only thing here that needs a pathname
+      layout/navigation.ts    # what the shell offers this role, written down once
+      layout/account-panel.tsx  # who is signed in, and the way out
+      layout/header.tsx       # the bar: the menu button, the theme, the two CTAs
+      layout/site-footer.tsx  # the quiet end, and the third thing given the session
       layout/session-recovery.tsx  # the one rotation a server-rendered header cannot run
       layout/theme-toggle.tsx
+      layout/global-error.tsx # the document a failed shell render is replaced with
       layout/index.ts
       providers/providers.tsx # theme + toaster, the only client boundary around the tree
       providers/index.ts
@@ -55,11 +73,42 @@ apps/web/
       register/api/register-action.ts
       register/index.ts
       profile/ui/profile-page.tsx
-      profile/ui/logout-button.tsx        # the browser's call: only it holds a refresh token
       profile/index.ts
+      catalogue/ui/catalogue-page.tsx     # the filtered, cursor-paged list of listings
+      catalogue/ui/catalogue-toolbar.tsx  # one row: the filters, the ordering, the chips
+      catalogue/ui/catalogue-filters-dialog.tsx  # every filter, in a modal
+      catalogue/ui/active-filters.tsx     # what is applied, each chip a link that drops it
+      catalogue/ui/catalogue-sort.tsx     # the four orderings, as one box
+      catalogue/ui/filter-field.tsx       # one box of the dialog, spelled once
+      catalogue/ui/catalogue-card.tsx
+      catalogue/ui/catalogue-skeleton.tsx
+      catalogue/api/read-catalogue-page.ts  # the cached read, and the cursor it refuses
+      catalogue/lib/catalogue-search.ts   # searchParams onto the contract's query
+      catalogue/lib/catalogue-search.spec.ts
+      catalogue/index.ts
+      listing/ui/listing-page.tsx         # one listing: the calendar and the form
+      listing/ui/availability-calendar.tsx  # the nights already taken, drawn
+      listing/ui/booking-form.tsx         # the only thing here that creates a booking
+      listing/ui/listing-skeleton.tsx
+      listing/api/create-booking-action.ts
+      listing/lib/months.ts               # the booked ranges laid out as month grids
+      listing/lib/months.spec.ts
+      listing/index.ts
+      bookings/ui/bookings-page.tsx       # one page, three scopes — the role picks one
+      bookings/ui/booking-card.tsx
+      bookings/ui/booking-status-badge.tsx
+      bookings/ui/cancel-booking-button.tsx
+      bookings/ui/bookings-skeleton.tsx
+      bookings/api/cancel-booking-action.ts
+      bookings/index.ts
       dashboard/ui/dashboard-page.tsx     # the owner's listings, read by the session
       dashboard/ui/listing-card.tsx
+      dashboard/ui/dashboard-skeleton.tsx
       dashboard/index.ts
+      not-found/ui/not-found-page.tsx     # the screen behind every notFound()
+      not-found/index.ts
+      error/ui/error-page.tsx             # the screen both error boundaries render
+      error/index.ts
       listing-new/ui/new-listing-page.tsx
       listing-new/index.ts
       listing-edit/ui/edit-listing-page.tsx
@@ -71,19 +120,25 @@ apps/web/
       save-listing/ui/listing-form.tsx    # the one form the new and the edit screen run
       save-listing/api/save-listing-action.ts
       save-listing/index.ts
+      logout/ui/logout-button.tsx         # the browser's call: only it holds a refresh token
+      logout/index.ts
     entities/                 # a domain model a second page also needs (none yet)
     shared/                   # no domain knowledge: transport, routes, config
       api/http-client.ts      # apiRequest(), refreshSession(), the two errors
-      api/auth.ts             # authApi, currentUser(), requireUser(), requireRole()
+      api/auth.ts             # authApi, currentUser() — memoized, requireUser/requireRole
       api/session-cookies.ts  # the API's Set-Cookie, re-issued for this origin
       api/bookings.ts         # bookingsApi — the routes of the resource
       api/listings.ts         # listingsApi — the same, for the catalogue rows
       api/index.ts
       config/api-url.ts       # apiOrigin() and BFF_BASE_PATH
       config/routes.ts        # ROUTES — every path of this application
+      config/cache-tags.ts    # the names the cached public reads are stored under
       config/index.ts
       lib/form-errors.ts      # zod issues and API errors onto one shape for a form
       lib/next-path.ts        # a `?next=` that cannot leave this site
+      lib/dates.ts            # a calendar day is a YYYY-MM-DD string, read as UTC
+      lib/money.ts            # a price onto the screen, in one place
+      lib/not-found.ts        # a 404 from the API, and an id a URL cannot carry
       lib/index.ts
 ```
 
@@ -178,6 +233,41 @@ with the linter configured to match. The three that come up:
 - A file of the `ui/` segment is named after what it renders (`home-page.tsx`,
   `theme-toggle.tsx`), and the component inside it carries the same name.
 
+## The shell
+
+The frame around every page is `_app/layout`, and it is a sidebar beside the content
+rather than a row of links above it: the navigation grew a section per role, and a header
+is the wrong shape for a list that keeps growing.
+
+- **`AppShell` reads the session once, for the whole frame.** The sidebar, the sheet
+  behind the menu button and the header all render differently for a signed-in visitor,
+  and each of them reading `/auth/me` would be three round trips for one answer — the
+  transport gives up Next's per-render memoization in exchange for its timeout (see
+  `http-client.ts`), so nothing collapses them by itself. What the shell asks for is
+  handed down as a prop.
+- **`currentUser()` is memoized on top of that** (`cache()` from React, in `shared/api`),
+  which is what keeps the page under the shell from asking a fourth time. It takes no
+  `ReadOptions`, unlike every other read of that segment: the session is personal, so
+  `no-store` is the only answer a call site could give — and a function with no arguments
+  is one `cache()` can key.
+- **The footer is handed the session too**, and offers what the navigation offers: the
+  catalogue to everybody, the stays only to somebody who has any. A link to `/bookings`
+  left standing for a stranger is a click into `/login?next=/bookings` they never asked
+  for, and the two halves of the shell disagreeing about one section is exactly the drift
+  the single list below exists to stop.
+- **One list of links, drawn twice** (`navigation.ts`): the sidebar from `lg` up, the
+  sheet below it. Two lists would be two sets of role rules to keep in step, and those are
+  exactly the rules that drift. It offers, it does not permit — every section behind a
+  link answers the same way with or without one.
+- **The icons are imported by both sides rather than passed between them.** A component is
+  not data and cannot cross the RSC boundary, so `nav-links.tsx` computes the list itself
+  from the plain `User` the server hands it. What it needs the client for is `usePathname`
+  — which link is current is the one thing a server render cannot know about itself.
+- **Signing out belongs to the shell**, which is why `LogoutButton` is a feature rather
+  than a piece of the profile page: the account panel at the foot of the navigation runs
+  it, and so does `/profile`. Why it is a browser call and not a Server Action is in "The
+  session" below, and has not changed.
+
 ## Data and API
 
 - **Every call to the API goes through `src/shared/api`.** No `fetch` to the backend from a
@@ -186,6 +276,10 @@ with the linter configured to match. The three that come up:
 - **The routes live next to it, one file per resource**: `shared/api/bookings.ts` writes
   down method, path and the schema of the answer for each of them. A new endpoint means a
   new method there, a new resource means a sibling file — never a `fetch` at the call site.
+- **A query string is built there too, and it is sorted.** The URL is the key the Data
+  Cache stores an answer under, so two callers asking the same question have to produce
+  the same one or each of them warms an entry the other never reads. An absent filter is
+  left out rather than sent empty.
 - **The public API of the segment is the resource, not the transport**: `shared/api`
   exports `bookingsApi` and the two errors, while `apiRequest` stays inside it. A call
   site that cannot reach the transport cannot spell a path of its own.
@@ -242,6 +336,20 @@ with the linter configured to match. The three that come up:
   all — is a drift from the contract and has to propagate.
 - Response types and request schemas come from `@repo/contracts`. Do not describe the shape
   of a response by hand — that is the main source of drift from the backend.
+- **A calendar day is a `YYYY-MM-DD` string, and `shared/lib/dates.ts` is the only place
+  that turns one into an instant.** Midnight UTC is what each of them names, which is the
+  clock `createBookingSchema` compares a check-in against. Parsing one into the runtime's
+  own zone moves a stay by a day for anybody west of Greenwich and makes the server and
+  the browser disagree about the same string — which React reports as a hydration error
+  rather than as the bug it is. For the same reason "today" is computed on the server and
+  handed to a client component as a prop instead of being read on both sides.
+- **Money is the currency itself, exact to the cent** (`shared/lib/money.ts`). Nothing is
+  converted on the way to the screen — what the formatter adds is the second decimal a
+  stored `120` does not carry and the rounding a multiplication needs, because three
+  nights at 120.35 is `361.05000000000007` in binary floating point. It names its locale
+  so the server and the browser agree on the separators. Every value that travels back to
+  the API keeps the scale the contract gives it, and a box that takes a price steps in
+  cents rather than leaving the browser to allow a third decimal the action would refuse.
 - The error body is part of the contract too (`apiErrorSchema`): do not read
   `message`/`errors` out of an `unknown` body by hand.
 - Parse the API response with a schema (`bookingListSchema.parse(...)`) instead of casting
@@ -359,7 +467,8 @@ their refresh token, and only the browser can turn an expired session into a liv
   `register/api`) are the reason: cookies are written on the server, the same contract
   schema refuses an obvious mistake before a request is spent, and the form works before
   React has hydrated. A login is the one form on a site that has to.
-- **Closing one is the exception, and the cookie scope is why** (`profile/ui/logout-button.tsx`).
+- **Closing one is the exception, and the cookie scope is why**
+  (`features/logout/ui/logout-button.tsx`).
   Revoking a refresh family means handing the API the refresh token, and only the browser
   is ever given one: it is scoped to `/api/auth`, so a Server Action — which posts to the
   URL of the page it sits on — never receives it. An action would clear the cookies of a
@@ -370,7 +479,9 @@ their refresh token, and only the browser can turn an expired session into a liv
   would wipe what the visitor typed at the moment the message explaining it appears.
 - **The forms show what comes back under the same field names** —
   `shared/lib/form-errors.ts` maps a zod issue and an `apiErrorSchema` issue onto one
-  shape, because they are the same thing on two sides of the wire.
+  shape, because they are the same thing on two sides of the wire. `fieldMessages` is the
+  last step of it: every box of every form ends in the same line, and writing the map out
+  at each of them is one more place to hand a field its neighbour's messages.
 - **A `?next=` is a path of this site or it is nothing** (`shared/lib/next-path.ts`):
   `//evil.com` and `/\evil.com` are absolute URLs to a browser, and following one would
   make the login page an open redirect. The action checks it again after the page has:
@@ -399,13 +510,78 @@ this side decided.
   A new protected route is still a line in the matcher of `proxy.ts`.
 - **The header offers, it does not permit** (`_app/layout/header.tsx`). The link is
   rendered for the role that has a use for it; the section behind it answers the same way
-  whether or not the link was there.
+  whether or not the link was there. So does a button inside a page: the "Cancel" on a
+  stay is drawn for the guest who took it and for an admin, and an owner who may read that
+  stay is not offered it — the API refuses them either way, and what is being decided here
+  is what to put on the screen.
+- **A page can have one scope per role rather than one page per role**, and `/bookings` is
+  that case: `GET /bookings` narrows what it returns by the caller's role — a guest sees
+  the stays they took, an owner the stays taken against their listings, an admin all of
+  them — so the page has no filter to get wrong and the role only decides what to call the
+  list. A `?guestId=` in its place would be a rule to re-check on every request.
 - **Ownership of a row is read, not guessed** (`_pages/listing-edit/api/own-listing.ts`).
   Every signed-in role may read a listing — the catalogue is not a secret — so a row
   belonging to somebody else comes back with a 200 and would render a form the `PATCH`
   refuses. Inside the owner's own section that is the same 404 as a row that does not
   exist. The rule that matters still lives in `ListingService`, which compares the owner
   on every write.
+
+## Search, filters and the URL
+
+The catalogue's filters live in the address bar and nowhere else. There is no filter state
+in a component, because there is nothing for it to hold: the server renders from
+`searchParams`, and every control on the screen either submits a form or is a link.
+
+- **Every filter is a modal** (`catalogue-filters-dialog.tsx`), and the toolbar above the
+  list is two controls: the button that opens it, with a count of what is applied, and the
+  ordering. The screen is the chips and the stays, not a panel of boxes.
+- **The form inside it is a plain `GET` form.** Submitting it writes the filters into the
+  URL and the browser performs the navigation, so the dialog needs no action, no state and
+  nothing to keep in step with the boxes — and it does not have to close itself, because
+  the page it lands on is a new one.
+- **It carries `noValidate` like every other form here**, and this one has the sharper
+  reason. The boxes state `min` and `step` so the keypad offers the right thing, and the
+  browser would otherwise refuse a submit over them in its own words and its own place,
+  before `listingQuerySchema` has said anything. A search arrives out of a URL, so a value
+  the contract refuses reaches this dialog already filled in — and a submit the browser
+  blocks would leave a visitor with a box they cannot correct by pressing the only button
+  in front of them.
+- **What that costs is a search without JavaScript.** A dialog and a `<select>` both need
+  it, so a visitor whose scripts never arrive can read the catalogue and take a filter off
+  a search somebody sent them — a chip is still a link — but cannot ask a question of their
+  own. That is the trade the compact toolbar is, and it is the one thing to weigh before
+  moving another control behind a door.
+- **The boxes are one field component** (`filter-field.tsx`), and it derives the `id` from
+  the field name rather than taking it as a prop: the boxes are portalled into the dialog,
+  and a label pointing at a bare `from` would follow whatever else on the page carries
+  that id.
+- **A chip is a link that removes one filter** (`active-filters.tsx`, `activeFilters` in
+  `lib/catalogue-search.ts`). Removing a filter is another address, so it needs neither
+  JavaScript nor an action, it survives a reload, and Back undoes it.
+- **The dates are one chip, not two.** `listingQuerySchema` refuses half a range, so a
+  chip that took away only the check-in would write a link the catalogue cannot answer.
+- **The ordering is a select over the same four links** (`catalogue-sort.tsx`,
+  `sortOptions` in `lib/catalogue-search.ts`). Choosing one navigates to the address that
+  option writes, so it is still a value of the URL: it can be sent to somebody else and
+  Back undoes it. The set comes from `listingSortSchema.options`, so a fifth ordering
+  added to the contract appears in the box with a label and nothing else to remember. Each
+  option drops the cursor, and has to: the API issues one under the ordering it was asked
+  for and refuses it under another.
+- **The default ordering leaves no trace in the URL.** `newest` is what the contract picks
+  for a catalogue nobody has asked anything of, so the link to it is the bare `/listings`
+  rather than `?sort=newest`. An ordering the contract refused marks no option as chosen —
+  the parse has already refused the search, and the message under the box says so.
+- **Sorting is not a filter**, and two places say so: it gets no chip — there is no
+  unordered catalogue to fall back to — and "Clear all" keeps it (`clearedFiltersHref`).
+  What it does travel in is every link this slice writes and the dialog's form, as a hidden
+  box beside the prices: a form submits every field it has, so without one showing the
+  stays would put them back in the order they were published.
+- **A filter the contract refused is still shown as it was typed.** It came out of a URL
+  like every other one; the parse has already refused the search, and the chip is what
+  lets a visitor take the refusal off again.
+- **A value a box cannot show is still reported.** Every box lives inside the dialog now,
+  so every message about one is repeated in the toolbar — a refusal behind a closed door
+  is a page that looks broken for no stated reason.
 
 ## Mutations and revalidation
 
@@ -444,12 +620,43 @@ How the result is made visible, by what kind of data it is:
 - A cached read has to name its tags at the call site, in the `ReadOptions` the read
   methods already take. Nothing checks that a tag exists; the linter cannot see it, so it
   is a matter of review.
+- **A tag does not cache anything by itself, so `revalidate` is not optional.** A `fetch`
+  has not been cached by default since Next 15: the decision is read off `cache` and
+  `revalidate`, and a request naming neither becomes a `no-store` with its tags attached
+  to nothing — `{ next: { tags } }` looks like caching and is not, and the mutation
+  invalidating that tag then has nothing to invalidate. It fails by being fresh, which is
+  why nothing reports it. `ReadOptions` requires the field for that reason, and a read
+  whose only invalidation is its tag says `revalidate: false` — `listingTag(id)` is that
+  case, while the two reads a lapsing hold changes carry the minute below instead.
+- **The names live in `shared/config/cache-tags.ts`**, for the same reason `ROUTES` does:
+  a tag is a string a read and a mutation have to spell the same way, and a typo in either
+  half is a page that never updates or one that updates for nothing.
+- **A tag is named after what a write changes, not after what a read shows.** There are
+  three — `CATALOGUE_TAG`, `listingTag(id)`, `availabilityTag(id)` — because editing a
+  listing changes the row and the catalogue but not who has booked it, and taking a
+  booking changes what is free without touching the row. Tagging the availability with
+  the row's tag would make every edit refetch every calendar and every booking refetch
+  every row.
+- **A read whose answer changes on a timer needs a lifetime as well as a tag**, and the
+  two reads a hold affects are the case. A `PENDING_PAYMENT` hold lapses fifteen minutes
+  after it was taken and puts its nights back on offer; nothing on this side mutates when
+  it does, because the API releases it from a queue. So the catalogue and the availability
+  carry `next: { revalidate: 60, tags }` — a minute, which is the interval of the sweep
+  behind that queue rather than a number picked for the feel of it.
+- **Both halves of a write, in that order**: `updateTag` for the tag the author is about
+  to read, `revalidateTag(tag, "max")` for the tags everybody else reads. The first makes
+  the next request wait for a fresh answer, which is what stops an author's own save
+  reading as lost; the second serves the previous answer while a new one is fetched
+  behind it, which is what the rest of the site should get. `refresh()` after them is a
+  third thing again — it throws away the router cache in the browser that made the
+  request, and is what a `no-store` read needs, since none of it is in the Data Cache.
 
 ### Confirming a destructive action
 
 A mutation nobody can undo — deleting a row, revoking access, anything the API answers
 with a `DELETE` — asks first, in an `AlertDialog` from `@repo/ui`
-(`_pages/listing-edit/ui/delete-listing-button.tsx` is the one so far). Not a second
+(`_pages/listing-edit/ui/delete-listing-button.tsx` and
+`_pages/bookings/ui/cancel-booking-button.tsx`). Not a second
 button that takes the place of the first: a modal takes the focus and refuses a click
 outside itself, which is what stops the confirmation being hit by the hand that was
 already moving.
@@ -459,11 +666,35 @@ already moving.
   belonging to that form. `className="contents"` on the `<form>` keeps the grid of the
   dialog intact around it.
 - **The dialog stays open when the action comes back with a message.** A refusal the form
-  could not prevent — a `404` for a row an admin retired first, an unreachable API —
-  belongs next to the button that provoked it, under the same `FormErrors` shape every
-  other form shows. A success never reaches that branch: the action redirects.
+  could not prevent — a `404` for a row an admin retired first or for a hold that lapsed
+  while the dialog was open, an unreachable API — belongs next to the button that
+  provoked it, under the same `FormErrors` shape every other form shows.
+- **A success does not have to redirect.** Deleting a listing does, because the screen it
+  was on is now a 404; cancelling a stay does not, because the row belongs exactly where
+  it is and only has a different status. What that one returns is `NO_FORM_ERRORS` and a
+  `refresh()`, and the list re-renders behind the closing dialog.
 - **What is reversible does not ask.** Signing out is a click away from being undone, and
   a dialog in front of it only adds one. The rule is the undo, not the danger of the word.
+
+## Waiting, and failing
+
+- **A route that reads the API has a `loading.tsx`**, and it is a one-line re-export like
+  every other file in `app/`: the skeleton itself is a component of the page's own slice.
+  What it draws is the shape of the screen it precedes, so nothing jumps when the answer
+  arrives.
+- **`not-found.tsx` is reached far more often than by a mistyped URL.** Every id that
+  cannot name a row arrives there (`requireId`, `orNotFound`), so does a retired listing,
+  and so does an owner's section opened by somebody who is not one.
+- **Two error boundaries, because they catch different things.** `error.tsx` catches what
+  a page throws; it cannot catch what the layout above it throws, and this shell reads the
+  session before it renders anything — so an API that cannot be reached at all fails
+  there. `global-error.tsx` is that case, and it replaces the document, which is why it
+  brings its own `<html>`, `<body>` and token import. Next.js decides from the file itself
+  whether a boundary is a Client Component, so both of those `app/` files carry the
+  directive as well as re-exporting one.
+- **Neither of them explains the failure.** What reaches a boundary is a drift from the
+  contract or a 500, and both are for the console. The two failures a visitor can act on
+  are already messages beside the form that provoked them.
 
 ## Styling and components
 
@@ -506,6 +737,18 @@ belongs in the same step.
   knowledge at all moves into `@repo/ui`.
 - Base UI composes through the `render` prop, not through the `asChild` of Radix:
   `<PopoverTrigger render={<Button ... />} />`.
+- **A link that looks like a button is a `<Link>` wearing the classes**, not a `Button`
+  rendering a link: `<Link href={...} className={buttonVariants({ variant, size })}>`, and
+  `cn(buttonVariants({ ... }), "...")` where the screen adds classes of its own, so
+  `tailwind-merge` resolves a conflict the way it does inside the primitive. `Button` keeps
+  the `nativeButton` promise of Base UI — that what its `render` prop produces is a real
+  `<button>` — and an `<a>` in there breaks it: the console says so in development, and
+  what it costs is the form and accessibility semantics of the element.
+  `nativeButton={false}` silences the message and is still the wrong shape here — it puts
+  button behaviour on a link rather than leaving a link a link. So the rule is by intent:
+  navigation is an anchor, an action is a `Button`. Every trigger that composes one
+  (`DialogTrigger`, `AlertDialogTrigger`) is unaffected — a `Button` inside one is still a
+  `<button>`.
 - The theme is `next-themes` with the class strategy (`src/_app/providers/providers.tsx`). A
   component that reads the theme renders on the server too — hence the `mounted` guard in
   `src/_app/layout/theme-toggle.tsx`.
@@ -539,12 +782,16 @@ them to drift, so they are not there. The trade is that an architectural mistake
 when the lint runs rather than while typing; `steiger ./src --watch` closes that gap
 during work on the structure.
 
-Two rules are switched off there, each with the reason next to it: `typo-in-layer-name`
-for `_app` and `_pages` (Steiger has no setting for the renaming the Next.js guide
-prescribes, and reads the prefix as a misspelling), and `no-segmentless-slices` inside
-`_app` (it reads that prefixed layer as a sliced one and asks each segment to be divided
-again). Everything else is on, `insignificant-slice` included — that one is what keeps
-"pages first" honest. Do not silence anything else without writing down why.
+Three rules are switched off there, each with the reason next to it, and all three are the
+same renaming showing through: `typo-in-layer-name` for `_app` and `_pages` (Steiger has
+no setting for the renaming the Next.js guide prescribes, and reads the prefix as a
+misspelling), `no-segmentless-slices` inside `_app` (it reads that prefixed layer as a
+sliced one and asks each segment to be divided again), and `insignificant-slice` for
+`features/logout` alone (the rule counts references between slices, and the shell's
+account panel is a segment of a layer Steiger reads as sliceless — so the second consumer
+of that slice is invisible to it). Everything else is on, `insignificant-slice` for every
+other slice included — that one is what keeps "pages first" honest. Do not silence
+anything else without writing down why.
 
 `--max-warnings 0` means a warning equals an error. On top of that the shared config
 enables `eslint-plugin-only-warn`, which downgrades every error to a warning — so the lint
@@ -562,11 +809,19 @@ What has a spec here is narrow on purpose, and the rule is worth stating so the 
 not drift into testing the framework: **logic a reviewer cannot re-check by reading it once**
 — a parser whose input somebody else writes, a security gate, or an invariant that only
 breaks under concurrency or a malformed answer. Four kinds, all in `src/shared` or `_app`
-because that is where this logic lives, none of them a component:
+because that was where this logic lived until the catalogue arrived — the two specs in
+`_pages/` are the same four kinds, on a layer rather than in a layer. None of them is a
+component:
 
 - A parser of untrusted input — `shared/lib/next-path.ts` (where a visitor is sent after
-  signing in) and the `Set-Cookie` reader inside `shared/api/session-cookies.ts` (what
-  becomes a cookie of this origin).
+  signing in), the `Set-Cookie` reader inside `shared/api/session-cookies.ts` (what
+  becomes a cookie of this origin) and `_pages/catalogue/lib/catalogue-search.ts`
+  (`searchParams` onto the contract's query: what a blank box means, what a repeated
+  parameter means, that the link the page writes parses back to the search it came from,
+  what each chip's link takes off — a chip that dropped the wrong half of a date range
+  would write a link the catalogue answers with a refusal — and what the ordering's own
+  links carry, since one that lost a filter or kept a cursor would answer a different
+  question than the one on the screen).
 - A security gate — `_app/proxy/proxy.ts`, which decides whether a request reaches a page
   or is bounced to `/login?next=…`.
 - A concurrency or protocol invariant — the single-flight session refresh and the
@@ -574,8 +829,11 @@ because that is where this logic lives, none of them a component:
   (a second rotation spent on an already-refreshed session, a retry loop) that only shows up
   under a race or a specific server answer, not by reading the function.
 - A mapping with more than one rule to keep straight — `shared/lib/form-errors.ts` (a zod
-  issue and an `apiErrorSchema` issue reduced to one shape) and `shared/config/api-url.ts`
-  (the trailing slash, the missing-env failure, the module-level cache).
+  issue and an `apiErrorSchema` issue reduced to one shape), `shared/config/api-url.ts`
+  (the trailing slash, the missing-env failure, the module-level cache) and
+  `_pages/listing/lib/months.ts` (the half-open range the calendar shades, the month
+  rollover, the Monday-first offset — a stay's check-out day drawn as taken would be a
+  free night the screen refuses to sell).
 
 A component is not tested: one that would break is one `check-types` and Steiger already
 refuse. Nor is a Server Action's own body once it is only forwarding to `authApi` and

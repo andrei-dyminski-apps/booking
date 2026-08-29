@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { z } from "zod";
 import { notFound, redirect } from "next/navigation";
 import {
@@ -78,10 +79,22 @@ export const authApi = {
  * failure — the token is missing, expired, or its user has been deleted — and a screen
  * that renders differently for a guest wants that as a value, not as an exception. Every
  * other status stays an error.
+ *
+ * It takes no `ReadOptions`, unlike every other read of this segment, and that is the
+ * point rather than an omission: the session is personal, the Data Cache is keyed by URL
+ * and shared between visitors, so `no-store` is the only answer a call site could give.
+ * Nothing to decide is what makes the read below memoizable.
+ *
+ * Once per render, and it has to be said out loud because the transport gives up the
+ * memoization Next.js would have performed for it: `AbortSignal.timeout` opts a request
+ * out of the per-render cache (see `http-client.ts`), so the shell asking who is signed
+ * in and the page under it asking the same question were two round trips to the API on
+ * every single render. `cache()` from React is the request-scoped one that survives that
+ * — it keys on the arguments, which is the second reason this function has none.
  */
-export async function currentUser(read: ReadOptions): Promise<User | null> {
+export const currentUser = cache(async (): Promise<User | null> => {
   try {
-    return await authApi.me(read);
+    return await authApi.me({ cache: "no-store" });
   } catch (error) {
     if (
       error instanceof ApiResponseError &&
@@ -92,7 +105,7 @@ export async function currentUser(read: ReadOptions): Promise<User | null> {
 
     throw error;
   }
-}
+});
 
 /**
  * The same read for a page that has nothing to show a stranger. The proxy has already
@@ -106,7 +119,7 @@ export async function currentUser(read: ReadOptions): Promise<User | null> {
  * anyway.
  */
 export async function requireUser(next: string): Promise<User> {
-  const user = await currentUser({ cache: "no-store" });
+  const user = await currentUser();
 
   if (user !== null) return user;
 

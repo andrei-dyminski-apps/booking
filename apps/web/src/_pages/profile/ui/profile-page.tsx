@@ -5,15 +5,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
+import { LogoutButton } from "#features/logout";
 import { requireUser } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { LogoutButton } from "./logout-button";
-
-/** An explicit locale and zone, or the server and the browser would disagree on both. */
-const memberSince = new Intl.DateTimeFormat("en-GB", {
-  dateStyle: "long",
-  timeZone: "UTC",
-});
+import { formatDate } from "#shared/lib";
 
 export const ProfilePage = async () => {
   const user = await requireUser(ROUTES.profile);
@@ -36,7 +31,7 @@ export const ProfilePage = async () => {
           <dd>{user.role}</dd>
 
           <dt className="text-muted-foreground">Member since</dt>
-          <dd>{memberSince.format(new Date(user.createdAt))}</dd>
+          <dd>{formatDate(user.createdAt)}</dd>
         </dl>
 
         <LogoutButton />

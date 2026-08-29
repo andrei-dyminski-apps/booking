@@ -1,7 +1,7 @@
 /**
  * A stay's date range, as the contract speaks it: two `YYYY-MM-DD` strings, check-out
  * exclusive. Pure string/'`Date`' arithmetic, no Prisma — the repository turns these into
- * `@db.Date` columns, and phase 5 turns `nights` into a price.
+ * `@db.Date` columns, and phase 6 turns `nights` into a price.
  *
  * Whether two ranges overlap is deliberately not here. It is asked in exactly two places,
  * and both of them are the database: the `where` of the check inside the locking

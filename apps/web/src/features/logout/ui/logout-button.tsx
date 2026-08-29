@@ -2,12 +2,18 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { LogOutIcon } from "lucide-react";
 import { Button } from "@repo/ui/components/button";
+import { cn } from "@repo/ui/lib/utils";
 import { authApi } from "#shared/api";
 import { ROUTES } from "#shared/config";
 import { toFormErrors } from "#shared/lib";
 
 /**
+ * A feature rather than a piece of the profile page, because the shell offers it too: the
+ * sidebar of a signed-in visitor ends in it, and having to walk to `/profile` to close a
+ * session was the one thing the navigation could not do.
+ *
  * The one mutation of the session that cannot be a Server Action, and the cookie scopes
  * are the reason. Ending a session means revoking the refresh family, and the API can only
  * be handed the refresh token by the side that holds it: it is scoped to the `/auth` path
@@ -20,7 +26,14 @@ import { toFormErrors } from "#shared/lib";
  * mirroring that issued them, and `router.refresh()` is what re-renders the shell for a
  * stranger — the client-side half of the `refresh()` the other two actions call.
  */
-export const LogoutButton = () => {
+export const LogoutButton = ({
+  variant = "outline",
+  className,
+}: {
+  /** The shell asks for a quieter one; the profile card keeps the outlined default. */
+  variant?: "outline" | "ghost";
+  className?: string;
+}) => {
   const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -43,13 +56,14 @@ export const LogoutButton = () => {
   };
 
   return (
-    <div className="flex flex-col items-start gap-2">
+    <div className={cn("flex flex-col items-stretch gap-2", className)}>
       <Button
         type="button"
-        variant="outline"
+        variant={variant}
         onClick={signOut}
         disabled={pending}
       >
+        <LogOutIcon />
         {pending ? "Signing out…" : "Sign out"}
       </Button>
 

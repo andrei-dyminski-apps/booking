@@ -33,4 +33,16 @@ export default defineConfig([
       "fsd/no-segmentless-slices": "off",
     },
   },
+  {
+    // The same renaming, seen from the other end. This slice has two consumers — the
+    // profile page and the shell's account panel — but the rule counts references
+    // between slices, and the shell's are segments of a layer Steiger reads as sliceless.
+    // So the app layer's use of it is invisible to the count and the slice reads as
+    // having a single consumer. The rule stays on everywhere else, which is what keeps
+    // "pages first" honest; this is the one place it cannot see the second consumer.
+    files: ["./src/features/logout/**"],
+    rules: {
+      "fsd/insignificant-slice": "off",
+    },
+  },
 ]);

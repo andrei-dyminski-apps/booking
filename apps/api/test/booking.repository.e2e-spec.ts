@@ -66,7 +66,7 @@ describe("BookingRepository foreign keys (e2e)", () => {
         ownerId: owner.id,
         title: "Cabin by the lake",
         description: "Two rooms, a jetty and no neighbours.",
-        pricePerNight: 12_000,
+        pricePerNight: 120,
         capacity: 4,
       },
     });
@@ -145,6 +145,37 @@ describe("BookingRepository foreign keys (e2e)", () => {
     await expect(
       bookingRepository.create(randomUUID(), { listingId, ...dates }),
     ).rejects.toThrow(GuestNotFoundError);
+  });
+
+  /**
+   * `lapsedHolds` and `holdsTheSlot` are written around `expires_at`, and under SQL's
+   * three-valued logic a `PENDING_PAYMENT` row without one makes both of them NULL: a hold
+   * no read of this repository can see, that no sweep can ever release, and that the
+   * `EXCLUDE` constraint — which filters on the status alone — goes on counting. The
+   * catalogue would offer nights `POST /bookings` then refuses, permanently.
+   *
+   * Nothing in this codebase writes such a row, which is exactly why the assumption is
+   * worth pinning to the database rather than to a reading of `create`. The insert is
+   * therefore raw: through the repository the case is unreachable by construction.
+   */
+  it("refuses a hold with no deadline at all", async () => {
+    await expect(
+      prismaService.$executeRaw`
+        INSERT INTO bookings (id, listing_id, guest_id, from_date, to_date, status, expires_at)
+        VALUES (gen_random_uuid(), ${listingId}::uuid, ${guestId}::uuid,
+                ${dates.from}::date, ${dates.to}::date, 'PENDING_PAYMENT', NULL)
+      `,
+    ).rejects.toThrow(/bookings_hold_has_deadline/);
+
+    // The statuses that no longer hold by a deadline keep the right to have none — which
+    // is what the seed writes.
+    await expect(
+      prismaService.$executeRaw`
+        INSERT INTO bookings (id, listing_id, guest_id, from_date, to_date, status, expires_at)
+        VALUES (gen_random_uuid(), ${listingId}::uuid, ${guestId}::uuid,
+                ${dates.from}::date, ${dates.to}::date, 'CONFIRMED', NULL)
+      `,
+    ).resolves.toBe(1);
   });
 
   // Both at once resolves to whichever key Postgres checks first, and the point is only

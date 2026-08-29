@@ -5,10 +5,10 @@
 -- btree_gist lets a GiST index mix the equality on "listing_id" with the range overlap.
 -- The range is half-open, '[)': a stay that starts on the day another ends is not an
 -- overlap — check-out is the morning the room is free again, the same rule the strict
--- inequalities in BookingRepository.findOverlapping already apply.
+-- inequalities of `overlapping` in BookingRepository already apply.
 --
 -- Only PENDING_PAYMENT and CONFIRMED take part: a cancelled or expired booking keeps its
--- row (phase 5 refunds need it) but no longer holds the slot.
+-- row (phase 6 refunds need it) but no longer holds the slot.
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 ALTER TABLE "bookings"

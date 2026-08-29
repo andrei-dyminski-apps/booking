@@ -108,10 +108,8 @@ describe("OpenAPI document (e2e)", () => {
       ["/bookings", "get"],
       ["/bookings", "post"],
       ["/bookings/{id}", "delete"],
-      ["/listings", "get"],
       ["/listings", "post"],
       ["/listings/mine", "get"],
-      ["/listings/{id}", "get"],
       ["/listings/{id}", "patch"],
       ["/listings/{id}", "delete"],
     ] as const) {
@@ -134,10 +132,12 @@ describe("OpenAPI document (e2e)", () => {
       expect(operation(path, method).responses?.["403"]).toBeDefined();
     }
 
-    // And absent from the routes every signed-in role may call.
+    // And absent from the routes no role check stands in front of — the open ones
+    // included, where there is no role to name in the first place.
     for (const [path, method] of [
       ["/listings", "get"],
       ["/listings/{id}", "get"],
+      ["/listings/{id}/availability", "get"],
       ["/bookings", "get"],
       ["/bookings/{id}", "get"],
     ] as const) {
@@ -205,6 +205,10 @@ describe("OpenAPI document (e2e)", () => {
       ["/auth/login", "post"],
       ["/auth/refresh", "post"],
       ["/auth/logout", "post"],
+      // The catalogue and everything a browsing visitor reads of it.
+      ["/listings", "get"],
+      ["/listings/{id}", "get"],
+      ["/listings/{id}/availability", "get"],
     ] as const) {
       // An empty requirement object is how OpenAPI 3 spells "no credential needed", and an
       // operation-level `security` replaces the root one rather than adding to it.

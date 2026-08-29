@@ -10,7 +10,7 @@ import {
   FieldLabel,
 } from "@repo/ui/components/field";
 import { Input } from "@repo/ui/components/input";
-import { NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
+import { fieldMessages, NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
 import { loginAction } from "../api/login-action";
 import { useSessionResume } from "../model/use-session-resume";
 
@@ -44,9 +44,7 @@ export const LoginForm = ({ next }: { next: string }) => {
             aria-invalid={errors.fields.email !== undefined}
             disabled={pending}
           />
-          <FieldError
-            errors={errors.fields.email?.map((message) => ({ message }))}
-          />
+          <FieldError errors={fieldMessages(errors.fields.email)} />
         </Field>
 
         <Field data-invalid={errors.fields.password !== undefined}>
@@ -63,9 +61,7 @@ export const LoginForm = ({ next }: { next: string }) => {
             aria-invalid={errors.fields.password !== undefined}
             disabled={pending}
           />
-          <FieldError
-            errors={errors.fields.password?.map((message) => ({ message }))}
-          />
+          <FieldError errors={fieldMessages(errors.fields.password)} />
         </Field>
 
         {errors.message !== null && <FieldError>{errors.message}</FieldError>}

@@ -13,9 +13,11 @@ import { ListingModule } from "./listing/listing.module";
 
 @Module({
   imports: [
-    // A ceiling per address for the whole API. The tight limit that matters is on the auth
-    // routes and lives next to them (@Throttle in AuthController) — this one only keeps a
-    // single client from monopolising the service.
+    // A ceiling per address for the whole API: this one only keeps a single client from
+    // monopolising the service. What a route actually needs lives next to it, in both
+    // directions — @Throttle in AuthController tightens it to 10 where an attempt costs
+    // 64 MB of argon2, and in ListingController it widens it for the three public reads,
+    // whose address is the frontend's rather than a visitor's once they are cached there.
     ThrottlerModule.forRoot({
       throttlers: [{ ttl: minutes(1), limit: 120 }],
     }),

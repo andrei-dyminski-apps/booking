@@ -1,11 +1,12 @@
 import { TZDate } from "@date-fns/tz";
 import { format } from "date-fns";
 import { z } from "zod";
+import { listingSummarySchema } from "./listing.js";
 
 /**
  * The lifecycle of a stay, mirrored by the `BookingStatus` enum of the Prisma schema.
  * `PENDING_PAYMENT` is a hold — the slot is taken while the guest pays, and `expiresAt`
- * is when the hold lapses. `CONFIRMED` is a paid stay (phase 5). `CANCELLED` and
+ * is when the hold lapses. `CONFIRMED` is a paid stay (phase 6). `CANCELLED` and
  * `EXPIRED` are terminal and free the slot: only the first two are "active", which is the
  * set the overlap rule and the database `EXCLUDE` constraint act on.
  */
@@ -30,6 +31,14 @@ export const BookingStatus = bookingStatusSchema.enum;
 export const bookingSchema = z.object({
   id: z.uuid(),
   listingId: z.uuid(),
+  /**
+   * Where the stay is, resolved whether or not the listing is still offered. That is the
+   * whole reason it is here: retiring a listing keeps the row so a booking can go on
+   * naming it, but `GET /listings/:id` answers `404` for a retired one — to its guest as
+   * much as to a stranger — and that read is public and cached by URL, so it is not the
+   * place to make an exception for whoever holds a stay. See `listingSummarySchema`.
+   */
+  listing: listingSummarySchema,
   guestId: z.uuid(),
   from: z.iso.date(),
   to: z.iso.date(),
@@ -57,11 +66,14 @@ const today = (): string => format(TZDate.tz("UTC"), "yyyy-MM-dd");
 /**
  * `guestId` comes from the session, so a request cannot book in another person's name.
  * `status` and `expiresAt` are the server's to set — a booking is always created as a
- * hold, and the deadline is computed from the server clock.
+ * hold, and the deadline is computed from the server clock. `listing` is omitted for the
+ * same reason: `listingId` is what a request names, and what that id resolves to is the
+ * server's answer rather than the client's claim.
  */
 export const createBookingSchema = bookingSchema
   .omit({
     id: true,
+    listing: true,
     guestId: true,
     status: true,
     expiresAt: true,

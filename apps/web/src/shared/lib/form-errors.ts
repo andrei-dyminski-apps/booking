@@ -52,3 +52,18 @@ export function toFormErrors(error: unknown): FormErrors {
 
   throw error;
 }
+
+/**
+ * The messages of one field in the shape `FieldError` renders them. Every box of every
+ * form here ends in the same line, and writing the map out at each of them is one more
+ * place to hand a field the messages of its neighbour.
+ *
+ * `undefined` rather than an empty array is what a field with nothing wrong with it has
+ * to pass on: `FieldError` renders nothing for it, and the same `undefined` is what the
+ * `data-invalid` and `aria-invalid` beside it are read from.
+ */
+export function fieldMessages(
+  messages: string[] | undefined,
+): { message: string }[] | undefined {
+  return messages?.map((message) => ({ message }));
+}

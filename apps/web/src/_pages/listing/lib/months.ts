@@ -1,0 +1,80 @@
+import type { BookedRange } from "@repo/contracts";
+
+/** One cell of the calendar. A day is either on offer, already taken, or behind us. */
+export type CalendarDay = {
+  day: string;
+  taken: boolean;
+  past: boolean;
+};
+
+export type CalendarMonth = {
+  label: string;
+  /** Empty cells before the 1st, so it lands under the weekday it falls on. */
+  offset: number;
+  days: CalendarDay[];
+};
+
+/**
+ * The window the API answered about, laid out as months.
+ *
+ * The one rule worth stating is the comparison: a range is half-open, `from` inclusive and
+ * `to` exclusive, because a night is what a stay takes and the check-out day is not one.
+ * That is the same `[)` the database excludes on and the same strict inequality the
+ * locking transaction compares with, so a stay ending on the 9th and one starting on it
+ * are drawn back to back rather than as a conflict.
+ *
+ * A range reaching past either end of the window arrives whole rather than clipped, which
+ * is what lets the last drawn day know the nights continue; the comparison below needs no
+ * special case for it.
+ *
+ * The days are `YYYY-MM-DD` strings throughout and compare lexicographically, so nothing
+ * here parses one into a local `Date` — see `shared/lib/dates.ts` for why that matters.
+ */
+export function buildMonths(
+  anchor: string,
+  count: number,
+  booked: readonly BookedRange[],
+  today: string,
+): CalendarMonth[] {
+  const start = new Date(`${anchor}T00:00:00.000Z`);
+  const months: CalendarMonth[] = [];
+
+  for (let index = 0; index < count; index += 1) {
+    const first = new Date(
+      Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + index, 1),
+    );
+    const days: CalendarDay[] = [];
+
+    for (
+      const cursor = new Date(first);
+      cursor.getUTCMonth() === first.getUTCMonth();
+      cursor.setUTCDate(cursor.getUTCDate() + 1)
+    ) {
+      const day = cursor.toISOString().slice(0, 10);
+
+      days.push({ day, taken: isTaken(day, booked), past: day < today });
+    }
+
+    months.push({
+      label: monthLabel.format(first),
+      // The week starts on Monday here, and `getUTCDay` counts from Sunday.
+      offset: (first.getUTCDay() + 6) % 7,
+      days,
+    });
+  }
+
+  return months;
+}
+
+/** Monday first, matching the offset above. */
+export const WEEKDAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] as const;
+
+const monthLabel = new Intl.DateTimeFormat("en-GB", {
+  month: "long",
+  year: "numeric",
+  timeZone: "UTC",
+});
+
+function isTaken(day: string, booked: readonly BookedRange[]): boolean {
+  return booked.some((range) => range.from <= day && day < range.to);
+}

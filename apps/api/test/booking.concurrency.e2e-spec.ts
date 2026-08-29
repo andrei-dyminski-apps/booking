@@ -16,7 +16,7 @@ import { signInAs, type Agent } from "./session";
 const listingInput: CreateListingInput = {
   title: "Loft above the harbour",
   description: "Two rooms under the roof and a wall of glass facing the water.",
-  pricePerNight: 12000,
+  pricePerNight: 120,
   capacity: 4,
 };
 

@@ -27,28 +27,63 @@ const users = [
   { email: "admin@example.com", role: Role.ADMIN },
 ];
 
-/** Prices are minor units, the way the column stores them: 12000 is 120.00 a night. */
+/** Prices are the currency itself, to the cent: 120 is a hundred and twenty a night. */
 const listings = [
   {
     title: "Loft above the harbour",
     description:
       "Two rooms under the roof, a wall of glass facing the water and a kitchen that fits four.",
-    pricePerNight: 12000,
+    pricePerNight: 120,
     capacity: 4,
   },
   {
     title: "Cottage at the edge of the pines",
     description:
       "A wood stove, a long table and nothing within earshot but the forest road.",
-    pricePerNight: 8500,
+    pricePerNight: 85,
     capacity: 6,
   },
   {
     title: "Studio on the market square",
     description:
       "One room, one window over the awnings, and every tram line within a minute's walk.",
-    pricePerNight: 5400,
+    pricePerNight: 54,
     capacity: 2,
+  },
+  {
+    title: "Farmhouse with the long table",
+    description:
+      "Six bedrooms, a kitchen built for a crowd and a field that ends at the river.",
+    pricePerNight: 210,
+    capacity: 12,
+  },
+  {
+    title: "Attic room off the canal",
+    description:
+      "A bed under the beams, a desk at the window and the water two floors down.",
+    pricePerNight: 39,
+    capacity: 1,
+  },
+  {
+    title: "Beach house on stilts",
+    description:
+      "A deck facing west, an outdoor shower and sand from the bottom step onwards.",
+    pricePerNight: 165,
+    capacity: 8,
+  },
+  {
+    title: "Vineyard cottage",
+    description:
+      "Two rooms at the end of a row of vines, with the press house for a neighbour.",
+    pricePerNight: 98,
+    capacity: 3,
+  },
+  {
+    title: "Cabin at the tree line",
+    description:
+      "A stove, a drying rack for boots and the last road before the path takes over.",
+    pricePerNight: 72,
+    capacity: 4,
   },
 ];
 
@@ -64,12 +99,18 @@ function inDays(days: number): Date {
   );
 }
 
-/** Indexes into `listings`; the ids only exist once the rows are written. */
+/**
+ * Indexes into `listings`; the ids only exist once the rows are written. Several listings
+ * are left with no stay at all on purpose: the catalogue's date filter has to have
+ * something to keep as well as something to drop.
+ */
 const bookings = [
   { listing: 0, from: inDays(10), to: inDays(14) },
   { listing: 0, from: inDays(19), to: inDays(21) },
   { listing: 1, from: inDays(12), to: inDays(16) },
   { listing: 2, from: inDays(40), to: inDays(53) },
+  { listing: 3, from: inDays(5), to: inDays(9) },
+  { listing: 6, from: inDays(30), to: inDays(37) },
 ];
 
 async function main(): Promise<void> {

@@ -10,13 +10,14 @@ import {
 import { ListingForm } from "#features/save-listing";
 import { requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
+import { requireId } from "#shared/lib";
 import { ownListing } from "../api/own-listing";
 import { DeleteListingButton } from "./delete-listing-button";
 
 export const EditListingPage = async ({
   params,
 }: PageProps<"/dashboard/listings/[id]">) => {
-  const { id } = await params;
+  const id = requireId((await params).id);
   const owner = await requireRole(Role.OWNER, ROUTES.editListing(id));
   const listing = await ownListing(owner.id, id);
 

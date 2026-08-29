@@ -10,7 +10,7 @@ import {
   FieldLabel,
 } from "@repo/ui/components/field";
 import { Input } from "@repo/ui/components/input";
-import { NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
+import { fieldMessages, NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
 import { registerAction } from "../api/register-action";
 
 export const RegisterForm = ({ next }: { next: string }) => {
@@ -40,9 +40,7 @@ export const RegisterForm = ({ next }: { next: string }) => {
             aria-invalid={errors.fields.email !== undefined}
             disabled={pending}
           />
-          <FieldError
-            errors={errors.fields.email?.map((message) => ({ message }))}
-          />
+          <FieldError errors={fieldMessages(errors.fields.email)} />
         </Field>
 
         <Field data-invalid={errors.fields.password !== undefined}>
@@ -59,9 +57,7 @@ export const RegisterForm = ({ next }: { next: string }) => {
             aria-invalid={errors.fields.password !== undefined}
             disabled={pending}
           />
-          <FieldError
-            errors={errors.fields.password?.map((message) => ({ message }))}
-          />
+          <FieldError errors={fieldMessages(errors.fields.password)} />
           <FieldDescription>At least 8 characters.</FieldDescription>
         </Field>
 

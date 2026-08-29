@@ -22,5 +22,8 @@ import {
     BookingExpiryQueue,
     BookingExpiryProcessor,
   ],
+  // ListingService reads the availability of a listing through it — the stays are booking
+  // rows, so the query and their date mapping stay on this side of the wall.
+  exports: [BookingRepository],
 })
 export class BookingModule {}

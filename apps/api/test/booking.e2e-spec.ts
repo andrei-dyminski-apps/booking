@@ -20,7 +20,7 @@ import { credentialsFor, signInAs, type Agent } from "./session";
 const listingInput: CreateListingInput = {
   title: "Loft above the harbour",
   description: "Two rooms under the roof and a wall of glass facing the water.",
-  pricePerNight: 12000,
+  pricePerNight: 120,
   capacity: 4,
 };
 
@@ -86,6 +86,31 @@ describe("BookingController (e2e)", () => {
     expect(
       Date.parse(String(booking.expiresAt)) - Date.parse(booking.createdAt),
     ).toBeCloseTo(HOLD_TTL_MS, -3);
+  });
+
+  /**
+   * The one thing on the API surface that resolves a retired listing, and the reason the
+   * booking carries a summary of it at all: the row is kept so a stay can go on naming
+   * where it was, while `GET /listings/:id` answers 404 for it — to the guest holding the
+   * booking as much as to anybody else, because that read is public and cached by URL.
+   */
+  it("goes on naming the listing after it has been retired", async () => {
+    const created = await guest.post("/bookings").send(input).expect(201);
+    const id = (created.body as { id: string }).id;
+
+    expect(bookingSchema.parse(created.body).listing).toEqual({
+      title: listingInput.title,
+      pricePerNight: listingInput.pricePerNight,
+    });
+
+    await owner.delete(`/listings/${input.listingId}`).expect(204);
+    await guest.get(`/listings/${input.listingId}`).expect(404);
+
+    const stay = await guest.get(`/bookings/${id}`).expect(200);
+
+    expect(bookingSchema.parse(stay.body).listing.title).toBe(
+      listingInput.title,
+    );
   });
 
   it("books for guests only — an owner rents out, an admin moderates", async () => {

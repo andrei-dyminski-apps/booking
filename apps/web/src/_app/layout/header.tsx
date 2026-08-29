@@ -1,67 +1,76 @@
 import Link from "next/link";
-import { Role } from "@repo/contracts";
-import { Button } from "@repo/ui/components/button";
-import { currentUser } from "#shared/api";
+import { SearchIcon } from "lucide-react";
+import type { User } from "@repo/contracts";
+import { buttonVariants } from "@repo/ui/components/button";
+import { cn } from "@repo/ui/lib/utils";
 import { ROUTES } from "#shared/config";
+import { MobileNav } from "./mobile-nav";
 import { SessionRecovery } from "./session-recovery";
 import { ThemeToggle } from "./theme-toggle";
 
 /**
- * The frame every page is rendered inside, which is why it lives in the app layer rather
- * than in a slice of its own. Reading the session here is what opts the whole tree out of
- * static rendering — the header differs per visitor, so no page above it can be a shared
- * document. That is the right trade while every screen is behind a login; the catalogue
- * of phase 6 is the first one that will want the opposite and will have to say so.
+ * The bar above the page. Most of the navigation moved into the sidebar beside it, so
+ * what is left here is what belongs to the window rather than to the site: the way to
+ * open that navigation on a narrow screen, the theme, and the two calls to action a
+ * stranger has.
  *
- * `null` here means "no live access token", which is not the same as "signed out" — hence
- * `SessionRecovery` beside it, the one thing about the session this side cannot settle.
+ * It is handed the session instead of reading one — `AppShell` asks once for the whole
+ * shell. `null` there means "no live access token", which is not the same as signed out,
+ * hence `SessionRecovery` beside it: the one thing about a session that only the browser
+ * can settle.
  */
-export const Header = async () => {
-  const user = await currentUser({ cache: "no-store" });
+export const Header = ({ user }: { user: User | null }) => (
+  <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <div className="flex h-14 items-center gap-2 px-4 sm:px-6">
+      <div className="lg:hidden">
+        <MobileNav user={user} />
+      </div>
 
-  return (
-    <header className="border-b border-border">
-      <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-4 py-3">
-        <Link href={ROUTES.home} className="font-semibold tracking-tight">
-          Booking
+      <Link
+        href={ROUTES.home}
+        className="font-semibold tracking-tight lg:hidden"
+      >
+        Booking
+      </Link>
+
+      <SessionRecovery signedIn={user !== null} />
+
+      <div className="ml-auto flex items-center gap-2">
+        {/*
+          The catalogue is offered to everybody, signed in or not: the three reading routes
+          behind it are `@Public()` for the same reason — a catalogue nobody may see
+          before signing up is not a catalogue.
+        */}
+        <Link
+          href={ROUTES.catalogue}
+          className={buttonVariants({ variant: "ghost", size: "sm" })}
+        >
+          <SearchIcon />
+          <span className="hidden sm:inline">Find a stay</span>
         </Link>
 
-        <SessionRecovery signedIn={user !== null} />
-
-        <nav className="flex items-center gap-2">
-          {user ? (
-            <>
-              {/*
-                The role decides what is worth offering, not what is allowed: the section
-                behind this link answers the same way with or without it, because the API
-                reads the role out of the access token on every request. An owner is the
-                only role with listings of their own — an admin edits other people's and
-                reaches them from the catalogue, not from here.
-              */}
-              {user.role === Role.OWNER && (
-                <Button
-                  variant="ghost"
-                  render={<Link href={ROUTES.dashboard} />}
-                >
-                  Dashboard
-                </Button>
+        {user === null && (
+          <>
+            <Link
+              href={ROUTES.login}
+              className={cn(
+                buttonVariants({ variant: "ghost", size: "sm" }),
+                "hidden sm:inline-flex",
               )}
+            >
+              Sign in
+            </Link>
+            <Link
+              href={ROUTES.register}
+              className={buttonVariants({ size: "sm" })}
+            >
+              Sign up
+            </Link>
+          </>
+        )}
 
-              <Button variant="ghost" render={<Link href={ROUTES.profile} />}>
-                {user.email}
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button variant="ghost" render={<Link href={ROUTES.login} />}>
-                Sign in
-              </Button>
-              <Button render={<Link href={ROUTES.register} />}>Sign up</Button>
-            </>
-          )}
-          <ThemeToggle />
-        </nav>
+        <ThemeToggle />
       </div>
-    </header>
-  );
-};
+    </div>
+  </header>
+);

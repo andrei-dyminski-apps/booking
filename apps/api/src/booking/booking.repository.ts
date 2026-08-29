@@ -2,6 +2,7 @@ import { tz } from "@date-fns/tz";
 import { Injectable } from "@nestjs/common";
 import {
   BookingStatus,
+  type BookedRange,
   type Booking,
   type CreateBookingInput,
 } from "@repo/contracts";
@@ -10,6 +11,7 @@ import { z } from "zod";
 import {
   type Prisma,
   type Booking as BookingRow,
+  type Listing as ListingRow,
 } from "../generated/prisma/client";
 import {
   isExclusionViolation,
@@ -76,6 +78,28 @@ export type BookingWithListingOwner = {
 type LockedListing = { id: string; deleted_at: Date | null };
 
 /**
+ * What every read of a booking selects from the listing it names, and it is not narrowed
+ * by `deleted_at`: a retired listing is still where the stay was, and resolving it here is
+ * the only way its guest ever learns the title again — see `listingSummarySchema` in the
+ * contract. Any extra column a caller selects alongside it (the owner, for the
+ * authorization rules) stays out of the answer, because `toBooking` names the two fields
+ * it copies rather than spreading the row.
+ */
+const LISTING_SUMMARY = {
+  listing: { select: { title: true, pricePerNight: true } },
+} satisfies Prisma.BookingInclude;
+
+/**
+ * A stored booking with the listing columns the contract's `listing` is built from. Taken
+ * off the row rather than off `ListingSummary`: the price is a `numeric` column and
+ * therefore a `Decimal` here, while the contract speaks a `number` — `toBooking` is where
+ * the two meet.
+ */
+type BookingRowWithListing = BookingRow & {
+  listing: Pick<ListingRow, "title" | "pricePerNight">;
+};
+
+/**
  * Every query the module makes, and the whole of its knowledge about how a stay is stored:
  * that dates live in `@db.Date` columns while the contract speaks `YYYY-MM-DD`, that a
  * stay has a status and only two of the four hold the slot, and that an overlap is a pair
@@ -114,12 +138,48 @@ export class BookingRepository {
   ): Promise<BookingWithListingOwner | null> {
     const row = await this.prismaService.booking.findFirst({
       where: { id },
-      include: { listing: { select: { ownerId: true } } },
+      include: {
+        listing: {
+          select: { ...LISTING_SUMMARY.listing.select, ownerId: true },
+        },
+      },
     });
 
     if (row === null) return null;
 
     return { booking: toBooking(row), listingOwnerId: row.listing.ownerId };
+  }
+
+  /**
+   * When a listing is taken, for the window a calendar is drawing — the read behind
+   * `GET /listings/:id/availability`, and the same question the catalogue's date filter
+   * asks of every listing at once. Only the stays that still hold the slot count, and a
+   * range is returned whole rather than clipped to the window: a stay that runs past the
+   * last day of it is not free on that day.
+   *
+   * It answers about a listing but reads bookings, which is why it lives here and is
+   * injected into `ListingService` rather than being written a second time over there:
+   * a `where` may cross between the two repositories, a row mapping may not — dates are
+   * `@db.Date` columns and this file is the one that knows it.
+   */
+  async findActiveRanges(
+    listingId: string,
+    window: { from: string; to: string },
+  ): Promise<BookedRange[]> {
+    const rows = await this.prismaService.booking.findMany({
+      where: {
+        listingId,
+        ...holdsTheSlot(new Date()),
+        ...overlapping(window.from, window.to),
+      },
+      select: { from: true, to: true },
+      orderBy: { from: "asc" },
+    });
+
+    return rows.map((row) => ({
+      from: toIsoDate(row.from),
+      to: toIsoDate(row.to),
+    }));
   }
 
   /**
@@ -135,6 +195,11 @@ export class BookingRepository {
    *     ever reaches here, and it is answered as the same `409`.
    */
   async create(guestId: string, input: CreateBookingInput): Promise<Booking> {
+    // One reading of the clock for the whole transaction: the sweep below, the overlap
+    // check and the deadline of the hold are three halves of one decision, and a second
+    // `new Date()` between them would let a hold expire in the middle of it.
+    const now = new Date();
+
     return this.prismaService.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<LockedListing[]>`
         SELECT id, deleted_at FROM listings WHERE id = ${input.listingId}::uuid FOR UPDATE
@@ -145,16 +210,15 @@ export class BookingRepository {
       }
 
       await tx.booking.updateMany({
-        where: { listingId: input.listingId, ...lapsedHolds(new Date()) },
+        where: { listingId: input.listingId, ...lapsedHolds(now) },
         data: { status: BookingStatus.EXPIRED },
       });
 
       const overlap = await tx.booking.findFirst({
         where: {
           listingId: input.listingId,
-          status: { in: [...ACTIVE_STATUSES] },
-          from: { lt: new Date(input.to) },
-          to: { gt: new Date(input.from) },
+          ...holdsTheSlot(now),
+          ...overlapping(input.from, input.to),
         },
         select: { id: true },
       });
@@ -171,8 +235,9 @@ export class BookingRepository {
             from: new Date(input.from),
             to: new Date(input.to),
             status: BookingStatus.PENDING_PAYMENT,
-            expiresAt: holdExpiry(new Date()),
+            expiresAt: holdExpiry(now),
           },
+          include: LISTING_SUMMARY,
         });
 
         return toBooking(row);
@@ -246,6 +311,7 @@ export class BookingRepository {
   private async findWhere(where: Prisma.BookingWhereInput): Promise<Booking[]> {
     const rows = await this.prismaService.booking.findMany({
       where,
+      include: LISTING_SUMMARY,
       orderBy: { from: "asc" },
     });
 
@@ -259,8 +325,40 @@ export class BookingRepository {
  * behind it. The boundary is inclusive: a hold is done holding the moment its deadline is
  * reached, not a millisecond after.
  */
-function lapsedHolds(now: Date): Prisma.BookingWhereInput {
+export function lapsedHolds(now: Date): Prisma.BookingWhereInput {
   return { status: BookingStatus.PENDING_PAYMENT, expiresAt: { lte: now } };
+}
+
+/**
+ * A stay that is holding its slot at this moment: active, and not a hold that has already
+ * lapsed. Written as the complement of `lapsedHolds` rather than as a second list of
+ * conditions, so the two cannot drift.
+ *
+ * Both of them read `expires_at`, and a `PENDING_PAYMENT` row with none would make both
+ * NULL rather than true or false — a hold this file cannot see and the `EXCLUDE`
+ * constraint still counts. That row cannot exist: `bookings_hold_has_deadline` refuses it
+ * at the database, which is what lets the complement be written this simply.
+ *
+ * The reads that ask it are three, and one of them is in another module: `create` refuses
+ * an overlap with it, `findActiveRanges` reports the ranges it matches, and
+ * `ListingRepository` filters the catalogue by the listings that match none of them. The
+ * exported ones are `where` clauses, which is the whole of what crosses that line —
+ * everything that turns a row into a contract type stays in this file.
+ */
+export function holdsTheSlot(now: Date): Prisma.BookingWhereInput {
+  return { status: { in: [...ACTIVE_STATUSES] }, NOT: lapsedHolds(now) };
+}
+
+/**
+ * Two nights that share one: check-out is exclusive, so a stay starting the day another
+ * ends is not an overlap. The strict inequalities are the same rule the `EXCLUDE`
+ * constraint spells as `daterange(from, to, '[)') WITH &&`.
+ */
+export function overlapping(
+  from: string,
+  to: string,
+): Prisma.BookingWhereInput {
+  return { from: { lt: new Date(to) }, to: { gt: new Date(from) } };
 }
 
 /**
@@ -295,10 +393,17 @@ function toIsoDate(date: Date): string {
   return format(date, "yyyy-MM-dd", { in: tz("UTC") });
 }
 
-function toBooking(row: BookingRow): Booking {
+function toBooking(row: BookingRowWithListing): Booking {
   return {
     id: row.id,
     listingId: row.listingId,
+    // Named field by field rather than spread: a caller that selects more of the listing
+    // than the summary — the owner, for the authorization rules — must not have it leak
+    // into a response body.
+    listing: {
+      title: row.listing.title,
+      pricePerNight: row.listing.pricePerNight.toNumber(),
+    },
     guestId: row.guestId,
     from: toIsoDate(row.from),
     to: toIsoDate(row.to),

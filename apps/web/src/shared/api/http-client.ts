@@ -36,10 +36,18 @@ export class ApiResponseError extends Error {
 /**
  * Caching of a read is a decision of the call site, not a default of this module —
  * hence a mandatory argument rather than an optional one.
+ *
+ * `revalidate` is mandatory too, and that is not symmetry for its own sake. A `fetch` has
+ * not been cached by default since Next 15, and tags alone do not opt one back in: the
+ * decision is read off `cache` and `revalidate`, and a request that names neither is
+ * turned into a `no-store` with its tags attached to nothing. `{ next: { tags } }` is
+ * therefore a spelling that looks like caching and is not, and the mutation invalidating
+ * that tag has nothing to invalidate — a mistake nothing reports, because it fails by
+ * being fresh. `false` is what a read whose only invalidation is its tag says.
  */
 export type ReadOptions =
   | { cache: RequestCache }
-  | { next: { revalidate?: number | false; tags?: string[] } };
+  | { next: { revalidate: number | false; tags?: string[] } };
 
 type RequestOptions<T> = {
   method: "GET" | "POST" | "PATCH" | "DELETE";

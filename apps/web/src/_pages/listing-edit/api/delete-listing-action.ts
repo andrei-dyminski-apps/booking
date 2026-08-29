@@ -1,9 +1,9 @@
 "use server";
 
-import { refresh } from "next/cache";
+import { refresh, revalidateTag, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { listingsApi } from "#shared/api";
-import { ROUTES } from "#shared/config";
+import { CATALOGUE_TAG, listingTag, ROUTES } from "#shared/config";
 import { toFormErrors, type FormErrors } from "#shared/lib";
 
 /**
@@ -26,6 +26,11 @@ export async function deleteListingAction(
     return toFormErrors(error);
   }
 
+  // The row leaves the catalogue and starts answering 404 by id, so both cached reads
+  // that still describe it are wrong. The one about this row is the author's own and is
+  // waited for; the catalogue is everybody's and can be served stale while it refetches.
+  updateTag(listingTag(listingId));
+  revalidateTag(CATALOGUE_TAG, "max");
   refresh();
   redirect(ROUTES.dashboard);
 }

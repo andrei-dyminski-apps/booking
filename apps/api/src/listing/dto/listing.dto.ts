@@ -1,6 +1,10 @@
 import { createZodDto } from "nestjs-zod";
 import {
+  availabilityQuerySchema,
   createListingSchema,
+  listingAvailabilitySchema,
+  listingPageSchema,
+  listingQuerySchema,
   listingSchema,
   updateListingSchema,
 } from "@repo/contracts";
@@ -17,3 +21,20 @@ export class CreateListingDto extends createZodDto(createListingSchema) {}
 export class UpdateListingDto extends createZodDto(updateListingSchema) {}
 
 export class ListingDto extends createZodDto(listingSchema) {}
+
+/**
+ * A query string is a request the pipe validates like any other, and the DTO is what makes
+ * `@Query()` reach it — the same class is also what puts the filters in `/docs`, which no
+ * TypeScript parameter type could.
+ */
+export class ListingQueryDto extends createZodDto(listingQuerySchema) {}
+
+export class AvailabilityQueryDto extends createZodDto(
+  availabilityQuerySchema,
+) {}
+
+export class ListingPageDto extends createZodDto(listingPageSchema) {}
+
+export class ListingAvailabilityDto extends createZodDto(
+  listingAvailabilitySchema,
+) {}

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
 import { Providers } from "../providers";
-import { Header } from "./header";
+import { AppShell } from "./app-shell";
 import "../styles/globals.css";
 
 // The application supplies the faces, the design system names the token: the loader
@@ -35,10 +35,9 @@ export const RootLayout = ({
     className={`${geistSans.variable} ${geistMono.variable}`}
     suppressHydrationWarning
   >
-    <body className="min-h-svh antialiased">
+    <body className="min-h-svh bg-background antialiased">
       <Providers>
-        <Header />
-        <main className="mx-auto w-full max-w-5xl px-4 py-10">{children}</main>
+        <AppShell>{children}</AppShell>
       </Providers>
     </body>
   </html>

@@ -1,12 +1,20 @@
-import { ForbiddenException, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import {
   Role,
+  type BookedRange,
   type CreateListingInput,
   type Listing,
+  type ListingQuery,
   type UpdateListingInput,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
+import { BookingRepository } from "../booking/booking.repository";
+import { decodeCursor, type CatalogueCursor } from "./catalogue-cursor";
 import { ListingRepository } from "./listing.repository";
 import { ListingService } from "./listing.service";
 
@@ -17,9 +25,16 @@ const UNKNOWN_ID = "0b6f7f6e-2f4c-4a52-9a5e-8f1f6d2c3b4a";
 const input: CreateListingInput = {
   title: "Loft above the harbour",
   description: "Two rooms under the roof and a wall of glass facing the water.",
-  pricePerNight: 12000,
+  pricePerNight: 120,
   capacity: 4,
 };
+
+/** The whole of a catalogue query, so a test names only the part it is about. */
+const query = (over: Partial<ListingQuery> = {}): ListingQuery => ({
+  limit: 20,
+  sort: "newest",
+  ...over,
+});
 
 const userWith = (id: string, role: Role): AuthenticatedUser => ({
   id,
@@ -54,8 +69,26 @@ class FakeListingRepository implements PublicOf<ListingRepository> {
    */
   vanishingListing = false;
 
-  findAll(): Promise<Listing[]> {
-    return Promise.resolve(this.offered());
+  /**
+   * The filters, the ordering and the keyset comparison are the repository's and are
+   * covered by e2e against a real database. What the service decides about a page is the
+   * cursor — whether one is issued and what an unreadable one costs — so that is all this
+   * models: rows in the order they were created, walked from the one the cursor names.
+   */
+  findPage(
+    query: ListingQuery,
+    cursor: CatalogueCursor | null,
+  ): Promise<{ items: Listing[]; hasMore: boolean }> {
+    const offered = this.offered();
+    const start =
+      cursor === null
+        ? 0
+        : offered.findIndex((listing) => listing.id === cursor.id) + 1;
+
+    return Promise.resolve({
+      items: offered.slice(start, start + query.limit),
+      hasMore: start + query.limit < offered.length,
+    });
   }
 
   findByOwner(ownerId: string): Promise<Listing[]> {
@@ -74,7 +107,9 @@ class FakeListingRepository implements PublicOf<ListingRepository> {
 
   create(ownerId: string, listing: CreateListingInput): Promise<Listing> {
     const stored: Listing = {
-      id: `listing-${String(this.rows.size + 1)}`,
+      // Shaped like the real thing: a cursor carries the id and refuses one that is not a
+      // uuid, so `listing-1` would make this fake unable to page.
+      id: `00000000-0000-4000-8000-${String(this.rows.size + 1).padStart(12, "0")}`,
       ownerId,
       ...listing,
       createdAt: "2026-08-20T12:00:00.000Z",
@@ -121,9 +156,26 @@ class FakeListingRepository implements PublicOf<ListingRepository> {
   }
 }
 
+/**
+ * `ListingService` reaches one method of the booking repository and nothing else, so the
+ * fake declares exactly that much: what the ranges mean, and the query that finds them,
+ * belong to the module that owns the rows.
+ */
+class FakeBookingRepository implements Pick<
+  PublicOf<BookingRepository>,
+  "findActiveRanges"
+> {
+  booked: BookedRange[] = [];
+
+  findActiveRanges(): Promise<BookedRange[]> {
+    return Promise.resolve(this.booked);
+  }
+}
+
 describe("ListingService", () => {
   let service: ListingService;
   let listingRepository: FakeListingRepository;
+  let bookingRepository: FakeBookingRepository;
 
   /** A listing `owner` owns — the row every rule below acts on. */
   const listedByOwner = async (): Promise<string> =>
@@ -131,11 +183,13 @@ describe("ListingService", () => {
 
   beforeEach(async () => {
     listingRepository = new FakeListingRepository();
+    bookingRepository = new FakeBookingRepository();
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         ListingService,
         { provide: ListingRepository, useValue: listingRepository },
+        { provide: BookingRepository, useValue: bookingRepository },
       ],
     }).compile();
 
@@ -152,7 +206,10 @@ describe("ListingService", () => {
     await listedByOwner();
     await service.create(OTHER_OWNER_ID, input);
 
-    await expect(service.findAll()).resolves.toHaveLength(2);
+    await expect(service.findPage(query())).resolves.toMatchObject({
+      items: [{ ownerId: OWNER_ID }, { ownerId: OTHER_OWNER_ID }],
+      nextCursor: null,
+    });
     await expect(service.findByOwner(OWNER_ID)).resolves.toMatchObject([
       { ownerId: OWNER_ID },
     ]);
@@ -205,7 +262,9 @@ describe("ListingService", () => {
 
     await service.remove(id, owner);
 
-    await expect(service.findAll()).resolves.toHaveLength(0);
+    await expect(service.findPage(query())).resolves.toMatchObject({
+      items: [],
+    });
     await expect(service.findByOwner(OWNER_ID)).resolves.toHaveLength(0);
     await expect(service.findOne(id)).rejects.toThrow(NotFoundException);
   });
@@ -230,6 +289,94 @@ describe("ListingService", () => {
       NotFoundException,
     );
     await expect(service.remove(id, owner)).rejects.toThrow(NotFoundException);
+  });
+
+  it("issues a cursor while there is another page, and none on the last one", async () => {
+    const first = await service.create(OWNER_ID, input);
+    const second = await service.create(OWNER_ID, input);
+
+    const page = await service.findPage(query({ limit: 1 }));
+
+    expect(page.items).toMatchObject([{ id: first.id }]);
+    expect(page.nextCursor).not.toBeNull();
+    expect(decodeCursor(String(page.nextCursor))).toEqual({
+      sort: "newest",
+      createdAt: new Date(first.createdAt),
+      id: first.id,
+    });
+
+    await expect(
+      service.findPage(query({ limit: 1, cursor: String(page.nextCursor) })),
+    ).resolves.toMatchObject({ items: [{ id: second.id }], nextCursor: null });
+  });
+
+  /**
+   * The ordering itself belongs to the repository and is covered by e2e; what the service
+   * decides is which key the cursor it hands back is made of. So the row the fake ends the
+   * page on carries a price of its own — a cursor built from `input` would read the same
+   * whether the service asked for the price or fell back to the timestamp.
+   */
+  it("issues a cursor made of the key the ordering sorts by", async () => {
+    const first = await service.create(OWNER_ID, {
+      ...input,
+      pricePerNight: 1,
+    });
+    await service.create(OWNER_ID, input);
+
+    const page = await service.findPage(query({ limit: 1, sort: "priceAsc" }));
+
+    expect(first.pricePerNight).not.toBe(input.pricePerNight);
+    expect(decodeCursor(String(page.nextCursor))).toEqual({
+      sort: "priceAsc",
+      pricePerNight: first.pricePerNight,
+      id: first.id,
+    });
+  });
+
+  // A client can only ever hand back a cursor this API issued, so a broken one is a
+  // mistake worth naming rather than a silent first page.
+  it("refuses a cursor it did not issue", async () => {
+    await expect(
+      service.findPage(query({ cursor: "not-a-cursor" })),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  /**
+   * A cursor names a place in one ordering, so it says nothing about any other. Reading it
+   * against a different `sort` would return rows that are a page of neither list —
+   * changing what the catalogue is ordered by starts the pages again, and that is what the
+   * refusal tells the client to do.
+   */
+  it("refuses a cursor issued under a different ordering", async () => {
+    await service.create(OWNER_ID, input);
+    await service.create(OWNER_ID, input);
+
+    const page = await service.findPage(query({ limit: 1 }));
+
+    await expect(
+      service.findPage(
+        query({ limit: 1, sort: "priceAsc", cursor: String(page.nextCursor) }),
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("reports the nights a listing is taken for, and hides a retired one entirely", async () => {
+    const id = await listedByOwner();
+    const window = { from: "2026-09-01", to: "2026-09-30" };
+
+    bookingRepository.booked = [{ from: "2026-09-10", to: "2026-09-14" }];
+
+    await expect(service.availability(id, window)).resolves.toEqual({
+      listingId: id,
+      ...window,
+      booked: [{ from: "2026-09-10", to: "2026-09-14" }],
+    });
+
+    await service.remove(id, owner);
+
+    await expect(service.availability(id, window)).rejects.toThrow(
+      NotFoundException,
+    );
   });
 
   it("throws NotFoundException for an unknown id, before any ownership check", async () => {

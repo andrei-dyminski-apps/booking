@@ -8,8 +8,10 @@ import { Test } from "@nestjs/testing";
 import {
   BookingStatus,
   Role,
+  type BookedRange,
   type Booking,
   type CreateBookingInput,
+  type ListingSummary,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import {
@@ -28,6 +30,12 @@ const OWNER_ID = "6d0f2c1e-1a2b-4c3d-8e5f-9a0b1c2d3e4f";
 const STRANGER_ID = "7e1a3d2f-2b3c-4d5e-9f6a-0b1c2d3e4f50";
 const LISTING_ID = "2f3a4b5c-6d7e-4f80-9a1b-2c3d4e5f6a7b";
 const OTHER_LISTING_ID = "3a4b5c6d-7e8f-4091-8a2b-3c4d5e6f7a8b";
+
+/** What the repository resolves beside every stay; no rule in this service reads it. */
+const listing: ListingSummary = {
+  title: "Loft above the harbour",
+  pricePerNight: 120,
+};
 
 const input: CreateBookingInput = {
   listingId: LISTING_ID,
@@ -125,6 +133,7 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
     const stored: Booking = {
       id: `booking-${String(this.rows.size + 1)}`,
       listingId: booking.listingId,
+      listing,
       guestId,
       from: booking.from,
       to: booking.to,
@@ -165,6 +174,24 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
 
   expireLapsedHolds(): Promise<number> {
     return Promise.resolve(0);
+  }
+
+  /** Read by `ListingService`, never by this one — see `listing.service.spec.ts`. */
+  findActiveRanges(
+    listingId: string,
+    window: { from: string; to: string },
+  ): Promise<BookedRange[]> {
+    return Promise.resolve(
+      this.allBookings()
+        .filter(
+          (stay) =>
+            stay.listingId === listingId &&
+            isActive(stay) &&
+            stay.from < window.to &&
+            stay.to > window.from,
+        )
+        .map((stay) => ({ from: stay.from, to: stay.to })),
+    );
   }
 
   private allBookings(): Booking[] {
@@ -320,7 +347,7 @@ describe("BookingService", () => {
   });
 
   /**
-   * A cancelled stay is a record, not a deletion — phase 5 refunds against it. So it keeps
+   * A cancelled stay is a record, not a deletion — phase 6 refunds against it. So it keeps
    * answering its guest, with the status saying what happened and the deadline the hold
    * had still on it, and only a second cancellation is refused.
    */

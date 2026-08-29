@@ -1,6 +1,15 @@
 import Link from "next/link";
+import { PlusIcon, WarehouseIcon } from "lucide-react";
 import { Role } from "@repo/contracts";
-import { Button } from "@repo/ui/components/button";
+import { buttonVariants } from "@repo/ui/components/button";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@repo/ui/components/empty";
 import { listingsApi, requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
 import { ListingCard } from "./listing-card";
@@ -28,15 +37,33 @@ export const DashboardPage = async () => {
           </p>
         </div>
 
-        <Button render={<Link href={ROUTES.newListing} />}>New listing</Button>
+        <Link href={ROUTES.newListing} className={buttonVariants()}>
+          <PlusIcon />
+          New listing
+        </Link>
       </div>
 
       {listings.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          Nothing here yet. The first listing is one form away.
-        </p>
+        <Empty className="border">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <WarehouseIcon />
+            </EmptyMedia>
+            <EmptyTitle>No listings yet</EmptyTitle>
+            <EmptyDescription>
+              The first one is a single form: a title, what it costs a night and
+              how many it sleeps.
+            </EmptyDescription>
+          </EmptyHeader>
+          <EmptyContent>
+            <Link href={ROUTES.newListing} className={buttonVariants()}>
+              <PlusIcon />
+              New listing
+            </Link>
+          </EmptyContent>
+        </Empty>
       ) : (
-        <div className="flex flex-col gap-4">
+        <div className="grid gap-4 sm:grid-cols-2">
           {listings.map((listing) => (
             <ListingCard key={listing.id} listing={listing} />
           ))}
