@@ -10,6 +10,7 @@ import {
   FieldLabel,
 } from "@repo/ui/components/field";
 import { Input } from "@repo/ui/components/input";
+import { PasswordInput } from "@repo/ui/components/password-input";
 import { fieldMessages, NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
 import { loginAction } from "../api/login-action";
 import { useSessionResume } from "../model/use-session-resume";
@@ -36,6 +37,7 @@ export const LoginForm = ({ next }: { next: string }) => {
             id="email"
             name="email"
             type="email"
+            size="lg"
             autoComplete="email"
             value={email}
             onChange={(event) => {
@@ -49,10 +51,10 @@ export const LoginForm = ({ next }: { next: string }) => {
 
         <Field data-invalid={errors.fields.password !== undefined}>
           <FieldLabel htmlFor="password">Password</FieldLabel>
-          <Input
+          <PasswordInput
             id="password"
             name="password"
-            type="password"
+            size="lg"
             autoComplete="current-password"
             value={password}
             onChange={(event) => {

@@ -4,8 +4,10 @@ import { App } from "supertest/types";
 import {
   Role,
   apiErrorSchema,
-  bookingListSchema,
+  bookingPageSchema,
   bookingSchema,
+  type Booking,
+  type BookingPage,
   type CreateBookingInput,
   type CreateListingInput,
 } from "@repo/contracts";
@@ -71,6 +73,21 @@ describe("BookingController (e2e)", () => {
   afterEach(async () => {
     await app.close();
   });
+
+  /** One page of `GET /bookings`, parsed against the contract like every other answer. */
+  const page = async (
+    agent: Agent,
+    search: Record<string, string> = {},
+  ): Promise<BookingPage> =>
+    bookingPageSchema.parse(
+      (await agent.get("/bookings").query(search).expect(200)).body,
+    );
+
+  /** The rows of that page, for the assertions that are about the scope or the filters. */
+  const stays = async (
+    agent: Agent,
+    search: Record<string, string> = {},
+  ): Promise<Booking[]> => (await page(agent, search)).items;
 
   it("creates a booking and answers with a body matching the contract schema", async () => {
     const response = await guest.post("/bookings").send(input).expect(201);
@@ -210,16 +227,147 @@ describe("BookingController (e2e)", () => {
       .send({ ...input, from: inDays(19), to: inDays(21) })
       .expect(201);
 
-    const seenBy = async (agent: Agent): Promise<number> =>
-      bookingListSchema.parse((await agent.get("/bookings").expect(200)).body)
-        .length;
-
     // A guest sees only their own; the owner of the listing sees both stays booked
     // against it; an admin sees everything there is.
-    expect(await seenBy(guest)).toBe(1);
-    expect(await seenBy(otherGuest)).toBe(1);
-    expect(await seenBy(owner)).toBe(2);
-    expect(await seenBy(admin)).toBe(2);
+    expect(await stays(guest)).toHaveLength(1);
+    expect(await stays(otherGuest)).toHaveLength(1);
+    expect(await stays(owner)).toHaveLength(2);
+    expect(await stays(admin)).toHaveLength(2);
+  });
+
+  /**
+   * A filter narrows the scope the role gives; it cannot reach around it. `guestId` is the
+   * one worth proving, because it names the same column the guest's own scope does — the
+   * repository `AND`s the two rather than spreading them, and this is what says so against
+   * a real query.
+   */
+  it("filters inside the scope and never around it", async () => {
+    await guest.post("/bookings").send(input).expect(201);
+    const otherStay = await otherGuest
+      .post("/bookings")
+      .send({ ...input, from: inDays(19), to: inDays(21) })
+      .expect(201);
+    const otherGuestId = bookingSchema.parse(otherStay.body).guestId;
+
+    expect(await stays(guest, { guestId: otherGuestId })).toHaveLength(0);
+    expect(await stays(admin, { guestId: otherGuestId })).toHaveLength(1);
+  });
+
+  it("filters by the listing, by the status and by a window the stay overlaps", async () => {
+    const second = await owner
+      .post("/listings")
+      .send({ ...listingInput, title: "Cabin by the lake" })
+      .expect(201);
+    const secondListingId = (second.body as { id: string }).id;
+
+    await guest.post("/bookings").send(input).expect(201);
+    const elsewhere = await guest
+      .post("/bookings")
+      .send({ listingId: secondListingId, from: inDays(30), to: inDays(32) })
+      .expect(201);
+
+    expect(await stays(guest, { listingId: secondListingId })).toHaveLength(1);
+    expect(await stays(guest, { status: "PENDING_PAYMENT" })).toHaveLength(2);
+    expect(await stays(guest, { status: "CANCELLED" })).toHaveLength(0);
+
+    // The window is an overlap and not a bound on the check-in: a stay counts when it
+    // touches these dates, which is the same half-open comparison POST /bookings makes.
+    expect(
+      await stays(guest, { from: inDays(11), to: inDays(12) }),
+    ).toHaveLength(1);
+    expect(
+      await stays(guest, { from: inDays(0), to: inDays(40) }),
+    ).toHaveLength(2);
+    // Check-out is exclusive on both sides of the comparison: the morning a stay ends is
+    // a day it no longer takes.
+    expect(await stays(guest, { from: input.to, to: inDays(29) })).toHaveLength(
+      0,
+    );
+
+    await guest
+      .delete(`/bookings/${(elsewhere.body as { id: string }).id}`)
+      .expect(204);
+
+    // A cancelled stay stays readable and says so — the status is what changed, not who
+    // may see the row.
+    expect(await stays(guest, { status: "CANCELLED" })).toHaveLength(1);
+  });
+
+  it("orders by the ordering asked for, and pages by the cursor it issues", async () => {
+    for (const start of [10, 20, 30]) {
+      await guest
+        .post("/bookings")
+        .send({
+          listingId: input.listingId,
+          from: inDays(start),
+          to: inDays(start + 2),
+        })
+        .expect(201);
+    }
+
+    const checkIns = async (
+      search: Record<string, string>,
+    ): Promise<string[]> =>
+      (await stays(guest, search)).map((stay) => stay.from);
+
+    await expect(checkIns({ sort: "checkInAsc" })).resolves.toEqual([
+      inDays(10),
+      inDays(20),
+      inDays(30),
+    ]);
+    await expect(checkIns({ sort: "checkInDesc" })).resolves.toEqual([
+      inDays(30),
+      inDays(20),
+      inDays(10),
+    ]);
+    // `newest` is the default and it is the moment the stay was taken, not the day it
+    // starts — these were booked in ascending order of check-in.
+    await expect(checkIns({})).resolves.toEqual([
+      inDays(30),
+      inDays(20),
+      inDays(10),
+    ]);
+
+    const first = await page(guest, { sort: "checkInAsc", limit: "2" });
+
+    expect(first.items.map((stay) => stay.from)).toEqual([
+      inDays(10),
+      inDays(20),
+    ]);
+    expect(first.nextCursor).not.toBeNull();
+
+    const second = await page(guest, {
+      sort: "checkInAsc",
+      limit: "2",
+      cursor: String(first.nextCursor),
+    });
+
+    // No row twice and none skipped — what a keyset page buys over an offset that a stay
+    // booked in between would shift.
+    expect(second.items.map((stay) => stay.from)).toEqual([inDays(30)]);
+    expect(second.nextCursor).toBeNull();
+  });
+
+  /**
+   * A cursor names a place in one ordering and in no other, and both refusals are the
+   * client's to act on: dropping the cursor starts the pages again, which is exactly what
+   * changing the ordering means.
+   */
+  it("refuses a cursor from another ordering, and one it never issued", async () => {
+    await guest.post("/bookings").send(input).expect(201);
+    await guest
+      .post("/bookings")
+      .send({ ...input, from: inDays(19), to: inDays(21) })
+      .expect(201);
+
+    const first = await page(guest, { limit: "1" });
+    const cursor = String(first.nextCursor);
+
+    await guest
+      .get("/bookings")
+      .query({ limit: "1", cursor, sort: "oldest" })
+      .expect(400);
+    await guest.get("/bookings").query({ cursor: "not-a-cursor" }).expect(400);
   });
 
   it("shows one booking to its guest, to the owner of the listing and to an admin", async () => {

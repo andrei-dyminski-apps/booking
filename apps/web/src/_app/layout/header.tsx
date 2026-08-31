@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { SearchIcon } from "lucide-react";
 import type { User } from "@repo/contracts";
-import { buttonVariants } from "@repo/ui/components/button";
-import { cn } from "@repo/ui/lib/utils";
 import { ROUTES } from "#shared/config";
+import { ButtonLink } from "#shared/ui";
 import { MobileNav } from "./mobile-nav";
 import { SessionRecovery } from "./session-recovery";
 import { ThemeToggle } from "./theme-toggle";
@@ -41,31 +40,24 @@ export const Header = ({ user }: { user: User | null }) => (
           behind it are `@Public()` for the same reason — a catalogue nobody may see
           before signing up is not a catalogue.
         */}
-        <Link
-          href={ROUTES.catalogue}
-          className={buttonVariants({ variant: "ghost", size: "sm" })}
-        >
+        <ButtonLink href={ROUTES.catalogue} variant="ghost" size="sm">
           <SearchIcon />
           <span className="hidden sm:inline">Find a stay</span>
-        </Link>
+        </ButtonLink>
 
         {user === null && (
           <>
-            <Link
+            <ButtonLink
               href={ROUTES.login}
-              className={cn(
-                buttonVariants({ variant: "ghost", size: "sm" }),
-                "hidden sm:inline-flex",
-              )}
+              variant="ghost"
+              size="sm"
+              className="hidden sm:inline-flex"
             >
               Sign in
-            </Link>
-            <Link
-              href={ROUTES.register}
-              className={buttonVariants({ size: "sm" })}
-            >
+            </ButtonLink>
+            <ButtonLink href={ROUTES.register} size="sm">
               Sign up
-            </Link>
+            </ButtonLink>
           </>
         )}
 

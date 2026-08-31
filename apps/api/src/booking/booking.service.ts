@@ -5,9 +5,16 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from "@nestjs/common";
-import { Role, type Booking, type CreateBookingInput } from "@repo/contracts";
+import {
+  Role,
+  type Booking,
+  type BookingPage,
+  type BookingQuery,
+  type CreateBookingInput,
+} from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { ownsOrIsAdmin } from "../auth/ownership";
+import { readCursor, type Page } from "../common/paging";
 import {
   BookingRepository,
   DatesUnavailableError,
@@ -15,6 +22,11 @@ import {
   ListingNotFoundError,
   type BookingWithListingOwner,
 } from "./booking.repository";
+import {
+  decodeCursor,
+  encodeCursor,
+  type BookingCursor,
+} from "./booking-cursor";
 import { BookingExpiryQueue } from "./booking-expiry.queue";
 
 @Injectable()
@@ -25,10 +37,35 @@ export class BookingService {
   ) {}
 
   /**
+   * One page of the stays this caller may see. The filters and the ordering are the
+   * client's, the scope is their role's and the cursor is this API's own — an unreadable
+   * one is a `400` rather than a silent first page, for the reason `readCursor` states.
+   *
+   * `nextCursor` is issued from the last row and only when there is another page: one on
+   * the last page would invite a request for an empty list.
+   */
+  async findPage(
+    user: AuthenticatedUser,
+    query: BookingQuery,
+  ): Promise<BookingPage> {
+    const cursor = readCursor(query.cursor, query.sort, decodeCursor);
+    const { items, hasMore } = await this.pageFor(user, query, cursor);
+    const last = items.at(-1);
+
+    return {
+      items,
+      nextCursor:
+        hasMore && last !== undefined ? encodeCursor(last, query.sort) : null,
+    };
+  }
+
+  /**
    * Not a filter the client may pass, but the scope its role gives it: a guest sees the
    * stays they booked, an owner the stays booked against their listings, an admin all of
-   * them. A `?guestId=` parameter would leave the same rule to be re-checked on every
-   * call — this way the query cannot return a row the caller may not see.
+   * them. A `?guestId=` parameter in its place would leave the same rule to be re-checked
+   * on every call — this way the query cannot return a row the caller may not see, and the
+   * `guestId` the contract does offer narrows that scope instead of replacing it (the
+   * repository `AND`s the two rather than spreading them, which is what makes that true).
    *
    * A role picks one of three named queries rather than assembling a `where`, so there is
    * no shape an unhandled role could fall through to. The switch is exhaustive on purpose
@@ -41,14 +78,22 @@ export class BookingService {
    * An owner sees the stays against their listings and not the ones they took as a guest —
    * a role is one persona here, and `@Roles(Role.USER)` on `create` keeps it that way.
    */
-  findAll(user: AuthenticatedUser): Promise<Booking[]> {
+  private pageFor(
+    user: AuthenticatedUser,
+    query: BookingQuery,
+    cursor: BookingCursor | null,
+  ): Promise<Page<Booking>> {
     switch (user.role) {
       case Role.ADMIN:
-        return this.bookingRepository.findAll();
+        return this.bookingRepository.findPageForEveryone(query, cursor);
       case Role.OWNER:
-        return this.bookingRepository.findByListingOwner(user.id);
+        return this.bookingRepository.findPageForListingOwner(
+          user.id,
+          query,
+          cursor,
+        );
       case Role.USER:
-        return this.bookingRepository.findByGuest(user.id);
+        return this.bookingRepository.findPageForGuest(user.id, query, cursor);
       default: {
         const unknownRole: never = user.role;
 

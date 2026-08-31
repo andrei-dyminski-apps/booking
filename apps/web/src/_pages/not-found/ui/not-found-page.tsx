@@ -1,6 +1,4 @@
-import Link from "next/link";
 import { CompassIcon } from "lucide-react";
-import { buttonVariants } from "@repo/ui/components/button";
 import {
   Empty,
   EmptyContent,
@@ -10,6 +8,7 @@ import {
   EmptyTitle,
 } from "@repo/ui/components/empty";
 import { ROUTES } from "#shared/config";
+import { ButtonLink } from "#shared/ui";
 
 /**
  * What `notFound()` renders, and it is reached far more often than by a mistyped URL:
@@ -31,12 +30,10 @@ export const NotFoundPage = () => (
       </EmptyDescription>
     </EmptyHeader>
     <EmptyContent>
-      <Link href={ROUTES.catalogue} className={buttonVariants()}>
-        Browse the stays
-      </Link>
-      <Link href={ROUTES.home} className={buttonVariants({ variant: "ghost" })}>
+      <ButtonLink href={ROUTES.catalogue}>Browse the stays</ButtonLink>
+      <ButtonLink href={ROUTES.home} variant="ghost">
         Back to the start
-      </Link>
+      </ButtonLink>
     </EmptyContent>
   </Empty>
 );

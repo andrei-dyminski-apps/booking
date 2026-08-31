@@ -11,6 +11,7 @@ import {
 } from "@repo/ui/components/field";
 import { Input } from "@repo/ui/components/input";
 import {
+  countOf,
   fieldMessages,
   formatMoney,
   isDay,
@@ -104,8 +105,7 @@ export const BookingForm = ({
 
             {nights > 0 && (
               <p className="text-sm">
-                {nights} {nights === 1 ? "night" : "nights"} ×{" "}
-                {formatMoney(pricePerNight)} ={" "}
+                {countOf(nights, "night")} × {formatMoney(pricePerNight)} ={" "}
                 <span className="font-semibold">
                   {formatMoney(nights * pricePerNight)}
                 </span>

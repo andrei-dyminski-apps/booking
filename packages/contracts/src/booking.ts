@@ -2,6 +2,7 @@ import { TZDate } from "@date-fns/tz";
 import { format } from "date-fns";
 import { z } from "zod";
 import { listingSummarySchema } from "./listing.js";
+import { blank, PAGING } from "./query.js";
 
 /**
  * The lifecycle of a stay, mirrored by the `BookingStatus` enum of the Prisma schema.
@@ -90,6 +91,84 @@ export const createBookingSchema = bookingSchema
 
 export const bookingListSchema = z.array(bookingSchema);
 
+/**
+ * How a list of stays is ordered, as the client asks for it. Four values rather than a
+ * field and a direction, for the reason `listingSortSchema` gives: the tiebreaker of a
+ * keyset page has to follow the direction of the key it breaks ties in, so what a client
+ * picks is the whole ordering and the index behind each one is the server's business.
+ *
+ * The two keys are the two moments a stay has: when it was taken (`createdAt`) and when
+ * it starts (`from`). `newest` is the default because a list nobody has asked anything of
+ * shows what has just happened; the check-in pair is what a person planning around the
+ * stays compares them on.
+ */
+export const bookingSortSchema = z.enum([
+  "newest",
+  "oldest",
+  "checkInAsc",
+  "checkInDesc",
+]);
+
+/**
+ * The query of `GET /bookings`, as it arrives in the URL — `searchParams` on the frontend
+ * and a query string here, so every value is text until it is coerced.
+ *
+ * **None of it is a scope.** What a caller may see is decided by their role inside the
+ * `where` of the query — a guest sees the stays they took, an owner the stays taken
+ * against their listings, an admin all of them — and every filter below narrows that
+ * further rather than widening it. `guestId` is therefore not a way to read another
+ * person's stays: for a guest it can only ever name themselves, and naming anybody else
+ * answers with the empty list it truthfully is.
+ *
+ * `from`/`to` are a window a stay has to overlap, not a pair of bounds on the check-in:
+ * "the stays that touch these dates" is the question a person asks of a list of bookings,
+ * and it is the same half-open comparison the overlap check inside `POST /bookings` makes.
+ * They are all-or-nothing like the catalogue's, and for the same reason — one date alone
+ * is half a question, and answering it by guessing the other end returns a different list
+ * than the one that was asked for.
+ */
+export const bookingQuerySchema = z
+  .object({
+    status: blank(bookingStatusSchema.optional()),
+    listingId: blank(z.uuid().optional()),
+    guestId: blank(z.uuid().optional()),
+    from: blank(z.iso.date().optional()),
+    to: blank(z.iso.date().optional()),
+    sort: blank(bookingSortSchema.default("newest")),
+    ...PAGING,
+  })
+  .refine((query) => (query.from === undefined) === (query.to === undefined), {
+    message: "Filtering by dates needs both a start and an end",
+    path: ["to"],
+  })
+  .refine(
+    (query) =>
+      query.from === undefined ||
+      query.to === undefined ||
+      query.from < query.to,
+    {
+      message: "The end of the window must be later than its start",
+      path: ["to"],
+    },
+  );
+
+/**
+ * One page of stays. `nextCursor` is `null` on the last page — the client asks for the
+ * next one by handing it back, and never by counting rows: an offset shifts under a
+ * booking taken while somebody is paging, and a keyset cursor does not.
+ *
+ * The list is paged at all because one of the three scopes has no ceiling on it: an
+ * admin's `GET /bookings` is every stay on the site, and a guest's own history is the only
+ * one of the three that stays small by itself.
+ */
+export const bookingPageSchema = z.object({
+  items: bookingListSchema,
+  nextCursor: z.string().nullable(),
+});
+
 export type BookingStatus = z.infer<typeof bookingStatusSchema>;
+export type BookingSort = z.infer<typeof bookingSortSchema>;
+export type BookingQuery = z.infer<typeof bookingQuerySchema>;
+export type BookingPage = z.infer<typeof bookingPageSchema>;
 export type Booking = z.infer<typeof bookingSchema>;
 export type CreateBookingInput = z.infer<typeof createBookingSchema>;

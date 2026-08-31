@@ -1,9 +1,8 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import Link from "next/link";
 import type { Listing } from "@repo/contracts";
-import { Button, buttonVariants } from "@repo/ui/components/button";
+import { Button } from "@repo/ui/components/button";
 import {
   Field,
   FieldDescription,
@@ -15,6 +14,7 @@ import { Input } from "@repo/ui/components/input";
 import { Textarea } from "@repo/ui/components/textarea";
 import { ROUTES } from "#shared/config";
 import { fieldMessages, NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
+import { ButtonLink } from "#shared/ui";
 import { saveListingAction } from "../api/save-listing-action";
 
 /**
@@ -47,6 +47,7 @@ export const ListingForm = ({ listing }: { listing?: Listing }) => {
           <Input
             id="title"
             name="title"
+            size="lg"
             value={title}
             onChange={(event) => {
               setTitle(event.target.value);
@@ -62,6 +63,7 @@ export const ListingForm = ({ listing }: { listing?: Listing }) => {
           <Textarea
             id="description"
             name="description"
+            size="lg"
             rows={4}
             value={description}
             onChange={(event) => {
@@ -104,6 +106,7 @@ export const ListingForm = ({ listing }: { listing?: Listing }) => {
             id="capacity"
             name="capacity"
             type="number"
+            size="lg"
             inputMode="numeric"
             value={capacity}
             onChange={(event) => {
@@ -118,16 +121,14 @@ export const ListingForm = ({ listing }: { listing?: Listing }) => {
 
         {errors.message !== null && <FieldError>{errors.message}</FieldError>}
 
-        <div className="flex items-center gap-2">
+        {/* Stacked and full-width on a phone, an inline row from `sm` up. */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Button type="submit" size="lg" loading={pending}>
             {listing === undefined ? "Create listing" : "Save changes"}
           </Button>
-          <Link
-            href={ROUTES.dashboard}
-            className={buttonVariants({ variant: "ghost", size: "lg" })}
-          >
+          <ButtonLink href={ROUTES.dashboard} variant="ghost" size="lg">
             Cancel
-          </Link>
+          </ButtonLink>
         </div>
       </FieldGroup>
     </form>

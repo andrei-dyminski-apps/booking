@@ -4,7 +4,7 @@ import request from "supertest";
 import { App } from "supertest/types";
 import {
   Role,
-  bookingListSchema,
+  bookingPageSchema,
   listingAvailabilitySchema,
   listingListSchema,
   listingPageSchema,
@@ -462,7 +462,7 @@ describe("ListingController (e2e)", () => {
     // ...and the stay taken against it still has its record, still readable by the owner
     // of the listing it names. That is the whole reason the row outlives the offer.
     const stays = await owner.get("/bookings").expect(200);
-    expect(bookingListSchema.parse(stays.body)).toHaveLength(1);
+    expect(bookingPageSchema.parse(stays.body).items).toHaveLength(1);
   });
 
   it("takes no new booking against a retired listing", async () => {
@@ -499,5 +499,24 @@ describe("ListingController (e2e)", () => {
       .expect(400);
     // A PATCH that changes nothing is a mistake on the caller's side, not a no-op.
     await owner.patch(`/listings/${listingId}`).send({}).expect(400);
+  });
+
+  it("stores a price at the ceiling of the contract and refuses one above it", async () => {
+    // The two ends of that ceiling have to agree, and only a real column can say that they
+    // do: the schema is what answers a request above it, while the CHECK on the column
+    // says the same number to every write that never passes through the schema. The
+    // highest price the schema accepts has to come back exact to the cent — the cent
+    // being the first thing a float would have lost.
+    const created = await owner
+      .post("/listings")
+      .send({ ...input, pricePerNight: 999_999.99 })
+      .expect(201);
+
+    expect(listingSchema.parse(created.body).pricePerNight).toBe(999_999.99);
+
+    await owner
+      .post("/listings")
+      .send({ ...input, pricePerNight: 1_000_000.01 })
+      .expect(400);
   });
 });

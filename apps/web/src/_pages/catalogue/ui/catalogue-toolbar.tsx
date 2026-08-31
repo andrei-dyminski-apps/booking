@@ -1,8 +1,12 @@
-import type { FieldErrors } from "#shared/lib";
-import { activeFilters, type FilterValues } from "../lib/catalogue-search";
-import { ActiveFilters } from "./active-filters";
+import { messagesExcept, type FieldErrors } from "#shared/lib";
+import { FilterChips, SortSelect } from "#shared/ui";
+import {
+  activeFilters,
+  clearedFiltersHref,
+  sortOptions,
+  type FilterValues,
+} from "../lib/catalogue-search";
 import { CatalogueFiltersDialog } from "./catalogue-filters-dialog";
-import { CatalogueSort } from "./catalogue-sort";
 
 /**
  * The head of the catalogue: one row — the button that opens every filter, the ordering,
@@ -31,15 +35,13 @@ export const CatalogueToolbar = ({
    */
   earliest: string;
 }) => {
-  // Everything except the ordering, which has a control of its own to sit under. Deduped
-  // because a rule about a pair of fields is reported under each of them.
-  const hidden = [
-    ...new Set(
-      Object.entries(errors)
-        .filter(([field]) => field !== "sort")
-        .flatMap(([, messages]) => messages),
-    ),
-  ];
+  // Everything the contract refused except the ordering, which has a control of its own to
+  // sit under.
+  const hidden = messagesExcept(errors, "sort");
+
+  // One read of what is on: the chips draw it and the button that opens the dialog counts
+  // it, and two calls would be two chances to answer the same question differently.
+  const filters = activeFilters(values);
 
   return (
     <div className="flex flex-col gap-2">
@@ -48,12 +50,12 @@ export const CatalogueToolbar = ({
           values={values}
           errors={errors}
           earliest={earliest}
-          count={activeFilters(values).length}
+          count={filters.length}
         />
 
-        <CatalogueSort values={values} error={errors.sort} />
+        <SortSelect options={sortOptions(values)} error={errors.sort} />
 
-        <ActiveFilters values={values} />
+        <FilterChips filters={filters} clearHref={clearedFiltersHref(values)} />
       </div>
 
       {hidden.map((message) => (

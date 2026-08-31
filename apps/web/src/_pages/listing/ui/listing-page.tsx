@@ -1,8 +1,6 @@
-import Link from "next/link";
 import { ArrowLeftIcon, UsersIcon } from "lucide-react";
 import { Role, type Role as RoleName } from "@repo/contracts";
 import { Badge } from "@repo/ui/components/badge";
-import { buttonVariants } from "@repo/ui/components/button";
 import {
   Card,
   CardContent,
@@ -11,9 +9,13 @@ import {
   CardTitle,
 } from "@repo/ui/components/card";
 import { Separator } from "@repo/ui/components/separator";
-import { cn } from "@repo/ui/lib/utils";
 import { currentUser, listingsApi } from "#shared/api";
-import { availabilityTag, listingTag, ROUTES } from "#shared/config";
+import {
+  availabilityTag,
+  HOLD_SWEEP_REVALIDATE,
+  listingTag,
+  ROUTES,
+} from "#shared/config";
 import {
   addDays,
   formatMoney,
@@ -21,6 +23,7 @@ import {
   requireId,
   today,
 } from "#shared/lib";
+import { ButtonLink } from "#shared/ui";
 import { buildMonths } from "../lib/months";
 import { AvailabilityCalendar } from "./availability-calendar";
 import { BookingForm } from "./booking-form";
@@ -55,8 +58,7 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
   // Both listing reads are public, cached under their own URL and tagged separately,
   // because the writes that change them are different: editing a listing does not change
   // who has booked it, and booking it does not touch the row. The availability carries a
-  // lifetime as well — a hold lapses on a timer rather than on a mutation, and a minute
-  // is the sweep interval the API releases it on.
+  // lifetime as well — a hold lapses on a timer rather than on a mutation.
   //
   // The session is asked for beside them rather than after them: it is the third request
   // this page makes and none of the three needs an answer from the other two, so waiting
@@ -76,7 +78,12 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
         listingsApi.availability(
           id,
           { from, to: addDays(from, CALENDAR_DAYS) },
-          { next: { revalidate: 60, tags: [availabilityTag(id)] } },
+          {
+            next: {
+              revalidate: HOLD_SWEEP_REVALIDATE,
+              tags: [availabilityTag(id)],
+            },
+          },
         ),
       ]),
     ),
@@ -86,16 +93,15 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-4">
-        <Link
+        <ButtonLink
           href={ROUTES.catalogue}
-          className={cn(
-            buttonVariants({ variant: "ghost", size: "sm" }),
-            "-ml-2 self-start",
-          )}
+          variant="ghost"
+          size="sm"
+          className="-ml-2 self-start"
         >
           <ArrowLeftIcon />
           All stays
-        </Link>
+        </ButtonLink>
 
         <div className="flex flex-col gap-3">
           <h1 className="text-3xl font-semibold tracking-tight text-balance">
@@ -153,12 +159,12 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
           </CardHeader>
           <CardContent>
             {viewer === null ? (
-              <Link
+              <ButtonLink
                 href={`${ROUTES.login}?next=${encodeURIComponent(ROUTES.listing(id))}`}
-                className={cn(buttonVariants(), "w-full")}
+                className="w-full"
               >
                 Sign in to book
-              </Link>
+              </ButtonLink>
             ) : viewer.role === Role.USER ? (
               <BookingForm
                 listingId={listing.id}

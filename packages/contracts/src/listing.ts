@@ -1,10 +1,26 @@
 import { z } from "zod";
+import { blank, PAGING } from "./query.js";
 
-/** What a single night may cost, in the currency itself. */
-const MAX_PRICE = 10_000;
+/**
+ * What a single night may cost, in the currency itself. High enough that no real nightly
+ * rate reaches it, low enough that a misplaced decimal point still does — which is the
+ * only thing a ceiling on a price can usefully catch.
+ *
+ * The column carries the same number as a `CHECK` constraint
+ * (`listings_price_within_contract`), and that is what keeps the two ends honest: this
+ * schema guards every price that arrives over HTTP, and the constraint guards the writes
+ * that never pass through it — the seed, a migration, an import — so a row this schema
+ * would refuse to read back cannot be stored in the first place. Raising the ceiling means
+ * raising both, in one change; `numeric(10, 2)` has room for two orders of magnitude more
+ * than this and needs no migration of its own until that runs out.
+ */
+const MAX_PRICE = 1_000_000;
 
-/** Minor units to the major one — the scale a price is allowed to be exact to. */
-const CENTS = 100;
+/**
+ * How many decimal places a price may be exact to — the `2` of `numeric(10, 2)`, and the
+ * cent the rules below refuse to go finer than.
+ */
+const SCALE = 2;
 
 /**
  * A price as the currency itself writes it: `120`, `120.5` and `120.50` are one amount and
@@ -12,13 +28,17 @@ const CENTS = 100;
  * rounded, because rounding it would store a price nobody typed and answer a form that
  * asked for one with a silent correction.
  *
- * The comparison is written with a tolerance because the input is a `number` and `120.35 *
- * 100` is `12034.999999999998` in binary floating point. A third decimal is off by at
- * least a tenth of a cent, which is eight orders of magnitude above the error of a double
- * at this scale — so the tolerance separates the two rather than blurring them.
+ * The comparison goes through the decimal spelling rather than through `amount * 100`,
+ * because the input is a `number` and `120.35 * 100` is `12034.999999999998` in binary
+ * floating point — so that form needs a tolerance to tell a rounding error from a third
+ * decimal, and the tolerance is a number picked against the ceiling of the day: the error
+ * of a double grows with the value it holds, and one chosen for a price of ten thousand
+ * has to be chosen again the next time the ceiling moves. `toFixed` needs none. It is the
+ * amount as the cent scale writes it, and a double that survives the round trip through it
+ * is the nearest one to a two-decimal number — which is exactly what the column stores.
  */
 const cents = (amount: number): boolean =>
-  Math.abs(amount * CENTS - Math.round(amount * CENTS)) < 1e-6;
+  Number(amount.toFixed(SCALE)) === amount;
 
 /**
  * The two rules every price on this contract obeys, as checks rather than as a wrapper
@@ -99,17 +119,6 @@ export const updateListingSchema = createListingSchema
 export const listingListSchema = z.array(listingSchema);
 
 /**
- * A filter nobody filled in, as a URL spells it. An empty input serialises to `?guests=`
- * rather than to nothing at all, and every coercion below would read that differently:
- * `Number("")` is `0`, so `minPrice` would quietly become a filter while `maxPrice`,
- * `guests`, `limit` and `cursor` each answered `400`. The blank is turned into the absence
- * it means before any of them sees it, so one form with three empty fields asks the same
- * question as a form with none.
- */
-const blank = <Schema extends z.ZodType>(schema: Schema) =>
-  z.preprocess((value) => (value === "" ? undefined : value), schema);
-
-/**
  * How the catalogue is ordered, as the client asks for it. Four values rather than a field
  * and a direction: the two halves are not independent — the tiebreaker of a keyset page
  * has to follow the direction of the key it breaks ties in, or one btree can no longer
@@ -136,12 +145,9 @@ export const listingSortSchema = z.enum([
  * question ("free from the 3rd" until when?), and answering it by guessing the other end
  * would quietly return a different list than the one that was asked for.
  *
- * `cursor` is opaque on purpose — it is issued by `nextCursor` of the previous page and
- * decoded only by the API, so how the pages are cut stays the server's to change. It names
- * a place in one ordering, which is why it travels with the `sort` it was issued under and
- * why the API refuses it against another: a page is only the next one of the same list.
- * `limit` has a ceiling because it is the one parameter a client could use to ask for the
- * whole table.
+ * `cursor` and `limit` are the pair every paged read here takes, so they are spread in
+ * from `PAGING` rather than spelled out — what they are and why the cursor travels with
+ * the `sort` it was issued under is written down there, once for both resources.
  */
 export const listingQuerySchema = z
   .object({
@@ -163,8 +169,7 @@ export const listingQuerySchema = z
     ),
     guests: blank(z.coerce.number().int().min(1).max(50).optional()),
     sort: blank(listingSortSchema.default("newest")),
-    cursor: blank(z.string().min(1).optional()),
-    limit: blank(z.coerce.number().int().min(1).max(50).default(20)),
+    ...PAGING,
   })
   .refine((query) => (query.from === undefined) === (query.to === undefined), {
     message: "Filtering by dates needs both a check-in and a check-out date",

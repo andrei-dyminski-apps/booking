@@ -2,7 +2,7 @@
 
 A booking service monorepo: a Next.js frontend and a NestJS backend in one repository, managed by Turborepo and pnpm workspaces.
 
-> Status: the API is a working vertical slice — owners publish listings, guests book them and the dates are checked for overlaps. Storage is PostgreSQL via Prisma 7, and the API is behind hand-written authentication: argon2, a JWT pair in httpOnly cookies, refresh-token rotation, and role-based authorization on top. The frontend has the session half of it — sign up, sign in, a guarded profile page rendered on the server as the visitor, and a session that survives an expired access token — plus the owner's dashboard, where a listing is published, edited and taken down, and the catalogue: a filtered, cursor-paged list of stays whose filters live in the URL, a listing page with an availability calendar and the form that takes a hold, and a "my bookings" screen that shows every role its own scope. What a hold cannot do yet is turn into a paid stay; that is the next phase. The rest are in [docs/plan.md](docs/plan.md).
+> Status: the API is a working vertical slice — owners publish listings, guests book them and the dates are checked for overlaps. Storage is PostgreSQL via Prisma 7, and the API is behind hand-written authentication: argon2, a JWT pair in httpOnly cookies, refresh-token rotation, and role-based authorization on top. The frontend has the session half of it — sign up, sign in, a guarded profile page rendered on the server as the visitor, and a session that survives an expired access token — plus the owner's dashboard, where a listing is published, edited and taken down, and the catalogue: a filtered, cursor-paged list of stays whose filters live in the URL, a listing page with an availability calendar and the form that takes a hold, and a "my bookings" screen that shows every role its own scope, filtered and paged out of the URL like the catalogue. What a hold cannot do yet is turn into a paid stay; that is the next phase. The rest are in [docs/plan.md](docs/plan.md).
 
 ## Requirements
 
@@ -110,7 +110,7 @@ Routing belongs to Next.js and everything else to Feature-Sliced Design, so each
 | `/`                                | the landing, one link into the catalogue                              | everyone    |
 | `/listings`                        | the catalogue: filters in the URL, keyset pages, cached and tagged    | everyone    |
 | `/listings/:id`                    | one listing, its availability calendar and the form that takes a hold | everyone    |
-| `/bookings`                        | stays, in the scope the caller's role gives them, with cancellation   | signed in   |
+| `/bookings`                        | stays in the caller's scope: filters in the URL, keyset pages         | signed in   |
 | `/login`, `/register`              | the session forms, submitted to Server Actions                        | everyone    |
 | `/profile`                         | the session as the API sees it, and "Sign out"                        | signed in   |
 | `/dashboard`                       | the owner's own listings                                              | OWNER       |
@@ -119,6 +119,8 @@ Routing belongs to Next.js and everything else to Feature-Sliced Design, so each
 Every screen sits inside one shell (`apps/web/src/_app/layout`): a sidebar from `lg` up, the same list in a sheet behind the menu button below it, and a header with the theme and the two calls to action a stranger has. The shell reads `/auth/me` once for all three, and `currentUser()` is memoized for the render so the page under it does not ask again. A route that reads the API has a `loading.tsx` skeleton beside it, `notFound()` has a screen of its own, and there are two error boundaries — one under the shell and one that replaces the document when the shell itself cannot render.
 
 On the catalogue the filters are the URL. Every one of them lives behind a "Filters" modal — a plain `GET` form, so submitting it is the browser navigating to the search it spells rather than an action keeping state in step — the ordering beside it is a box over the same four links, and what is applied is spelled out as chips, each of them a link to the same search without that filter. The price of the compact toolbar is that asking a question of your own needs JavaScript: without it the catalogue still reads, and a chip still takes a filter off a search somebody sent.
+
+The stays screen is the same toolbar over a different list, and the two share what they can: the boxes, the chips and the ordering box live in `src/shared/ui`, while what is being filtered — the labels, the links, the parse of `searchParams` — stays in the slice of each screen. A card there carries one more link than the catalogue's does: "Stays here" is the `listingId` filter, which is how an owner or an admin reaches it without typing a uuid into a box.
 
 The three catalogue routes are the first cached reads in the application: `GET /listings`, one listing and its availability are public and identical for every visitor, so they are stored under their URL and tagged, and a mutation of a listing or a booking invalidates the tags it actually changed. Everything personal — the session, a visitor's stays, an owner's own listings — is read `no-store` and never tagged, because the Data Cache is keyed by URL and shared with whoever asks next.
 
@@ -141,7 +143,7 @@ of the catalogue is behind the global `JwtAuthGuard` and answers `401` without a
 | `POST`   | `/listings`                  | create, the owner taken from the session; OWNER only                                 |
 | `PATCH`  | `/listings/:id`              | edit; OWNER (their own) or ADMIN, `403` otherwise                                    |
 | `DELETE` | `/listings/:id`              | retire, `204`; out of the catalogue, booked stays keep their record                  |
-| `GET`    | `/bookings`                  | the bookings the caller may see, sorted by check-in date                             |
+| `GET`    | `/bookings`                  | one page of the stays the caller may see: filters, an ordering and a cursor          |
 | `GET`    | `/bookings/:id`              | a single booking; the guest, the owner of the listing or an admin                    |
 | `POST`   | `/bookings`                  | create a 15-minute hold; USER only, `404` — no such listing, `409` — dates are taken |
 | `DELETE` | `/bookings/:id`              | cancel, `204`; the guest or an admin. The row stays, with `status: CANCELLED`        |
@@ -204,6 +206,55 @@ The answer is `{ items, nextCursor }`, and `nextCursor` is `null` on the last pa
   not a catalogue, and the frontend caches those answers in a store keyed by URL and shared
   between visitors, so a read that needed a session could not be cached at all. Nothing
   personal is in them.
+
+### The stays list
+
+`GET /bookings` is the second search of this API, and it is paged for a reason the
+catalogue does not have: one of its three scopes has no ceiling on it. A guest's own
+history stays small by itself, an owner's is bounded by their listings, and an admin's is
+every stay on the site.
+
+| Parameter         | What it narrows                                                      |
+| ----------------- | -------------------------------------------------------------------- |
+| `status`          | one of `PENDING_PAYMENT`, `CONFIRMED`, `CANCELLED`, `EXPIRED`        |
+| `listingId`       | the stays taken against one listing                                  |
+| `guestId`         | the stays one guest took                                             |
+| `from`, `to`      | stays that overlap the window — both or neither, check-out exclusive |
+| `sort`            | `newest` (the default), `oldest`, `checkInAsc`, `checkInDesc`        |
+| `cursor`, `limit` | the page: a cursor from the previous answer, at most 50 rows         |
+
+The answer is `{ items, nextCursor }`, the cursor is the same opaque keyset cursor the
+catalogue issues, and it is refused the same way: one this API did not write, or one handed
+back under another `sort`, is a `400` rather than a silent first page.
+
+- **A filter narrows the scope; it never reaches around it.** What a caller may see is
+  decided by their role inside the `where` — a guest's own stays, an owner's listings',
+  everything for an admin — and `guestId` is a filter on top of that rather than a way past
+  it: for a guest it can only ever name themselves, and naming anybody else answers with
+  the empty list it truthfully is. The repository `AND`s the scope with the filters instead
+  of spreading them into one object, which is what makes that true of the one parameter
+  that names the same column the scope does.
+- **"Overlaps the window" is the predicate that refuses a booking.** `from`/`to` ask for the
+  stays that touch those dates, which is the same half-open comparison the locking
+  transaction makes — so the list and the rule behind it cannot disagree about what those
+  dates mean.
+- **Every status stays readable.** A cancelled or lapsed stay is a record its guest keeps,
+  so nothing narrows these reads by status; `status` is a filter for whoever wants one, and
+  the row says which of the four it is.
+- **`status` reports the stored value, not the clock**, and for up to a minute those differ.
+  A hold whose deadline has passed is released by a job and by the sweep behind it, so
+  until one of them runs the row is still `PENDING_PAYMENT` — `?status=PENDING_PAYMENT`
+  includes it and `?status=EXPIRED` does not. Its slot is already free either way: what
+  the overlap check and the catalogue ask is "is this hold still holding", which reads
+  `expires_at` rather than waiting for the write. The window is the sweep interval, one
+  minute.
+- **Four indexes, two per scope that has one** — `(created_at DESC, id DESC)` and
+  `(from_date DESC, id DESC)`, each again behind `guest_id`. The tiebreaker follows the
+  direction of the key, so one btree answers both directions, and none of them is partial:
+  no predicate narrows this table the way `deleted_at IS NULL` narrows the listings, which
+  is why they are declared on the model rather than in raw SQL. The owner's scope gets none
+  of its own — it narrows by `listings.owner_id`, a column of another table — and what
+  bounds it is that owner's listings rather than the site.
 
 ### Concurrent booking
 

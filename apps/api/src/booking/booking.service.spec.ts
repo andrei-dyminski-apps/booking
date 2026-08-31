@@ -1,19 +1,25 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   NotFoundException,
   UnauthorizedException,
 } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
+import { randomUUID } from "node:crypto";
 import {
+  bookingQuerySchema,
   BookingStatus,
   Role,
   type BookedRange,
   type Booking,
+  type BookingQuery,
+  type BookingSort,
   type CreateBookingInput,
   type ListingSummary,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
+import type { Page } from "../common/paging";
 import {
   BookingRepository,
   DatesUnavailableError,
@@ -21,6 +27,7 @@ import {
   ListingNotFoundError,
   type BookingWithListingOwner,
 } from "./booking.repository";
+import type { BookingCursor } from "./booking-cursor";
 import { BookingService } from "./booking.service";
 import { BookingExpiryQueue } from "./booking-expiry.queue";
 import { ACTIVE_STATUSES, holdExpiry } from "./domain/booking-status";
@@ -43,6 +50,24 @@ const input: CreateBookingInput = {
   to: "2026-09-05",
 };
 
+const MS_PER_DAY = 86_400_000;
+
+const day = (offset: number): string =>
+  new Date(Date.parse("2026-09-01T00:00:00.000Z") + offset * MS_PER_DAY)
+    .toISOString()
+    .slice(0, 10);
+
+/**
+ * The nth stay of a fixture that needs several: a week apart, so no two of them overlap
+ * and the fake refuses none — what these specs are about is the paging and the ordering,
+ * not the slot.
+ */
+const stayAfter = (index: number): CreateBookingInput => ({
+  ...input,
+  from: day(index * 7),
+  to: day(index * 7 + 2),
+});
+
 const userWith = (id: string, role: Role): AuthenticatedUser => ({
   id,
   email: "someone@example.com",
@@ -56,6 +81,39 @@ const admin = userWith(STRANGER_ID, Role.ADMIN);
 
 /** See `auth.service.spec.ts` for what this mapped type does and does not catch. */
 type PublicOf<T> = { [K in keyof T]: T[K] };
+
+/**
+ * A query as it reaches the service: parsed by the contract rather than written out, so a
+ * spec never states a default the API does not have.
+ */
+const searchFor = (search: Record<string, string> = {}): BookingQuery =>
+  bookingQuerySchema.parse(search);
+
+const compare = (left: string, right: string): number => {
+  if (left < right) return -1;
+
+  return left > right ? 1 : 0;
+};
+
+/** The four orderings of the contract, with the tiebreaker following the key. */
+const ordering =
+  (sort: BookingSort) =>
+  (left: Booking, right: Booking): number => {
+    switch (sort) {
+      case "newest":
+        return (
+          compare(right.createdAt, left.createdAt) || compare(right.id, left.id)
+        );
+      case "oldest":
+        return (
+          compare(left.createdAt, right.createdAt) || compare(left.id, right.id)
+        );
+      case "checkInAsc":
+        return compare(left.from, right.from) || compare(left.id, right.id);
+      case "checkInDesc":
+        return compare(right.from, left.from) || compare(right.id, left.id);
+    }
+  };
 
 const isActive = (booking: Booking): boolean =>
   ACTIVE_STATUSES.includes(booking.status);
@@ -84,21 +142,36 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
   /** Set to have `create` fail on the other key: the account behind the token is gone. */
   vanishingGuest = false;
 
-  findAll(): Promise<Booking[]> {
-    return Promise.resolve(this.allBookings());
+  findPageForEveryone(
+    query: BookingQuery,
+    cursor: BookingCursor | null,
+  ): Promise<Page<Booking>> {
+    return this.pageOf(this.allBookings(), query, cursor);
   }
 
-  findByGuest(guestId: string): Promise<Booking[]> {
-    return Promise.resolve(
+  findPageForGuest(
+    guestId: string,
+    query: BookingQuery,
+    cursor: BookingCursor | null,
+  ): Promise<Page<Booking>> {
+    return this.pageOf(
       this.allBookings().filter((booking) => booking.guestId === guestId),
+      query,
+      cursor,
     );
   }
 
-  findByListingOwner(ownerId: string): Promise<Booking[]> {
-    return Promise.resolve(
+  findPageForListingOwner(
+    ownerId: string,
+    query: BookingQuery,
+    cursor: BookingCursor | null,
+  ): Promise<Page<Booking>> {
+    return this.pageOf(
       [...this.rows.values()]
         .filter((found) => found.listingOwnerId === ownerId)
         .map((found) => found.booking),
+      query,
+      cursor,
     );
   }
 
@@ -131,7 +204,11 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
     }
 
     const stored: Booking = {
-      id: `booking-${String(this.rows.size + 1)}`,
+      // A uuid and a distinct moment, because the cursor the service issues off the last
+      // row of a page is parsed back as untrusted input: `booking-2` is not an id the
+      // contract's `uuid()` reads, and rows sharing one `createdAt` would leave the
+      // ordering to the tiebreaker alone.
+      id: randomUUID(),
       listingId: booking.listingId,
       listing,
       guestId,
@@ -139,7 +216,9 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
       to: booking.to,
       status: BookingStatus.PENDING_PAYMENT,
       expiresAt: holdExpiry(new Date()).toISOString(),
-      createdAt: "2026-08-17T12:00:00.000Z",
+      createdAt: new Date(
+        Date.parse("2026-08-17T12:00:00.000Z") + this.rows.size * 1_000,
+      ).toISOString(),
     };
 
     this.rows.set(stored.id, {
@@ -194,6 +273,48 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
     );
   }
 
+  /**
+   * The filters, the ordering and the cursor, in memory. They belong to the repository and
+   * are exercised against a real database by the e2e specs — what the fake has to get
+   * right is the shape the service reasons about: a scope narrowed further by the filters
+   * (never widened by them), `limit` rows with `hasMore` beside them, and a page that
+   * starts after the row the cursor names.
+   */
+  private pageOf(
+    rows: Booking[],
+    query: BookingQuery,
+    cursor: BookingCursor | null,
+  ): Promise<Page<Booking>> {
+    const matching = rows
+      .filter(
+        (stay) => query.status === undefined || stay.status === query.status,
+      )
+      .filter(
+        (stay) =>
+          query.listingId === undefined || stay.listingId === query.listingId,
+      )
+      .filter(
+        (stay) => query.guestId === undefined || stay.guestId === query.guestId,
+      )
+      .filter(
+        (stay) =>
+          query.from === undefined ||
+          query.to === undefined ||
+          (stay.from < query.to && stay.to > query.from),
+      )
+      .sort(ordering(query.sort));
+
+    const start =
+      cursor === null
+        ? 0
+        : matching.findIndex((stay) => stay.id === cursor.id) + 1;
+
+    return Promise.resolve({
+      items: matching.slice(start, start + query.limit),
+      hasMore: matching.length > start + query.limit,
+    });
+  }
+
   private allBookings(): Booking[] {
     return [...this.rows.values()].map((found) => found.booking);
   }
@@ -232,6 +353,13 @@ describe("BookingService", () => {
   /** A booking `guest` took against a listing `owner` owns — the row every rule acts on. */
   const bookedByGuest = async (): Promise<string> =>
     (await service.create(GUEST_ID, input)).id;
+
+  /** The stays one caller is handed, with a search of their own where one matters. */
+  const seenBy = async (
+    user: AuthenticatedUser,
+    search: Record<string, string> = {},
+  ): Promise<Booking[]> =>
+    (await service.findPage(user, searchFor(search))).items;
 
   beforeEach(async () => {
     bookingRepository = new FakeBookingRepository();
@@ -303,9 +431,109 @@ describe("BookingService", () => {
       listingId: OTHER_LISTING_ID,
     });
 
-    await expect(service.findAll(guest)).resolves.toHaveLength(1);
-    await expect(service.findAll(owner)).resolves.toHaveLength(1);
-    await expect(service.findAll(admin)).resolves.toHaveLength(2);
+    await expect(seenBy(guest)).resolves.toHaveLength(1);
+    await expect(seenBy(owner)).resolves.toHaveLength(1);
+    await expect(seenBy(admin)).resolves.toHaveLength(2);
+  });
+
+  /**
+   * The filters narrow the scope the role gives and can never widen it, which is the whole
+   * reason `guestId` is allowed to be one at all: for a guest it can only ever name
+   * themselves, and naming somebody else answers with the empty list it truthfully is
+   * rather than with that person's stays.
+   */
+  it("filters inside the scope of the caller, never around it", async () => {
+    await bookedByGuest();
+    await service.create(STRANGER_ID, {
+      ...input,
+      listingId: OTHER_LISTING_ID,
+    });
+
+    await expect(seenBy(guest, { guestId: STRANGER_ID })).resolves.toEqual([]);
+    await expect(seenBy(admin, { guestId: STRANGER_ID })).resolves.toHaveLength(
+      1,
+    );
+    await expect(
+      seenBy(admin, { listingId: OTHER_LISTING_ID }),
+    ).resolves.toHaveLength(1);
+    await expect(
+      seenBy(admin, { status: BookingStatus.CANCELLED }),
+    ).resolves.toEqual([]);
+  });
+
+  /**
+   * A page carries a cursor only while there is another one behind it, and the next page
+   * starts after the row that cursor names — no row twice and none skipped, which is what
+   * a keyset page buys over an offset a new booking would shift.
+   */
+  it("cuts the list into pages and issues a cursor only while there is one after", async () => {
+    for (let taken = 0; taken < 3; taken += 1) {
+      await service.create(GUEST_ID, stayAfter(taken));
+    }
+
+    const first = await service.findPage(guest, searchFor({ limit: "2" }));
+
+    expect(first.items).toHaveLength(2);
+    expect(first.nextCursor).not.toBeNull();
+
+    const second = await service.findPage(
+      guest,
+      searchFor({ limit: "2", cursor: String(first.nextCursor) }),
+    );
+
+    expect(second.items).toHaveLength(1);
+    expect(second.nextCursor).toBeNull();
+    expect(second.items.map((stay) => stay.id)).not.toContain(
+      first.items[0]?.id,
+    );
+  });
+
+  /**
+   * A cursor names a place in one ordering and in no other: read under another it would
+   * compare a check-in against a moment, and the rows after it would be a page of neither
+   * list. Both refusals are the client's to act on — dropping the cursor starts the pages
+   * again, which is exactly what changing the ordering means.
+   */
+  it("refuses a cursor from another ordering, and one it never issued", async () => {
+    await bookedByGuest();
+    await service.create(GUEST_ID, stayAfter(1));
+
+    const page = await service.findPage(guest, searchFor({ limit: "1" }));
+    const cursor = String(page.nextCursor);
+
+    await expect(
+      service.findPage(
+        guest,
+        searchFor({ limit: "1", cursor, sort: "oldest" }),
+      ),
+    ).rejects.toThrow(BadRequestException);
+
+    await expect(
+      service.findPage(guest, searchFor({ cursor: "not-a-cursor" })),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("orders by what was asked for, not by what was stored", async () => {
+    const second = await service.create(GUEST_ID, stayAfter(2));
+    const first = await service.create(GUEST_ID, stayAfter(0));
+
+    await expect(
+      seenBy(guest, { sort: "checkInAsc" }).then((stays) =>
+        stays.map((stay) => stay.id),
+      ),
+    ).resolves.toEqual([first.id, second.id]);
+
+    // `newest` is the default, and it is the moment the stay was taken rather than the
+    // day it starts: the later booking of the earlier stay comes first.
+    await expect(
+      seenBy(guest).then((stays) => stays.map((stay) => stay.id)),
+    ).resolves.toEqual([first.id, second.id]);
+
+    await expect(
+      seenBy(guest, { sort: "oldest" }).then((stays) =>
+        stays.map((stay) => stay.id),
+      ),
+    ).resolves.toEqual([second.id, first.id]);
   });
 
   it("shows a booking to its guest, to the owner of the listing and to an admin", async () => {
@@ -343,7 +571,7 @@ describe("BookingService", () => {
     const second = await bookedByGuest();
     await service.remove(second, admin);
 
-    await expect(service.findAll(admin)).resolves.toHaveLength(2);
+    await expect(seenBy(admin)).resolves.toHaveLength(2);
   });
 
   /**
@@ -385,6 +613,8 @@ describe("BookingService", () => {
 
     const stale = userWith(STRANGER_ID, "MODERATOR" as unknown as Role);
 
-    expect(() => service.findAll(stale)).toThrow(ForbiddenException);
+    await expect(service.findPage(stale, searchFor())).rejects.toThrow(
+      ForbiddenException,
+    );
   });
 });

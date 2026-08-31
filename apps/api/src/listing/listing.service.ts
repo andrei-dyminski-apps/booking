@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -11,17 +10,13 @@ import type {
   ListingAvailability,
   ListingPage,
   ListingQuery,
-  ListingSort,
   UpdateListingInput,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { ownsOrIsAdmin } from "../auth/ownership";
 import { BookingRepository } from "../booking/booking.repository";
-import {
-  decodeCursor,
-  encodeCursor,
-  type CatalogueCursor,
-} from "./catalogue-cursor";
+import { readCursor } from "../common/paging";
+import { decodeCursor, encodeCursor } from "./catalogue-cursor";
 import { ListingRepository } from "./listing.repository";
 
 /**
@@ -51,7 +46,7 @@ export class ListingService {
    * same list.
    */
   async findPage(query: ListingQuery): Promise<ListingPage> {
-    const cursor = this.readCursor(query.cursor, query.sort);
+    const cursor = readCursor(query.cursor, query.sort, decodeCursor);
 
     const { items, hasMore } = await this.listingRepository.findPage(
       query,
@@ -137,38 +132,6 @@ export class ListingService {
     if (!(await this.listingRepository.softDelete(id))) {
       throw new NotFoundException(`Listing ${id} not found`);
     }
-  }
-
-  /**
-   * No cursor is the first page; one this API cannot read is a `400`. `decodeCursor`
-   * returns `null` for both an absent and an unreadable value, so the two are told apart
-   * here, where only one of them is a mistake.
-   *
-   * A cursor issued under another ordering is the second mistake, and it is a `400` rather
-   * than a first page for the same reason: it names a place in a list this request is not
-   * asking for, and the rows after it are a page of neither. It is said in its own words
-   * because a client can act on it — changing the sort means starting the pages again,
-   * which is exactly what dropping the cursor does.
-   */
-  private readCursor(
-    raw: string | undefined,
-    sort: ListingSort,
-  ): CatalogueCursor | null {
-    if (raw === undefined) return null;
-
-    const cursor = decodeCursor(raw);
-
-    if (cursor === null) {
-      throw new BadRequestException("Malformed cursor");
-    }
-
-    if (cursor.sort !== sort) {
-      throw new BadRequestException(
-        "This cursor was issued for a different ordering",
-      );
-    }
-
-    return cursor;
   }
 
   private async getListing(id: string): Promise<Listing> {

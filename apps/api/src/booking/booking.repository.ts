@@ -4,6 +4,8 @@ import {
   BookingStatus,
   type BookedRange,
   type Booking,
+  type BookingQuery,
+  type BookingSort,
   type CreateBookingInput,
 } from "@repo/contracts";
 import { format } from "date-fns";
@@ -19,7 +21,9 @@ import {
   PrismaErrorCode,
   violatedConstraint,
 } from "../prisma/prisma.errors";
+import type { Page } from "../common/paging";
 import { PrismaService } from "../prisma/prisma.service";
+import type { BookingCursor } from "./booking-cursor";
 import { ACTIVE_STATUSES, holdExpiry } from "./domain/booking-status";
 
 /**
@@ -113,16 +117,34 @@ type BookingRowWithListing = BookingRow & {
 export class BookingRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
-  findAll(): Promise<Booking[]> {
-    return this.findWhere({});
+  /** Every stay there is — the admin's scope, and the one with no ceiling on it. */
+  findPageForEveryone(
+    query: BookingQuery,
+    cursor: BookingCursor | null,
+  ): Promise<Page<Booking>> {
+    return this.findPage({}, query, cursor);
   }
 
-  findByGuest(guestId: string): Promise<Booking[]> {
-    return this.findWhere({ guestId });
+  /** The stays this guest took. */
+  findPageForGuest(
+    guestId: string,
+    query: BookingQuery,
+    cursor: BookingCursor | null,
+  ): Promise<Page<Booking>> {
+    return this.findPage({ guestId }, query, cursor);
   }
 
-  findByListingOwner(ownerId: string): Promise<Booking[]> {
-    return this.findWhere({ listing: { ownerId } });
+  /**
+   * The stays taken against this owner's listings — a relation rather than a column, which
+   * is why it is the one scope the indexes below cannot serve as a seek. See the note on
+   * `ORDER_BY`.
+   */
+  findPageForListingOwner(
+    ownerId: string,
+    query: BookingQuery,
+    cursor: BookingCursor | null,
+  ): Promise<Page<Booking>> {
+    return this.findPage({ listing: { ownerId } }, query, cursor);
   }
 
   /**
@@ -308,14 +330,138 @@ export class BookingRepository {
     return count;
   }
 
-  private async findWhere(where: Prisma.BookingWhereInput): Promise<Booking[]> {
+  /**
+   * One page of stays: the caller's scope, the filters and the keyset cursor as three
+   * conditions of one `where`, and `limit + 1` rows so the caller learns whether there is
+   * a page after this one without a second `count`.
+   *
+   * **The three are `AND`-ed rather than spread into one object, and that is a rule about
+   * the scope rather than a matter of shape.** `guestId` is both a scope and a filter —
+   * spread, the filter would replace the scope, and a guest asking for `?guestId=` of
+   * somebody else would be handed their stays. An `AND` cannot lose a condition that way:
+   * every one of the three has to hold. The cursor is in there for the second reason the
+   * catalogue gives as well — on a check-in-ordered page it narrows the same column the
+   * date window narrows.
+   */
+  private async findPage(
+    scope: Prisma.BookingWhereInput,
+    query: BookingQuery,
+    cursor: BookingCursor | null,
+  ): Promise<Page<Booking>> {
     const rows = await this.prismaService.booking.findMany({
-      where,
+      where: {
+        AND: [
+          scope,
+          bookingFilters(query),
+          ...(cursor === null ? [] : [afterCursor(cursor)]),
+        ],
+      },
       include: LISTING_SUMMARY,
-      orderBy: { from: "asc" },
+      orderBy: ORDER_BY[query.sort],
+      take: query.limit + 1,
     });
 
-    return rows.map(toBooking);
+    return {
+      items: rows.slice(0, query.limit).map(toBooking),
+      hasMore: rows.length > query.limit,
+    };
+  }
+}
+
+/**
+ * The filters of `GET /bookings`, as a `where`. `undefined` is how Prisma spells "no
+ * condition", so an absent filter needs no branch of its own — what does need one is the
+ * date window, because it is a pair of comparisons rather than one.
+ *
+ * The window is an overlap and not a bound on the check-in: a stay touches these dates if
+ * it starts before the window ends and ends after it starts. That is `overlapping` below,
+ * the same half-open comparison the transaction in `create` refuses a double booking with,
+ * so a list of stays and the rule that made them cannot disagree about what "these dates"
+ * means.
+ */
+function bookingFilters(query: BookingQuery): Prisma.BookingWhereInput {
+  const { from, to } = query;
+
+  return {
+    status: query.status,
+    listingId: query.listingId,
+    guestId: query.guestId,
+    ...(from !== undefined && to !== undefined ? overlapping(from, to) : {}),
+  };
+}
+
+/**
+ * What a list of stays is ordered by, one entry per value the contract offers.
+ *
+ * The tiebreaker follows the direction of the key rather than being fixed, which is an
+ * index decision and not a matter of taste — see the note in `listing.repository.ts`: the
+ * ascending and the descending pair are exact reverses, so one btree answers both.
+ *
+ * The indexes that serve these are declared on the model (`schema.prisma`) rather than in
+ * raw SQL, because nothing about them is partial: `(created_at DESC, id DESC)` and
+ * `(from_date DESC, id DESC)` for the admin's scope, each of them again behind `guest_id`
+ * for a guest's own stays. The owner's scope is the one that gets none of its own: it
+ * narrows by a column of `listings`, so no index of this table can hold both halves, and
+ * an owner's stays are bounded by their listings rather than by the site. Changing
+ * `ORDER_BY` means changing those declarations and `afterCursor` with it.
+ */
+const ORDER_BY: Record<BookingSort, Prisma.BookingOrderByWithRelationInput[]> =
+  {
+    newest: [{ createdAt: "desc" }, { id: "desc" }],
+    oldest: [{ createdAt: "asc" }, { id: "asc" }],
+    checkInAsc: [{ from: "asc" }, { id: "asc" }],
+    checkInDesc: [{ from: "desc" }, { id: "desc" }],
+  };
+
+/**
+ * Everything that sorts after the cursor row under the ordering it was issued in: past the
+ * key, or level with it and past the id. It is written as a comparison against the values
+ * the cursor carries rather than through Prisma's own `cursor` option, because that one
+ * resolves the row by id first — and a booking cancelled between two pages is still there,
+ * but one deleted with its guest's account is not.
+ *
+ * Each branch says the key twice, and the redundant half is the one the index uses: an
+ * `OR` gives Postgres no start position, so the inclusive bound beside it is what turns a
+ * page deep in the list into a seek rather than the scan an offset would cost. The reason
+ * is written out in full in `listing.repository.ts`.
+ *
+ * The switch is exhaustive, which is what keeps it in step with `ORDER_BY` above and with
+ * `booking-cursor.ts`: a fifth ordering in the contract stops compiling in all three.
+ */
+function afterCursor(cursor: BookingCursor): Prisma.BookingWhereInput {
+  switch (cursor.sort) {
+    case "newest":
+      return {
+        createdAt: { lte: cursor.createdAt },
+        OR: [
+          { createdAt: { lt: cursor.createdAt } },
+          { createdAt: cursor.createdAt, id: { lt: cursor.id } },
+        ],
+      };
+    case "oldest":
+      return {
+        createdAt: { gte: cursor.createdAt },
+        OR: [
+          { createdAt: { gt: cursor.createdAt } },
+          { createdAt: cursor.createdAt, id: { gt: cursor.id } },
+        ],
+      };
+    case "checkInAsc":
+      return {
+        from: { gte: cursor.from },
+        OR: [
+          { from: { gt: cursor.from } },
+          { from: cursor.from, id: { gt: cursor.id } },
+        ],
+      };
+    case "checkInDesc":
+      return {
+        from: { lte: cursor.from },
+        OR: [
+          { from: { lt: cursor.from } },
+          { from: cursor.from, id: { lt: cursor.id } },
+        ],
+      };
   }
 }
 

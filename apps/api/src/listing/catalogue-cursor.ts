@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { listingSchema, listingSortSchema } from "@repo/contracts";
 import type { Listing, ListingSort } from "@repo/contracts";
+import { decodeParts, encodeParts } from "../common/paging";
 
 /**
  * The place in the catalogue a page ends, as the client hands it back. Keyset rather than
@@ -15,9 +16,9 @@ import type { Listing, ListingSort } from "@repo/contracts";
  *
  * The sort is in it as well, and it is what makes the pair readable: `120.00` is a price
  * under one ordering and nothing at all under another. It is also what lets the API refuse
- * a cursor handed back with a different `sort` — see `ListingService.readCursor`. Changing
- * what the catalogue is ordered by starts the list again, and answering the request as if
- * it had not would silently return a page of a list nobody asked for.
+ * a cursor handed back with a different `sort` — see `readCursor` in `src/common/paging.ts`.
+ * Changing what the catalogue is ordered by starts the list again, and answering the
+ * request as if it had not would silently return a page of a list nobody asked for.
  *
  * The row it names does not have to exist any more, and that is the reason the comparison
  * is written out in `ListingRepository` rather than handed to Prisma's own `cursor`: a
@@ -28,14 +29,15 @@ export type CatalogueCursor =
   | { sort: "priceAsc" | "priceDesc"; pricePerNight: number; id: string };
 
 /**
- * Opaque to the client on purpose. What it encodes is how the catalogue is cut into pages,
- * and that is the server's to change — a base64 string is a value to hand back, while
- * `created_at,id` in plain sight is an invitation to construct one.
+ * The envelope — the base64 spelling, the separator and the resource tag — belongs to
+ * `src/common/paging.ts`, because every paged read of this API writes a cursor the same
+ * way. What is left here is the half only the catalogue knows: which column each ordering
+ * sorts by, and how that column's value is read back.
  */
-export function encodeCursor(listing: Listing, sort: ListingSort): string {
-  const parts = [sort, sortKey(listing, sort), listing.id];
+const RESOURCE = "listings";
 
-  return Buffer.from(parts.join(SEPARATOR), "utf8").toString("base64url");
+export function encodeCursor(listing: Listing, sort: ListingSort): string {
+  return encodeParts(RESOURCE, sort, sortKey(listing, sort), listing.id);
 }
 
 /**
@@ -49,19 +51,14 @@ export function encodeCursor(listing: Listing, sort: ListingSort): string {
  * from, so a cursor cannot name a price no listing could have.
  */
 export function decodeCursor(raw: string): CatalogueCursor | null {
-  const parts = Buffer.from(raw, "base64url").toString("utf8").split(SEPARATOR);
-
-  if (parts.length !== 3) return null;
-
-  const parsed = cursorSchema.safeParse({
-    sort: parts[0],
-    key: parts[1],
-    id: parts[2],
+  const parts = decodeParts(RESOURCE, raw, {
+    sort: listingSortSchema,
+    id: listingSchema.shape.id,
   });
 
-  if (!parsed.success) return null;
+  if (parts === null) return null;
 
-  const { sort, key, id } = parsed.data;
+  const { sort, key, id } = parts;
 
   switch (sort) {
     case "newest":
@@ -102,9 +99,6 @@ function sortKey(listing: Listing, sort: ListingSort): string {
   }
 }
 
-/** A colon or a comma would need escaping; no half of the triple can contain this one. */
-const SEPARATOR = "|";
-
 /**
  * The one spelling `encodeCursor` writes for a price, and therefore the only one read back:
  * the amount to exactly two decimals, the scale the column stores and the contract refuses
@@ -114,9 +108,3 @@ const SEPARATOR = "|";
  * the two keys are read to the same standard rather than one of them being read leniently.
  */
 const CENTS = z.string().regex(/^\d+\.\d{2}$/);
-
-const cursorSchema = z.object({
-  sort: listingSortSchema,
-  key: z.string().min(1),
-  id: listingSchema.shape.id,
-});

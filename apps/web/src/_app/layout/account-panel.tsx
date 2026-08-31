@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { Role, type User } from "@repo/contracts";
-import { buttonVariants } from "@repo/ui/components/button";
 import { LogoutButton } from "#features/logout";
 import { ROUTES } from "#shared/config";
+import { ButtonLink } from "#shared/ui";
 
 /**
  * The foot of the navigation, in both places that draw it: the sidebar on a wide screen
@@ -16,15 +16,10 @@ export const AccountPanel = ({ user }: { user: User | null }) => {
   if (user === null) {
     return (
       <div className="flex flex-col gap-2">
-        <Link href={ROUTES.register} className={buttonVariants()}>
-          Create account
-        </Link>
-        <Link
-          href={ROUTES.login}
-          className={buttonVariants({ variant: "ghost" })}
-        >
+        <ButtonLink href={ROUTES.register}>Create account</ButtonLink>
+        <ButtonLink href={ROUTES.login} variant="ghost">
           Sign in
-        </Link>
+        </ButtonLink>
       </div>
     );
   }

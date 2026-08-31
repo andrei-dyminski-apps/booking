@@ -61,10 +61,11 @@ export const LogoutButton = ({
         type="button"
         variant={variant}
         onClick={signOut}
-        disabled={pending}
+        loading={pending}
       >
-        <LogOutIcon />
-        {pending ? "Signing out…" : "Sign out"}
+        {/* The spinner from the primitive takes the icon's place while pending. */}
+        {!pending && <LogOutIcon />}
+        Sign out
       </Button>
 
       {message !== null && (

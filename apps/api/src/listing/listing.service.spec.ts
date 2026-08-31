@@ -14,6 +14,7 @@ import {
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { BookingRepository } from "../booking/booking.repository";
+import type { Page } from "../common/paging";
 import { decodeCursor, type CatalogueCursor } from "./catalogue-cursor";
 import { ListingRepository } from "./listing.repository";
 import { ListingService } from "./listing.service";
@@ -78,7 +79,7 @@ class FakeListingRepository implements PublicOf<ListingRepository> {
   findPage(
     query: ListingQuery,
     cursor: CatalogueCursor | null,
-  ): Promise<{ items: Listing[]; hasMore: boolean }> {
+  ): Promise<Page<Listing>> {
     const offered = this.offered();
     const start =
       cursor === null

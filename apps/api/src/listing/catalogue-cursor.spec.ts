@@ -1,4 +1,5 @@
 import type { Listing, ListingSort } from "@repo/contracts";
+import { encodeParts } from "../common/paging";
 import { decodeCursor, encodeCursor } from "./catalogue-cursor";
 
 const listing: Listing = {
@@ -12,8 +13,9 @@ const listing: Listing = {
   updatedAt: "2026-08-20T12:00:00.000Z",
 };
 
+/** A cursor of this resource, spelled by hand — with the resource tag the envelope adds. */
 const raw = (...parts: (string | number)[]): string =>
-  Buffer.from(parts.join("|")).toString("base64url");
+  Buffer.from(["listings", ...parts].join("|")).toString("base64url");
 
 /**
  * A cursor arrives in a URL, so it is untrusted input: what it becomes is a `where` on the
@@ -55,10 +57,12 @@ describe("catalogue cursor", () => {
     for (const value of [
       "",
       "not-a-cursor",
-      // The pair the cursor carried before an ordering could be asked for: it parses as
-      // base64 and names a place, but not one this API can read any more.
-      raw(listing.createdAt, listing.id),
-      // A sort nobody offers, the halves the wrong way round, a fourth field, one half
+      // The triple the cursor carried before the envelope named the resource: it parses
+      // as base64 and names a place, but not one this API can read any more.
+      Buffer.from(["newest", listing.createdAt, listing.id].join("|")).toString(
+        "base64url",
+      ),
+      // A sort nobody offers, the halves the wrong way round, a fifth field, one half
       // alone, and an id that is not one: each parses as base64 and none of them is a
       // place in the catalogue.
       raw("cheapest", listing.pricePerNight, listing.id),
@@ -69,6 +73,21 @@ describe("catalogue cursor", () => {
     ]) {
       expect(decodeCursor(value)).toBeNull();
     }
+  });
+
+  /**
+   * Every list of this API spells its cursor the same way, and a `newest` one is a
+   * timestamp and a uuid whichever list issued it. Without the resource in the envelope a
+   * cursor of the stays would decode here as a perfectly good place in the catalogue, and
+   * the answer would be a page of a question nobody asked rather than the `400` a cursor
+   * from somewhere else deserves.
+   */
+  it("refuses a cursor another list of this API issued", () => {
+    expect(
+      decodeCursor(
+        encodeParts("bookings", "newest", listing.createdAt, listing.id),
+      ),
+    ).toBeNull();
   });
 
   /**
@@ -90,7 +109,7 @@ describe("catalogue cursor", () => {
       expect(decodeCursor(raw(sort, listing.createdAt, listing.id))).toBe(null);
       expect(decodeCursor(raw(sort, 0, listing.id))).toBeNull();
       expect(decodeCursor(raw(sort, 1.5, listing.id))).toBeNull();
-      expect(decodeCursor(raw(sort, 1_000_001, listing.id))).toBeNull();
+      expect(decodeCursor(raw(sort, "1000000.01", listing.id))).toBeNull();
     }
   });
 

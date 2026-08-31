@@ -355,3 +355,31 @@ async function toResponseError(response: Response): Promise<ApiResponseError> {
     parsed.data.errors ?? [],
   );
 }
+
+/**
+ * The query string of a read, and the second half of the Data Cache key it is stored
+ * under — which is why the parameters are sorted rather than left in the order the object
+ * happened to carry them. Two callers asking the same question have to produce the same
+ * URL, or each of them warms a cache entry the other never reads.
+ *
+ * An absent filter is left out entirely rather than sent empty. The contract reads `from=`
+ * as the absence it means, so either spelling is answered the same way — but they are two
+ * different URLs, and this is the side that decides which of them the cache is keyed by.
+ */
+export function queryString(
+  params: Record<string, string | number | undefined>,
+): string {
+  const search = new URLSearchParams();
+
+  for (const [name, value] of Object.entries(params)) {
+    if (value === undefined) continue;
+
+    search.set(name, String(value));
+  }
+
+  search.sort();
+
+  const query = search.toString();
+
+  return query === "" ? "" : `?${query}`;
+}

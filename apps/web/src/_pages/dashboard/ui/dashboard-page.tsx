@@ -1,7 +1,5 @@
-import Link from "next/link";
 import { PlusIcon, WarehouseIcon } from "lucide-react";
 import { Role } from "@repo/contracts";
-import { buttonVariants } from "@repo/ui/components/button";
 import {
   Empty,
   EmptyContent,
@@ -12,6 +10,7 @@ import {
 } from "@repo/ui/components/empty";
 import { listingsApi, requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
+import { ButtonLink } from "#shared/ui";
 import { ListingCard } from "./listing-card";
 
 /**
@@ -37,10 +36,10 @@ export const DashboardPage = async () => {
           </p>
         </div>
 
-        <Link href={ROUTES.newListing} className={buttonVariants()}>
+        <ButtonLink href={ROUTES.newListing}>
           <PlusIcon />
           New listing
-        </Link>
+        </ButtonLink>
       </div>
 
       {listings.length === 0 ? (
@@ -56,18 +55,20 @@ export const DashboardPage = async () => {
             </EmptyDescription>
           </EmptyHeader>
           <EmptyContent>
-            <Link href={ROUTES.newListing} className={buttonVariants()}>
+            <ButtonLink href={ROUTES.newListing}>
               <PlusIcon />
               New listing
-            </Link>
+            </ButtonLink>
           </EmptyContent>
         </Empty>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <ul role="list" className="grid gap-4 sm:grid-cols-2">
           {listings.map((listing) => (
-            <ListingCard key={listing.id} listing={listing} />
+            <li key={listing.id}>
+              <ListingCard listing={listing} />
+            </li>
           ))}
-        </div>
+        </ul>
       )}
     </div>
   );

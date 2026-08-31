@@ -6,12 +6,16 @@ import {
 } from "@repo/contracts";
 import { ROUTES } from "#shared/config";
 import {
-  formatDay,
+  countOf,
+  dayLabelOrAny,
+  filtersHref,
   formatMoney,
-  isDay,
+  searchParamsHref,
+  singleParam,
   toFieldErrors,
   type FieldErrors,
 } from "#shared/lib";
+import type { SortOption } from "#shared/ui";
 
 /**
  * What the boxes of the filter form hold — text, because that is what a URL carries.
@@ -39,6 +43,18 @@ export type CatalogueSearch = {
   query: ListingQuery | null;
   errors: FieldErrors;
   values: FilterValues;
+  /**
+   * The address this search belongs at, or `null` when the URL already spells it. A
+   * `GET` form submits every box it has, so the ordinary way to arrive here is
+   * `?from=&to=&minPrice=100&…` — the same search the chips and the ordering write as
+   * `?minPrice=100`. Both are answered identically, and that is the problem: one
+   * catalogue under two addresses is a link that is longer than the search it carries,
+   * a second entry in the router cache for a page already there, and two URLs for a
+   * crawler to read as duplicates. So the page redirects to this one instead of
+   * rendering, and every address of the catalogue is a link this slice would have
+   * written itself.
+   */
+  canonical: string | null;
 };
 
 /**
@@ -46,50 +62,51 @@ export type CatalogueSearch = {
  * schema that validates the query string on the API side parses it here, and what it
  * refuses is shown under the box it belongs to.
  *
- * An empty box is not a filter, and nothing here has to say so: a `GET` form submits every
- * field it has, so the URL of an unfiltered search spells out `?from=&to=&…`, and
- * `listingQuerySchema` reads each blank as the absence it means. That rule lives in the
- * contract rather than here precisely because both sides meet it — the query string the
- * API parses arrives with the same blanks in it.
+ * An empty box is not a filter, and the contract is what says so: `listingQuerySchema`
+ * reads each blank as the absence it means, on this side and on the API's, so a search is
+ * answered the same however many empty boxes the form submitted along with it. What the
+ * blanks do not survive is the address bar — see `canonical`.
  */
 export function readCatalogueSearch(
   params: Record<string, string | string[] | undefined>,
 ): CatalogueSearch {
   const values: FilterValues = {
-    from: single(params.from),
-    to: single(params.to),
-    minPrice: single(params.minPrice),
-    maxPrice: single(params.maxPrice),
-    guests: single(params.guests),
-    sort: single(params.sort),
+    from: singleParam(params.from),
+    to: singleParam(params.to),
+    minPrice: singleParam(params.minPrice),
+    maxPrice: singleParam(params.maxPrice),
+    guests: singleParam(params.guests),
+    sort: singleParam(params.sort),
   };
 
-  const parsed = listingQuerySchema.safeParse({
-    ...values,
-    cursor: single(params.cursor),
-  });
+  const cursor = singleParam(params.cursor);
+  const parsed = listingQuerySchema.safeParse({ ...values, cursor });
+
+  const href = catalogueHref(values, cursor === "" ? undefined : cursor);
+  const canonical =
+    href === searchParamsHref(ROUTES.catalogue, params) ? null : href;
 
   return parsed.success
-    ? { query: parsed.data, errors: {}, values }
-    : { query: null, errors: toFieldErrors(parsed.error.issues), values };
+    ? { query: parsed.data, errors: {}, values, canonical }
+    : {
+        query: null,
+        errors: toFieldErrors(parsed.error.issues),
+        values,
+        canonical,
+      };
 }
 
 /**
  * A link to the catalogue carrying these filters, and the next page of them when a cursor
- * is handed over. The cursor is deliberately not part of the filter form: changing what
- * is being searched for starts the pages again, and a cursor left over from the previous
- * question would answer a different one. Changing the ordering is the same thing said
- * more strictly — a cursor names a place in one ordering and the API refuses it against
- * another — and every link below is written without one for exactly that reason.
+ * is handed over. `filtersHref` does the assembling; what stays here is the route and the
+ * field order every link of this slice shares. The cursor is deliberately not part of the
+ * filter form: changing what is being searched for starts the pages again, and a cursor
+ * left over from the previous question would answer a different one — the ordering is the
+ * same thing said more strictly, since the API refuses a cursor against another ordering,
+ * and every link below is written without one for that reason.
  */
 export function catalogueHref(values: FilterValues, cursor?: string): string {
-  const search = new URLSearchParams(withoutEmpty(values));
-
-  if (cursor !== undefined) search.set("cursor", cursor);
-
-  const query = search.toString();
-
-  return query === "" ? ROUTES.catalogue : `${ROUTES.catalogue}?${query}`;
+  return filtersHref(ROUTES.catalogue, values, cursor);
 }
 
 /**
@@ -109,14 +126,6 @@ const SORT_LABELS: Record<ListingSort, string> = {
  * current one before the query is parsed.
  */
 const DEFAULT_SORT: ListingSort = "newest";
-
-/** One ordering, as a link: an ordering is another address, exactly like a filter. */
-export type SortOption = {
-  value: ListingSort;
-  label: string;
-  href: string;
-  current: boolean;
-};
 
 /**
  * The four orderings the contract offers, each of them a link to this same search under it.
@@ -207,7 +216,7 @@ export function activeFilters(values: FilterValues): ActiveFilter[] {
   if (values.from !== "" || values.to !== "") {
     filters.push({
       key: "dates",
-      label: `${dayLabel(values.from)} → ${dayLabel(values.to)}`,
+      label: `${dayLabelOrAny(values.from)} → ${dayLabelOrAny(values.to)}`,
       href: catalogueHref({ ...values, from: "", to: "" }),
     });
   }
@@ -231,7 +240,7 @@ export function activeFilters(values: FilterValues): ActiveFilter[] {
   if (values.guests !== "") {
     filters.push({
       key: "guests",
-      label: `${values.guests} ${values.guests === "1" ? "guest" : "guests"}`,
+      label: guestsLabel(values.guests),
       href: catalogueHref({ ...values, guests: "" }),
     });
   }
@@ -239,11 +248,11 @@ export function activeFilters(values: FilterValues): ActiveFilter[] {
   return filters;
 }
 
-/** A day for a chip to carry, or the word for the half of a range that was left empty. */
-function dayLabel(value: string): string {
-  if (value === "") return "any date";
+/** A count of guests, agreed with its noun — or the text as it arrived, like the price. */
+function guestsLabel(value: string): string {
+  const count = Number(value);
 
-  return isDay(value) ? formatDay(value) : value;
+  return Number.isInteger(count) ? countOf(count, "guest") : `${value} guests`;
 }
 
 /** A price on its way to a screen, like everywhere else — or the text as it arrived. */
@@ -251,20 +260,4 @@ function priceLabel(value: string): string {
   const amount = Number(value);
 
   return Number.isFinite(amount) ? formatMoney(amount) : value;
-}
-
-/**
- * One value or none. A parameter repeated in the URL arrives as an array, and this
- * application never writes one — so rather than guessing which of them was meant, the
- * filter is dropped and the search is the one the visitor can see in the boxes.
- */
-function single(value: string | string[] | undefined): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-/** A link carries only the filters that are set — the parse would accept the blanks too. */
-function withoutEmpty(values: Record<string, string>): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(values).filter(([, value]) => value !== ""),
-  );
 }

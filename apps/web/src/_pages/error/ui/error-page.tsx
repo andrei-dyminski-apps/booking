@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useTransition } from "react";
 import { TriangleAlertIcon } from "lucide-react";
 import { Button } from "@repo/ui/components/button";
 import {
@@ -29,6 +29,10 @@ export const ErrorPage = ({
   error: Error & { digest?: string };
   reset: () => void;
 }) => {
+  // `reset` reports nothing about itself, and re-rendering the segment reads the API
+  // again — the transition is what makes that wait visible on the button that started it.
+  const [retrying, startTransition] = useTransition();
+
   useEffect(() => {
     // The server logs its own; this is the half that happened after hydration.
     console.error(error);
@@ -47,7 +51,16 @@ export const ErrorPage = ({
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <Button onClick={reset}>Try again</Button>
+        <Button
+          onClick={() => {
+            startTransition(() => {
+              reset();
+            });
+          }}
+          loading={retrying}
+        >
+          Try again
+        </Button>
         {error.digest !== undefined && (
           <p className="text-xs text-muted-foreground">
             Reference: {error.digest}

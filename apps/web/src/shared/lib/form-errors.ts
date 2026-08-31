@@ -54,6 +54,27 @@ export function toFormErrors(error: unknown): FormErrors {
 }
 
 /**
+ * Every distinct message in `errors`, minus the fields named in `except`.
+ *
+ * A toolbar sits above a dialog, so a refusal of a box behind that door has to be repeated
+ * out where it can be seen. A rule about a pair of fields is reported under each of them,
+ * so the list is de-duplicated; `except` is for a field that has a control of its own to
+ * sit under (the ordering), so its message is not shown twice.
+ */
+export function messagesExcept(
+  errors: FieldErrors,
+  ...except: string[]
+): string[] {
+  return [
+    ...new Set(
+      Object.entries(errors)
+        .filter(([field]) => !except.includes(field))
+        .flatMap(([, messages]) => messages),
+    ),
+  ];
+}
+
+/**
  * The messages of one field in the shape `FieldError` renders them. Every box of every
  * form here ends in the same line, and writing the map out at each of them is one more
  * place to hand a field the messages of its neighbour.

@@ -94,6 +94,20 @@ describe("readCatalogueSearch", () => {
     expect(errors.minPrice).toHaveLength(1);
   });
 
+  it("takes a price at the ceiling and refuses the cent above it", () => {
+    // The top of the range is where the cent rule and the ceiling meet, and a filter is
+    // the one place a visitor types a price without a form to bound it. A refusal at
+    // 999999.99 would be a box they cannot correct; one at 1000000.01 is the contract.
+    const { query, errors } = readCatalogueSearch({ maxPrice: "999999.99" });
+
+    expect(errors.maxPrice).toBeUndefined();
+    expect(query?.maxPrice).toBe(999_999.99);
+
+    expect(
+      readCatalogueSearch({ maxPrice: "1000000.01" }).errors.maxPrice,
+    ).toHaveLength(1);
+  });
+
   it("refuses a filter that is not a number at all", () => {
     const { query, errors } = readCatalogueSearch({ guests: "many" });
 
@@ -128,6 +142,82 @@ describe("readCatalogueSearch", () => {
 
     expect(query).toBeNull();
     expect(errors.sort).toHaveLength(1);
+  });
+});
+
+describe("readCatalogueSearch, the address it belongs at", () => {
+  it("leaves an address that is already the one this slice writes", () => {
+    expect(readCatalogueSearch({}).canonical).toBeNull();
+    expect(
+      readCatalogueSearch({ guests: "3", sort: "priceAsc" }).canonical,
+    ).toBeNull();
+    expect(
+      readCatalogueSearch({ guests: "3", cursor: "b3BhcXVl" }).canonical,
+    ).toBeNull();
+  });
+
+  it("drops the empty boxes a GET form submits beside the one that was filled in", () => {
+    const { canonical } = readCatalogueSearch({
+      from: "",
+      to: "",
+      minPrice: "100",
+      maxPrice: "",
+      guests: "",
+      sort: "",
+    });
+
+    expect(canonical).toBe("/listings?minPrice=100");
+  });
+
+  it("writes the parameters in the order every link of this slice writes them", () => {
+    // Otherwise the same search is two addresses again, one of them written by a form and
+    // the other by a chip.
+    expect(
+      readCatalogueSearch({ sort: "priceAsc", guests: "3" }).canonical,
+    ).toBe("/listings?guests=3&sort=priceAsc");
+  });
+
+  it("drops what the catalogue does not take, and a parameter the URL repeats", () => {
+    expect(readCatalogueSearch({ guests: "3", ref: "email" }).canonical).toBe(
+      "/listings?guests=3",
+    );
+    expect(readCatalogueSearch({ guests: ["2", "8"] }).canonical).toBe(
+      "/listings",
+    );
+  });
+
+  it("canonicalises a search the contract refuses as well", () => {
+    // The boxes and the message about them are what this address is for, so it is the one
+    // the mistake is corrected at.
+    const { query, canonical } = readCatalogueSearch({
+      sort: "cheapest",
+      guests: "",
+    });
+
+    expect(query).toBeNull();
+    expect(canonical).toBe("/listings?sort=cheapest");
+  });
+
+  it("round-trips: the address it names is one it would leave alone", () => {
+    // A redirect onto an address that redirects again is a loop, so this is the property
+    // that matters rather than any single link above.
+    const canonical = readCatalogueSearch({
+      from: " 2030-01-02 ",
+      to: "2030-01-09",
+      minPrice: "",
+      sort: "priceDesc",
+      cursor: "b3BhcXVl",
+    }).canonical;
+
+    expect(canonical).toBe(
+      "/listings?from=2030-01-02&to=2030-01-09&sort=priceDesc&cursor=b3BhcXVl",
+    );
+
+    const params = Object.fromEntries(
+      new URL(canonical ?? "", "https://example.test").searchParams,
+    );
+
+    expect(readCatalogueSearch(params).canonical).toBeNull();
   });
 });
 

@@ -10,6 +10,7 @@ import {
   FieldLabel,
 } from "@repo/ui/components/field";
 import { Input } from "@repo/ui/components/input";
+import { PasswordInput } from "@repo/ui/components/password-input";
 import { fieldMessages, NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
 import { registerAction } from "../api/register-action";
 
@@ -32,6 +33,7 @@ export const RegisterForm = ({ next }: { next: string }) => {
             id="email"
             name="email"
             type="email"
+            size="lg"
             autoComplete="email"
             value={email}
             onChange={(event) => {
@@ -45,10 +47,10 @@ export const RegisterForm = ({ next }: { next: string }) => {
 
         <Field data-invalid={errors.fields.password !== undefined}>
           <FieldLabel htmlFor="password">Password</FieldLabel>
-          <Input
+          <PasswordInput
             id="password"
             name="password"
-            type="password"
+            size="lg"
             autoComplete="new-password"
             value={password}
             onChange={(event) => {

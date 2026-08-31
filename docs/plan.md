@@ -327,6 +327,54 @@ is the transition a hold could not make on its own:
 - [ ] Helmet.
 - [ ] Bring Swagger up to a complete description with examples and auth.
 - [ ] Observability: structured logs (pino), a request-logging interceptor, `/health` (`@nestjs/terminus`).
+- [ ] **JSON-LD across the whole site** — the structured data a catalogue is actually read
+      by, and the one SEO question this project has so far answered with nothing. Semantic
+      markup is not that answer: wrapping the rows in a `<ul role="list">` bought a screen
+      reader a count and an edge (`.claude/rules/frontend.md`) and buys a crawler nothing,
+      because nothing ranks on list markup. What a search engine reads a stay out of is
+      `application/ld+json`, and it is the difference between a blue link and a result
+      carrying a price and a capacity.
+
+      Four documents, each on the page whose data it describes — a graph assembled in one
+      place would have to be kept in step with screens it cannot see:
+
+      - `Organization` and `WebSite` in the shell (`_app/layout`), the two the whole site
+        shares, emitted once in the root layout rather than per page.
+      - `ItemList` on `/listings`, its `itemListElement` the rows the page has already
+        read. It describes the page that was asked for, so a filtered search and a cursor
+        page each describe themselves rather than the catalogue as a whole.
+      - `Accommodation` (`VacationRental`) with an `Offer` on `/listings/:id` — the title,
+        the description, `occupancy` off the capacity, and the nightly price as a
+        `UnitPriceSpecification` in the currency the contract stores. Google's
+        vacation-rental result is a partner programme; the `Offer` and its price is the
+        half that earns a rich result without one.
+      - `BreadcrumbList` on both, since the trail is `/` → `/listings` → the row and each
+        page already knows its own.
+
+      Three things it has to get right, and all three are why this is a phase item rather
+      than a snippet:
+
+      - **The document is built from the contract type the page already renders** — off the
+        parsed `Listing`, not from a second read and not from fields assembled by hand. A
+        document that disagrees with the page it sits on is what a crawler penalises, and
+        that drift is exactly what a shared schema exists to prevent.
+      - **It is untrusted text inside a `<script>`.** A title and a description are written
+        by an owner, so a `</script>` in either one closes the block early and puts the
+        rest of the row into the document as markup. `JSON.stringify` does not escape it:
+        turning `<` into `\u003c` is the whole defence, and it belongs in one helper in
+        `shared/lib` with a spec beside it — a parser whose input somebody else writes is
+        the first of the four kinds of spec the frontend rules already name.
+      - **Indexing goes in the same change**, because half of a catalogue's SEO is what not
+        to index. A cursor is opaque and unrepeatable, so a `?cursor=…` page gets
+        `robots: { index: false, follow: true }` out of `generateMetadata` and a canonical
+        pointing at the same search without it, while a filtered search canonicalises to
+        itself. The pages also still have no `metadata` of their own — a title, a
+        description and `openGraph`, and on `/listings/:id` all three off the row.
+
+      What stays out: `AggregateRating` and `Review` until the optional reviews below
+      exist, and `availability` on the offer — that would be a promise about dates the
+      calendar answers per window and a document cannot state for a stay as a whole.
+
 - [ ] Optional: reviews with ratings, email notifications through BullMQ.
 
 ## Phase 8 — Deployment and presentation
@@ -334,6 +382,83 @@ is the transition a hold could not make on its own:
 - [ ] Web on Vercel; API + Postgres + Redis on Railway or Fly.io. `API_ORIGIN` is a runtime variable of the frontend server, so a changed API address is a redeploy without a rebuild; `TRUST_PROXY` on the API has to reach past the extra `X-Forwarded-For` entry the frontend server's own request produces.
 - [ ] The README as a pitch: screenshots, an architecture diagram, an "interesting decisions" section (concurrency, webhooks, refresh-token rotation), a three-command start, Stripe test cards, demo logins for all three roles.
 - [ ] The demo scenario: two browser windows book the same slot at once — one goes to payment, the other receives a polite conflict.
+
+## Phase 9 — Localization
+
+The whole tree is English today, the interface included, and that is a rule rather than an
+accident (`.claude/rules/workflow.md`). This phase is the one change allowed to touch it,
+and the rule already says how: Russian comes back as a translation catalogue, never as a
+string typed into a component. It comes last because it touches every screen — doing it
+before the screens were finished would be paying for each of them twice — and because two
+of its pieces were written in advance, each with a note saying so.
+
+- [ ] **`next-intl` and a `[locale]` segment.** It is the toolkit built for the App Router
+      rather than around it: `getTranslations` in a Server Component, `getLocale` instead
+      of reading the segment out of `params`, and ICU messages so a plural is a rule of the
+      catalogue rather than of the code. The locale goes in the path — `/en/listings`,
+      `/ru/listings` — and not in a cookie, and the Data Cache is what settles that: it is
+      keyed by URL and shared between visitors, so a catalogue whose language lived in a
+      cookie would serve one visitor's language to the next one out of the same entry. In
+      the path, the two languages are two keys and the sharing stays correct.
+- [ ] **`app/` grows a level and `src/` does not.** Every file under `app/` is a one-line
+      re-export, so moving the tree under `app/[locale]/` is mechanical and the slices it
+      re-exports never learn about it. `app/api/[...path]` stays outside that segment — the
+      BFF is transport, it has no language, and the middleware's matcher has to say so.
+      `ROUTES` in `shared/config` stays locale-free too: the prefix is added by the
+      navigation helpers `createNavigation` generates, which is one place rather than
+      every `href` on the site.
+- [ ] **One `proxy.ts`, two jobs.** Next.js allows a single middleware, and this one already
+      is the cookie gate in front of the protected routes; `createMiddleware` from
+      `next-intl` is a second function that wants the same slot. They compose — the locale
+      is resolved first, the gate then reads a path it can recognise — and the matcher
+      literal in `proxy.ts` has to learn the prefix, since `/profile` and `/ru/profile` are
+      the same protected route. The literal stays a literal: Next.js parses it out of that
+      file before any import is evaluated, which is why it could never be `ROUTES` and
+      cannot become a generated list now.
+- [ ] **The contract answers with a code, not a sentence — and this is the real work of the
+      phase.** Today a refusal is English prose written in a zod schema or a Nest
+      exception, and it reaches the screen as it is: `form-errors.ts` puts it under the
+      field it names. A Russian form showing an English refusal is the whole problem, and
+      translating on the frontend by matching the text would be a parser over somebody
+      else's prose. So `apiErrorSchema` grows a stable `code` per issue, the schemas in
+      `@repo/contracts` carry one on every rule, and the catalogue maps a code to a
+      message with the parameters the rule already knows (a minimum, a ceiling, a date).
+      The English prose stays as the fallback for a code no catalogue has yet, and as what
+      `/docs` and the API's own logs keep saying. It is a contract change, so it lands in
+      one place for both sides — which is the argument the shared package has been making
+      since phase 1.
+- [ ] **A Server Action has to be handed its locale.** `next/root-params` does not reach
+      one, so `getTranslations({locale, namespace})` needs the value passed in — and
+      mutations here are Server Actions by default. That makes it a rule for the whole
+      `api/` segment of every page slice rather than a detail of one form: the locale
+      travels as a hidden field of the form, beside the `sort` the catalogue's dialog
+      already carries for the same kind of reason.
+- [ ] **Two formatters were written for this and one must not be touched.** `countOf` in
+      `shared/lib/plural.ts` says in its own comment that `Intl.PluralRules` and a
+      catalogue replace its body and nothing else; `formatMoney` names `en-GB` explicitly
+      so the server and the browser agree on the separators, and localizing it means
+      choosing the locale rather than dropping the argument — a `undefined` locale is the
+      runtime's, and the server's runtime is not the visitor's. `shared/lib/dates.ts` is
+      the one that stays: a calendar day is a `YYYY-MM-DD` string read as midnight UTC,
+      because that is the clock the contract compares a check-in against. Only its display
+      is localized; parsing one in the visitor's zone moves a stay by a day.
+- [ ] **The SEO of two languages**, and it is the other half of the JSON-LD item in phase 7.
+      `<html lang>` comes from the resolved locale instead of the literal `en` it carries
+      now, `generateMetadata` emits `alternates.languages` so each page names its
+      counterpart, and every JSON-LD document gains `inLanguage`. A locale is a path
+      segment, so a canonical is per language and the `?cursor=…` rule from phase 7 applies
+      unchanged in both.
+- [ ] **What stays English.** Everything that is not the interface: code, comments, tests
+      and their fixtures, commit messages aside, the seed's demo data, the API's logs and
+      Swagger. The catalogue files are the only place in the tree where Cyrillic lands, and
+      `.claude/rules/workflow.md` is updated in this change to say so instead of saying
+      "when i18n appears".
+
+What stays out: translating what an owner wrote. A listing's title and description are
+their author's text in their author's language, and a `language` column with per-locale
+copy behind it is a product decision rather than an engineering one. So is currency —
+money is stored and answered in one currency, and localizing how a number is written is
+not converting what it is worth.
 
 ## Decisions already made
 

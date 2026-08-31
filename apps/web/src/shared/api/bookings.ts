@@ -1,11 +1,13 @@
 import { z } from "zod";
 import {
-  bookingListSchema,
+  bookingPageSchema,
   bookingSchema,
   type Booking,
+  type BookingPage,
+  type BookingQuery,
   type CreateBookingInput,
 } from "@repo/contracts";
-import { apiRequest, type ReadOptions } from "./http-client";
+import { apiRequest, queryString, type ReadOptions } from "./http-client";
 
 /**
  * Every route of the bookings resource is written down here once — method, path and the
@@ -16,11 +18,16 @@ import { apiRequest, type ReadOptions } from "./http-client";
  * in `shared/api` and not in an entity slice of its own.
  */
 export const bookingsApi = {
-  list: (read: ReadOptions): Promise<Booking[]> =>
+  /**
+   * One page of the stays the caller may see. The scope is the session's — the API narrows
+   * by role rather than by a parameter — and what travels in the query string is the
+   * filters, the ordering and the cursor of the previous page.
+   */
+  page: (query: BookingQuery, read: ReadOptions): Promise<BookingPage> =>
     apiRequest({
       method: "GET",
-      path: "/bookings",
-      schema: bookingListSchema,
+      path: `/bookings${queryString(query)}`,
+      schema: bookingPageSchema,
       read,
     }),
 

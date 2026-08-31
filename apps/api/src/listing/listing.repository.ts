@@ -11,6 +11,7 @@ import {
   type Prisma,
   type Listing as ListingRow,
 } from "../generated/prisma/client";
+import type { Page } from "../common/paging";
 import { isPrismaError, PrismaErrorCode } from "../prisma/prisma.errors";
 import { PrismaService } from "../prisma/prisma.service";
 import type { CatalogueCursor } from "./catalogue-cursor";
@@ -59,7 +60,7 @@ export class ListingRepository {
   async findPage(
     query: ListingQuery,
     cursor: CatalogueCursor | null,
-  ): Promise<{ items: Listing[]; hasMore: boolean }> {
+  ): Promise<Page<Listing>> {
     const rows = await this.prismaService.listing.findMany({
       where: catalogueWhere(query, cursor),
       orderBy: ORDER_BY[query.sort],

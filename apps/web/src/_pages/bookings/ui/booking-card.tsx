@@ -11,11 +11,14 @@ import {
 } from "@repo/ui/components/card";
 import { ROUTES } from "#shared/config";
 import {
+  countOf,
   formatDay,
   formatMoment,
   formatMoney,
   nightsBetween,
 } from "#shared/lib";
+import { ButtonLink } from "#shared/ui";
+import { listingStaysHref } from "../lib/bookings-search";
 import { BookingStatusBadge } from "./booking-status-badge";
 import { CancelBookingButton } from "./cancel-booking-button";
 
@@ -55,7 +58,7 @@ export const BookingCard = ({
           </span>
           <span className="flex items-center gap-1.5">
             <MoonIcon className="size-3.5" />
-            {nights} {nights === 1 ? "night" : "nights"}
+            {countOf(nights, "night")}
           </span>
           {/*
             What these nights cost today, which is not the same claim as what this stay
@@ -70,6 +73,21 @@ export const BookingCard = ({
           </span>
         </CardDescription>
         <CardAction className="flex items-center gap-2">
+          {/*
+            The stays against one listing, for the two roles that see more than their own.
+            It is how the `listingId` filter is reached in practice — the id is in the URL
+            it writes rather than typed into the box behind the dialog — and a guest is not
+            offered it because their own list is already one person's.
+          */}
+          {viewer.role !== Role.USER && (
+            <ButtonLink
+              href={listingStaysHref(booking.listingId)}
+              variant="ghost"
+              size="sm"
+            >
+              Stays here
+            </ButtonLink>
+          )}
           <BookingStatusBadge status={booking.status} />
           {mayCancel(booking, viewer) && (
             <CancelBookingButton

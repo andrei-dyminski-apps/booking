@@ -77,9 +77,6 @@ apps/web/
       catalogue/ui/catalogue-page.tsx     # the filtered, cursor-paged list of listings
       catalogue/ui/catalogue-toolbar.tsx  # one row: the filters, the ordering, the chips
       catalogue/ui/catalogue-filters-dialog.tsx  # every filter, in a modal
-      catalogue/ui/active-filters.tsx     # what is applied, each chip a link that drops it
-      catalogue/ui/catalogue-sort.tsx     # the four orderings, as one box
-      catalogue/ui/filter-field.tsx       # one box of the dialog, spelled once
       catalogue/ui/catalogue-card.tsx
       catalogue/ui/catalogue-skeleton.tsx
       catalogue/api/read-catalogue-page.ts  # the cached read, and the cursor it refuses
@@ -95,11 +92,17 @@ apps/web/
       listing/lib/months.spec.ts
       listing/index.ts
       bookings/ui/bookings-page.tsx       # one page, three scopes — the role picks one
+      bookings/ui/bookings-toolbar.tsx    # one row: the filters, the ordering, the chips
+      bookings/ui/bookings-filters-dialog.tsx  # every filter, in a modal
+      bookings/ui/status-field.tsx        # the one box that is a native <select>
       bookings/ui/booking-card.tsx
       bookings/ui/booking-status-badge.tsx
       bookings/ui/cancel-booking-button.tsx
       bookings/ui/bookings-skeleton.tsx
+      bookings/api/read-bookings-page.ts  # the personal read, and the cursor it refuses
       bookings/api/cancel-booking-action.ts
+      bookings/lib/bookings-search.ts     # searchParams onto the contract's query
+      bookings/lib/bookings-search.spec.ts
       bookings/index.ts
       dashboard/ui/dashboard-page.tsx     # the owner's listings, read by the session
       dashboard/ui/listing-card.tsx
@@ -129,17 +132,29 @@ apps/web/
       api/session-cookies.ts  # the API's Set-Cookie, re-issued for this origin
       api/bookings.ts         # bookingsApi — the routes of the resource
       api/listings.ts         # listingsApi — the same, for the catalogue rows
+      api/keyset-page.ts      # a stale cursor onto null, the one both paged reads share
       api/index.ts
       config/api-url.ts       # apiOrigin() and BFF_BASE_PATH
       config/routes.ts        # ROUTES — every path of this application
       config/cache-tags.ts    # the names the cached public reads are stored under
+      config/cache-lifetimes.ts  # the one lifetime the API's own clock decides
       config/index.ts
       lib/form-errors.ts      # zod issues and API errors onto one shape for a form
       lib/next-path.ts        # a `?next=` that cannot leave this site
+      lib/search-params.ts    # searchParams onto a URL and back: the domain-free half
       lib/dates.ts            # a calendar day is a YYYY-MM-DD string, read as UTC
       lib/money.ts            # a price onto the screen, in one place
       lib/not-found.ts        # a 404 from the API, and an id a URL cannot carry
+      lib/plural.ts           # a count and the noun it counts, made to agree
       lib/index.ts
+      ui/button-link.tsx      # a <Link> wearing the button classes, spelled once
+      ui/filter-field.tsx     # one box of a search form, spelled once
+      ui/filter-form.tsx      # the `GET` form of a dialog, sent to the canonical URL
+      ui/filter-chips.tsx     # what is applied, each chip a link that drops it
+      ui/sort-select.tsx      # the orderings of a list, as one box
+      ui/pager.tsx            # forwards-only keyset paging: next, and back to the first
+      ui/stale-page-notice.tsx  # what a list shows for a cursor the API will not read
+      ui/index.ts
 ```
 
 The rules of the methodology, as they apply here:
@@ -276,10 +291,18 @@ is the wrong shape for a list that keeps growing.
 - **The routes live next to it, one file per resource**: `shared/api/bookings.ts` writes
   down method, path and the schema of the answer for each of them. A new endpoint means a
   new method there, a new resource means a sibling file — never a `fetch` at the call site.
-- **A query string is built there too, and it is sorted.** The URL is the key the Data
-  Cache stores an answer under, so two callers asking the same question have to produce
-  the same one or each of them warms an entry the other never reads. An absent filter is
-  left out rather than sent empty.
+- **A query string is built there too, and it is sorted** (`queryString` in
+  `http-client.ts`, used by `listingsApi.page` and `bookingsApi.page`). The URL is the key
+  the Data Cache stores an answer under, so two callers asking the same question have to
+  produce the same one or each of them warms an entry the other never reads. An absent
+  filter is left out rather than sent empty. It lives with the transport rather than beside
+  one resource because both paged reads spell it, and a second copy would be a second set
+  of decisions about the blank and the ordering of the parameters.
+- **A paged read answers a page, not a list**: `listingsApi.page` and `bookingsApi.page`
+  both return `{ items, nextCursor }`, and the cursor is opaque here as well — it is handed
+  back untouched, never taken apart. A `400` on a read that carried one is the only status
+  either page slice recovers from, and it means the value in the URL was typed rather than
+  followed.
 - **The public API of the segment is the resource, not the transport**: `shared/api`
   exports `bookingsApi` and the two errors, while `apiRequest` stays inside it. A call
   site that cannot reach the transport cannot spell a path of its own.
@@ -343,6 +366,12 @@ is the wrong shape for a list that keeps growing.
   the browser disagree about the same string — which React reports as a hydration error
   rather than as the bug it is. For the same reason "today" is computed on the server and
   handed to a client component as a prop instead of being read on both sides.
+- **A count and the noun beside it agree in one place** (`shared/lib/plural.ts`).
+  `countOf(nights, "night")` is what a screen writes; the comparison itself is spelled
+  once. Four labels across three screens said it inline, and each of them was a place for
+  a singular to be missed — the same argument as the formatter below. The irregular form
+  is an argument rather than a guess, and the function is where `Intl.PluralRules` goes
+  when i18n arrives.
 - **Money is the currency itself, exact to the cent** (`shared/lib/money.ts`). Nothing is
   converted on the way to the screen — what the formatter adds is the second decimal a
   stored `120` does not carry and the rounding a multiplication needs, because three
@@ -532,13 +561,60 @@ The catalogue's filters live in the address bar and nowhere else. There is no fi
 in a component, because there is nothing for it to hold: the server renders from
 `searchParams`, and every control on the screen either submits a form or is a link.
 
+**The stays screen is the same shape over a different list** (`_pages/bookings`), and what
+the two share sits in `shared`. In `shared/ui`: the box of a search form (`FilterField`),
+the `GET` form of the dialog (`FilterForm`), the chips that take a filter off
+(`FilterChips`), the ordering box (`SortSelect`), the forwards-only pager (`Pager`) and
+what a list shows for a cursor the API will not read (`StalePageNotice`). In `shared/lib`
+and `shared/api`, the domain-free mechanics the two slices' search modules would otherwise
+each spell: `filtersHref` and `singleParam` and `searchParamsHref` (`search-params.ts`),
+`dayLabelOrAny` (`dates.ts`), `messagesExcept` (`form-errors.ts`), `pageOrNullOnStaleCursor`
+(`api/keyset-page.ts`).
+
+What is _not_ shared is anything that knows what is being filtered — the field set, the
+labels, the schema wiring, `readXxxSearch`, `sortOptions`, `activeFilters` — and that
+stays in the slice of each screen, which is why `catalogue-search.ts` and
+`bookings-search.ts` are two files rather than one generic one. The line is the same one
+`FilterForm` draws with `href` as a prop: the slice hands over what it knows (the route,
+the field order, the labels) and the shared half does the assembling. A generic
+`createKeysetSearch(config)` was weighed and left out — it trades ~50 lines a reviewer
+checks by reading them once for a parameterised type that is harder to read than either
+copy.
+
+The `shared/ui` components are there rather than in `@repo/ui` because none of them is a
+primitive: one speaks this application's `FieldErrors` and ends in its `fieldMessages`,
+another navigates with `useRouter`. What they compose — `Field`, `Input`, `Badge`,
+`Select`, `Empty` — is what lives in the design system.
+
+The rules below are written about the catalogue and hold for both, with two differences
+worth naming: the stays are personal, so that read is `no-store` and carries no tag; and one
+of its filters (`listingId`) is reached by a link on a card rather than by typing an id into
+a box, which is how an id-shaped filter stays usable at all.
+
 - **Every filter is a modal** (`catalogue-filters-dialog.tsx`), and the toolbar above the
   list is two controls: the button that opens it, with a count of what is applied, and the
   ordering. The screen is the chips and the stays, not a panel of boxes.
-- **The form inside it is a plain `GET` form.** Submitting it writes the filters into the
-  URL and the browser performs the navigation, so the dialog needs no action, no state and
-  nothing to keep in step with the boxes — and it does not have to close itself, because
-  the page it lands on is a new one.
+- **The form inside it is a `GET` form** (`shared/ui/filter-form.tsx`, drawn by both
+  dialogs). Submitting it writes the filters into the URL and the browser goes there, so
+  the dialog needs no action and nothing to keep in step with the boxes: the values come
+  back out of the address the server rendered from.
+- **Where there is JavaScript, that form navigates to the canonical address itself.** A
+  `GET` form submits every box it has, so the address it lands on is the long one below
+  and the page replaces it a round trip later — which the address bar shows, and a
+  commercial screen should not. So `onSubmit` builds the link out of the submitted fields
+  with the very function the chips and the ordering write theirs with
+  (`catalogueHref` / `bookingsHref`) and pushes it. The fields are read as they were
+  submitted rather than merged into the search on the screen, and trimmed the way
+  `singleParam` trims what it reads back: either would be a value that canonicalises to
+  something else, and the redirect would run after all.
+- **The redirect underneath it stays load-bearing** — it is what canonicalises a submit
+  with no JavaScript behind it, and a URL somebody typed or shortened by hand. The client
+  path is the fast one over it, not a replacement, which is why the form keeps its
+  `method` and its `action`: without a script it is exactly the form it was.
+- **What the dialog holds is open state and nothing else.** A document navigation used to
+  close it by taking the page away, and a soft one leaves it standing — so the submit and
+  the "Clear all" beside it close it themselves. The boxes are uncontrolled, so a popup
+  left open would go on showing filters the address no longer carries.
 - **It carries `noValidate` like every other form here**, and this one has the sharper
   reason. The boxes state `min` and `step` so the keypad offers the right thing, and the
   browser would otherwise refuse a submit over them in its own words and its own place,
@@ -546,6 +622,27 @@ in a component, because there is nothing for it to hold: the server renders from
   the contract refuses reaches this dialog already filled in — and a submit the browser
   blocks would leave a visitor with a box they cannot correct by pressing the only button
   in front of them.
+- **One search, one address** (`canonical` in `lib/catalogue-search.ts` and in
+  `lib/bookings-search.ts`, the `redirect` at the top of each of the two pages). A `GET`
+  form submits every box it has, so the dialog
+  lands on `?from=&to=&minPrice=100&…` — the same search a chip writes as `?minPrice=100`,
+  and `listingQuerySchema` reads the blanks as the absences they are, so both are answered
+  identically. Two addresses for one answer is what the redirect exists to stop: a link
+  longer than the search it carries, a second entry in the router cache for a page already
+  there, and a pair of URLs a crawler reads as duplicates. The page redirects before it
+  asks the API, so the cost is a redirect rather than a fetch, and a search the contract
+  refuses is canonicalised too — the boxes showing the mistake belong at the address it
+  will be corrected at. The stays screen buys less by it — that read is `no-store`, so
+  there is no cache entry to split and no crawler to confuse — and does it anyway, because
+  a screen of this shape answering the same question at two addresses is the drift the
+  rule exists to stop.
+- **The canonical address is the filters and nothing else**, which is what makes it
+  comparable: it is the link `catalogueHref` would have written, so the parameters are in
+  its order, a repeated one is gone with the value it stood for, and a parameter this
+  catalogue does not take is dropped. A campaign tag on a link into the catalogue does not
+  survive that, and would have to be carried deliberately if one ever appears. The redirect
+  is temporary rather than permanent for the same reason: which addresses collapse into
+  which is a decision of this slice, and a 308 would be cached by the browser for good.
 - **What that costs is a search without JavaScript.** A dialog and a `<select>` both need
   it, so a visitor whose scripts never arrive can read the catalogue and take a filter off
   a search somebody sent them — a chip is still a link — but cannot ask a question of their
@@ -641,8 +738,16 @@ How the result is made visible, by what kind of data it is:
   two reads a hold affects are the case. A `PENDING_PAYMENT` hold lapses fifteen minutes
   after it was taken and puts its nights back on offer; nothing on this side mutates when
   it does, because the API releases it from a queue. So the catalogue and the availability
-  carry `next: { revalidate: 60, tags }` — a minute, which is the interval of the sweep
-  behind that queue rather than a number picked for the feel of it.
+  carry `next: { revalidate: HOLD_SWEEP_REVALIDATE, tags }` — a minute, which is the
+  interval of the sweep behind that queue rather than a number picked for the feel of it.
+- **That minute is named in `shared/config/cache-lifetimes.ts`**, and for the same reason
+  the tags next door are: it is `SWEEP_INTERVAL_MS` of `apps/api/src/booking/booking-expiry.queue.ts`
+  read from this side, and nothing across the wire checks that the two still agree — a
+  literal at each call site is one more place to miss when that interval changes. Only a
+  lifetime the API's own clock decides goes in there. A number chosen by this side for one
+  screen stays at that screen, and `revalidate: false` is not a lifetime at all — it is
+  how a read says its tag is the whole of its invalidation, and a name would only hide
+  that.
 - **Both halves of a write, in that order**: `updateTag` for the tag the author is about
   to read, `revalidateTag(tag, "max")` for the tags everybody else reads. The first makes
   the next request wait for a fresh answer, which is what stops an author's own save
@@ -704,6 +809,16 @@ repository and are edited like any other code. `@repo/ui` is the design system; 
 the part `shared/ui` plays in a single-package FSD project, and a primitive belongs there
 rather than in `src/shared`.
 
+`src/shared/ui` exists for what a second screen needs and the design system cannot hold: a
+component that knows this application's `FieldErrors`, or one whose whole job is to
+navigate with `useRouter`. The test is the dependency, not the size — anything that would
+have to import from `#shared/*` or from `next/*` is not a primitive and does not go into
+the package. Seven live there: `ButtonLink` — a `<Link>` wearing the button classes, the
+one spelling of "a link that looks like a button" (see below) — and `FilterField`,
+`FilterForm`, `FilterChips`, `SortSelect`, `Pager` and `StalePageNotice`, the parts the
+catalogue and the stays screen search and page with. A component only one screen uses
+stays in that screen's slice, exactly as "pages first" says.
+
 - The design tokens live in `packages/ui/src/styles/globals.css`;
   `src/_app/styles/globals.css` is a single `@import "@repo/ui/globals.css"`. Colours,
   radii and fonts are CSS variables, so write `bg-background` and `text-muted-foreground`
@@ -738,9 +853,11 @@ belongs in the same step.
 - Base UI composes through the `render` prop, not through the `asChild` of Radix:
   `<PopoverTrigger render={<Button ... />} />`.
 - **A link that looks like a button is a `<Link>` wearing the classes**, not a `Button`
-  rendering a link: `<Link href={...} className={buttonVariants({ variant, size })}>`, and
-  `cn(buttonVariants({ ... }), "...")` where the screen adds classes of its own, so
-  `tailwind-merge` resolves a conflict the way it does inside the primitive. `Button` keeps
+  rendering a link. That spelling — `cn(buttonVariants({ variant, size }), className)`, so
+  `tailwind-merge` resolves a screen's own class the way it does inside the primitive —
+  lives once in `ButtonLink` (`shared/ui`), and a call site writes
+  `<ButtonLink href={...} variant="ghost" size="sm">`: `variant` and `size` are the
+  button's, everything else is `next/link`'s. `Button` keeps
   the `nativeButton` promise of Base UI — that what its `render` prop produces is a real
   `<button>` — and an `<a>` in there breaks it: the console says so in development, and
   what it costs is the form and accessibility semantics of the element.
@@ -749,6 +866,22 @@ belongs in the same step.
   navigation is an anchor, an action is a `Button`. Every trigger that composes one
   (`DialogTrigger`, `AlertDialogTrigger`) is unaffected — a `Button` inside one is still a
   `<button>`.
+- **A run of the same row is a list, and says so.** A `map` over data of any length —
+  the catalogue's cards, the owner's dashboard, a visitor's stays — renders
+  `<ul role="list">` with one `<li>` per row, and the layout classes stay where they
+  were: a grid or a flex column behaves identically on the `<ul>`. What that buys is a
+  count and an edge — a screen reader announces how many rows there are and where one
+  ends, which a run of `div`s cannot say, and these rows are alike by design. What it does
+  not buy is search ranking: nothing reads list markup for that, and what would read a
+  catalogue is structured data this site does not emit yet. `role="list"` is not
+  redundant — Tailwind's preflight drops the marker from every `ul` and Safari drops the
+  list semantics along with it, so the attribute is what puts them back.
+- **What is not a collection is not marked as one.** A set written down in the code is a
+  composition rather than a list: the toolbar's controls, the home page's three
+  highlights, the weekday headings of the calendar. So is the row of chips under the
+  toolbar — each one is a control that takes a filter off, and it belongs with the
+  controls beside it rather than in a collection of its own. Their number is not something
+  a visitor needs announced, and the markup would only be more to read past.
 - The theme is `next-themes` with the class strategy (`src/_app/providers/providers.tsx`). A
   component that reads the theme renders on the server too — hence the `mounted` guard in
   `src/_app/layout/theme-toggle.tsx`.
@@ -809,15 +942,18 @@ What has a spec here is narrow on purpose, and the rule is worth stating so the 
 not drift into testing the framework: **logic a reviewer cannot re-check by reading it once**
 — a parser whose input somebody else writes, a security gate, or an invariant that only
 breaks under concurrency or a malformed answer. Four kinds, all in `src/shared` or `_app`
-because that was where this logic lived until the catalogue arrived — the two specs in
+because that was where this logic lived until the catalogue arrived — the three specs in
 `_pages/` are the same four kinds, on a layer rather than in a layer. None of them is a
 component:
 
 - A parser of untrusted input — `shared/lib/next-path.ts` (where a visitor is sent after
   signing in), the `Set-Cookie` reader inside `shared/api/session-cookies.ts` (what
-  becomes a cookie of this origin) and `_pages/catalogue/lib/catalogue-search.ts`
+  becomes a cookie of this origin) and the two searches — `_pages/catalogue/lib/catalogue-search.ts`
+  and `_pages/bookings/lib/bookings-search.ts`
   (`searchParams` onto the contract's query: what a blank box means, what a repeated
   parameter means, that the link the page writes parses back to the search it came from,
+  that the address it redirects to is one it would leave alone — a canonical form that is
+  not a fixed point is a redirect loop —,
   what each chip's link takes off — a chip that dropped the wrong half of a date range
   would write a link the catalogue answers with a refusal — and what the ordering's own
   links carry, since one that lost a filter or kept a cursor would answer a different

@@ -7,4 +7,5 @@ export {
   refreshSession,
   type ReadOptions,
 } from "./http-client";
+export { pageOrNullOnStaleCursor } from "./keyset-page";
 export { mirrorSessionCookies } from "./session-cookies";

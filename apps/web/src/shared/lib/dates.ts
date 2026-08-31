@@ -47,6 +47,18 @@ export function formatDay(day: string): string {
 }
 
 /**
+ * A day formatted for a chip, or the words "any date" for the empty half of a range. A
+ * value that is not a `YYYY-MM-DD` day is handed back as it was typed: it reached the
+ * screen out of a URL, and the chip's job is to name what was asked for so it can be taken
+ * off again. Both search screens carry a date range, so this is the one spelling of it.
+ */
+export function dayLabelOrAny(value: string): string {
+  if (value === "") return "any date";
+
+  return isDay(value) ? formatDay(value) : value;
+}
+
+/**
  * The day an instant falls on, in UTC. `formatDay` takes the day itself — this one takes
  * a moment the API stamped a row with (`createdAt`), where the time of day is noise on a
  * screen that is only saying when something started.

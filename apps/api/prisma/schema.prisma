@@ -48,13 +48,32 @@ model Booking {
   guest   User    @relation(fields: [guestId], references: [id], onDelete: Cascade)
 
   @@index([listingId, from, to])
-  @@index([guestId])
   /// Serves both halves of hold expiry: the repeatable sweep, which asks for every lapsed
   /// hold there is, and the lazy one inside `create`, which asks the same question and
   /// then filters by listing. `listingId` is deliberately not the leading column — that
   /// would leave the sweep without an index — and the job that releases one named hold
   /// goes by primary key, so it needs none of this.
   @@index([status, expiresAt])
+  /// The four below are `GET /bookings`, which is a keyset page: each is a pair the cursor
+  /// carries (`ORDER_BY` in `booking.repository.ts`), and the tiebreaker follows the
+  /// direction of the key so that one btree read backwards answers the other direction —
+  /// two per key rather than four, the same arithmetic as the catalogue's.
+  ///
+  /// Unlike the catalogue's, none of them is partial: every status is readable here, so
+  /// nothing narrows these reads the way `deleted_at IS NULL` narrows a listing. That is
+  /// what lets them be declared on the model instead of in a raw-SQL migration.
+  ///
+  /// The plain pair serves the admin's scope, which is every stay on the site and the only
+  /// one with no ceiling; behind `guest_id` it serves a guest's own history — and it
+  /// replaces the bare `@@index([guestId])` that used to be here, which was its prefix.
+  /// The owner's scope gets none: it narrows by `listings.owner_id`, a column of another
+  /// table, so no index of this one can hold the filter and the ordering together. What
+  /// bounds it is the owner's own listings rather than the site, which is why that is a
+  /// trade worth making instead of denormalising the column onto every booking.
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
+  @@index([from(sort: Desc), id(sort: Desc)])
+  @@index([guestId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([guestId, from(sort: Desc), id(sort: Desc)])
   @@map("bookings")
 }
 
@@ -68,7 +87,12 @@ enum BookingStatus {
 /// A place to stay. `price_per_night` is an amount of the currency itself, exact to the
 /// cent: `numeric(10, 2)` rather than a float, because a float stores neither 120.10 nor
 /// the sum of a stay's nights exactly and the error accumulates across them. The contract
-/// refuses anything finer than a cent, so the two scales agree.
+/// refuses anything finer than a cent, so the two scales agree — and the ceiling agrees
+/// too, which the type alone cannot say: the column holds a hundred times what `MAX_PRICE`
+/// in `@repo/contracts` allows, so the number itself is written as the `CHECK` constraint
+/// `listings_price_within_contract` (the raw-SQL migration `bound_prices_to_the_contract`)
+/// and a write that bypasses the API cannot leave a price the API would then refuse to
+/// read back.
 model Listing {
   id            String    @id @default(uuid()) @db.Uuid
   ownerId       String    @map("owner_id") @db.Uuid

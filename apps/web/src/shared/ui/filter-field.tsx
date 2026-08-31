@@ -5,18 +5,23 @@ import {
   FieldLabel,
 } from "@repo/ui/components/field";
 import { Input } from "@repo/ui/components/input";
-import { fieldMessages } from "#shared/lib";
+import { fieldMessages } from "../lib";
 
 /**
- * One box of the catalogue's filters — its label, its messages and the two attributes that
- * have to agree with them, written once for the five of them.
+ * One box of a search form — its label, its messages and the two attributes that have to
+ * agree with them, written once for every screen that filters a list.
+ *
+ * It is here rather than in `@repo/ui` because it is not a primitive: it speaks this
+ * application's `FieldErrors` and ends in the same `fieldMessages` line every other form
+ * here ends in. What it composes — `Field` and `Input` — is what lives in the design
+ * system.
  *
  * The `id` is derived from the name rather than being the name: these boxes are portalled
- * into the dialog, and a label of theirs pointing at a bare `from` would follow whatever
+ * into a dialog, and a label of theirs pointing at a bare `from` would follow whatever
  * else on the page ends up carrying that id.
  *
- * Uncontrolled on purpose. Nothing resets these — a submit is a navigation, and the
- * values come back out of the URL the server rendered from.
+ * Uncontrolled on purpose. Nothing resets these — a submit is a navigation, and the values
+ * come back out of the URL the server rendered from.
  */
 export const FilterField = ({
   name,
@@ -30,7 +35,7 @@ export const FilterField = ({
 }: {
   name: string;
   label: string;
-  type: "date" | "number";
+  type: "date" | "number" | "text";
   value: string;
   error: string[] | undefined;
   min?: string | number;

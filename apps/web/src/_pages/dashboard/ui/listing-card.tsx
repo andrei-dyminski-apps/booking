@@ -1,8 +1,6 @@
-import Link from "next/link";
 import { PencilIcon, UsersIcon } from "lucide-react";
 import type { Listing } from "@repo/contracts";
 import { Badge } from "@repo/ui/components/badge";
-import { buttonVariants } from "@repo/ui/components/button";
 import {
   Card,
   CardAction,
@@ -13,7 +11,8 @@ import {
   CardTitle,
 } from "@repo/ui/components/card";
 import { ROUTES } from "#shared/config";
-import { formatMoney } from "#shared/lib";
+import { countOf, formatMoney } from "#shared/lib";
+import { ButtonLink } from "#shared/ui";
 
 /**
  * A listing as its owner sees it: the same row the catalogue draws, leading to the form
@@ -26,7 +25,7 @@ export const ListingCard = ({ listing }: { listing: Listing }) => (
       <CardTitle>{listing.title}</CardTitle>
       <CardDescription className="flex items-center gap-1.5">
         <UsersIcon className="size-3.5" />
-        {listing.capacity} {listing.capacity === 1 ? "guest" : "guests"}
+        {countOf(listing.capacity, "guest")}
       </CardDescription>
       <CardAction>
         <Badge variant="outline" className="h-6">
@@ -40,19 +39,17 @@ export const ListingCard = ({ listing }: { listing: Listing }) => (
       </p>
     </CardContent>
     <CardFooter className="gap-2">
-      <Link
+      <ButtonLink
         href={ROUTES.editListing(listing.id)}
-        className={buttonVariants({ variant: "outline", size: "sm" })}
+        variant="outline"
+        size="sm"
       >
         <PencilIcon />
         Edit
-      </Link>
-      <Link
-        href={ROUTES.listing(listing.id)}
-        className={buttonVariants({ variant: "ghost", size: "sm" })}
-      >
+      </ButtonLink>
+      <ButtonLink href={ROUTES.listing(listing.id)} variant="ghost" size="sm">
         View as a guest
-      </Link>
+      </ButtonLink>
     </CardFooter>
   </Card>
 );

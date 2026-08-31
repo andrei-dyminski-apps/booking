@@ -1,11 +1,9 @@
-import Link from "next/link";
 import {
   CalendarRangeIcon,
   ClockIcon,
   ShieldCheckIcon,
   type LucideIcon,
 } from "lucide-react";
-import { buttonVariants } from "@repo/ui/components/button";
 import {
   Card,
   CardContent,
@@ -14,6 +12,7 @@ import {
   CardTitle,
 } from "@repo/ui/components/card";
 import { ROUTES } from "#shared/config";
+import { ButtonLink } from "#shared/ui";
 
 /**
  * The one page with nothing to read from the API. What it explains is the rule the rest
@@ -38,18 +37,12 @@ export const HomePage = () => (
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Link
-          href={ROUTES.catalogue}
-          className={buttonVariants({ size: "lg" })}
-        >
+        <ButtonLink href={ROUTES.catalogue} size="lg">
           Browse the stays
-        </Link>
-        <Link
-          href={ROUTES.register}
-          className={buttonVariants({ size: "lg", variant: "outline" })}
-        >
+        </ButtonLink>
+        <ButtonLink href={ROUTES.register} size="lg" variant="outline">
           Create an account
-        </Link>
+        </ButtonLink>
       </div>
     </section>
 
