@@ -17,6 +17,20 @@ import { blank, PAGING } from "./query.js";
 const MAX_PRICE = 1_000_000;
 
 /**
+ * The same number as a person reads it. The locale is named rather than left to the
+ * runtime for the reason the frontend's own formatter names one: a message assembled on
+ * the server and a message assembled in the browser have to come out identically.
+ */
+const MAX_PRICE_LABEL = MAX_PRICE.toLocaleString("en-US");
+
+/**
+ * How many guests a listing may sleep. It is a bound on two fields rather than one — the
+ * capacity of a listing, and the `guests` a search filters by — and they are the same
+ * question asked from either end, so the number is written once.
+ */
+const MAX_CAPACITY = 50;
+
+/**
  * How many decimal places a price may be exact to — the `2` of `numeric(10, 2)`, and the
  * cent the rules below refuse to go finer than.
  */
@@ -47,11 +61,36 @@ const cents = (amount: number): boolean =>
  * are and the API still reads a price off `listingSchema.shape` to validate a cursor with.
  */
 const MONEY = [
-  z.lte(MAX_PRICE),
+  z.lte(MAX_PRICE, {
+    message: `A price may not be above ${MAX_PRICE_LABEL}`,
+  }),
   z.refine<number>(cents, {
     message: "A price may not be finer than a cent",
   }),
 ];
+
+/**
+ * What a number field says when what arrived was not a number at all — a box left empty,
+ * or text nothing could read as one.
+ *
+ * Zod's own wording for that is `Invalid input: expected number, received undefined`,
+ * which names the type system rather than the thing being asked for. It reaches two
+ * audiences that both deserve better: the API answers a malformed body with it, and the
+ * browser puts it under the box as the field is left, because a form here validates
+ * against this very schema before it sends anything.
+ *
+ * `invalid_type` needs a callback where every other rule takes a plain `message`, and that
+ * is the whole reason this exists: a bound is one rule with one thing to say, while "not a
+ * number" covers both a box left empty and text nothing could read. Returning `undefined`
+ * for anything else hands the issue back to the message its own rule gave it.
+ */
+const numberMessage =
+  (missing: string, notANumber: string) =>
+  (issue: z.core.$ZodRawIssue): string | undefined => {
+    if (issue.code !== "invalid_type") return undefined;
+
+    return issue.input === undefined ? missing : notANumber;
+  };
 
 /**
  * A place to stay, owned by exactly one OWNER.
@@ -65,13 +104,38 @@ const MONEY = [
 export const listingSchema = z.object({
   id: z.uuid(),
   ownerId: z.uuid(),
-  title: z.string().trim().min(3).max(100),
-  description: z.string().trim().min(10).max(2000),
+  title: z
+    .string()
+    .trim()
+    .min(3, { message: "A title needs at least 3 characters" })
+    .max(100, { message: "A title may not be longer than 100 characters" }),
+  description: z
+    .string()
+    .trim()
+    .min(10, { message: "A description needs at least 10 characters" })
+    .max(2000, {
+      message: "A description may not be longer than 2000 characters",
+    }),
   pricePerNight: z
-    .number()
-    .positive()
+    .number({
+      error: numberMessage(
+        "A price per night is required",
+        "A price per night must be a number",
+      ),
+    })
+    .positive({ message: "A price per night must be more than zero" })
     .check(...MONEY),
-  capacity: z.int().min(1).max(50),
+  capacity: z
+    .int({
+      error: numberMessage(
+        "A capacity is required",
+        "A capacity must be a whole number",
+      ),
+    })
+    .min(1, { message: "A listing has to sleep at least one guest" })
+    .max(MAX_CAPACITY, {
+      message: `A listing may not sleep more than ${String(MAX_CAPACITY)} guests`,
+    }),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
@@ -167,7 +231,7 @@ export const listingQuerySchema = z
         .check(...MONEY)
         .optional(),
     ),
-    guests: blank(z.coerce.number().int().min(1).max(50).optional()),
+    guests: blank(z.coerce.number().int().min(1).max(MAX_CAPACITY).optional()),
     sort: blank(listingSortSchema.default("newest")),
     ...PAGING,
   })

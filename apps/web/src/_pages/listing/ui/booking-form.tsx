@@ -1,24 +1,21 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { createBookingSchema, type CreateBookingInput } from "@repo/contracts";
 import { Button } from "@repo/ui/components/button";
 import {
-  Field,
   FieldDescription,
   FieldError,
   FieldGroup,
-  FieldLabel,
 } from "@repo/ui/components/field";
 import { Input } from "@repo/ui/components/input";
 import {
   countOf,
-  fieldMessages,
   formatMoney,
   isDay,
   nightsBetween,
-  NO_FORM_ERRORS,
-  type FormErrors,
+  useActionForm,
 } from "#shared/lib";
+import { FormField } from "#shared/ui";
 import { createBookingAction } from "../api/create-booking-action";
 
 /**
@@ -30,6 +27,11 @@ import { createBookingAction } from "../api/create-booking-action";
  * server when there is something to pay for — this number is what the guest is told, not
  * what they are charged. Nothing about it is sent: the API reads the nightly price off the
  * listing, which is why `createBookingSchema` has no amount on it at all.
+ *
+ * `createBookingSchema` is also what refuses a check-out before the check-in and a stay in
+ * the past, here as well as in the action. `listingId` is one of its fields, so the form
+ * is handed it as a bound value rather than as a box — it is what the schema needs to parse
+ * at all, and the action ignores what arrives and uses the id the page bound to it.
  */
 export const BookingForm = ({
   listingId,
@@ -41,62 +43,53 @@ export const BookingForm = ({
   /** Today in UTC, from the server — see `shared/lib/dates.ts`. */
   earliest: string;
 }) => {
-  const [errors, submit, pending] = useActionState<FormErrors, FormData>(
-    createBookingAction.bind(null, listingId),
-    NO_FORM_ERRORS,
-  );
-  // Controlled, like every other form here: React resets an uncontrolled one once an
-  // action settles, which would clear both dates at the moment the message explaining
-  // what was wrong with them appears.
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const { form, submit, pending, message } = useActionForm<CreateBookingInput>({
+    action: createBookingAction.bind(null, listingId),
+    schema: createBookingSchema,
+    defaultValues: { from: "", to: "" },
+    bound: { listingId },
+  });
+
+  const from = form.watch("from");
+  const to = form.watch("to");
 
   const nights = isDay(from) && isDay(to) ? nightsBetween(from, to) : 0;
 
   return (
-    // The browser's own validation would preempt the contract with messages of its own.
-    <form action={submit} noValidate>
+    // `method` is what a page with no scripts falls back to — see `register-form.tsx`.
+    // `noValidate` is the usual reason: the browser's own validation would preempt the
+    // contract with messages of its own.
+    <form method="post" onSubmit={submit} noValidate>
       <FieldGroup>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Field data-invalid={errors.fields.from !== undefined}>
-            <FieldLabel htmlFor="from">Check in</FieldLabel>
-            <Input
-              id="from"
-              name="from"
-              type="date"
-              size="lg"
-              min={earliest}
-              value={from}
-              onChange={(event) => {
-                setFrom(event.target.value);
-              }}
-              aria-invalid={errors.fields.from !== undefined}
-              disabled={pending}
-            />
-            <FieldError errors={fieldMessages(errors.fields.from)} />
-          </Field>
+          <FormField form={form} name="from" label="Check in">
+            {(control) => (
+              <Input
+                {...control}
+                type="date"
+                size="lg"
+                min={earliest}
+                disabled={pending}
+              />
+            )}
+          </FormField>
 
-          <Field data-invalid={errors.fields.to !== undefined}>
-            <FieldLabel htmlFor="to">Check out</FieldLabel>
-            <Input
-              id="to"
-              name="to"
-              type="date"
-              size="lg"
-              min={from === "" ? earliest : from}
-              value={to}
-              onChange={(event) => {
-                setTo(event.target.value);
-              }}
-              aria-invalid={errors.fields.to !== undefined}
-              disabled={pending}
-            />
-            <FieldDescription>
-              Check-out is not a night: a stay from the 2nd to the 5th is three
-              of them.
-            </FieldDescription>
-            <FieldError errors={fieldMessages(errors.fields.to)} />
-          </Field>
+          <FormField
+            form={form}
+            name="to"
+            label="Check out"
+            description="Check-out is not a night: a stay from the 2nd to the 5th is three of them."
+          >
+            {(control) => (
+              <Input
+                {...control}
+                type="date"
+                size="lg"
+                min={isDay(from) ? from : earliest}
+                disabled={pending}
+              />
+            )}
+          </FormField>
 
           <div className="flex flex-col gap-4 lg:pt-6.5">
             <Button type="submit" size="lg" loading={pending}>
@@ -114,7 +107,7 @@ export const BookingForm = ({
           </div>
         </div>
 
-        {errors.message !== null && <FieldError>{errors.message}</FieldError>}
+        {message !== null && <FieldError>{message}</FieldError>}
 
         <FieldDescription>
           A hold keeps the nights for fifteen minutes. There is nothing to pay

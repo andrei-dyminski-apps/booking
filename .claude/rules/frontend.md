@@ -139,7 +139,8 @@ apps/web/
       config/cache-tags.ts    # the names the cached public reads are stored under
       config/cache-lifetimes.ts  # the one lifetime the API's own clock decides
       config/index.ts
-      lib/form-errors.ts      # zod issues and API errors onto one shape for a form
+      lib/form-errors.ts      # zod issues, API errors and field state onto one shape
+      lib/use-action-form.ts  # the contract, react-hook-form and a Server Action, tied
       lib/next-path.ts        # a `?next=` that cannot leave this site
       lib/search-params.ts    # searchParams onto a URL and back: the domain-free half
       lib/dates.ts            # a calendar day is a YYYY-MM-DD string, read as UTC
@@ -149,6 +150,7 @@ apps/web/
       lib/index.ts
       ui/button-link.tsx      # a <Link> wearing the button classes, spelled once
       ui/filter-field.tsx     # one box of a search form, spelled once
+      ui/form-field.tsx       # one box of a form that submits, and the aria that ties it
       ui/filter-form.tsx      # the `GET` form of a dialog, sent to the canonical URL
       ui/filter-chips.tsx     # what is applied, each chip a link that drops it
       ui/sort-select.tsx      # the orderings of a list, as one box
@@ -493,9 +495,10 @@ their refresh token, and only the browser can turn an expired session into a liv
   survive the `router.refresh()` it triggers, and it is released again by a render that
   does report somebody.
 - **A form submits to a Server Action**, and the two that open a session (`login/api`,
-  `register/api`) are the reason: cookies are written on the server, the same contract
-  schema refuses an obvious mistake before a request is spent, and the form works before
-  React has hydrated. A login is the one form on a site that has to.
+  `register/api`) are the reason: cookies are written on the server, and the same contract
+  schema refuses an obvious mistake before a request is spent. Whether the submit survives
+  a page with no JavaScript is what tells the two apart — see "Forms" below. A login is the
+  one form on a site that has to, and it is the one that keeps the plain `action={...}`.
 - **Closing one is the exception, and the cookie scope is why**
   (`features/logout/ui/logout-button.tsx`).
   Revoking a refresh family means handing the API the refresh token, and only the browser
@@ -503,9 +506,11 @@ their refresh token, and only the browser can turn an expired session into a liv
   URL of the page it sits on — never receives it. An action would clear the cookies of a
   family nobody revoked, and a stolen token would outlive the "Sign out" by a week. So the
   logout is a browser call through the BFF, followed by `router.refresh()`.
-- **The inputs of those forms stay controlled** even though the action reads the request
+- **The login form's inputs stay controlled** even though the action reads the request
   rather than the state. React resets an uncontrolled form once an action settles, which
-  would wipe what the visitor typed at the moment the message explaining it appears.
+  would wipe what the visitor typed at the moment the message explaining it appears. The
+  other forms have no such problem: `react-hook-form` owns their values, and an action that
+  comes back with a refusal changes nothing about them.
 - **The forms show what comes back under the same field names** —
   `shared/lib/form-errors.ts` maps a zod issue and an `apiErrorSchema` issue onto one
   shape, because they are the same thing on two sides of the wire. `fieldMessages` is the
@@ -554,6 +559,111 @@ this side decided.
   refuses. Inside the owner's own section that is the same 404 as a row that does not
   exist. The rule that matters still lives in `ListingService`, which compares the owner
   on every write.
+
+## Forms
+
+Two kinds, and what tells them apart is whether the submit has to survive a page whose
+JavaScript never arrived.
+
+- **The login form is the one that has to** (`_pages/login`). It stays a plain
+  `<form action={submit}>` over `useActionState`: the browser posts `FormData` to the
+  action with or without React, its boxes are controlled by hand so an action that comes
+  back with a refusal does not empty them, and nothing validates it in the browser at all.
+  A visitor who cannot sign in cannot use the site, so that form spends a round trip on a
+  mistake rather than a dependency on hydration.
+- **Every other form validates in the browser first** — registration, the listing form both
+  dashboard screens run, the booking form. They are `react-hook-form` over the same
+  contract schema the action parses, tied together by `useActionForm`
+  (`shared/lib/use-action-form.ts`), and they submit through `onSubmit` rather than
+  `action`, so the values travel as an object rather than as `FormData`. That is the trade,
+  taken deliberately: a password policy stated a round trip after the fact is stated in the
+  wrong place, and none of these screens is reachable by somebody who could not run the
+  script that rendered it.
+- **What a page with no scripts falls back to is `method="post"`, and it is not
+  cosmetic.** A `<form>` with neither a `method` nor an `action` submits a `GET` to its own
+  URL, so an unhydrated registration form would put the typed-in password into the address
+  bar, the browser history and this server's access log. The attribute makes that failure a
+  `405` from a page route that takes no `POST`, which is the right shape for it: nothing
+  happens, and nothing leaks. With the script running, `handleSubmit` calls
+  `preventDefault` before anything else and the attribute never comes up.
+
+What `useActionForm` ties together, and what each third of it owns:
+
+- **The schema is the contract's, and it runs twice.** `registerSchema`,
+  `createListingSchema` and `createBookingSchema` refuse a field where it was typed and
+  refuse the payload again inside the action — an action is an endpoint of its own,
+  reachable by anything that can spell its id, so the browser's parse is a convenience and
+  never the check. Nothing is validated in a component: a rule that is not in the contract
+  does not exist.
+- **A box is judged when it is left, and re-judged on every keystroke after that**
+  (`mode: "onBlur"`, `reValidateMode: "onChange"`). Refusing a password at its first
+  character is a message that stays wrong for as long as it takes to type a right one;
+  leaving the message up after the mistake is gone is the other half of the same error.
+- **What the server refuses is put back under the fields it names.** `FormErrors` is the
+  same shape it always was, and the hook writes each message into field state with
+  `setError` — so an API refusal and a schema refusal reach the screen through one line of
+  markup. A name the form does not have is dropped rather than stored under a field nothing
+  renders, and `defaultValues` is what says which names those are — it names the boxes, not
+  everything the schema needs. What the schema needs and no box holds is `bound` instead
+  (the listing a booking is taken against): it goes into the form's values so the browser
+  parses against the whole contract schema rather than a narrower copy, and stays out of
+  the list of names, because a refusal about a field with nothing on the screen would
+  otherwise take the focus that belongs to the one the visitor can fix.
+- **The first refusal takes the focus, and only the first.** Client-side that is
+  `react-hook-form`'s own `shouldFocusError`; server-side it is `shouldFocus` on the first
+  field the answer names. A form long enough to scroll otherwise reports a failure the
+  visitor cannot see.
+- **A form-level message is not a field's.** `FormErrors.message` — an unreachable API, a
+  `409` about nights somebody else took — is rendered by the form itself in a `FieldError`,
+  which is a `role="alert"` and therefore announced without being tied to a box.
+
+**Every box is a `FormField`** (`shared/ui/form-field.tsx`), and it exists for the wiring
+rather than for the markup:
+
+- **`aria-invalid` and the message are linked by `aria-describedby`.** One says that a box
+  is wrong and the other says what is wrong with it, and without the link a screen reader
+  announces the first and never reaches the second. The ids are derived from the field name
+  rather than being it, for the reason `FilterField` gives; the error's is left out while
+  there is no error, because `FieldError` renders
+  nothing at all in that case and a reference to an element that is not there reads as no
+  description rather than as an empty one.
+- **The value is rendered by the server.** `register` leaves a box uncontrolled and reaches
+  the DOM through a ref, which runs after hydration — so the component passes
+  `defaultValue` as well, or the edit screen would go out with four empty boxes and fill
+  them in a moment later. It stays the initial value, and not because React stops writing
+  it: React sets `defaultValue` on every render, and what keeps that from moving what is on
+  the screen is the DOM's own dirty-value flag, raised the moment the visitor types.
+- **The control is a child function, not a prop.** The boxes differ — a password reveals
+  itself, a description is several lines, a price steps in cents — and what surrounds them
+  does not. Spreading what the function is handed is the whole of the wiring at a call
+  site.
+- **Text becomes what the contract wants at the box, not in the action.** `register`'s
+  `setValueAs` is where a price and a capacity stop being strings, and an empty box becomes
+  `undefined` rather than `0`: the schema then says the field is missing, which is what
+  happened, instead of refusing a number nobody typed.
+- **Every rule a person can break is worded by the contract, not by the screen.** A form
+  validating in the browser makes zod's own wording the first thing a visitor reads, and
+  `Too small: expected string to have >=3 characters` names the type system rather than the
+  thing being asked for. So each of those rules carries a `message` where it is written —
+  the spelling `passwordSchema` has always used — and the two codes a plain `message`
+  cannot reach take a callback beside them instead: `numberMessage` in `listing.ts` and
+  `dayMessage` in `booking.ts`, which is what tells a box left empty from text nothing could
+  read. A form does not restate any of it, and the API answers with the same words.
+- **A rule about a pair of fields waits until it has the pair.** `createBookingSchema`
+  guards both of its refinements on the dates parsing at all, as `listingQuerySchema` does:
+  without that, an empty check-in box is refused for being in the past — `"" >= today()` is
+  false — and the visitor is told something untrue about a box they have not filled in,
+  beside the refusal that is actually about it. Turning off `criteriaMode` would only hide
+  it, since the API returns both issues and `toFieldErrors` collects them either way.
+- **`noValidate` stays on every form**, for the reason the filter dialog gives: the
+  browser's own validation would preempt the contract with messages of its own, in its own
+  words and its own place.
+
+**A form with no fields is neither of the two** — the confirmations behind a destructive
+action (`delete-listing-button.tsx`, `cancel-booking-button.tsx`) submit a bound id and
+nothing else, so they stay a plain `action={submit}` with nothing to validate. So do the
+`GET` forms of the filter dialogs, which navigate rather than mutate; those are the next
+section.
 
 ## Search, filters and the URL
 
@@ -813,8 +923,9 @@ rather than in `src/shared`.
 component that knows this application's `FieldErrors`, or one whose whole job is to
 navigate with `useRouter`. The test is the dependency, not the size — anything that would
 have to import from `#shared/*` or from `next/*` is not a primitive and does not go into
-the package. Seven live there: `ButtonLink` — a `<Link>` wearing the button classes, the
-one spelling of "a link that looks like a button" (see below) — and `FilterField`,
+the package. Eight live there: `ButtonLink` — a `<Link>` wearing the button classes, the
+one spelling of "a link that looks like a button" (see below) —, `FormField`, the one box
+every form that submits is made of, and `FilterField`,
 `FilterForm`, `FilterChips`, `SortSelect`, `Pager` and `StalePageNotice`, the parts the
 catalogue and the stays screen search and page with. A component only one screen uses
 stays in that screen's slice, exactly as "pages first" says.
@@ -965,7 +1076,9 @@ component:
   (a second rotation spent on an already-refreshed session, a retry loop) that only shows up
   under a race or a specific server answer, not by reading the function.
 - A mapping with more than one rule to keep straight — `shared/lib/form-errors.ts` (a zod
-  issue and an `apiErrorSchema` issue reduced to one shape), `shared/config/api-url.ts`
+  issue, an `apiErrorSchema` issue and `react-hook-form`'s own field state reduced to one
+  shape: which of `types` and `message` a box's messages come out of, and that a rule
+  recorded as a bare `true` is not one of them), `shared/config/api-url.ts`
   (the trailing slash, the missing-env failure, the module-level cache) and
   `_pages/listing/lib/months.ts` (the half-open range the calendar shades, the month
   rollover, the Monday-first offset — a stay's check-out day drawn as taken would be a

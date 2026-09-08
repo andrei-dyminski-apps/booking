@@ -1,69 +1,69 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { registerSchema, type RegisterInput } from "@repo/contracts";
 import { Button } from "@repo/ui/components/button";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from "@repo/ui/components/field";
+import { FieldError, FieldGroup } from "@repo/ui/components/field";
 import { Input } from "@repo/ui/components/input";
 import { PasswordInput } from "@repo/ui/components/password-input";
-import { fieldMessages, NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
+import { useActionForm } from "#shared/lib";
+import { FormField } from "#shared/ui";
 import { registerAction } from "../api/register-action";
 
+/**
+ * Unlike the login form beside it, this one validates in the browser first: an address
+ * that is not one and a password of four characters are refused by `registerSchema` where
+ * they were typed, and the action is only reached by a payload the contract already
+ * accepts. Registration is the point where a password policy is stated, and stating it a
+ * round trip after the fact is the worst place to state it.
+ *
+ * That costs the progressive enhancement the login form keeps — see `useActionForm` — and
+ * only the login form has to keep it: somebody whose scripts never arrived cannot have
+ * registered a moment ago, while somebody signing in may well have.
+ */
 export const RegisterForm = ({ next }: { next: string }) => {
-  const [errors, submit, pending] = useActionState<FormErrors, FormData>(
-    registerAction.bind(null, next),
-    NO_FORM_ERRORS,
-  );
-  // Controlled for the same reason as the login form: an action that comes back with a
-  // refusal must not take the typed-in values away with it.
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const { form, submit, pending, message } = useActionForm<RegisterInput>({
+    action: registerAction.bind(null, next),
+    schema: registerSchema,
+    defaultValues: { email: "", password: "" },
+  });
 
   return (
-    <form action={submit} noValidate>
+    // `method` matters for the page whose scripts never arrived: a form with neither it
+    // nor an `action` submits a `GET` to its own URL, which would put a typed-in password
+    // into the address bar, the history and the access log. `noValidate` is the usual
+    // reason — the browser's own validation would preempt the contract with messages of
+    // its own.
+    <form method="post" onSubmit={submit} noValidate>
       <FieldGroup>
-        <Field data-invalid={errors.fields.email !== undefined}>
-          <FieldLabel htmlFor="email">Email</FieldLabel>
-          <Input
-            id="email"
-            name="email"
-            type="email"
-            size="lg"
-            autoComplete="email"
-            value={email}
-            onChange={(event) => {
-              setEmail(event.target.value);
-            }}
-            aria-invalid={errors.fields.email !== undefined}
-            disabled={pending}
-          />
-          <FieldError errors={fieldMessages(errors.fields.email)} />
-        </Field>
+        <FormField form={form} name="email" label="Email">
+          {(control) => (
+            <Input
+              {...control}
+              type="email"
+              size="lg"
+              autoComplete="email"
+              disabled={pending}
+            />
+          )}
+        </FormField>
 
-        <Field data-invalid={errors.fields.password !== undefined}>
-          <FieldLabel htmlFor="password">Password</FieldLabel>
-          <PasswordInput
-            id="password"
-            name="password"
-            size="lg"
-            autoComplete="new-password"
-            value={password}
-            onChange={(event) => {
-              setPassword(event.target.value);
-            }}
-            aria-invalid={errors.fields.password !== undefined}
-            disabled={pending}
-          />
-          <FieldError errors={fieldMessages(errors.fields.password)} />
-          <FieldDescription>At least 8 characters.</FieldDescription>
-        </Field>
+        <FormField
+          form={form}
+          name="password"
+          label="Password"
+          description="At least 8 characters."
+        >
+          {(control) => (
+            <PasswordInput
+              {...control}
+              size="lg"
+              autoComplete="new-password"
+              disabled={pending}
+            />
+          )}
+        </FormField>
 
-        {errors.message !== null && <FieldError>{errors.message}</FieldError>}
+        {message !== null && <FieldError>{message}</FieldError>}
 
         <Button type="submit" size="lg" loading={pending}>
           Create account

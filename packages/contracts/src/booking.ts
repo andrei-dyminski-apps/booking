@@ -22,6 +22,33 @@ export const bookingStatusSchema = z.enum([
 export const BookingStatus = bookingStatusSchema.enum;
 
 /**
+ * What a date field says when what arrived was not a calendar day — a box left empty, or
+ * text nothing could read as one. The same job `numberMessage` does in `listing.ts`, and
+ * for the same reason: zod's own `Invalid ISO date` names the format rather than the thing
+ * being asked for, and a form here puts it under the box as the field is left.
+ *
+ * The two codes are the two ways of arriving with nothing: `invalid_type` is a field that
+ * was never sent, `invalid_format` with an empty string is a box on the screen nobody
+ * filled in.
+ */
+const dayMessage =
+  (missing: string, notADay: string) =>
+  (issue: z.core.$ZodRawIssue): string | undefined => {
+    if (issue.code === "invalid_type") return missing;
+    if (issue.code !== "invalid_format") return undefined;
+
+    return issue.input === "" ? missing : notADay;
+  };
+
+/**
+ * The format both ends of a stay are written in, on its own, so the two rules below can ask
+ * whether they have anything to compare yet. See the guard on each of them.
+ */
+const DAY = z.iso.date();
+
+const isDay = (value: string): boolean => DAY.safeParse(value).success;
+
+/**
  * Dates are stored as `YYYY-MM-DD`, so they compare lexicographically.
  *
  * A booking names two people-facing rows rather than free text: the listing it takes and
@@ -41,8 +68,18 @@ export const bookingSchema = z.object({
    */
   listing: listingSummarySchema,
   guestId: z.uuid(),
-  from: z.iso.date(),
-  to: z.iso.date(),
+  from: z.iso.date({
+    error: dayMessage(
+      "A check-in date is required",
+      "A check-in date must be written as YYYY-MM-DD",
+    ),
+  }),
+  to: z.iso.date({
+    error: dayMessage(
+      "A check-out date is required",
+      "A check-out date must be written as YYYY-MM-DD",
+    ),
+  }),
   status: bookingStatusSchema,
   /**
    * When the hold lapses — and it stays on the row after it has. Which moment a stay
@@ -80,11 +117,19 @@ export const createBookingSchema = bookingSchema
     expiresAt: true,
     createdAt: true,
   })
-  .refine((booking) => booking.from < booking.to, {
-    message: "Check-out date must be later than check-in date",
-    path: ["to"],
-  })
-  .refine((booking) => booking.from >= today(), {
+  // Both rules are about a date and wait for one: without the guard an empty check-in box
+  // reads as a stay in the past — `"" >= today()` is false — and the form puts that under a
+  // box nobody has filled in yet, beside the refusal that is actually true.
+  // `listingQuerySchema` guards its own cross-field rules the same way.
+  .refine(
+    (booking) =>
+      !isDay(booking.from) || !isDay(booking.to) || booking.from < booking.to,
+    {
+      message: "Check-out date must be later than check-in date",
+      path: ["to"],
+    },
+  )
+  .refine((booking) => !isDay(booking.from) || booking.from >= today(), {
     message: "Check-in date cannot be in the past",
     path: ["from"],
   });

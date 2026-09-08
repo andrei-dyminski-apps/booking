@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiResponseError, ApiUnreachableError } from "../api/http-client";
-import { toFieldErrors, toFormErrors } from "./form-errors";
+import { messagesOf, toFieldErrors, toFormErrors } from "./form-errors";
 
 describe("toFieldErrors", () => {
   it("groups messages under the first path segment", () => {
@@ -56,5 +56,52 @@ describe("toFormErrors", () => {
     const drift = new TypeError("unexpected shape");
 
     expect(() => toFormErrors(drift)).toThrow(drift);
+  });
+});
+
+describe("messagesOf", () => {
+  it("has nothing to say about a field with nothing wrong with it", () => {
+    expect(messagesOf(undefined)).toBeUndefined();
+  });
+
+  it("reads the one message a field with a single refusal carries", () => {
+    expect(messagesOf({ type: "too_small", message: "Too short" })).toEqual([
+      "Too short",
+    ]);
+  });
+
+  it("prefers every message of `types` over the one `message` repeats", () => {
+    expect(
+      messagesOf({
+        type: "too_small",
+        message: "Too short",
+        types: { too_small: "Too short", invalid_format: "Not an email" },
+      }),
+    ).toEqual(["Too short", "Not an email"]);
+  });
+
+  it("flattens a `types` entry that carries several messages of its own", () => {
+    expect(
+      messagesOf({
+        type: "server",
+        message: "Already registered",
+        types: { "server-0": ["Already registered", "Try another"] },
+      }),
+    ).toEqual(["Already registered", "Try another"]);
+  });
+
+  it("falls back to `message` when a rule recorded itself in `types` without one", () => {
+    expect(
+      messagesOf({
+        type: "required",
+        message: "Required",
+        types: { required: true },
+      }),
+    ).toEqual(["Required"]);
+  });
+
+  it("says nothing rather than an empty message for a refusal with no words at all", () => {
+    expect(messagesOf({ type: "required", message: "" })).toBeUndefined();
+    expect(messagesOf({ type: "required" })).toBeUndefined();
   });
 });

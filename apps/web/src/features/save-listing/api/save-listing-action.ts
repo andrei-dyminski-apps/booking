@@ -2,7 +2,7 @@
 
 import { refresh, revalidateTag, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
-import { createListingSchema } from "@repo/contracts";
+import { createListingSchema, type CreateListingInput } from "@repo/contracts";
 import { listingsApi } from "#shared/api";
 import { CATALOGUE_TAG, listingTag, ROUTES } from "#shared/config";
 import { toFieldErrors, toFormErrors, type FormErrors } from "#shared/lib";
@@ -12,22 +12,20 @@ import { toFieldErrors, toFormErrors, type FormErrors } from "#shared/lib";
  * editing one submit the same four fields, and which of the two happens is decided by
  * whether the page bound an id to it.
  *
- * `createListingSchema` validates both. The API accepts a subset for a PATCH, but this
- * form never sends one — every field is on screen with its current value, so the stricter
- * of the two schemas is also the honest one, and `updateListingSchema` would only accept
- * an emptier body than the form can produce.
+ * `createListingSchema` validates both, and it has already validated the same values in
+ * the browser — this is the endpoint's own parse, because an action is reachable by
+ * anything that can spell its id and the shape of `values` is a claim until it is read.
+ * The API accepts a subset for a PATCH, but this form never sends one — every field is on
+ * screen with its current value, so the stricter of the two schemas is also the honest
+ * one, and `updateListingSchema` would only accept an emptier body than the form can
+ * produce.
  */
 export async function saveListingAction(
   listingId: string | null,
   _state: FormErrors,
-  formData: FormData,
+  values: CreateListingInput,
 ): Promise<FormErrors> {
-  const parsed = createListingSchema.safeParse({
-    title: formData.get("title"),
-    description: formData.get("description"),
-    pricePerNight: toNumber(formData.get("pricePerNight")),
-    capacity: toNumber(formData.get("capacity")),
-  });
+  const parsed = createListingSchema.safeParse(values);
 
   if (!parsed.success) {
     return { message: null, fields: toFieldErrors(parsed.error.issues) };
@@ -61,16 +59,4 @@ export async function saveListingAction(
   // the list as it was before they changed it.
   refresh();
   redirect(ROUTES.dashboard);
-}
-
-/**
- * A form sends every field as text, and the contract wants two numbers — a price to the
- * cent and a whole capacity. An empty box is not a zero: handing the schema `undefined`
- * makes it say the field is missing, which is what happened, instead of refusing a number
- * nobody typed.
- */
-function toNumber(value: FormDataEntryValue | null): number | undefined {
-  if (typeof value !== "string" || value.trim() === "") return undefined;
-
-  return Number(value);
 }

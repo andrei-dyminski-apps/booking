@@ -48,7 +48,7 @@ The shape of requests and responses is described once — as zod schemas in `@re
 
 - request body validation in Nest — through `nestjs-zod` and the global `ZodValidationPipe`;
 - types for both sides — `z.infer`;
-- form validation in the browser — before the request is sent;
+- form validation in the browser — through **react-hook-form**, on the field as it is left, before the request is sent;
 - OpenAPI schemas at `/docs` — the documentation cannot drift away from the code.
 
 ```ts
@@ -73,7 +73,7 @@ Change the data format — change the schema; `pnpm check-types` shows what fell
 
 ## Interface
 
-The frontend is built on **Tailwind CSS 4** and **shadcn/ui** over Base UI primitives (preset `base-nova`, icons from `lucide-react`). shadcn is a generator rather than a dependency: the components land in `packages/ui/src/components` as ordinary source files of this repository, so the design system is versioned and reviewed along with everything else.
+The frontend is built on **Tailwind CSS 4** and **shadcn/ui** over Base UI primitives (preset `base-nova`, icons from `lucide-react`). Forms are **react-hook-form** with the contract schema as its resolver, submitting to a Server Action — everywhere except the login form, which stays a plain `action={...}` so that it works before React has hydrated. shadcn is a generator rather than a dependency: the components land in `packages/ui/src/components` as ordinary source files of this repository, so the design system is versioned and reviewed along with everything else.
 
 ```
 packages/ui/

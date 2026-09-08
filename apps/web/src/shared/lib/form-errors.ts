@@ -1,3 +1,6 @@
+// The type is erased at compile time, so nothing about this import reaches the bundle of
+// either side: a Server Action reads `toFieldErrors` out of this same module.
+import type { FieldError } from "react-hook-form";
 import { ApiResponseError, ApiUnreachableError } from "../api";
 
 /** The messages to show under each field, keyed by the name of the field. */
@@ -87,4 +90,36 @@ export function fieldMessages(
   messages: string[] | undefined,
 ): { message: string }[] | undefined {
   return messages?.map((message) => ({ message }));
+}
+
+/**
+ * Every message about one box, out of the field state `react-hook-form` keeps — the third
+ * source of the same shape the two above reduce to, and the one a `FormField` reads.
+ *
+ * Field state carries one message and, under `criteriaMode: "all"`, a `types` map of all of
+ * them: a field that is both too short and in the wrong format has two things to say, and
+ * so does one the API refused twice. The map is preferred where it is there and `message`
+ * is the whole of it where it is not — and neither is trusted to hold text, because a rule
+ * that passes no message of its own is recorded in `types` as a bare `true`.
+ *
+ * `undefined` rather than an empty array is what a field with nothing wrong with it has to
+ * answer, for the reason `fieldMessages` above gives.
+ */
+export function messagesOf(
+  error: FieldError | undefined,
+): string[] | undefined {
+  if (error === undefined) return undefined;
+
+  const all = Object.values(error.types ?? {})
+    .flat()
+    .filter(isText);
+
+  if (all.length > 0) return all;
+
+  return isText(error.message) ? [error.message] : undefined;
+}
+
+/** A message that is actually there — a `types` entry may be a `boolean` or absent. */
+function isText(value: unknown): value is string {
+  return typeof value === "string" && value !== "";
 }

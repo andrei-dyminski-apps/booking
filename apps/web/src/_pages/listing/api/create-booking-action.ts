@@ -2,33 +2,32 @@
 
 import { refresh, revalidateTag, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
-import { createBookingSchema } from "@repo/contracts";
+import { createBookingSchema, type CreateBookingInput } from "@repo/contracts";
 import { bookingsApi } from "#shared/api";
 import { availabilityTag, CATALOGUE_TAG, ROUTES } from "#shared/config";
 import { toFieldErrors, toFormErrors, type FormErrors } from "#shared/lib";
 
 /**
- * Taking a hold. The listing is bound by the page rather than submitted with the form —
+ * Taking a hold. The listing is bound by the page rather than taken from the payload —
  * the same reason `ownerId` is not on `createListingSchema`: what a request may name is
- * decided by the screen it was made from, not by a field somebody can retype.
+ * decided by the screen it was made from, not by a field somebody can retype. The form
+ * carries a `listingId` because the schema it validates against has one, and the value
+ * below overwrites it for exactly that reason.
  *
  * `createBookingSchema` is the schema Nest validates the body with, so the obvious
- * mistakes — a check-out before the check-in, a stay in the past — are refused before a
- * request is spent. What it cannot answer is whether the nights are free: that is a
- * question about other rows, and the only place it can be settled without a race is
- * inside the transaction that locks the listing. Its answer arrives here as a `409` and
- * is shown the way every other refusal is.
+ * mistakes — a check-out before the check-in, a stay in the past — are refused in the
+ * browser before a request is spent, and refused again here because an action is an
+ * endpoint of its own. What it cannot answer either time is whether the nights are free:
+ * that is a question about other rows, and the only place it can be settled without a
+ * race is inside the transaction that locks the listing. Its answer arrives here as a
+ * `409` and is shown the way every other refusal is.
  */
 export async function createBookingAction(
   listingId: string,
   _state: FormErrors,
-  formData: FormData,
+  values: CreateBookingInput,
 ): Promise<FormErrors> {
-  const parsed = createBookingSchema.safeParse({
-    listingId,
-    from: formData.get("from"),
-    to: formData.get("to"),
-  });
+  const parsed = createBookingSchema.safeParse({ ...values, listingId });
 
   if (!parsed.success) {
     return { message: null, fields: toFieldErrors(parsed.error.issues) };

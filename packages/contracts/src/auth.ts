@@ -31,7 +31,7 @@ const emailSchema = z.email().max(254).toLowerCase();
 const passwordSchema = z
   .string()
   .min(8, { message: "Password must be at least 8 characters long" })
-  .max(128);
+  .max(128, { message: "Password may not be longer than 128 characters" });
 
 /** What the API tells the client about the signed-in person — never the password hash. */
 export const userSchema = z.object({

@@ -2,7 +2,7 @@
 
 import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
-import { registerSchema } from "@repo/contracts";
+import { registerSchema, type RegisterInput } from "@repo/contracts";
 import { authApi } from "#shared/api";
 import { ROUTES } from "#shared/config";
 import {
@@ -13,20 +13,21 @@ import {
 } from "#shared/lib";
 
 /**
- * The same shape as the login action, and the same reason for it. `registerSchema` is the
- * stricter of the two on purpose — the password policy applies to a password being chosen,
- * not to one being typed in again — and registration opens the session, so there is
- * nothing to sign in to afterwards.
+ * `registerSchema` is the stricter of the two session schemas on purpose — the password
+ * policy applies to a password being chosen, not to one being typed in again — and
+ * registration opens the session, so there is nothing to sign in to afterwards.
+ *
+ * The form has already validated against this very schema, and the parse below is not a
+ * repetition of it: an action is an endpoint of its own, reachable by anything that can
+ * spell its id, so what the type of `values` says the browser sent is a claim and this is
+ * where it is checked.
  */
 export async function registerAction(
   next: string,
   _state: FormErrors,
-  formData: FormData,
+  values: RegisterInput,
 ): Promise<FormErrors> {
-  const parsed = registerSchema.safeParse({
-    email: formData.get("email"),
-    password: formData.get("password"),
-  });
+  const parsed = registerSchema.safeParse(values);
 
   if (!parsed.success) {
     return { message: null, fields: toFieldErrors(parsed.error.issues) };
