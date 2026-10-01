@@ -272,10 +272,4 @@ The connection URLs repeat what docker-compose.yml is given, and nothing links t
 
 ## Checks
 
-```sh
-pnpm --filter @repo/api lint          # eslint . --max-warnings 0
-pnpm --filter @repo/api lint:fix      # eslint . --fix, Prettier formatting included
-pnpm --filter @repo/api check-types   # tsc --noEmit
-```
-
 The lint is type-aware (`recommendedTypeChecked`), so it catches what plain ESLint misses: unhandled promises, unsafe operations on `any`. Fix the rules rather than disabling them. A floating promise at the top level (like `void bootstrap()` in `main.ts`) is marked with an explicit `void`, not ignored.

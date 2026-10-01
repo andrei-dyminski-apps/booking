@@ -23,7 +23,7 @@ The domain model (grown phase by phase):
 
 The default of the repository stays a modular monolith, now with the
 `module → controller → service → repository → Prisma` layering described in
-`.claude/rules/backend.md`. One departure from it is planned, and only one.
+`apps/api/CLAUDE.md`. One departure from it is planned, and only one.
 
 **Everywhere: a repository between the service and Prisma — done.** No service imports the
 generated client or the row types any more (the mappers live in the repository), so a unit
@@ -153,7 +153,7 @@ Done on both sides.
 - [x] Tokens live in **httpOnly cookies** only, never in localStorage. The browser holds the frontend's copy of the pair rather than the API's — the BFF re-issues both for its own origin — so they are first-party and CORS is not part of the path at all.
 - [x] In Nest: `passport-jwt`, a global `JwtAuthGuard` + a `@Public()` decorator for open endpoints.
 - [x] On the frontend: `proxy.ts` (what Next.js 16 calls middleware) in front of the protected routes, a server-side fetch that forwards the session cookie, and the `/login`, `/register` and `/profile` screens. Two cookie scopes decide the shape of it: the access cookie is scoped to `/` and therefore reaches the Next.js server, which is what lets a server render read `/auth/me` as the visitor; the refresh cookie is scoped to `/auth` and reaches neither the proxy nor a render, so the only side that can trade an expired session for a live one is the browser.
-- [x] The BFF, and the session moved onto the frontend's own origin with it: the browser calls `/api/...`, the proxy re-issues the two cookies for this host, the login/register/logout forms became Server Actions, and the transport answers a 401 with one rotation and one replay — single-flight per tab and across tabs. See "Decisions already made" for why, and `.claude/rules/frontend.md` for the rules that came out of it.
+- [x] The BFF, and the session moved onto the frontend's own origin with it: the browser calls `/api/...`, the proxy re-issues the two cookies for this host, the login/register/logout forms became Server Actions, and the transport answers a 401 with one rotation and one replay — single-flight per tab and across tabs. See "Decisions already made" for why, and `apps/web/CLAUDE.md` for the rules that came out of it.
 - [x] The `registerSchema` / `loginSchema` schemas go into `@repo/contracts`: one validation for the form and the request.
 - [x] `UserRepository` and `RefreshTokenRepository` in front of Prisma — the repository step of "Layering inside `apps/api`". `AuthService` keeps the rules and no longer imports the generated client, the rotation transaction and the `P2002` translation live in the repository, and the unit spec runs against in-memory fakes: it now asserts what ends up stored (a replayed token revokes the whole family) instead of the arguments of a Prisma call.
 
@@ -179,7 +179,7 @@ builds.
       stay against it — a finished one included — could never be let go of, and the `409`
       that came back was a dead end rather than a rule. Retired means out of the
       catalogue, off the dashboard, `404` by id and closed to new bookings, while the
-      stays keep their record. What it costs is written down in `.claude/rules/backend.md`:
+      stays keep their record. What it costs is written down in `apps/api/CLAUDE.md`:
       the foreign key no longer refuses a booking against a retired listing, and phase 4's
       locking transaction is where that check becomes atomic again.
 - [ ] `/admin` — the same conditional rendering for the role that sees everything. It
@@ -241,7 +241,7 @@ on it says why it is a change to the transport rather than a flag.
       filters deliberately got none: they narrow a scan the ordering already drives, and
       which of them earns an index is a question for a query plan over real data.
 - [x] The first cached reads in the application, and with them the rest of the
-      revalidation table in `.claude/rules/frontend.md`: the catalogue, one listing and
+      revalidation table in `apps/web/CLAUDE.md`: the catalogue, one listing and
       its availability are the three public reads, they carry `next: { tags }`, and the
       names are written once in `shared/config/cache-tags.ts` because a tag is a string
       two halves have to spell the same way. The three are separate because the writes
@@ -330,7 +330,7 @@ is the transition a hold could not make on its own:
 - [ ] **JSON-LD across the whole site** — the structured data a catalogue is actually read
       by, and the one SEO question this project has so far answered with nothing. Semantic
       markup is not that answer: wrapping the rows in a `<ul role="list">` bought a screen
-      reader a count and an edge (`.claude/rules/frontend.md`) and buys a crawler nothing,
+      reader a count and an edge (`apps/web/CLAUDE.md`) and buys a crawler nothing,
       because nothing ranks on list markup. What a search engine reads a stay out of is
       `application/ld+json`, and it is the difference between a blue link and a result
       carrying a price and a capacity.

@@ -10,8 +10,16 @@ import { Input } from "#components/input";
 function PasswordInput({
   className,
   disabled,
+I'm not gonna say it I'm done with   onRevealedChange,
   ...props
-}: Omit<React.ComponentProps<typeof Input>, "type">) {
+}: Omit<React.ComponentProps<typeof Input>, "type"> & {
+  /**
+   * Told when the characters go on the screen. The state stays here — the box still owns
+   * it — and this is only a report, for a form that draws something else beside the box
+   * because of it: the registration one asks for the password twice while it is hidden.
+   */
+  onRevealedChange?: (revealed: boolean) => void;
+}) {
   const [revealed, setRevealed] = useState(false);
 
   return (
@@ -35,7 +43,8 @@ function PasswordInput({
         className="absolute inset-y-0 right-0.5 my-auto text-muted-foreground"
         disabled={disabled}
         onClick={() => {
-          setRevealed((shown) => !shown);
+          setRevealed(!revealed);
+          onRevealedChange?.(!revealed);
         }}
       >
         {revealed ? <EyeOffIcon /> : <EyeIcon />}

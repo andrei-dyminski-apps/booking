@@ -4,16 +4,9 @@ Instructions for Claude Code when working in this repository.
 
 ## What this project is
 
-`booking` is a monorepo on Turborepo + pnpm workspaces.
-
-| Package                      | What it is                                          |
-| ---------------------------- | --------------------------------------------------- |
-| `apps/web`                   | Next.js 16 (App Router, Turbopack), React 19, FSD   |
-| `apps/api`                   | NestJS 11 (Express), REST, Prisma 7 + PostgreSQL    |
-| `packages/contracts`         | `@repo/contracts` — zod schemas of the API contract |
-| `packages/ui`                | `@repo/ui` — design system: Tailwind 4 + shadcn/ui  |
-| `packages/eslint-config`     | `@repo/eslint-config` — shared ESLint configs       |
-| `packages/typescript-config` | `@repo/typescript-config` — base tsconfigs          |
+`booking` is a monorepo on Turborepo + pnpm workspaces. Two applications in `apps/*` and
+the packages they share in `packages/*` — `pnpm-workspace.yaml` and each `package.json`
+are the inventory.
 
 Node >= 22.9, the package manager is **pnpm 9** (`packageManager` in the root `package.json`).
 
@@ -75,7 +68,13 @@ The root scripts start turbo through `node --env-file-if-exists=.env`, so the va
 
 ## Rules
 
+The two that hold everywhere are imported here and are always in context:
+
 @.claude/rules/monorepo.md
-@.claude/rules/frontend.md
-@.claude/rules/backend.md
 @.claude/rules/workflow.md
+
+The conventions of one application live with it and are loaded when its files are —
+`apps/web/CLAUDE.md` (Next.js, FSD, the shell, forms, caching) and `apps/api/CLAUDE.md`
+(NestJS, Prisma, authentication, authorization, tests). Read the one for the application
+being changed before changing it; they are not in context until a file under that
+directory is.

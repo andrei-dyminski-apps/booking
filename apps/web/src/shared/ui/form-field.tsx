@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   useFormState,
   type FieldValues,
@@ -16,6 +16,7 @@ import {
   FieldLabel,
 } from "@repo/ui/components/field";
 import { fieldMessages, messagesOf } from "../lib";
+import { CharacterCount } from "./character-count";
 
 /**
  * What the control is handed: everything `register` returns, plus the three attributes a
@@ -44,10 +45,18 @@ export type FormControl<Name extends string> = UseFormRegisterReturn<Name> & {
  * **The value is rendered by the server, not only put there by the browser.** `register`
  * leaves a box uncontrolled and reaches the DOM through a ref, which runs after hydration
  * — so without `defaultValue` the edit screen would be sent out with four empty boxes and
- * fill them in a moment later. It is the initial value only, and not because React stops
- * writing it: React goes on setting `defaultValue` on every render, and what keeps that
- * from moving what is on the screen is the DOM's own dirty-value flag, raised the moment
- * the visitor types. So the field's state is `react-hook-form`'s from the first keystroke.
+ * fill them in a moment later. It is the initial value and nothing after it, which is why
+ * it is read once rather than off the form on every render: from the first keystroke the
+ * value is `react-hook-form`'s, and handing the control a default that has moved with it
+ * is how Base UI's `FieldControl` reads a box turning controlled — it says so in the
+ * console. The DOM would ignore the new default either way, its own dirty-value flag
+ * being up, so nothing is lost by never writing it again.
+ *
+ * **A bound on the text is drawn as a count, never as a limit on typing.** `limit` is the
+ * schema's own `maxLength`, and what it produces is `CharacterCount` — a hundred
+ * characters is not something anybody counts on sight, and the alternative, `maxLength` on
+ * the control, would take the room away without a word about it. The number joins the
+ * description in `aria-describedby`, so a box states its allowance when it takes focus.
  *
  * **`aria-describedby` is the other point of the component.** `aria-invalid` says that a box is
  * wrong and the message says what is wrong with it, and without the link between them a
@@ -56,15 +65,16 @@ export type FormControl<Name extends string> = UseFormRegisterReturn<Name> & {
  * case, and a reference to an element that is not there is read as no description rather
  * than as an empty one.
  *
- * The three ids are derived from the name rather than being it, for the reason
- * `FilterField` beside it gives: a label pointing at a bare `from` would follow whatever
- * else on the page ends up carrying that id.
+ * The ids are derived from the name rather than being it, for the reason `FilterField`
+ * beside it gives: a label pointing at a bare `from` would follow whatever else on the
+ * page ends up carrying that id.
  */
 export const FormField = <Values extends FieldValues>({
   form,
   name,
   label,
   description,
+  limit,
   options,
   children,
 }: {
@@ -72,6 +82,13 @@ export const FormField = <Values extends FieldValues>({
   name: Path<Values>;
   label: string;
   description?: string;
+  /**
+   * How long the contract lets this box's text be, for a box that takes text — read off
+   * the schema (`createListingSchema.shape.title.maxLength`) rather than written down
+   * again, and `null` there when the field has no bound at all. What it draws is a count
+   * and never a limit on typing; `character-count.tsx` says why.
+   */
+  limit?: number | null;
   /** How the box's text becomes the value the contract expects — a price, a count. */
   options?: RegisterOptions<Values, Path<Values>>;
   children: (control: FormControl<Path<Values>>) => ReactNode;
@@ -81,22 +98,41 @@ export const FormField = <Values extends FieldValues>({
   const formState = useFormState({ control: form.control, name });
   const { error, invalid } = form.getFieldState(name, formState);
   const messages = messagesOf(error);
-  const value: unknown = form.getValues(name);
+  // The value the server rendered, taken at the first render and kept: see above.
+  const [defaultValue] = useState(() => {
+    const initial: unknown = form.getValues(name);
+
+    return initial === undefined ? undefined : String(initial);
+  });
 
   const id = `field-${name}`;
   const descriptionId =
     description === undefined ? undefined : `${id}-description`;
+  const countId = typeof limit === "number" ? `${id}-count` : undefined;
   const errorId = messages === undefined ? undefined : `${id}-error`;
-  const describedBy = [descriptionId, errorId].filter(isText).join(" ");
+  const describedBy = [descriptionId, countId, errorId]
+    .filter(isText)
+    .join(" ");
 
   return (
     <Field data-invalid={invalid}>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <div className="flex justify-between gap-6 items-end">
+        <FieldLabel htmlFor={id}>{label}</FieldLabel>
+
+        {typeof limit === "number" && (
+          <CharacterCount
+            id={`${id}-count`}
+            control={form.control}
+            name={name}
+            limit={limit}
+          />
+        )}
+      </div>
 
       {children({
         ...form.register(name, options),
         id,
-        defaultValue: value === undefined ? undefined : String(value),
+        defaultValue,
         "aria-invalid": invalid,
         "aria-describedby": describedBy === "" ? undefined : describedBy,
       })}
@@ -110,7 +146,7 @@ export const FormField = <Values extends FieldValues>({
   );
 };
 
-/** An id that is actually there — the description's and the error's are absent as `undefined`. */
+/** An id that is actually there — a description, a count and an error are each absent as `undefined`. */
 function isText(value: unknown): value is string {
   return typeof value === "string" && value !== "";
 }

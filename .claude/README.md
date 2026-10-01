@@ -6,14 +6,14 @@ Claude Code configuration for this repository.
 | --------------------- | ------------------------------------------------------------------ |
 | `../CLAUDE.md`        | Entry point: project overview, commands, env. Loaded automatically |
 | `rules/monorepo.md`   | pnpm, package boundaries, configs, turbo.json                      |
-| `rules/frontend.md`   | `apps/web` — Next.js, Server/Client Components, styling            |
-| `rules/backend.md`    | `apps/api` — NestJS, module layout, Prisma, tests                  |
 | `rules/workflow.md`   | Way of working, code style, git, documentation                     |
 | `skills/`             | Vendored agent skills, loaded on demand rather than every session  |
 | `settings.json`       | Command permissions (committed to the repository)                  |
 | `settings.local.json` | Personal overrides, not committed                                  |
 
-The files in `rules/` are wired in through `@` imports at the end of `CLAUDE.md` — a new rules file has to be added there, otherwise it will not be loaded.
+The files in `rules/` are wired in through `@` imports at the end of `CLAUDE.md` — a new rules file has to be added there, otherwise it will not be loaded. They hold what applies to the whole repository, so they are in context in every session.
+
+What applies to one application lives with it instead — `../apps/web/CLAUDE.md` and `../apps/api/CLAUDE.md` — and is loaded when a file under that directory is, not before. That is where the bulk of the rules are, and it keeps a session that never opens `apps/web` from carrying its conventions.
 
 ## Skills
 
@@ -32,7 +32,7 @@ git clone --depth 1 https://github.com/feature-sliced/skills.git
 cp -r skills/feature-sliced-design .claude/skills/
 ```
 
-The skill states the methodology; `rules/frontend.md` states what this repository decided
+The skill states the methodology; `../apps/web/CLAUDE.md` states what this repository decided
 to do with it, and wins where the two disagree — the section "The methodology itself"
 there lists the disagreements.
 

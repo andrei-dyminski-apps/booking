@@ -1,9 +1,9 @@
 import { messagesExcept, type FieldErrors } from "#shared/lib";
 import { FilterChips, SortSelect } from "#shared/ui";
 import {
-  activeFilters,
   clearedFiltersHref,
   sortOptions,
+  type ActiveFilter,
   type FilterValues,
 } from "../lib/catalogue-search";
 import { CatalogueFiltersDialog } from "./catalogue-filters-dialog";
@@ -24,10 +24,17 @@ import { CatalogueFiltersDialog } from "./catalogue-filters-dialog";
 export const CatalogueToolbar = ({
   values,
   errors,
+  filters,
   earliest,
 }: {
   values: FilterValues;
   errors: FieldErrors;
+  /**
+   * What is currently being filtered by, read once by the page: this row draws it as chips
+   * and counts it on the button that opens the dialog, and the page asks the same list
+   * whether there was a filter to blame for an empty result.
+   */
+  filters: ActiveFilter[];
   /**
    * Today in UTC, computed on the server. The date boxes refuse a stay in the past the
    * way `createBookingSchema` does, and reading the clock in the markup instead would
@@ -38,10 +45,6 @@ export const CatalogueToolbar = ({
   // Everything the contract refused except the ordering, which has a control of its own to
   // sit under.
   const hidden = messagesExcept(errors, "sort");
-
-  // One read of what is on: the chips draw it and the button that opens the dialog counts
-  // it, and two calls would be two chances to answer the same question differently.
-  const filters = activeFilters(values);
 
   return (
     <div className="flex flex-col gap-2">

@@ -40,11 +40,24 @@ export const ListingForm = ({ listing }: { listing?: Listing }) => {
     // contract with messages of its own.
     <form method="post" onSubmit={submit} noValidate>
       <FieldGroup>
-        <FormField form={form} name="title" label="Title">
+        <FormField
+          form={form}
+          name="title"
+          label="Title"
+          // The ceiling comes off the schema rather than being written down a second
+          // time: the count and the sentence that refuses a title too long have to be
+          // about the same number.
+          limit={createListingSchema.shape.title.maxLength}
+        >
           {(control) => <Input {...control} size="lg" disabled={pending} />}
         </FormField>
 
-        <FormField form={form} name="description" label="Description">
+        <FormField
+          form={form}
+          name="description"
+          label="Description"
+          limit={createListingSchema.shape.description.maxLength}
+        >
           {(control) => (
             <Textarea {...control} size="lg" rows={4} disabled={pending} />
           )}

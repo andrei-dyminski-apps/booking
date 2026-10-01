@@ -1,10 +1,5 @@
 # apps/web — Next.js
 
-## Stack
-
-Next.js 16, App Router, Turbopack, React 19, TypeScript strict, ESM (`"type": "module"`).
-The code is organized by **Feature-Sliced Design**.
-
 ## Architecture — Feature-Sliced Design
 
 Routing belongs to Next.js, everything else to FSD. The `app/` folder at the root of the
@@ -156,6 +151,8 @@ apps/web/
       ui/sort-select.tsx      # the orderings of a list, as one box
       ui/pager.tsx            # forwards-only keyset paging: next, and back to the first
       ui/stale-page-notice.tsx  # what a list shows for a cursor the API will not read
+      ui/refused-search-notice.tsx  # …and for a search the contract refuses
+      ui/no-matches-notice.tsx  # …and for an answer the filters emptied
       ui/index.ts
 ```
 
@@ -579,6 +576,17 @@ JavaScript never arrived.
   taken deliberately: a password policy stated a round trip after the fact is stated in the
   wrong place, and none of these screens is reachable by somebody who could not run the
   script that rendered it.
+- **Registration asks for the password twice, and only while it is hidden**
+  (`_pages/register/ui/register-form.tsx`). The second box is a question about what was
+  typed behind asterisks, so the eye on the first one answers it: revealing the characters
+  takes the box away and `unregister` takes its value with it, or a mismatch nobody can
+  see any more would go on refusing the submit. It has no eye of its own — that would show
+  a copy of what the box above is still hiding. The rule is `registerFormSchema` in
+  `@repo/contracts`, beside the request schema rather than in the component: the
+  confirmation never travels — the form hands `registerAction` the two fields the contract
+  describes — but the sentence a visitor reads is worded where every other one is, and the
+  field is optional there because its absence is exactly how the schema reads "the
+  password is on the screen".
 - **What a page with no scripts falls back to is `method="post"`, and it is not
   cosmetic.** A `<form>` with neither a `method` nor an `action` submits a `GET` to its own
   URL, so an unhydrated registration form would put the typed-in password into the address
@@ -627,12 +635,30 @@ rather than for the markup:
   there is no error, because `FieldError` renders
   nothing at all in that case and a reference to an element that is not there reads as no
   description rather than as an empty one.
+- **A bound on the length is a count, never a `maxLength`** (`limit`, drawn by
+  `shared/ui/character-count.tsx`). A hundred characters of a title is not a number anybody
+  counts on sight, so the box says how much of its allowance is gone; what it does not do
+  is take the rest away. `maxLength` is the one HTML constraint `noValidate` does not
+  switch off, so it would stand in front of the contract exactly where every rule of a form
+  here is the contract's to state — and it says nothing while it does it: a pasted
+  paragraph loses its end in silence, where `A description may not be longer than 2000
+characters` reaches the box either way. The number is read off the schema
+  (`createListingSchema.shape.title.maxLength`) rather than written down again, and it is
+  counted the way the schema counts it — trimmed — or it would promise room the parse then
+  refuses. It subscribes by name in a component of its own, because whoever holds a
+  subscription re-renders on every keystroke and that has to be one line rather than the
+  whole form. Both spellings of it live there: `12 / 100` beside the box and a sentence for
+  a screen reader, joined to the box through `aria-describedby` and announced when it takes
+  focus rather than as it changes.
 - **The value is rendered by the server.** `register` leaves a box uncontrolled and reaches
   the DOM through a ref, which runs after hydration — so the component passes
   `defaultValue` as well, or the edit screen would go out with four empty boxes and fill
-  them in a moment later. It stays the initial value, and not because React stops writing
-  it: React sets `defaultValue` on every render, and what keeps that from moving what is on
-  the screen is the DOM's own dirty-value flag, raised the moment the visitor types.
+  them in a moment later. It is the initial value and nothing after it, and it is read off
+  the form once rather than on every render: from the first keystroke the value belongs to
+  `react-hook-form`, and a default that moved along with it is what Base UI's
+  `FieldControl` reports as a box turning controlled. The DOM would ignore the new default
+  anyway — its own dirty-value flag goes up the moment the visitor types — so the only
+  thing writing it again produced was the warning.
 - **The control is a child function, not a prop.** The boxes differ — a password reveals
   itself, a description is several lines, a price steps in cents — and what surrounds them
   does not. Spreading what the function is handed is the whole of the wiring at a call
@@ -675,7 +701,9 @@ in a component, because there is nothing for it to hold: the server renders from
 the two share sits in `shared`. In `shared/ui`: the box of a search form (`FilterField`),
 the `GET` form of the dialog (`FilterForm`), the chips that take a filter off
 (`FilterChips`), the ordering box (`SortSelect`), the forwards-only pager (`Pager`) and
-what a list shows for a cursor the API will not read (`StalePageNotice`). In `shared/lib`
+the three notices a list shows in place of itself — a cursor the API will not read
+(`StalePageNotice`), a search the contract refuses (`RefusedSearchNotice`) and an answer
+the filters emptied (`NoMatchesNotice`). In `shared/lib`
 and `shared/api`, the domain-free mechanics the two slices' search modules would otherwise
 each spell: `filtersHref` and `singleParam` and `searchParamsHref` (`search-params.ts`),
 `dayLabelOrAny` (`dates.ts`), `messagesExcept` (`form-errors.ts`), `pageOrNullOnStaleCursor`
@@ -789,6 +817,19 @@ a box, which is how an id-shaped filter stays usable at all.
 - **A value a box cannot show is still reported.** Every box lives inside the dialog now,
   so every message about one is repeated in the toolbar — a refusal behind a closed door
   is a page that looks broken for no stated reason.
+- **An empty screen says which of the three emptied it**, and only the first of them is
+  the same sentence on both lists. A search nothing matched is a filter away from an
+  answer, so it is `NoMatchesNotice` and it points at the chips — the way out is already
+  on the screen. A list with nothing in it at all is not: an empty catalogue and a guest
+  with no stays are each a message about that list, written in its own slice, and the one
+  that can offer a first step does (`ROUTES.catalogue`). The third is the search the
+  contract refused, which reached no API at all — `RefusedSearchNotice`, next to the
+  messages under the boxes. Telling a visitor to widen a filter when there was none is
+  what the split exists to stop.
+- **Which of the two the list is showing is one read** — `activeFilters(values)` in the
+  page, handed to the toolbar as a prop. The toolbar counts it on the button and draws it
+  as chips while the empty state asks whether it is empty, and two calls would be two
+  chances to answer the same question differently.
 
 ## Mutations and revalidation
 
@@ -923,10 +964,11 @@ rather than in `src/shared`.
 component that knows this application's `FieldErrors`, or one whose whole job is to
 navigate with `useRouter`. The test is the dependency, not the size — anything that would
 have to import from `#shared/*` or from `next/*` is not a primitive and does not go into
-the package. Eight live there: `ButtonLink` — a `<Link>` wearing the button classes, the
+the package. Ten live there: `ButtonLink` — a `<Link>` wearing the button classes, the
 one spelling of "a link that looks like a button" (see below) —, `FormField`, the one box
 every form that submits is made of, and `FilterField`,
-`FilterForm`, `FilterChips`, `SortSelect`, `Pager` and `StalePageNotice`, the parts the
+`FilterForm`, `FilterChips`, `SortSelect`, `Pager`, `StalePageNotice`,
+`RefusedSearchNotice` and `NoMatchesNotice`, the parts the
 catalogue and the stays screen search and page with. A component only one screen uses
 stays in that screen's slice, exactly as "pages first" says.
 
@@ -1000,13 +1042,6 @@ belongs in the same step.
   file in the package.
 
 ## Checks
-
-```sh
-pnpm --filter @repo/web lint          # eslint --max-warnings 0 && steiger ./src
-pnpm --filter @repo/web lint:fix      # eslint --fix, Prettier formatting included
-pnpm --filter @repo/web check-types   # next typegen && tsc --noEmit
-pnpm test                             # vitest, from the root — see below
-```
 
 The lint is two tools in one script, and both have to pass:
 

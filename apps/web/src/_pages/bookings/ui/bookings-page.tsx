@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { CalendarSearchIcon, CompassIcon, SearchXIcon } from "lucide-react";
+import { CalendarSearchIcon } from "lucide-react";
 import { Role, type Role as RoleName } from "@repo/contracts";
 import {
   Empty,
@@ -11,7 +11,13 @@ import {
 } from "@repo/ui/components/empty";
 import { requireUser } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { ButtonLink, Pager, StalePageNotice } from "#shared/ui";
+import {
+  ButtonLink,
+  NoMatchesNotice,
+  Pager,
+  RefusedSearchNotice,
+  StalePageNotice,
+} from "#shared/ui";
 import { readBookingsPage } from "../api/read-bookings-page";
 import {
   activeFilters,
@@ -108,28 +114,29 @@ export const BookingsPage = async ({
 
       {page !== null &&
         (page.items.length === 0 ? (
-          <Empty className="border">
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                {filtered ? <SearchXIcon /> : <CalendarSearchIcon />}
-              </EmptyMedia>
-              <EmptyTitle>
-                {filtered ? "Nothing matches this search" : "Nothing here yet"}
-              </EmptyTitle>
-              <EmptyDescription>
-                {filtered
-                  ? "The chips above take a filter off one at a time — a wider window, or any status."
-                  : scope.empty}
-              </EmptyDescription>
-            </EmptyHeader>
-            {viewer.role === Role.USER && !filtered && (
-              <EmptyContent>
-                <ButtonLink href={ROUTES.catalogue}>
-                  Browse the stays
-                </ButtonLink>
-              </EmptyContent>
-            )}
-          </Empty>
+          // An empty answer has two reasons and they read differently: a search nothing
+          // matched is a filter away from an answer, and a scope with nothing in it is
+          // not — which is what `scope.empty` says, in the words of the role reading it.
+          filtered ? (
+            <NoMatchesNotice />
+          ) : (
+            <Empty className="border">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <CalendarSearchIcon />
+                </EmptyMedia>
+                <EmptyTitle>Nothing here yet</EmptyTitle>
+                <EmptyDescription>{scope.empty}</EmptyDescription>
+              </EmptyHeader>
+              {viewer.role === Role.USER && (
+                <EmptyContent>
+                  <ButtonLink href={ROUTES.catalogue}>
+                    Browse the stays
+                  </ButtonLink>
+                </EmptyContent>
+              )}
+            </Empty>
+          )
         ) : (
           <ul role="list" className="flex flex-col gap-4">
             {page.items.map((booking) => (
@@ -140,20 +147,7 @@ export const BookingsPage = async ({
           </ul>
         ))}
 
-      {query === null && (
-        <Empty className="border">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <CompassIcon />
-            </EmptyMedia>
-            <EmptyTitle>This search cannot be answered</EmptyTitle>
-            <EmptyDescription>
-              The messages above say what is wrong with it. Nothing was asked of
-              the API — a list beside them would read as the answer.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      )}
+      {query === null && <RefusedSearchNotice />}
 
       {page !== null && (
         <Pager

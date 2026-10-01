@@ -52,8 +52,10 @@ export {
   roleSchema,
   userSchema,
   registerSchema,
+  registerFormSchema,
   loginSchema,
   type User,
   type RegisterInput,
+  type RegisterFormInput,
   type LoginInput,
 } from "./auth.js";

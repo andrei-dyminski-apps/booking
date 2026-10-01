@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { CompassIcon, SearchXIcon } from "lucide-react";
+import { WarehouseIcon } from "lucide-react";
 import {
   Empty,
   EmptyDescription,
@@ -8,9 +8,18 @@ import {
   EmptyTitle,
 } from "@repo/ui/components/empty";
 import { today } from "#shared/lib";
-import { Pager, StalePageNotice } from "#shared/ui";
+import {
+  NoMatchesNotice,
+  Pager,
+  RefusedSearchNotice,
+  StalePageNotice,
+} from "#shared/ui";
 import { readCataloguePage } from "../api/read-catalogue-page";
-import { catalogueHref, readCatalogueSearch } from "../lib/catalogue-search";
+import {
+  activeFilters,
+  catalogueHref,
+  readCatalogueSearch,
+} from "../lib/catalogue-search";
 import { CatalogueCard } from "./catalogue-card";
 import { CatalogueToolbar } from "./catalogue-toolbar";
 
@@ -38,6 +47,11 @@ export const CataloguePage = async ({
   // the boxes, and an unfiltered list beside them would read as the answer to it.
   const page = query === null ? null : await readCataloguePage(query);
   const staleCursor = query !== null && page === null;
+  // One read of what is on: the toolbar draws the same list as chips and counts it on the
+  // button that opens the dialog, and the empty state asks whether there was a filter to
+  // blame for it.
+  const filters = activeFilters(values);
+  const filtered = filters.length > 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -49,24 +63,36 @@ export const CataloguePage = async ({
         </p>
       </div>
 
-      <CatalogueToolbar values={values} errors={errors} earliest={today()} />
+      <CatalogueToolbar
+        values={values}
+        errors={errors}
+        filters={filters}
+        earliest={today()}
+      />
 
       {staleCursor && <StalePageNotice firstPageHref={catalogueHref(values)} />}
 
       {page !== null &&
         (page.items.length === 0 ? (
-          <Empty className="border">
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <SearchXIcon />
-              </EmptyMedia>
-              <EmptyTitle>Nothing matches this search</EmptyTitle>
-              <EmptyDescription>
-                Try a wider window, a higher price, or fewer guests — the chips
-                above take a filter off one at a time.
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
+          // An empty answer has two reasons and they read differently: a search nothing
+          // matched is a filter away from an answer, and a catalogue with nothing in it is
+          // not.
+          filtered ? (
+            <NoMatchesNotice />
+          ) : (
+            <Empty className="border">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <WarehouseIcon />
+                </EmptyMedia>
+                <EmptyTitle>Nothing on offer yet</EmptyTitle>
+                <EmptyDescription>
+                  No listing has been published. The first one an owner puts up
+                  will be here.
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          )
         ) : (
           <ul role="list" className="grid gap-4 sm:grid-cols-2">
             {page.items.map((listing) => (
@@ -77,20 +103,7 @@ export const CataloguePage = async ({
           </ul>
         ))}
 
-      {query === null && (
-        <Empty className="border">
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <CompassIcon />
-            </EmptyMedia>
-            <EmptyTitle>This search cannot be answered</EmptyTitle>
-            <EmptyDescription>
-              The messages above say what is wrong with it. Nothing was asked of
-              the API — a list beside them would read as the answer.
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      )}
+      {query === null && <RefusedSearchNotice />}
 
       {page !== null && (
         <Pager

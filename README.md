@@ -103,7 +103,7 @@ The import is per file — `@repo/ui/components/dialog`; inside the package the 
 
 ### Screens
 
-Routing belongs to Next.js and everything else to Feature-Sliced Design, so each file under `apps/web/app` is a one-line re-export of a slice in `apps/web/src/_pages` — the rules are in [`.claude/rules/frontend.md`](.claude/rules/frontend.md).
+Routing belongs to Next.js and everything else to Feature-Sliced Design, so each file under `apps/web/app` is a one-line re-export of a slice in `apps/web/src/_pages` — the rules are in [`apps/web/CLAUDE.md`](apps/web/CLAUDE.md).
 
 | Route                              | What it is                                                            | Who sees it |
 | ---------------------------------- | --------------------------------------------------------------------- | ----------- |

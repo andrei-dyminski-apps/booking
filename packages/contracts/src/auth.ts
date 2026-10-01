@@ -47,6 +47,29 @@ export const registerSchema = z.object({
 });
 
 /**
+ * Registration as it is filled in, rather than as it is sent. `registerSchema` above is
+ * the request body and stays it: the second box is a question about what was typed here
+ * and never travels. The rule is written here anyway, because a sentence a visitor reads
+ * is worded where every other one is, and because a form on this site parses against a
+ * contract schema rather than against a copy assembled in a component.
+ *
+ * The confirmation is optional because it is only asked for while the password is behind
+ * asterisks. A form that puts the characters on the screen has already answered what this
+ * box asks, so it takes the box away — and its absence is how the schema reads that.
+ */
+export const registerFormSchema = registerSchema
+  .extend({ confirmPassword: z.string().optional() })
+  .refine(
+    (values) =>
+      values.confirmPassword === undefined ||
+      values.confirmPassword === values.password,
+    {
+      message: "Passwords do not match",
+      path: ["confirmPassword"],
+    },
+  );
+
+/**
  * Login repeats the shape of registration but not its rules: the password policy may
  * tighten later, and an old password that no longer passes `registerSchema` still has
  * to get its owner in. Hence a plain non-empty string here.
@@ -59,6 +82,7 @@ export const loginSchema = z.object({
 export type Role = z.infer<typeof roleSchema>;
 export type User = z.infer<typeof userSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;
+export type RegisterFormInput = z.infer<typeof registerFormSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 
 /**
