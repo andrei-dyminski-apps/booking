@@ -12,6 +12,7 @@ import { Throttle, minutes } from "@nestjs/throttler";
 import {
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiUnauthorizedResponse,
@@ -70,6 +71,10 @@ export class AuthController {
     description: "Invalid email or password",
     type: ApiErrorDto,
   })
+  @ApiForbiddenResponse({
+    description: "The password is right and an admin has blocked the account",
+    type: ApiErrorDto,
+  })
   async login(
     @Body() dto: LoginDto,
     @Res({ passthrough: true }) res: Response,
@@ -87,7 +92,7 @@ export class AuthController {
   @ApiOkResponse({ type: UserDto })
   @ApiUnauthorizedResponse({
     description:
-      "The refresh token is missing, invalid, expired, or already used",
+      "The refresh token is missing, invalid, expired, or already used, or its account has been blocked",
     type: ApiErrorDto,
   })
   async refresh(
@@ -124,7 +129,7 @@ export class AuthController {
   @Get("me")
   @ApiOkResponse({ type: UserDto })
   @ApiUnauthorizedResponse({
-    description: "Session no longer exists",
+    description: "Session no longer exists, or its account has been blocked",
     type: ApiErrorDto,
   })
   me(@CurrentUser() user: AuthenticatedUser): Promise<User> {

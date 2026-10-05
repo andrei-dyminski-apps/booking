@@ -145,10 +145,24 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
+  /// When an admin shut the account. A blocked user cannot sign in or refresh a session,
+  /// and blocking deletes every refresh token they hold in the same transaction — what is
+  /// left is an access token, which runs out within `JWT_ACCESS_TTL` because `JwtStrategy`
+  /// reads no database. A moment rather than a flag, because when it happened is the first
+  /// thing whoever reopens the account asks. Blocking is what the API offers instead of
+  /// deleting a user: the rows are kept, and so is everything that points at them.
+  blockedAt DateTime? @map("blocked_at")
+
   refreshTokens RefreshToken[]
   listings      Listing[]
   bookings      Booking[]
 
+  /// `GET /users` is a keyset page ordered by `created_at` with `id` behind it — the pair
+  /// `user-cursor.ts` encodes. One index serves both directions, the same arithmetic as the
+  /// bookings': the tiebreaker follows the key, so `oldest` is this btree read backwards.
+  /// The filters get none: `role` and the status have three and two values, and `email` is
+  /// a substring match no btree can seek.
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
   @@map("users")
 }
 

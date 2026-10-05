@@ -123,3 +123,50 @@ export function readCursor<Sort extends string, Cursor extends { sort: Sort }>(
 
   return cursor;
 }
+
+/**
+ * The ordering every paged list of this API offers first: `newest` and `oldest`, by the
+ * moment a row was created with its id behind it. The tiebreaker follows the direction of
+ * the key, so the two are one `(created_at DESC, id DESC)` btree read either way.
+ */
+export const CREATED_AT_ORDER = {
+  newest: [{ createdAt: "desc" }, { id: "desc" }],
+  oldest: [{ createdAt: "asc" }, { id: "asc" }],
+} satisfies Record<
+  CreatedAtSort,
+  ({ createdAt: "asc" | "desc" } | { id: "asc" | "desc" })[]
+>;
+
+export type CreatedAtSort = "newest" | "oldest";
+
+/** A cursor issued under one of the two orderings of `CREATED_AT_ORDER`. */
+export type CreatedAtCursor = {
+  sort: CreatedAtSort;
+  createdAt: Date;
+  id: string;
+};
+
+type Bound<T> = { lt: T } | { lte: T } | { gt: T } | { gte: T };
+
+/**
+ * Everything after a `CREATED_AT_ORDER` cursor, as a `where` any model with the two
+ * columns accepts. The key is said twice, and the inclusive half is the one the index
+ * uses — the reason is written out in full beside `afterCursor` in
+ * `listing.repository.ts`, the one list that also pages by a key of its own.
+ */
+export function afterCreatedAt(cursor: CreatedAtCursor): {
+  createdAt: Bound<Date>;
+  OR: ({ createdAt: Bound<Date> } | { createdAt: Date; id: Bound<string> })[];
+} {
+  const { createdAt, id } = cursor;
+
+  return cursor.sort === "newest"
+    ? {
+        createdAt: { lte: createdAt },
+        OR: [{ createdAt: { lt: createdAt } }, { createdAt, id: { lt: id } }],
+      }
+    : {
+        createdAt: { gte: createdAt },
+        OR: [{ createdAt: { gt: createdAt } }, { createdAt, id: { gt: id } }],
+      };
+}

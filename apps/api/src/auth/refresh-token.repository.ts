@@ -3,7 +3,7 @@ import type { User } from "@repo/contracts";
 import type { Prisma } from "../generated/prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import type { IssuedRefreshToken } from "./auth.types";
-import { toUser } from "./user.repository";
+import { toUser } from "../user/user.repository";
 
 /** A stored token together with its owner: every refresh needs both. */
 export type StoredRefreshToken = {
@@ -12,6 +12,8 @@ export type StoredRefreshToken = {
   expiresAt: Date;
   revokedAt: Date | null;
   user: User;
+  /** Whether an admin has blocked the account since this token was issued. */
+  userBlocked: boolean;
 };
 
 @Injectable()
@@ -38,6 +40,7 @@ export class RefreshTokenRepository {
       expiresAt: row.expiresAt,
       revokedAt: row.revokedAt,
       user: toUser(row.user),
+      userBlocked: row.user.blockedAt !== null,
     };
   }
 

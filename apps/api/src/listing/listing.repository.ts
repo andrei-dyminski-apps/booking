@@ -11,7 +11,7 @@ import {
   type Prisma,
   type Listing as ListingRow,
 } from "../generated/prisma/client";
-import type { Page } from "../common/paging";
+import { afterCreatedAt, CREATED_AT_ORDER, type Page } from "../common/paging";
 import { isPrismaError, PrismaErrorCode } from "../prisma/prisma.errors";
 import { PrismaService } from "../prisma/prisma.service";
 import type { CatalogueCursor } from "./catalogue-cursor";
@@ -195,8 +195,7 @@ function catalogueWhere(
  */
 const ORDER_BY: Record<ListingSort, Prisma.ListingOrderByWithRelationInput[]> =
   {
-    newest: [{ createdAt: "desc" }, { id: "desc" }],
-    oldest: [{ createdAt: "asc" }, { id: "asc" }],
+    ...CREATED_AT_ORDER,
     priceAsc: [{ pricePerNight: "asc" }, { id: "asc" }],
     priceDesc: [{ pricePerNight: "desc" }, { id: "desc" }],
   };
@@ -229,21 +228,8 @@ const ORDER_BY: Record<ListingSort, Prisma.ListingOrderByWithRelationInput[]> =
 function afterCursor(cursor: CatalogueCursor): Prisma.ListingWhereInput {
   switch (cursor.sort) {
     case "newest":
-      return {
-        createdAt: { lte: cursor.createdAt },
-        OR: [
-          { createdAt: { lt: cursor.createdAt } },
-          { createdAt: cursor.createdAt, id: { lt: cursor.id } },
-        ],
-      };
     case "oldest":
-      return {
-        createdAt: { gte: cursor.createdAt },
-        OR: [
-          { createdAt: { gt: cursor.createdAt } },
-          { createdAt: cursor.createdAt, id: { gt: cursor.id } },
-        ],
-      };
+      return afterCreatedAt(cursor);
     case "priceAsc":
       return {
         pricePerNight: { gte: cursor.pricePerNight },

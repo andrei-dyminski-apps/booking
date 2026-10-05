@@ -21,7 +21,7 @@ import {
   PrismaErrorCode,
   violatedConstraint,
 } from "../prisma/prisma.errors";
-import type { Page } from "../common/paging";
+import { afterCreatedAt, CREATED_AT_ORDER, type Page } from "../common/paging";
 import { PrismaService } from "../prisma/prisma.service";
 import type { BookingCursor } from "./booking-cursor";
 import { ACTIVE_STATUSES, holdExpiry } from "./domain/booking-status";
@@ -407,8 +407,7 @@ function bookingFilters(query: BookingQuery): Prisma.BookingWhereInput {
  */
 const ORDER_BY: Record<BookingSort, Prisma.BookingOrderByWithRelationInput[]> =
   {
-    newest: [{ createdAt: "desc" }, { id: "desc" }],
-    oldest: [{ createdAt: "asc" }, { id: "asc" }],
+    ...CREATED_AT_ORDER,
     checkInAsc: [{ from: "asc" }, { id: "asc" }],
     checkInDesc: [{ from: "desc" }, { id: "desc" }],
   };
@@ -431,21 +430,8 @@ const ORDER_BY: Record<BookingSort, Prisma.BookingOrderByWithRelationInput[]> =
 function afterCursor(cursor: BookingCursor): Prisma.BookingWhereInput {
   switch (cursor.sort) {
     case "newest":
-      return {
-        createdAt: { lte: cursor.createdAt },
-        OR: [
-          { createdAt: { lt: cursor.createdAt } },
-          { createdAt: cursor.createdAt, id: { lt: cursor.id } },
-        ],
-      };
     case "oldest":
-      return {
-        createdAt: { gte: cursor.createdAt },
-        OR: [
-          { createdAt: { gt: cursor.createdAt } },
-          { createdAt: cursor.createdAt, id: { gt: cursor.id } },
-        ],
-      };
+      return afterCreatedAt(cursor);
     case "checkInAsc":
       return {
         from: { gte: cursor.from },

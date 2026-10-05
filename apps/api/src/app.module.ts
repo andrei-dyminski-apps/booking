@@ -10,6 +10,7 @@ import { JwtAuthGuard } from "./auth/guards/jwt-auth.guard";
 import { RolesGuard } from "./auth/guards/roles.guard";
 import { BookingModule } from "./booking/booking.module";
 import { ListingModule } from "./listing/listing.module";
+import { UserModule } from "./user/user.module";
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { ListingModule } from "./listing/listing.module";
     AuthModule,
     BookingModule,
     ListingModule,
+    UserModule,
   ],
   controllers: [AppController],
   providers: [

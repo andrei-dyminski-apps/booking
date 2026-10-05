@@ -161,6 +161,17 @@ describe("OpenAPI document (e2e)", () => {
     }
   });
 
+  it("keeps the role on a route that declares a 403 of its own under a class-wide @Roles", () => {
+    // A class decorator and a method decorator are not joined: the method's 403 replaces the
+    // class's whole, so `PATCH /users/{id}` has to state the guard's reason itself.
+    const { description } =
+      operation("/users/{id}", "patch").responses?.["403"] ?? {};
+
+    expect(description).toContain("Requires the role ADMIN");
+    expect(description).toContain("the caller's own");
+    expect(operation("/users", "get").responses?.["403"]).toBeDefined();
+  });
+
   it("carries a JSON schema on every success response that has a body", () => {
     // Walked out of the document rather than listed here, and that is the whole point: a
     // route added without @ApiOkResponse/@ApiCreatedResponse gets a bare success entry from

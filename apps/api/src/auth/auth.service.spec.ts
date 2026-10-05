@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import {
   ConflictException,
+  ForbiddenException,
   Logger,
   UnauthorizedException,
 } from "@nestjs/common";
 import { JwtModule } from "@nestjs/jwt";
 import { Test } from "@nestjs/testing";
-import type { User } from "@repo/contracts";
+import type { ManagedUser, User } from "@repo/contracts";
+import type { Page } from "../common/paging";
 import * as argon2 from "argon2";
 import { AUTH_CONFIG, type AuthConfig } from "./auth.config";
 import { AuthService } from "./auth.service";
@@ -20,7 +22,7 @@ import {
   EmailAlreadyRegisteredError,
   UserRepository,
   type UserCredentials,
-} from "./user.repository";
+} from "../user/user.repository";
 
 const config: AuthConfig = {
   accessSecret: "access-secret",
@@ -65,7 +67,11 @@ class FakeUserRepository implements PublicOf<UserRepository> {
       createdAt: new Date("2026-08-19T12:00:00.000Z").toISOString(),
     };
 
-    this.rows.set(user.id, { user, passwordHash: input.passwordHash });
+    this.rows.set(user.id, {
+      user,
+      passwordHash: input.passwordHash,
+      blocked: false,
+    });
 
     return Promise.resolve(user);
   }
@@ -74,8 +80,33 @@ class FakeUserRepository implements PublicOf<UserRepository> {
     return Promise.resolve(this.rowByEmail(email) ?? null);
   }
 
-  findById(id: string): Promise<User | null> {
-    return Promise.resolve(this.rows.get(id)?.user ?? null);
+  findActiveById(id: string): Promise<User | null> {
+    const row = this.rows.get(id);
+
+    return Promise.resolve(row === undefined || row.blocked ? null : row.user);
+  }
+
+  // The admin's half of the repository. AuthService never calls it, and a fake that
+  // answered anyway would be a second implementation of rules `UserService` owns.
+  findPage(): Promise<Page<ManagedUser>> {
+    return Promise.reject(new Error("AuthService does not page users"));
+  }
+
+  update(): Promise<ManagedUser | null> {
+    return Promise.reject(new Error("AuthService does not update users"));
+  }
+
+  /** What blocking does to the row; the tokens it deletes are the other fake's business. */
+  block(id: string): void {
+    const row = this.rows.get(id);
+
+    if (row === undefined) throw new Error(`No user ${id} in the fake`);
+
+    row.blocked = true;
+  }
+
+  isBlocked(id: string): boolean {
+    return this.rows.get(id)?.blocked ?? false;
   }
 
   /** The join `findByHash` does through the relation, without a query to write. */
@@ -132,6 +163,7 @@ class FakeRefreshTokenRepository implements PublicOf<RefreshTokenRepository> {
       expiresAt: row.expiresAt,
       revokedAt: row.revokedAt,
       user: this.userRepository.get(row.userId),
+      userBlocked: this.userRepository.isBlocked(row.userId),
     });
   }
 
@@ -327,6 +359,24 @@ describe("AuthService", () => {
       expect(elapsed).toBeGreaterThan(10);
     });
 
+    it("refuses a blocked account only once the password is right", async () => {
+      const registered = await service.register(credentials);
+      const sessions = refreshTokenRepository.rows.length;
+
+      userRepository.block(registered.user.id);
+
+      // A wrong password still reads as any other wrong password: the block is news only
+      // to somebody who already knows the account exists.
+      await expect(
+        service.login({ email: credentials.email, password: "wrong-password" }),
+      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.login(credentials)).rejects.toThrow(
+        ForbiddenException,
+      );
+
+      expect(refreshTokenRepository.rows).toHaveLength(sessions);
+    });
+
     it("opens a session for the right password", async () => {
       const registered = await service.register(credentials);
 
@@ -419,6 +469,26 @@ describe("AuthService", () => {
       );
     });
 
+    it("ends the family of a token that outlived the block of its account", async () => {
+      const session = await service.register(credentials);
+      const familyId = refreshTokenRepository.rows[0]?.familyId ?? "";
+
+      // Blocking deletes the rows; one that is still here was written by a login that
+      // raced the block, and it must not mint another week.
+      userRepository.block(session.user.id);
+
+      await expect(
+        service.refresh(session.tokens.refreshToken),
+      ).rejects.toThrow(UnauthorizedException);
+
+      expect(refreshTokenRepository.family(familyId)).toHaveLength(1);
+      expect(
+        refreshTokenRepository
+          .family(familyId)
+          .every((row) => row.revokedAt !== null),
+      ).toBe(true);
+    });
+
     it("rejects a missing cookie", async () => {
       await expect(service.refresh(null)).rejects.toThrow(
         UnauthorizedException,
@@ -494,6 +564,16 @@ describe("AuthService", () => {
   describe("findById", () => {
     it("treats a vanished user as an ended session rather than a missing resource", async () => {
       await expect(service.findById(randomUUID())).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it("treats a blocked account as an ended session while its access token is still signed", async () => {
+      const session = await service.register(credentials);
+
+      userRepository.block(session.user.id);
+
+      await expect(service.findById(session.user.id)).rejects.toThrow(
         UnauthorizedException,
       );
     });

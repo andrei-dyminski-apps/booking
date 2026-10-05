@@ -8,11 +8,13 @@ import { AuthService } from "./auth.service";
 import { JwtStrategy } from "./jwt.strategy";
 import { RefreshTokenRepository } from "./refresh-token.repository";
 import { TokenService } from "./token.service";
-import { UserRepository } from "./user.repository";
+import { UserModule } from "../user/user.module";
 
 @Module({
   imports: [
     PrismaModule,
+    // The accounts a session is opened for; the table and its repository are that module's.
+    UserModule,
     PassportModule,
     // No secret here: the two token kinds are signed with two different keys, which
     // TokenService passes per call instead of registering the module twice.
@@ -23,7 +25,6 @@ import { UserRepository } from "./user.repository";
     { provide: AUTH_CONFIG, useFactory: loadAuthConfig },
     AuthService,
     TokenService,
-    UserRepository,
     RefreshTokenRepository,
     JwtStrategy,
   ],

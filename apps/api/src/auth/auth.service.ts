@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   UnauthorizedException,
@@ -10,7 +11,13 @@ import * as argon2 from "argon2";
 import { isPast } from "date-fns";
 import { RefreshTokenRepository } from "./refresh-token.repository";
 import { TokenService, type TokenPair } from "./token.service";
-import { EmailAlreadyRegisteredError, UserRepository } from "./user.repository";
+import {
+  EmailAlreadyRegisteredError,
+  UserRepository,
+} from "../user/user.repository";
+
+/** What a blocked account is told when it tries to sign in or keep a session going. */
+const ACCOUNT_BLOCKED = "This account has been blocked";
 
 /** Everything the controller needs: the body of the answer plus the tokens it turns into cookies. */
 export type AuthResult = {
@@ -81,6 +88,12 @@ export class AuthService {
       throw new UnauthorizedException("Invalid email or password");
     }
 
+    // Only after the password: saying an account is blocked tells whoever hears it that
+    // the address is registered, and the one person that is no news to is its owner.
+    if (found.blocked) {
+      throw new ForbiddenException(ACCOUNT_BLOCKED);
+    }
+
     return this.startSession(found.user);
   }
 
@@ -108,6 +121,14 @@ export class AuthService {
     // A valid signature with no row behind it: the session was ended, or the user is gone.
     if (stored === null) {
       throw new UnauthorizedException("Refresh token is not recognised");
+    }
+
+    // Blocking deletes every refresh row of the account, so a row that is still here was
+    // written by a login that read the account a moment before it was blocked. The family
+    // goes with it, and the answer is the one a dead session gets.
+    if (stored.userBlocked) {
+      await this.refreshTokenRepository.revokeFamily(stored.familyId);
+      throw new UnauthorizedException(ACCOUNT_BLOCKED);
     }
 
     if (stored.revokedAt !== null) {
@@ -161,10 +182,12 @@ export class AuthService {
    *
    * A signed token whose row is gone is an ended session, not a missing resource — 401
    * sends the client to the login form, while 404 would leave it retrying a request that
-   * can never succeed and would confirm that the token itself was good.
+   * can never succeed and would confirm that the token itself was good. A blocked
+   * account is the same case: its access token is still signed for up to
+   * `JWT_ACCESS_TTL`, and the session behind it is over.
    */
   async findById(id: string): Promise<User> {
-    const user = await this.userRepository.findById(id);
+    const user = await this.userRepository.findActiveById(id);
 
     if (user === null) {
       throw new UnauthorizedException("Session no longer exists");
