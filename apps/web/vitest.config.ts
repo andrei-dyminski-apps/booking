@@ -6,7 +6,7 @@ import { defineConfig } from "vitest/config";
  * failure a reviewer cannot re-check on every change — a parser (`next-path.ts`,
  * `session-cookies.ts`), a security gate (`proxy.ts`), or an invariant with a real way to
  * get it wrong under concurrency or a malformed answer (the single-flight session refresh
- * and retry-on-401 in `http-client.ts`). See "Tests" in `.claude/rules/frontend.md` for
+ * and retry-on-401 in `http-client.ts`). See "Tests" in `apps/web/CLAUDE.md` for
  * the rule this config exists to run.
  *
  * Rendering is not tested and needs no `jsdom`: a component that would break here is one

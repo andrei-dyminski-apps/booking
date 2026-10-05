@@ -27,10 +27,12 @@ import { deleteListingAction } from "../api/delete-listing-action";
  * submit button left behind in a form up here would no longer belong to it. `contents`
  * keeps the grid of the dialog intact around it.
  *
- * The dialog stays open when the action comes back with a message — a `404` for a row an
- * admin retired first, or an unreachable API — because that reason belongs next to the
- * button that provoked it. A success never gets here: the action redirects to the
- * dashboard.
+ * The dialog stays open when the action comes back with a message — a `404` for a row
+ * somebody else retired first, or an unreachable API — because that reason belongs next to
+ * the button that provoked it. A success never gets here: the action redirects to the
+ * section the author manages listings from.
+ *
+ * A feature because two screens run it: the owner's edit screen and the admin's.
  */
 export const DeleteListingButton = ({ listingId }: { listingId: string }) => {
   const [errors, submit, pending] = useActionState<FormErrors, FormData>(
@@ -54,9 +56,9 @@ export const DeleteListingButton = ({ listingId }: { listingId: string }) => {
             </AlertDialogMedia>
             <AlertDialogTitle>Delete this listing?</AlertDialogTitle>
             <AlertDialogDescription>
-              This cannot be undone. It leaves the catalogue and your dashboard
-              for good and takes no new bookings. Stays already booked against
-              it keep their record.
+              This cannot be undone. It leaves the catalogue and its
+              owner&apos;s dashboard for good and takes no new bookings. Stays
+              already booked against it keep their record.
             </AlertDialogDescription>
           </AlertDialogHeader>
 

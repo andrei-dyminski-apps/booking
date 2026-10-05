@@ -3,7 +3,9 @@ import {
   CalendarCheckIcon,
   HomeIcon,
   LayoutDashboardIcon,
+  ShieldIcon,
   UserIcon,
+  UsersIcon,
   type LucideIcon,
 } from "lucide-react";
 import { Role, type User } from "@repo/contracts";
@@ -65,6 +67,26 @@ export function navigationFor(user: User | null): NavItem[] {
       hint: "Your listings",
       icon: LayoutDashboardIcon,
     });
+  }
+
+  // The admin's section is two screens rather than one, because they answer two different
+  // questions — what is on offer, and who may use the site — and an admin reaches for each
+  // on its own.
+  if (user.role === Role.ADMIN) {
+    items.push(
+      {
+        href: ROUTES.admin,
+        label: "Listings",
+        hint: "Everything on offer, editable",
+        icon: ShieldIcon,
+      },
+      {
+        href: ROUTES.adminUsers,
+        label: "Users",
+        hint: "Accounts and roles",
+        icon: UsersIcon,
+      },
+    );
   }
 
   items.push({

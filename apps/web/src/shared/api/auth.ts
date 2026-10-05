@@ -8,7 +8,7 @@ import {
   type Role,
   type User,
 } from "@repo/contracts";
-import { HTTP_STATUS, ROUTES } from "../config";
+import { HTTP_STATUS, listingsSectionFor, ROUTES } from "../config";
 import { ApiResponseError, apiRequest, type ReadOptions } from "./http-client";
 import { mirrorSessionCookies } from "./session-cookies";
 
@@ -143,4 +143,26 @@ export async function requireRole(role: Role, next: string): Promise<User> {
   if (user.role !== role) notFound();
 
   return user;
+}
+
+/**
+ * Sends the author of a listing write back to the section of their role — an owner's
+ * dashboard or the admin's list, see `listingsSectionFor`. The session says which rather
+ * than a value the screen binds: an action is an endpoint of its own, and a destination it
+ * was handed would be one more value to distrust.
+ *
+ * It runs after the write has already happened, so it must not fail the action: an API
+ * that times out, answers a 5xx or a 429 here would otherwise turn a save that went
+ * through into an error screen, and the retry of a delete into a 404. Any failure to read
+ * the session lands on the dashboard, which is where every write went before roles had
+ * sections of their own.
+ */
+export async function redirectToListingsSection(): Promise<never> {
+  const section = await currentUser().then(
+    (user) =>
+      user === null ? ROUTES.dashboard : listingsSectionFor(user.role),
+    () => ROUTES.dashboard,
+  );
+
+  redirect(section);
 }

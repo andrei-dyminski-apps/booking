@@ -1,10 +1,9 @@
 "use server";
 
 import { refresh, revalidateTag, updateTag } from "next/cache";
-import { redirect } from "next/navigation";
 import { createListingSchema, type CreateListingInput } from "@repo/contracts";
-import { listingsApi } from "#shared/api";
-import { CATALOGUE_TAG, listingTag, ROUTES } from "#shared/config";
+import { listingsApi, redirectToListingsSection } from "#shared/api";
+import { CATALOGUE_TAG, listingTag } from "#shared/config";
 import { toFieldErrors, toFormErrors, type FormErrors } from "#shared/lib";
 
 /**
@@ -54,9 +53,12 @@ export async function saveListingAction(
 
   revalidateTag(CATALOGUE_TAG, "max");
 
-  // The dashboard reads the listings with `no-store`, so nothing is cached on the server;
-  // what this clears is the client's router cache, which would otherwise show the visitor
-  // the list as it was before they changed it.
+  // The dashboard and the admin's list read the listings with `no-store`, so nothing is
+  // cached on the server; what this clears is the client's router cache, which would
+  // otherwise show the visitor the list as it was before they changed it.
   refresh();
-  redirect(ROUTES.dashboard);
+
+  // Back to the section the author works from — an owner's dashboard, or the admin's list
+  // of every listing.
+  return redirectToListingsSection();
 }

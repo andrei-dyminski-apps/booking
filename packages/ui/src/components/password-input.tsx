@@ -10,7 +10,7 @@ import { Input } from "#components/input";
 function PasswordInput({
   className,
   disabled,
-I'm not gonna say it I'm done with   onRevealedChange,
+  onRevealedChange,
   ...props
 }: Omit<React.ComponentProps<typeof Input>, "type"> & {
   /**

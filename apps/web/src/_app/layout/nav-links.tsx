@@ -15,6 +15,10 @@ import { navigationFor } from "./navigation";
  * A section is current when the path is inside it, not only when it is the path exactly:
  * `/listings/:id` is still the catalogue and `/dashboard/listings/new` is still the
  * dashboard. Home is the exception, because every path starts with `/`.
+ *
+ * Only one link is current, and it is the deepest one that contains the path: `/admin`
+ * contains `/admin/users` as surely as the users link does, and two sections lit up at
+ * once would say the visitor is in both.
  */
 export const NavLinks = ({
   user,
@@ -27,11 +31,20 @@ export const NavLinks = ({
   className?: string;
 }) => {
   const pathname = usePathname();
+  const items = navigationFor(user);
+  const currentHref = items
+    .map((item) => item.href)
+    .filter((href) => contains(href, pathname))
+    .reduce<string | null>(
+      (deepest, href) =>
+        deepest === null || href.length > deepest.length ? href : deepest,
+      null,
+    );
 
   return (
     <nav className={cn("flex flex-col gap-1", className)}>
-      {navigationFor(user).map(({ href, label, hint, icon: Icon }) => {
-        const current = isCurrent(pathname, href);
+      {items.map(({ href, label, hint, icon: Icon }) => {
+        const current = href === currentHref;
 
         return (
           <Link
@@ -60,7 +73,7 @@ export const NavLinks = ({
   );
 };
 
-function isCurrent(pathname: string, href: string): boolean {
+function contains(href: string, pathname: string): boolean {
   if (href === "/") return pathname === href;
 
   return pathname === href || pathname.startsWith(`${href}/`);

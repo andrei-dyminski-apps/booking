@@ -157,11 +157,10 @@ Done on both sides.
 - [x] The `registerSchema` / `loginSchema` schemas go into `@repo/contracts`: one validation for the form and the request.
 - [x] `UserRepository` and `RefreshTokenRepository` in front of Prisma — the repository step of "Layering inside `apps/api`". `AuthService` keeps the rules and no longer imports the generated client, the rotation transaction and the `P2002` translation live in the repository, and the unit spec runs against in-memory fakes: it now asserts what ends up stored (a replayed token revokes the whole family) instead of the arguments of a Prisma call.
 
-## Phase 3 — Roles (RBAC)
+## Phase 3 — Roles (RBAC) ✅
 
-The backend is done, and so is the owner's half of the frontend. What waits for phase 5 is
-the admin's: it is a view over the whole catalogue, and the catalogue is what that phase
-builds.
+Done, the admin's half included: it waited for the catalogue of phase 5, and it grew user
+management on the way.
 
 - [x] A `@Roles(Role.OWNER)` decorator + `RolesGuard`, registered globally after `JwtAuthGuard` — it reads the user that one put on the request. Membership of a set rather than a hierarchy: a route that admins may use names `ADMIN`, so what a role can reach is readable where the route is written.
 - [x] The `Listing` model (belongs to an OWNER, `price_per_night` in the currency itself, to the cent) and the `listing` module. `Booking` grew up with it: `room_id` and the typed-in `guest_name` became relations to a listing and to a user, because no rule about "their own" can be written against a string.
@@ -182,9 +181,19 @@ builds.
       stays keep their record. What it costs is written down in `apps/api/CLAUDE.md`:
       the foreign key no longer refuses a booking against a retired listing, and phase 4's
       locking transaction is where that check becomes atomic again.
-- [ ] `/admin` — the same conditional rendering for the role that sees everything. It
-      waits for phase 5: an admin's screen is the catalogue plus the right to edit any row
-      of it, so building it before the catalogue would mean building the catalogue twice.
+- [x] `/admin` — the same conditional rendering for the role that sees everything, built
+      on the catalogue now that it exists: every offered listing, cursor-paged, each one
+      edited and retired through the owner's own form (`features/save-listing`,
+      `features/delete-listing`, which became a feature with its second screen). The API
+      needed nothing new for it — `ownsOrIsAdmin` already let an admin through.
+- [x] User management for the admin, which the phase grew: `GET /users` (a keyset page
+      with role, status and address filters) and `PATCH /users/:id` (role and block), both
+      `@Roles(Role.ADMIN)`, on top of `UserRepository` moved into a `user` module of its own.
+      Blocking stamps `blocked_at` and deletes the refresh tokens in one transaction; login
+      answers `403` after the password, refresh and `/auth/me` answer `401`, and the access
+      token lapses within `JWT_ACCESS_TTL`. No account deletion — bookings cascade and
+      listings restrict, so a block is the reversible answer. An admin cannot change or
+      block their own account. On the frontend that is `/admin/users`.
 
 ## Phase 4 — Concurrent booking (the centrepiece)
 

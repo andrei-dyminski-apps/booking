@@ -132,10 +132,10 @@ of the catalogue is behind the global `JwtAuthGuard` and answers `401` without a
 | Method   | Path                         | What it does                                                                         |
 | -------- | ---------------------------- | ------------------------------------------------------------------------------------ |
 | `POST`   | `/auth/register`             | register and open a session; `400` — failed the schema, `409` — email is taken       |
-| `POST`   | `/auth/login`                | log in; `401` — wrong email or password                                              |
+| `POST`   | `/auth/login`                | log in; `401` — wrong email or password, `403` — the account is blocked              |
 | `POST`   | `/auth/refresh`              | rotate the token pair; `401` — missing, spent or forged token, cookies cleared       |
 | `POST`   | `/auth/logout`               | end the session, `204`; answers the same without one                                 |
-| `GET`    | `/auth/me`                   | the current user; `401` — no session, or the user is gone                            |
+| `GET`    | `/auth/me`                   | the current user; `401` — no session, the user is gone or blocked                    |
 | `GET`    | `/listings`                  | the catalogue: filters, an ordering and a cursor; public                             |
 | `GET`    | `/listings/mine`             | the caller's own listings; OWNER only                                                |
 | `GET`    | `/listings/:id`              | a single listing, `404` if missing or retired; public                                |
@@ -147,6 +147,8 @@ of the catalogue is behind the global `JwtAuthGuard` and answers `401` without a
 | `GET`    | `/bookings/:id`              | a single booking; the guest, the owner of the listing or an admin                    |
 | `POST`   | `/bookings`                  | create a 15-minute hold; USER only, `404` — no such listing, `409` — dates are taken |
 | `DELETE` | `/bookings/:id`              | cancel, `204`; the guest or an admin. The row stays, with `status: CANCELLED`        |
+| `GET`    | `/users`                     | one page of accounts: role, status and address filters, a cursor; ADMIN only         |
+| `PATCH`  | `/users/:id`                 | change the role and/or block; ADMIN only, `403` on the caller's own account          |
 
 Overlapping dates on the same listing are rejected; back-to-back bookings (check-out on the day the next guest checks in) are allowed.
 
@@ -302,7 +304,7 @@ The secrets have no fallback in the code: an unset `JWT_ACCESS_SECRET` stops the
 
 The two cookie scopes are what shape the browser half of it, so it is worth reading them together: the access token is scoped to `/` and the refresh token to `/auth` on the API's host. The Next.js server therefore receives a visitor's access token and never their refresh token.
 
-- **`apps/web/proxy.ts`** (Next.js 16 renamed `middleware.ts` to that) guards `/profile`, `/bookings` and `/dashboard`, and answers one question — is there an access cookie. It cannot answer more: the cookie is httpOnly and only the API holds the secret that would verify it, so this only spares the server a render nobody could see. The page behind it reads `/auth/me` anyway and copes with a `401` of its own.
+- **`apps/web/proxy.ts`** (Next.js 16 renamed `middleware.ts` to that) guards `/profile`, `/bookings`, `/dashboard` and `/admin`, and answers one question — is there an access cookie. It cannot answer more: the cookie is httpOnly and only the API holds the secret that would verify it, so this only spares the server a render nobody could see. The page behind it reads `/auth/me` anyway and copes with a `401` of its own.
 - **A server render reads the API as the visitor.** `credentials: "include"` is a rule for browsers and does nothing in Node, so the transport copies the access cookie out of the request Next.js is answering. It does that for uncached reads only: the answer to a cached one goes into the Data Cache under its URL and is then served to whoever asks next.
 - **An expired access token is not a signed-out user.** The browser drops that cookie after fifteen minutes while the refresh token lives a week, so the login page spends one `/auth/refresh` before it shows a form and sends the visitor on where they were going. It has to happen there: the refresh cookie's path means it is attached to a request that leaves the browser for the API and to nothing that leaves the Next.js server — neither the proxy nor a render can perform that trade.
 - **The forms post straight to the API**, not through a server action that would have to re-issue both cookies with attributes copied from the backend, and they validate with `loginSchema` / `registerSchema` — the same schemas that refuse the request on the other side, so a message reads the same wherever it was produced.
@@ -316,20 +318,25 @@ Authorization is two checks, and they are deliberately not the same check.
 
 The guard is membership of a set, not a hierarchy: an ADMIN does not pass an `@Roles(Role.OWNER)` check by being senior to an owner. A route admins may use names `ADMIN` itself, so what each role can reach is readable where the route is written rather than hidden in a comparison inside the guard — and `@Roles(Role.USER)` on "create a booking" keeps meaning what it says instead of quietly admitting the two roles above it. The one place a hierarchy exists is the ownership check, where an admin passes without owning anything, and that is a rule about rows.
 
-|                         | USER      | OWNER                  | ADMIN |
-| ----------------------- | --------- | ---------------------- | ----- |
-| read the catalogue      | ✅        | ✅                     | ✅    |
-| create a listing        | —         | ✅                     | —     |
-| edit / delete a listing | —         | their own              | any   |
-| create a booking        | ✅        | —                      | —     |
-| read bookings           | their own | against their listings | all   |
-| cancel a booking        | their own | —                      | any   |
+|                         | USER      | OWNER                  | ADMIN             |
+| ----------------------- | --------- | ---------------------- | ----------------- |
+| read the catalogue      | ✅        | ✅                     | ✅                |
+| create a listing        | —         | ✅                     | —                 |
+| edit / delete a listing | —         | their own              | any               |
+| create a booking        | ✅        | —                      | —                 |
+| read bookings           | their own | against their listings | all               |
+| cancel a booking        | their own | —                      | any               |
+| manage users            | —         | —                      | any but their own |
 
 Reading and writing are separate rules over the same row: an owner sees the stays booked against their listing and cannot cancel one out from under a guest. `GET /bookings` narrows by the role of the caller inside the `where` rather than through a query parameter, so the query cannot return a row the caller may not see.
 
 Whether a refusal is a `403` or a `404` follows from what the caller could have found anyway. A listing that belongs to another owner answers `403` — the catalogue is readable by everyone signed in, so "exists, but not yours" says nothing new. A booking answers `404`, because nothing lets a stranger list bookings and a `403` would be the one way to learn that an id exists. The `403` on cancelling is the exception that proves it: it goes to the owner of the listing, who may already read that booking, and refuses them the second right rather than the first.
 
-Registration always writes a `USER` — the only safe default for a public endpoint. The other two roles are set in the database (the seed does it for the demo logins), and since `JwtStrategy` reads no database, a change of role takes effect at the next refresh: `JWT_ACCESS_TTL` is the upper bound on that lag.
+Registration always writes a `USER` — the only safe default for a public endpoint. The other two roles are given by an admin (`PATCH /users/:id`, the `/admin/users` screen; the seed sets them for the demo logins), and since `JwtStrategy` reads no database, a change of role takes effect at the next refresh: `JWT_ACCESS_TTL` is the upper bound on that lag.
+
+An admin manages accounts instead of deleting them. **Blocking** stamps `users.blocked_at` and deletes every refresh token of the account in the same transaction, so no session can be refreshed; login answers `403` once the password is right, `/auth/me` answers `401`, and the access token left in a browser lapses within `JWT_ACCESS_TTL`. A delete was left out on purpose: bookings cascade from a user and listings restrict, so it would either erase somebody's stay history or be refused for any owner who ever listed. An admin cannot change their own role or block themselves — a site must not be able to lose its last admin by one click — so another admin does it.
+
+The admin's screens are `/admin` (every listing on offer, each editable and retirable through the owner's own form) and `/admin/users` (the accounts, filtered in the URL like the stays).
 
 ## Shared configuration
 

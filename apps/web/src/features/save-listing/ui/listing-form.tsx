@@ -22,7 +22,14 @@ import { saveListingAction } from "../api/save-listing-action";
  * characters or a price with three decimals is refused in the box it was typed into. The
  * schema wants numbers and a box hands over text, which is what `toNumber` below is for.
  */
-export const ListingForm = ({ listing }: { listing?: Listing }) => {
+export const ListingForm = ({
+  listing,
+  cancelHref = ROUTES.dashboard,
+}: {
+  listing?: Listing;
+  /** Where "Cancel" leads: the section of whoever is editing — an owner's or the admin's. */
+  cancelHref?: string;
+}) => {
   const { form, submit, pending, message } = useActionForm<CreateListingInput>({
     action: saveListingAction.bind(null, listing?.id ?? null),
     schema: createListingSchema,
@@ -114,7 +121,7 @@ export const ListingForm = ({ listing }: { listing?: Listing }) => {
           <Button type="submit" size="lg" loading={pending}>
             {listing === undefined ? "Create listing" : "Save changes"}
           </Button>
-          <ButtonLink href={ROUTES.dashboard} variant="ghost" size="lg">
+          <ButtonLink href={cancelHref} variant="ghost" size="lg">
             Cancel
           </ButtonLink>
         </div>

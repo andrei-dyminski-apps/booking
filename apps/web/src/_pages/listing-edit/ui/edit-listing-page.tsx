@@ -7,12 +7,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
+import { DeleteListingButton } from "#features/delete-listing";
 import { ListingForm } from "#features/save-listing";
 import { requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
 import { requireId } from "#shared/lib";
 import { ownListing } from "../api/own-listing";
-import { DeleteListingButton } from "./delete-listing-button";
 
 export const EditListingPage = async ({
   params,
