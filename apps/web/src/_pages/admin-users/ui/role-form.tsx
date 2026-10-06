@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import type { Role } from "@repo/contracts";
 import { Button } from "@repo/ui/components/button";
+import { FieldError } from "@repo/ui/components/field";
 import {
   Select,
   SelectContent,
@@ -10,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@repo/ui/components/select";
-import { NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
+import { fieldMessages, NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
 import { changeRoleAction } from "../api/update-user-actions";
 import { ROLE_LABELS, roleOptions } from "../lib/users-search";
 
@@ -74,11 +75,7 @@ export const RoleForm = ({
         </Button>
       </div>
 
-      {messages.map((message) => (
-        <p key={message} role="alert" className="text-sm text-destructive">
-          {message}
-        </p>
-      ))}
+      <FieldError errors={fieldMessages(messages)} />
     </form>
   );
 };

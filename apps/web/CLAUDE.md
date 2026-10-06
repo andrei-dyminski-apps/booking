@@ -94,7 +94,6 @@ apps/web/
       bookings/ui/bookings-page.tsx       # one page, three scopes — the role picks one
       bookings/ui/bookings-toolbar.tsx    # one row: the filters, the ordering, the chips
       bookings/ui/bookings-filters-dialog.tsx  # every filter, in a modal
-      bookings/ui/status-field.tsx        # the one box that is a native <select>
       bookings/ui/booking-card.tsx
       bookings/ui/booking-status-badge.tsx
       bookings/ui/cancel-booking-button.tsx
@@ -128,7 +127,6 @@ apps/web/
       admin-users/ui/users-page.tsx       # the accounts, filtered in the URL
       admin-users/ui/users-toolbar.tsx
       admin-users/ui/users-filters-dialog.tsx
-      admin-users/ui/choice-field.tsx     # a closed-set box of the dialog: role, status
       admin-users/ui/user-card.tsx
       admin-users/ui/role-form.tsx        # a box and a button, no confirmation
       admin-users/ui/block-button.tsx     # asks before blocking, not before reopening
@@ -173,6 +171,7 @@ apps/web/
       lib/index.ts
       ui/button-link.tsx      # a <Link> wearing the button classes, spelled once
       ui/filter-field.tsx     # one box of a search form, spelled once
+      ui/filter-select.tsx    # …and one that picks out of a closed set
       ui/form-field.tsx       # one box of a form that submits, and the aria that ties it
       ui/filter-form.tsx      # the `GET` form of a dialog, sent to the canonical URL
       ui/filter-chips.tsx     # what is applied, each chip a link that drops it
@@ -964,6 +963,12 @@ already moving.
   subtree that renders it, so a submit button left behind in a form up here stops
   belonging to that form. `className="contents"` on the `<form>` keeps the grid of the
   dialog intact around it.
+- **Its trigger never sits inside another form**, even though the popup leaves the DOM
+  subtree. React bubbles a submit along the component tree, portals included, so the
+  confirmation's own submit would reach the outer form's `onSubmit` as well. Where a
+  delete shares a row with a form's buttons, the row goes outside the `<form>` and the
+  submit reaches it through the `form` attribute (`extraAction` in
+  `features/save-listing/ui/listing-form.tsx`).
 - **The dialog stays open when the action comes back with a message.** A refusal the form
   could not prevent — a `404` for a row an admin retired first or for a hold that lapsed
   while the dialog was open, an unreachable API — belongs next to the button that

@@ -15,13 +15,13 @@ import {
 } from "@repo/ui/components/dialog";
 import { ROUTES } from "#shared/config";
 import type { FieldErrors } from "#shared/lib";
-import { ButtonLink, FilterField, FilterForm } from "#shared/ui";
+import { ButtonLink, FilterField, FilterForm, FilterSelect } from "#shared/ui";
 import {
   bookingsHref,
   clearedFiltersHref,
+  statusOptions,
   type FilterValues,
 } from "../lib/bookings-search";
-import { StatusField } from "./status-field";
 
 /**
  * Every filter the stays screen takes, in a popup — the same shape the catalogue's filters
@@ -106,7 +106,14 @@ export const BookingsFiltersDialog = ({
           onNavigate={() => setOpen(false)}
         >
           <div className="grid gap-4 sm:grid-cols-2">
-            <StatusField value={values.status} error={errors.status} />
+            <FilterSelect
+              name="status"
+              label="Status"
+              anyLabel="Any status"
+              options={statusOptions}
+              value={values.status}
+              error={errors.status}
+            />
 
             <FilterField
               name="listingId"

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { ArrowDownWideNarrowIcon } from "lucide-react";
+import { FieldError } from "@repo/ui/components/field";
 import {
   Select,
   SelectContent,
@@ -9,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@repo/ui/components/select";
+import { fieldMessages } from "../lib";
 
 /**
  * One ordering, as a link: an ordering is another address, exactly like a filter. The
@@ -83,11 +85,7 @@ export const SortSelect = ({
         </SelectContent>
       </Select>
 
-      {(error ?? []).map((message) => (
-        <p key={message} className="text-sm text-destructive">
-          {message}
-        </p>
-      ))}
+      <FieldError errors={fieldMessages(error)} />
     </div>
   );
 };

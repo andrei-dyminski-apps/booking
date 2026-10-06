@@ -14,6 +14,7 @@ import {
   AlertDialogTrigger,
 } from "@repo/ui/components/alert-dialog";
 import { Button } from "@repo/ui/components/button";
+import { FieldError } from "@repo/ui/components/field";
 import { NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
 import { deleteListingAction } from "../api/delete-listing-action";
 
@@ -42,9 +43,7 @@ export const DeleteListingButton = ({ listingId }: { listingId: string }) => {
 
   return (
     <AlertDialog>
-      <AlertDialogTrigger
-        render={<Button variant="outline" className="self-start" />}
-      >
+      <AlertDialogTrigger render={<Button variant="outline" size="lg" />}>
         Delete listing
       </AlertDialogTrigger>
 
@@ -62,9 +61,7 @@ export const DeleteListingButton = ({ listingId }: { listingId: string }) => {
             </AlertDialogDescription>
           </AlertDialogHeader>
 
-          {errors.message !== null && (
-            <p className="text-sm text-destructive">{errors.message}</p>
-          )}
+          {errors.message !== null && <FieldError>{errors.message}</FieldError>}
 
           <AlertDialogFooter>
             <AlertDialogCancel disabled={pending}>Keep it</AlertDialogCancel>

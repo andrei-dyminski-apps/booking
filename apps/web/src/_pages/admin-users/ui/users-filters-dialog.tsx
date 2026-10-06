@@ -15,7 +15,7 @@ import {
 } from "@repo/ui/components/dialog";
 import { ROUTES } from "#shared/config";
 import type { FieldErrors } from "#shared/lib";
-import { ButtonLink, FilterField, FilterForm } from "#shared/ui";
+import { ButtonLink, FilterField, FilterForm, FilterSelect } from "#shared/ui";
 import {
   clearedFiltersHref,
   roleOptions,
@@ -23,7 +23,6 @@ import {
   usersHref,
   type FilterValues,
 } from "../lib/users-search";
-import { ChoiceField } from "./choice-field";
 
 /**
  * Every filter of the users screen, in a popup — the shape the catalogue's and the stays'
@@ -87,7 +86,7 @@ export const UsersFiltersDialog = ({
               />
             </div>
 
-            <ChoiceField
+            <FilterSelect
               name="role"
               label="Role"
               anyLabel="Any role"
@@ -96,7 +95,7 @@ export const UsersFiltersDialog = ({
               error={errors.role}
             />
 
-            <ChoiceField
+            <FilterSelect
               name="status"
               label="Status"
               anyLabel="Any status"

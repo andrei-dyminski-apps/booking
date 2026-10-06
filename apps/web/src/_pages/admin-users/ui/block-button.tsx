@@ -14,6 +14,7 @@ import {
   AlertDialogTrigger,
 } from "@repo/ui/components/alert-dialog";
 import { Button } from "@repo/ui/components/button";
+import { FieldError } from "@repo/ui/components/field";
 import { NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
 import { setBlockedAction } from "../api/update-user-actions";
 
@@ -46,11 +47,7 @@ export const BlockButton = ({
         <Button type="submit" variant="outline" size="sm" loading={pending}>
           Unblock
         </Button>
-        {errors.message !== null && (
-          <p role="alert" className="text-sm text-destructive">
-            {errors.message}
-          </p>
-        )}
+        {errors.message !== null && <FieldError>{errors.message}</FieldError>}
       </form>
     );
   }
@@ -75,9 +72,7 @@ export const BlockButton = ({
             </AlertDialogDescription>
           </AlertDialogHeader>
 
-          {errors.message !== null && (
-            <p className="text-sm text-destructive">{errors.message}</p>
-          )}
+          {errors.message !== null && <FieldError>{errors.message}</FieldError>}
 
           <AlertDialogFooter>
             <AlertDialogCancel disabled={pending}>

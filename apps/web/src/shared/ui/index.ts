@@ -2,6 +2,7 @@ export { ButtonLink } from "./button-link";
 export { FilterChips, type FilterChip } from "./filter-chips";
 export { FilterField } from "./filter-field";
 export { FilterForm } from "./filter-form";
+export { FilterSelect } from "./filter-select";
 export { FormField, type FormControl } from "./form-field";
 export { NoMatchesNotice } from "./no-matches-notice";
 export { Pager } from "./pager";

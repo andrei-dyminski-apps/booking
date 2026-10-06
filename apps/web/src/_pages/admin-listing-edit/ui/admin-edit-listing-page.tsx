@@ -3,7 +3,6 @@ import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
@@ -39,11 +38,12 @@ export const AdminEditListingPage = async ({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <ListingForm listing={listing} cancelHref={ROUTES.admin} />
+        <ListingForm
+          listing={listing}
+          cancelHref={ROUTES.admin}
+          extraAction={<DeleteListingButton listingId={listing.id} />}
+        />
       </CardContent>
-      <CardFooter className="flex-col items-stretch gap-4">
-        <DeleteListingButton listingId={listing.id} />
-      </CardFooter>
     </Card>
   );
 };

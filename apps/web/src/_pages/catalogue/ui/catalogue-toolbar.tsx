@@ -1,4 +1,5 @@
-import { messagesExcept, type FieldErrors } from "#shared/lib";
+import { FieldError } from "@repo/ui/components/field";
+import { fieldMessages, messagesExcept, type FieldErrors } from "#shared/lib";
 import { FilterChips, SortSelect } from "#shared/ui";
 import {
   clearedFiltersHref,
@@ -61,11 +62,7 @@ export const CatalogueToolbar = ({
         <FilterChips filters={filters} clearHref={clearedFiltersHref(values)} />
       </div>
 
-      {hidden.map((message) => (
-        <p key={message} className="text-sm text-destructive">
-          {message}
-        </p>
-      ))}
+      <FieldError errors={fieldMessages(hidden)} />
     </div>
   );
 };

@@ -14,6 +14,7 @@ import {
   AlertDialogTrigger,
 } from "@repo/ui/components/alert-dialog";
 import { Button } from "@repo/ui/components/button";
+import { FieldError } from "@repo/ui/components/field";
 import { NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
 import { cancelBookingAction } from "../api/cancel-booking-action";
 
@@ -58,9 +59,7 @@ export const CancelBookingButton = ({
             </AlertDialogDescription>
           </AlertDialogHeader>
 
-          {errors.message !== null && (
-            <p className="text-sm text-destructive">{errors.message}</p>
-          )}
+          {errors.message !== null && <FieldError>{errors.message}</FieldError>}
 
           <AlertDialogFooter>
             <AlertDialogCancel disabled={pending}>Keep it</AlertDialogCancel>

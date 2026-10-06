@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { LogOutIcon } from "lucide-react";
 import { Button } from "@repo/ui/components/button";
+import { FieldError } from "@repo/ui/components/field";
 import { cn } from "@repo/ui/lib/utils";
 import { authApi } from "#shared/api";
 import { ROUTES } from "#shared/config";
@@ -69,9 +70,7 @@ export const LogoutButton = ({
       </Button>
 
       {message !== null && (
-        <p className="text-sm text-destructive">
-          {message} You are still signed in.
-        </p>
+        <FieldError>{message} You are still signed in.</FieldError>
       )}
     </div>
   );
