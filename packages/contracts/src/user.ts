@@ -18,6 +18,20 @@ export const managedUserSchema = userSchema.extend({
 export const managedUserListSchema = z.array(managedUserSchema);
 
 /**
+ * One account as its own page in the admin's section shows it: the managed shape plus how
+ * much the account has behind it, so a link to its stays or its listings says whether
+ * following it is worth a click.
+ *
+ * `bookingCount` counts every stay the account took, whatever its status — the same set
+ * `GET /bookings?guestId=` lists. `listingCount` counts the listings still on offer, the
+ * same set `GET /listings?ownerId=` lists: a retired one is gone to everybody.
+ */
+export const managedUserDetailSchema = managedUserSchema.extend({
+  bookingCount: z.int().nonnegative(),
+  listingCount: z.int().nonnegative(),
+});
+
+/**
  * Whether an account may sign in, as a filter. It is derived from `blockedAt` rather than
  * stored beside it, so the two cannot disagree; the names are the filter's own because "a
  * user whose `blockedAt` is not null" is not something anybody types into a box.
@@ -90,6 +104,7 @@ export const updateUserSchema = z
   });
 
 export type ManagedUser = z.infer<typeof managedUserSchema>;
+export type ManagedUserDetail = z.infer<typeof managedUserDetailSchema>;
 export type UserStatus = z.infer<typeof userStatusSchema>;
 export type UserSort = z.infer<typeof userSortSchema>;
 export type UserQuery = z.infer<typeof userQuerySchema>;

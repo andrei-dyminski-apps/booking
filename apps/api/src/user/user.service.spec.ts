@@ -7,6 +7,7 @@ import { Test } from "@nestjs/testing";
 import {
   Role,
   type ManagedUser,
+  type ManagedUserDetail,
   type UpdateUserInput,
   type User,
   type UserQuery,
@@ -14,7 +15,11 @@ import {
 import type { AuthenticatedUser } from "../auth/auth.types";
 import type { Page } from "../common/paging";
 import { decodeCursor, type UserCursor } from "./user-cursor";
-import { UserRepository, type UserCredentials } from "./user.repository";
+import {
+  CallerNotAdminError,
+  UserRepository,
+  type UserCredentials,
+} from "./user.repository";
 import { UserService } from "./user.service";
 
 const ADMIN_ID = "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d";
@@ -72,7 +77,7 @@ class FakeUserRepository implements PublicOf<UserRepository> {
     return Promise.reject(new Error("UserService does not sign anybody in"));
   }
 
-  /** The caller's own row, read again before a change: see `UserService.update`. */
+  // AuthService's read of a session. Nothing here calls it.
   findActiveById(id: string): Promise<User | null> {
     const row = this.rows.find(
       (candidate) => candidate.id === id && candidate.blockedAt === null,
@@ -86,6 +91,15 @@ class FakeUserRepository implements PublicOf<UserRepository> {
       role: row.role,
       createdAt: row.createdAt,
     });
+  }
+
+  /** The counts are subqueries the e2e spec covers; here every account has nothing yet. */
+  findDetailById(id: string): Promise<ManagedUserDetail | null> {
+    const row = this.rows.find((candidate) => candidate.id === id);
+
+    if (row === undefined) return Promise.resolve(null);
+
+    return Promise.resolve({ ...row, bookingCount: 0, listingCount: 0 });
   }
 
   findPage(
@@ -109,7 +123,18 @@ class FakeUserRepository implements PublicOf<UserRepository> {
     });
   }
 
-  update(id: string, change: UpdateUserInput): Promise<ManagedUser | null> {
+  /** The caller's own row is read before the write, as the lock does in the real one. */
+  update(
+    callerId: string,
+    id: string,
+    change: UpdateUserInput,
+  ): Promise<ManagedUser | null> {
+    const caller = this.rows.find((candidate) => candidate.id === callerId);
+
+    if (caller?.role !== Role.ADMIN || caller.blockedAt !== null) {
+      return Promise.reject(new CallerNotAdminError(callerId));
+    }
+
     const row = this.rows.find((candidate) => candidate.id === id);
 
     if (row === undefined) return Promise.resolve(null);
@@ -187,6 +212,16 @@ describe("UserService", () => {
     expect(userRepository.rows[0]).toEqual(self);
   });
 
+  it("refuses the caller's own account spelled in upper case", async () => {
+    // `ParseUUIDPipe` lets it through, and Postgres finds the same row by it.
+    const self = addCaller();
+
+    await expect(
+      service.update(admin, self.id.toUpperCase(), { role: Role.USER }),
+    ).rejects.toThrow(ForbiddenException);
+    expect(userRepository.rows[0]).toEqual(self);
+  });
+
   it("refuses a token whose account has been blocked or demoted since it was issued", async () => {
     for (const caller of [
       { blockedAt: new Date().toISOString() },
@@ -218,6 +253,26 @@ describe("UserService", () => {
     await expect(
       service.update(admin, UNKNOWN_ID, { blocked: true }),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  it("reads one account, blocked or not, the caller's own included", async () => {
+    const self = addCaller();
+    const blocked = userRepository.add({
+      blockedAt: new Date().toISOString(),
+    });
+
+    await expect(service.findOne(self.id)).resolves.toMatchObject({
+      id: self.id,
+    });
+    await expect(service.findOne(blocked.id)).resolves.toMatchObject({
+      blockedAt: blocked.blockedAt,
+    });
+  });
+
+  it("answers 404 when reading an account that does not exist", async () => {
+    await expect(service.findOne(UNKNOWN_ID)).rejects.toThrow(
+      NotFoundException,
+    );
   });
 
   it("issues a cursor while there is another page, and none on the last one", async () => {

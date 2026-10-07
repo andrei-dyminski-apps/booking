@@ -148,6 +148,18 @@ describe("ListingController (e2e)", () => {
     ]);
   });
 
+  it("narrows the catalogue to the listings of one owner", async () => {
+    const otherId = await publish({ title: "Attic room" }, otherOwner);
+    const { ownerId } = listingSchema.parse(
+      (await anyone().get(`/listings/${otherId}`).expect(200)).body,
+    );
+
+    await expect(
+      catalogue(`?ownerId=${ownerId}`).then(titles),
+    ).resolves.toEqual(["Attic room"]);
+    await anyone().get("/listings?ownerId=not-an-id").expect(400);
+  });
+
   it("drops a listing whose nights are taken, and offers it again the moment they are not", async () => {
     await publish({ title: "Attic room" });
     const taken = { from: inDays(10), to: inDays(14) };

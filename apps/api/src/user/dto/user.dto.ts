@@ -1,5 +1,6 @@
 import { createZodDto } from "nestjs-zod";
 import {
+  managedUserDetailSchema,
   managedUserSchema,
   updateUserSchema,
   userPageSchema,
@@ -13,5 +14,9 @@ export class UserQueryDto extends createZodDto(userQuerySchema) {}
 
 /** Response halves, for `/docs` only: the controller keeps returning the contract types. */
 export class ManagedUserDto extends createZodDto(managedUserSchema) {}
+
+export class ManagedUserDetailDto extends createZodDto(
+  managedUserDetailSchema,
+) {}
 
 export class UserPageDto extends createZodDto(userPageSchema) {}

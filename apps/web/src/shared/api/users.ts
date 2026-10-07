@@ -1,7 +1,9 @@
 import {
+  managedUserDetailSchema,
   managedUserSchema,
   userPageSchema,
   type ManagedUser,
+  type ManagedUserDetail,
   type UpdateUserInput,
   type UserPage,
   type UserQuery,
@@ -23,6 +25,15 @@ export const usersApi = {
       method: "GET",
       path: `/users${queryString(query)}`,
       schema: userPageSchema,
+      read,
+    }),
+
+  /** One account, with how many stays it took and how many listings it still offers. */
+  get: (id: string, read: ReadOptions): Promise<ManagedUserDetail> =>
+    apiRequest({
+      method: "GET",
+      path: `/users/${encodeURIComponent(id)}`,
+      schema: managedUserDetailSchema,
       read,
     }),
 

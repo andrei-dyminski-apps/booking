@@ -45,7 +45,7 @@ src/
     dto/listing.dto.ts   # createZodDto on top of the @repo/contracts schemas
   user/                  # accounts: the repository every module reads users through, and the admin's routes
     user.module.ts       # exports UserRepository — AuthModule imports it
-    user.controller.ts   # GET /users, PATCH /users/:id — @Roles(Role.ADMIN) on the class
+    user.controller.ts   # GET /users, GET and PATCH /users/:id — @Roles(Role.ADMIN) on the class
     user.service.ts      # what the guard cannot answer: not one's own account, and a caller still an admin
     user.repository.ts   # users; the unique violation, the page, the role and the block
     user.service.spec.ts
@@ -250,7 +250,7 @@ Two checks, and the split between them is the point.
   second right rather than the first.
 - **Roles come from the database, never from a request.** `/auth/register` always writes a
   `USER`; an admin changes a role through `PATCH /users/:id`, and never their own — the
-  `403` from `UserService` keeps a site from losing its last admin by one click. That route is also the one place the role is read from the row rather than the token: `UserService.update` refuses a caller whose account is no longer an active admin, because an admin who was just blocked or demoted would otherwise keep up to `JWT_ACCESS_TTL` to block the admin who did it. `JwtStrategy` reads no database, so a promoted user carries the old role until
+  `403` from `UserService` keeps a site from losing its last admin by one click. That route is also the one place the role is read from the row rather than the token: `UserService.update` refuses a caller whose account is no longer an active admin, because an admin who was just blocked or demoted would otherwise keep up to `JWT_ACCESS_TTL` to block the admin who did it. The caller's row is read in `UserRepository.update`, locked with the target's (`SELECT ... FOR UPDATE`, ordered by id) inside the transaction that writes — a read before it would let two admins blocking each other at once both through and leave the site with none (`CallerNotAdminError` is what the service turns into the `403`). The own-account check compares the id lower-cased, because `ParseUUIDPipe` accepts an upper-case UUID that Postgres resolves to the same row. `JwtStrategy` reads no database, so a promoted user carries the old role until
   the next refresh — the e2e helper `signInAs` logs in again after promoting the row for
   exactly that reason.
 

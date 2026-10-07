@@ -11,9 +11,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@repo/ui/components/select";
+import { ROLE_LABELS, roleOptions } from "#entities/user";
 import { fieldMessages, NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
 import { changeRoleAction } from "../api/update-user-actions";
-import { ROLE_LABELS, roleOptions } from "../lib/users-search";
 
 /**
  * The role of one account, as a box and a button. A plain `action={submit}` form rather
@@ -46,7 +46,7 @@ export const RoleForm = ({
   ];
 
   return (
-    <form action={submit} className="flex flex-col gap-1">
+    <form action={submit} noValidate className="flex flex-col gap-1">
       {/* Stacked and full-width on a phone, an inline row from `sm` up. */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <Select

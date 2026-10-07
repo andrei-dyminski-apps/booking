@@ -170,6 +170,7 @@ function catalogueWhere(
 
   return {
     ...STILL_OFFERED,
+    ownerId: query.ownerId,
     capacity: { gte: query.guests },
     pricePerNight: { gte: query.minPrice, lte: query.maxPrice },
     ...(from !== undefined && to !== undefined

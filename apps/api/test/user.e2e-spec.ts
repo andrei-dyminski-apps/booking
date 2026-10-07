@@ -4,6 +4,7 @@ import request from "supertest";
 import { App } from "supertest/types";
 import {
   Role,
+  managedUserDetailSchema,
   managedUserSchema,
   userPageSchema,
   type UserPage,
@@ -11,6 +12,7 @@ import {
 import { AppModule } from "./../src/app.module";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
+import { inDays } from "./dates";
 import { credentialsFor, signInAs, type Agent } from "./session";
 
 describe("UserController (e2e)", () => {
@@ -62,6 +64,53 @@ describe("UserController (e2e)", () => {
     const guestId = await idOf(credentialsFor.USER.email);
 
     await owner.patch(`/users/${guestId}`).send({ blocked: true }).expect(403);
+    await owner.get(`/users/${guestId}`).expect(403);
+  });
+
+  it("reads one account with the stays it took and the listings it still offers", async () => {
+    const listing = {
+      description: "Two rooms under the roof and a wall of glass.",
+      pricePerNight: 120,
+      capacity: 4,
+    };
+    const kept = await owner
+      .post("/listings")
+      .send({ ...listing, title: "Loft" })
+      .expect(201);
+    const retired = await owner
+      .post("/listings")
+      .send({ ...listing, title: "Attic" })
+      .expect(201);
+    await owner
+      .delete(`/listings/${(retired.body as { id: string }).id}`)
+      .expect(204);
+    await guest
+      .post("/bookings")
+      .send({
+        listingId: (kept.body as { id: string }).id,
+        from: inDays(10),
+        to: inDays(12),
+      })
+      .expect(201);
+
+    const ownerId = await idOf(credentialsFor.OWNER.email);
+    const guestId = await idOf(credentialsFor.USER.email);
+
+    expect(
+      managedUserDetailSchema.parse(
+        (await admin.get(`/users/${ownerId}`).expect(200)).body,
+      ),
+    ).toMatchObject({ role: Role.OWNER, bookingCount: 0, listingCount: 1 });
+    expect(
+      managedUserDetailSchema.parse(
+        (await admin.get(`/users/${guestId}`).expect(200)).body,
+      ),
+    ).toMatchObject({ role: Role.USER, bookingCount: 1, listingCount: 0 });
+  });
+
+  it("answers 404 for an unknown account and 400 for an id that is not one", async () => {
+    await admin.get("/users/0b6f7f6e-2f4c-4a52-9a5e-8f1f6d2c3b4a").expect(404);
+    await admin.get("/users/not-an-id").expect(400);
   });
 
   it("pages every account, newest first, and back the other way", async () => {
@@ -95,6 +144,9 @@ describe("UserController (e2e)", () => {
     expect(emails(await page("?email=E2E-OWN"))).toEqual([
       credentialsFor.OWNER.email,
     ]);
+    // Taken as written: `LIKE` would read these two as wildcards and match every address.
+    expect(emails(await page("?email=%25"))).toEqual([]);
+    expect(emails(await page("?email=e2e_"))).toEqual([]);
 
     const guestId = await idOf(credentialsFor.USER.email);
 
@@ -140,8 +192,10 @@ describe("UserController (e2e)", () => {
 
     expect(managedUserSchema.parse(response.body).blockedAt).not.toBeNull();
 
-    await guest.post("/auth/refresh").expect(401);
+    // `/auth/me` first: the failed refresh below clears the agent's cookies, and a request
+    // without an access token is a 401 from the guard, whatever the row says.
     await guest.get("/auth/me").expect(401);
+    await guest.post("/auth/refresh").expect(401);
     await request(app.getHttpServer())
       .post("/auth/login")
       .send(credentialsFor.USER)
@@ -204,6 +258,27 @@ describe("UserController (e2e)", () => {
     ).toMatchObject({ blockedAt: null });
   });
 
+  it("lets only one of two admins blocking each other at once through", async () => {
+    const second = await signInAs(app, Role.ADMIN, {
+      email: "e2e-admin-2@example.com",
+      password: "password123",
+    });
+    const adminId = await idOf(credentialsFor.ADMIN.email);
+    const secondId = await idOf("e2e-admin-2@example.com");
+
+    const statuses = await Promise.all([
+      admin.patch(`/users/${secondId}`).send({ blocked: true }),
+      second.patch(`/users/${adminId}`).send({ blocked: true }),
+    ]).then((responses) => responses.map((response) => response.status));
+
+    expect(statuses.sort()).toEqual([200, 403]);
+    expect(
+      await app
+        .get(PrismaService)
+        .user.count({ where: { role: Role.ADMIN, blockedAt: null } }),
+    ).toBe(1);
+  });
+
   it("refuses an admin's change to their own account, an empty change and an unknown id", async () => {
     const adminId = await idOf(credentialsFor.ADMIN.email);
 
@@ -212,6 +287,11 @@ describe("UserController (e2e)", () => {
       .send({ role: Role.USER })
       .expect(403);
     await admin.patch(`/users/${adminId}`).send({ blocked: true }).expect(403);
+    // The same row to Postgres, and a different string to a naive comparison.
+    await admin
+      .patch(`/users/${adminId.toUpperCase()}`)
+      .send({ blocked: true })
+      .expect(403);
 
     const guestId = await idOf(credentialsFor.USER.email);
 

@@ -4,8 +4,8 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import {
-  Role,
   type ManagedUser,
+  type ManagedUserDetail,
   type UpdateUserInput,
   type UserPage,
   type UserQuery,
@@ -13,7 +13,7 @@ import {
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { readCursor } from "../common/paging";
 import { decodeCursor, encodeCursor } from "./user-cursor";
-import { UserRepository } from "./user.repository";
+import { CallerNotAdminError, UserRepository } from "./user.repository";
 
 /**
  * Managing accounts is the admin's, and the controller says so with `@Roles`. What is left
@@ -45,6 +45,20 @@ export class UserService {
   }
 
   /**
+   * One account, the admin's own included: reading it changes nothing, so the rule that
+   * keeps an admin off their own row in `update` has nothing to guard here.
+   */
+  async findOne(id: string): Promise<ManagedUserDetail> {
+    const user = await this.userRepository.findDetailById(id);
+
+    if (user === null) {
+      throw new NotFoundException(`User ${id} not found`);
+    }
+
+    return user;
+  }
+
+  /**
    * Changes the role, the block, or both.
    *
    * **Not on oneself.** An admin who demotes or blocks their own account is a site that can
@@ -61,28 +75,36 @@ export class UserService {
    * **Except for the caller of this route.** What is left of an admin who was just blocked
    * or demoted is an access token that may still block the admin who did it, or promote
    * somebody else — the one thing a block has to stop at once. So the caller's own row is
-   * read before anything is written, and a token whose account is no longer an active
-   * admin is refused with the `403` the guard would give it after its next refresh. One
-   * indexed read on a route that is clicked, not polled, is the whole price.
+   * read under the lock the write takes (see `UserRepository.update`), and a token whose
+   * account is no longer an active admin is refused with the `403` the guard would give it
+   * after its next refresh.
+   *
+   * The id is compared lower-cased: `ParseUUIDPipe` lets an upper-case UUID through and
+   * Postgres finds the same row by it, while the token carries the id as Postgres prints
+   * it.
    */
   async update(
     actor: AuthenticatedUser,
     id: string,
     change: UpdateUserInput,
   ): Promise<ManagedUser> {
-    if (id === actor.id) {
+    if (id.toLowerCase() === actor.id.toLowerCase()) {
       throw new ForbiddenException(
         "Admins cannot change the role or the block of their own account",
       );
     }
 
-    const caller = await this.userRepository.findActiveById(actor.id);
+    let updated: ManagedUser | null;
 
-    if (caller?.role !== Role.ADMIN) {
-      throw new ForbiddenException("Your account is no longer an admin's");
+    try {
+      updated = await this.userRepository.update(actor.id, id, change);
+    } catch (error) {
+      if (error instanceof CallerNotAdminError) {
+        throw new ForbiddenException("Your account is no longer an admin's");
+      }
+
+      throw error;
     }
-
-    const updated = await this.userRepository.update(id, change);
 
     if (updated === null) {
       throw new NotFoundException(`User ${id} not found`);

@@ -7,7 +7,7 @@ import {
 } from "@nestjs/common";
 import { JwtModule } from "@nestjs/jwt";
 import { Test } from "@nestjs/testing";
-import type { ManagedUser, User } from "@repo/contracts";
+import type { ManagedUser, ManagedUserDetail, User } from "@repo/contracts";
 import type { Page } from "../common/paging";
 import * as argon2 from "argon2";
 import { AUTH_CONFIG, type AuthConfig } from "./auth.config";
@@ -88,6 +88,10 @@ class FakeUserRepository implements PublicOf<UserRepository> {
 
   // The admin's half of the repository. AuthService never calls it, and a fake that
   // answered anyway would be a second implementation of rules `UserService` owns.
+  findDetailById(): Promise<ManagedUserDetail | null> {
+    return Promise.reject(new Error("AuthService does not read user details"));
+  }
+
   findPage(): Promise<Page<ManagedUser>> {
     return Promise.reject(new Error("AuthService does not page users"));
   }

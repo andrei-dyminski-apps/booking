@@ -17,7 +17,7 @@ import {
  * schema the API validates the body with.
  *
  * Neither action redirects: the row belongs where it is, now saying something different,
- * and `refresh()` is what re-renders the list. It is read `no-store`, so nothing of it is
+ * and `refresh()` is what re-renders the page. It is read `no-store`, so nothing of it is
  * in the Data Cache; what is thrown away is the copy the admin's own router holds.
  */
 export async function changeRoleAction(

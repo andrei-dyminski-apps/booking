@@ -13,12 +13,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@repo/ui/components/dialog";
+import { roleOptions } from "#entities/user";
 import { ROUTES } from "#shared/config";
 import type { FieldErrors } from "#shared/lib";
 import { ButtonLink, FilterField, FilterForm, FilterSelect } from "#shared/ui";
 import {
   clearedFiltersHref,
-  roleOptions,
   statusOptions,
   usersHref,
   type FilterValues,

@@ -1,15 +1,14 @@
 import {
-  Role,
   roleSchema,
   userQuerySchema,
   userSortSchema,
   UserStatus,
   userStatusSchema,
-  type Role as RoleName,
   type UserQuery,
   type UserSort,
   type UserStatus as UserStatusName,
 } from "@repo/contracts";
+import { ROLE_LABELS } from "#entities/user";
 import { ROUTES } from "#shared/config";
 import {
   filtersHref,
@@ -78,22 +77,6 @@ export function readUsersSearch(
 export function usersHref(values: FilterValues, cursor?: string): string {
   return filtersHref(ROUTES.adminUsers, values, cursor);
 }
-
-/**
- * The three roles, named for a person. Keyed by the contract's enum, so a fourth role
- * stops compiling here instead of appearing as a blank option — and read by the badge on
- * every row as well as by the filter and the role box, so one role has one name.
- */
-export const ROLE_LABELS: Record<RoleName, string> = {
-  [Role.USER]: "Guest",
-  [Role.OWNER]: "Owner",
-  [Role.ADMIN]: "Admin",
-};
-
-export const roleOptions = roleSchema.options.map((value) => ({
-  value,
-  label: ROLE_LABELS[value],
-}));
 
 export const STATUS_LABELS: Record<UserStatusName, string> = {
   [UserStatus.ACTIVE]: "Active",

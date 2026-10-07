@@ -30,8 +30,11 @@ apps/web/
     admin/page.tsx            # every listing on offer, editable — the admin's section
     admin/loading.tsx
     admin/listings/[id]/page.tsx
-    admin/users/page.tsx      # the accounts: roles and blocks
+    admin/listings/[id]/loading.tsx
+    admin/users/page.tsx      # the accounts, each leading to its own page
     admin/users/loading.tsx
+    admin/users/[id]/page.tsx # one account: its role, its block, its stays and listings
+    admin/users/[id]/loading.tsx
     not-found.tsx             # what notFound() renders — an id, a role, a retired row
     error.tsx                 # the boundary under the shell; "use client" + re-export
     global-error.tsx          # the boundary above it, for a shell that cannot render
@@ -122,20 +125,24 @@ apps/web/
       admin-listings/api/read-listings-page.ts   # the catalogue's read, `no-store`
       admin-listings/index.ts
       admin-listing-edit/ui/admin-edit-listing-page.tsx
+      admin-listing-edit/ui/admin-edit-listing-skeleton.tsx
       admin-listing-edit/api/any-listing.ts      # the row, whoever owns it
       admin-listing-edit/index.ts
       admin-users/ui/users-page.tsx       # the accounts, filtered in the URL
       admin-users/ui/users-toolbar.tsx
       admin-users/ui/users-filters-dialog.tsx
-      admin-users/ui/user-card.tsx
-      admin-users/ui/role-form.tsx        # a box and a button, no confirmation
-      admin-users/ui/block-button.tsx     # asks before blocking, not before reopening
+      admin-users/ui/user-card.tsx        # an account, and the link to its page
       admin-users/ui/users-skeleton.tsx
       admin-users/api/read-users-page.ts
-      admin-users/api/update-user-actions.ts
       admin-users/lib/users-search.ts     # searchParams onto the contract's query
       admin-users/lib/users-search.spec.ts
       admin-users/index.ts
+      admin-user/ui/user-page.tsx         # one account: access, and links to its activity
+      admin-user/ui/role-form.tsx         # a box and a button, no confirmation
+      admin-user/ui/block-button.tsx      # asks before blocking, not before reopening
+      admin-user/ui/user-skeleton.tsx
+      admin-user/api/update-user-actions.ts
+      admin-user/index.ts
     features/                 # a user action a second page also runs
       save-listing/ui/listing-form.tsx    # the one form the new and the edit screen run
       save-listing/api/save-listing-action.ts
@@ -145,7 +152,10 @@ apps/web/
       delete-listing/index.ts
       logout/ui/logout-button.tsx         # the browser's call: only it holds a refresh token
       logout/index.ts
-    entities/                 # a domain model a second page also needs (none yet)
+    entities/                 # a domain model a second page also needs
+      user/model/roles.ts     # the roles named for a person: both admin screens read them
+      user/api/any-user.ts    # the account with its counts, or a 404: its page and `?ownerId=`
+      user/index.ts
     shared/                   # no domain knowledge: transport, routes, config
       api/http-client.ts      # apiRequest(), refreshSession(), the two errors
       api/auth.ts             # authApi, currentUser() — memoized, requireUser/requireRole
@@ -254,7 +264,8 @@ with the linter configured to match. The three that come up:
 - **Extraction.** "Start simple, extract when needed" holds literally —
   `fsd/insignificant-slice` is on and a slice appears the day a second consumer does, not
   the day it looks reusable. `features/save-listing` is the whole of that layer so far, and
-  it was written the moment the second screen needed the form; `entities/` is still empty.
+  it was written the moment the second screen needed the form; `entities/user` appeared
+  the day the account's own page became the second reader of the role labels.
 - **Aliases.** The skill writes `@/features/auth`; here it is `#features/auth`, the
   `imports` map of `package.json`. The mechanism differs, the rule it enforces does not.
 
@@ -579,11 +590,13 @@ this side decided.
   list. A `?guestId=` in its place would be a rule to re-check on every request.
 - **The admin's section is `/admin`**, two screens: every listing on offer, each one
   edited and retired through the same `save-listing` and `delete-listing` features the
-  owner runs, and `/admin/users`, where a role is changed and an account blocked. Both
+  owner runs, and `/admin/users`, the accounts, each leading to `/admin/users/[id]` — where
+  a role is changed and an account blocked, and its stays and listings are one link away
+  (`/bookings?guestId=`, `/admin?ownerId=`) rather than listed again. Both
   write actions send their author back to the section of their own role
   (`listingsSectionFor` in `shared/config/routes.ts`), read off the session rather than
   bound by the page — an action is an endpoint, and a destination it was handed would be
-  one more value to distrust. The admin's own row on the users screen carries no controls:
+  one more value to distrust. The admin's own account page carries no controls:
   the API refuses a change to the caller's own account, and controls that could only
   reach that `403` are not worth drawing.
 - **One link is current in the navigation**, the deepest one containing the path —
@@ -726,7 +739,7 @@ characters` reaches the box either way. The number is read off the schema
 **A form with no fields is neither of the two** — the confirmations behind a destructive
 action (`delete-listing-button.tsx`, `cancel-booking-button.tsx`, `block-button.tsx`) submit a bound id and
 nothing else, so they stay a plain `action={submit}` with nothing to validate. So does a
-form whose only box is a closed choice — `role-form.tsx` on the admin's list of accounts:
+form whose only box is a closed choice — `role-form.tsx` on the admin's page of an account:
 a select of the three roles cannot hold a value the contract refuses, so a browser-side
 parse would have nothing to say, and the action still parses what arrives with
 `updateUserSchema`. A form that gains a box somebody types into stops being this case.
@@ -954,7 +967,7 @@ How the result is made visible, by what kind of data it is:
 A mutation nobody can undo — deleting a row, revoking access, anything the API answers
 with a `DELETE` — asks first, in an `AlertDialog` from `@repo/ui`
 (`features/delete-listing/ui/delete-listing-button.tsx`,
-`_pages/bookings/ui/cancel-booking-button.tsx` and `_pages/admin-users/ui/block-button.tsx`). Not a second
+`_pages/bookings/ui/cancel-booking-button.tsx` and `_pages/admin-user/ui/block-button.tsx`). Not a second
 button that takes the place of the first: a modal takes the focus and refuses a click
 outside itself, which is what stops the confirmation being hit by the hand that was
 already moving.

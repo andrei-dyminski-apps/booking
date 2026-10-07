@@ -67,8 +67,9 @@ export const BlockButton = ({
             <AlertDialogTitle>Block {email}?</AlertDialogTitle>
             <AlertDialogDescription>
               Every session of this account ends and it cannot sign in again
-              until it is unblocked. A page already open keeps working for at
-              most fifteen minutes. Its listings and stays stay where they are.
+              until it is unblocked. A page already open keeps working until its
+              short-lived token runs out. Its listings and stays stay where they
+              are.
             </AlertDialogDescription>
           </AlertDialogHeader>
 

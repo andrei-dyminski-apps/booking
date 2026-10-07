@@ -22,8 +22,8 @@ import { UserCard } from "./user-card";
 import { UsersToolbar } from "./users-toolbar";
 
 /**
- * Every account on the site, a keyset page at a time, and the two things an admin may do
- * to one: change its role, and block or reopen it. The screen has the stays screen's
+ * Every account on the site, a keyset page at a time, each leading to its own page where
+ * its role is changed and it is blocked or reopened. The screen has the stays screen's
  * shape — the filters in the URL, one search at one address, a page that reads `no-store`
  * — because it is the same kind of list.
  */
@@ -47,9 +47,8 @@ export const UsersPage = async ({
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">Users</h1>
         <p className="text-sm text-muted-foreground">
-          Every account, newest first. A new role takes effect at the
-          account&apos;s next sign-in or refresh, within fifteen minutes; a
-          block ends its sessions at once.
+          Every account, newest first. Open one to change its role, block it, or
+          see its stays and listings.
         </p>
       </div>
 

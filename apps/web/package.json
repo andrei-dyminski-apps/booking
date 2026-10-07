@@ -7,6 +7,7 @@
     "#_app/*": "./src/_app/*/index.ts",
     "#_pages/*": "./src/_pages/*/index.ts",
     "#features/*": "./src/features/*/index.ts",
+    "#entities/*": "./src/entities/*/index.ts",
     "#shared/*": "./src/shared/*/index.ts"
   },
   "scripts": {

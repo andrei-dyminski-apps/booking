@@ -136,7 +136,7 @@ of the catalogue is behind the global `JwtAuthGuard` and answers `401` without a
 | `POST`   | `/auth/refresh`              | rotate the token pair; `401` — missing, spent or forged token, cookies cleared       |
 | `POST`   | `/auth/logout`               | end the session, `204`; answers the same without one                                 |
 | `GET`    | `/auth/me`                   | the current user; `401` — no session, the user is gone or blocked                    |
-| `GET`    | `/listings`                  | the catalogue: filters, an ordering and a cursor; public                             |
+| `GET`    | `/listings`                  | the catalogue: filters (`ownerId` among them), an ordering and a cursor; public      |
 | `GET`    | `/listings/mine`             | the caller's own listings; OWNER only                                                |
 | `GET`    | `/listings/:id`              | a single listing, `404` if missing or retired; public                                |
 | `GET`    | `/listings/:id/availability` | the nights already taken, for a `from`/`to` window; public                           |
@@ -148,6 +148,7 @@ of the catalogue is behind the global `JwtAuthGuard` and answers `401` without a
 | `POST`   | `/bookings`                  | create a 15-minute hold; USER only, `404` — no such listing, `409` — dates are taken |
 | `DELETE` | `/bookings/:id`              | cancel, `204`; the guest or an admin. The row stays, with `status: CANCELLED`        |
 | `GET`    | `/users`                     | one page of accounts: role, status and address filters, a cursor; ADMIN only         |
+| `GET`    | `/users/:id`                 | one account with its stay and listing counts; ADMIN only                             |
 | `PATCH`  | `/users/:id`                 | change the role and/or block; ADMIN only, `403` on the caller's own account          |
 
 Overlapping dates on the same listing are rejected; back-to-back bookings (check-out on the day the next guest checks in) are allowed.
@@ -336,7 +337,7 @@ Registration always writes a `USER` — the only safe default for a public endpo
 
 An admin manages accounts instead of deleting them. **Blocking** stamps `users.blocked_at` and deletes every refresh token of the account in the same transaction, so no session can be refreshed; login answers `403` once the password is right, `/auth/me` answers `401`, and the access token left in a browser lapses within `JWT_ACCESS_TTL`. A delete was left out on purpose: bookings cascade from a user and listings restrict, so it would either erase somebody's stay history or be refused for any owner who ever listed. An admin cannot change their own role or block themselves — a site must not be able to lose its last admin by one click — so another admin does it.
 
-The admin's screens are `/admin` (every listing on offer, each editable and retirable through the owner's own form) and `/admin/users` (the accounts, filtered in the URL like the stays).
+The admin's screens are `/admin` (every listing on offer, each editable and retirable through the owner's own form) and `/admin/users` (the accounts, filtered in the URL like the stays). Each account has a page of its own, `/admin/users/[id]`, where its role is changed and it is blocked, with links to its stays and its listings.
 
 ## Shared configuration
 

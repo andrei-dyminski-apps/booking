@@ -209,12 +209,17 @@ export const listingSortSchema = z.enum([
  * question ("free from the 3rd" until when?), and answering it by guessing the other end
  * would quietly return a different list than the one that was asked for.
  *
+ * `ownerId` narrows the catalogue to one owner's listings. It is no secret — every listing
+ * already carries its `ownerId` — and it is what the admin's section follows from an
+ * account to what that account offers.
+ *
  * `cursor` and `limit` are the pair every paged read here takes, so they are spread in
  * from `PAGING` rather than spelled out — what they are and why the cursor travels with
  * the `sort` it was issued under is written down there, once for both resources.
  */
 export const listingQuerySchema = z
   .object({
+    ownerId: blank(z.uuid().optional()),
     from: blank(z.iso.date().optional()),
     to: blank(z.iso.date().optional()),
     minPrice: blank(

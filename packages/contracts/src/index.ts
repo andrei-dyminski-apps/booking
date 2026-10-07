@@ -63,6 +63,7 @@ export {
 export {
   managedUserSchema,
   managedUserListSchema,
+  managedUserDetailSchema,
   userStatusSchema,
   userSortSchema,
   userQuerySchema,
@@ -70,6 +71,7 @@ export {
   updateUserSchema,
   UserStatus,
   type ManagedUser,
+  type ManagedUserDetail,
   type UserSort,
   type UserQuery,
   type UserPage,

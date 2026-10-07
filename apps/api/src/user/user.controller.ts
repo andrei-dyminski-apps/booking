@@ -13,12 +13,18 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
 } from "@nestjs/swagger";
-import { Role, type ManagedUser, type UserPage } from "@repo/contracts";
+import {
+  Role,
+  type ManagedUser,
+  type ManagedUserDetail,
+  type UserPage,
+} from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { Roles } from "../auth/decorators/roles.decorator";
 import { ApiErrorDto } from "../common/dto/api-error.dto";
 import {
+  ManagedUserDetailDto,
   ManagedUserDto,
   UpdateUserDto,
   UserPageDto,
@@ -51,6 +57,16 @@ export class UserController {
   })
   findPage(@Query() query: UserQueryDto): Promise<UserPage> {
     return this.userService.findPage(query);
+  }
+
+  @Get(":id")
+  @ApiOkResponse({ type: ManagedUserDetailDto })
+  @ApiNotFoundResponse({
+    description: "The user does not exist",
+    type: ApiErrorDto,
+  })
+  findOne(@Param("id", ParseUUIDPipe) id: string): Promise<ManagedUserDetail> {
+    return this.userService.findOne(id);
   }
 
   /**
