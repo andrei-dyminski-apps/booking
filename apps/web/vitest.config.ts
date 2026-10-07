@@ -13,6 +13,10 @@ import { defineConfig } from "vitest/config";
  * `check-types` and Steiger already refuse.
  */
 export default defineConfig({
+  // Nothing is rendered, but a spec can still import a slice whose public API exports a
+  // component next to its logic (`#features/listing-search`), and `tsconfig.json` leaves JSX to
+  // Next with `jsx: "preserve"` — so the runner compiles it itself.
+  oxc: { jsx: { runtime: "automatic" } },
   test: {
     environment: "node",
     include: ["src/**/*.spec.ts"],

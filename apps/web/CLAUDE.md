@@ -119,10 +119,14 @@ apps/web/
       listing-edit/ui/edit-listing-page.tsx
       listing-edit/api/own-listing.ts     # the row of this screen, or a 404
       listing-edit/index.ts
-      admin-listings/ui/admin-listings-page.tsx  # every offered listing, cursor-paged
+      admin-listings/ui/admin-listings-page.tsx  # every offered listing, filtered in the URL
+      admin-listings/ui/admin-listings-toolbar.tsx
+      admin-listings/ui/admin-listings-filters-dialog.tsx
       admin-listings/ui/admin-listing-card.tsx
       admin-listings/ui/admin-listings-skeleton.tsx
       admin-listings/api/read-listings-page.ts   # the catalogue's read, `no-store`
+      admin-listings/lib/admin-listings-search.ts  # the catalogue's filters plus `ownerId`
+      admin-listings/lib/admin-listings-search.spec.ts
       admin-listings/index.ts
       admin-listing-edit/ui/admin-edit-listing-page.tsx
       admin-listing-edit/ui/admin-edit-listing-skeleton.tsx
@@ -152,6 +156,9 @@ apps/web/
       delete-listing/index.ts
       logout/ui/logout-button.tsx         # the browser's call: only it holds a refresh token
       logout/index.ts
+      listing-search/model/listing-filters.ts  # the catalogue query's chips, orderings, labels
+      listing-search/ui/listing-filter-fields.tsx  # …and its boxes: both listings dialogs
+      listing-search/index.ts
     entities/                 # a domain model a second page also needs
       user/model/roles.ts     # the roles named for a person: both admin screens read them
       user/api/any-user.ts    # the account with its counts, or a 404: its page and `?ownerId=`
@@ -758,7 +765,10 @@ the `GET` form of the dialog (`FilterForm`), the chips that take a filter off
 (`FilterChips`), the ordering box (`SortSelect`), the forwards-only pager (`Pager`) and
 the three notices a list shows in place of itself — a cursor the API will not read
 (`StalePageNotice`), a search the contract refuses (`RefusedSearchNotice`) and an answer
-the filters emptied (`NoMatchesNotice`). In `shared/lib`
+the filters emptied (`NoMatchesNotice`). The two admin lists are the same shape again:
+`_pages/admin-users` over accounts, and `_pages/admin-listings` over the catalogue's own
+filters plus `ownerId` — the one the catalogue's contract takes and only an admin has a
+use for, shown as a chip named by the owner's address. In `shared/lib`
 and `shared/api`, the domain-free mechanics the two slices' search modules would otherwise
 each spell: `filtersHref` and `singleParam` and `searchParamsHref` (`search-params.ts`),
 `dayLabelOrAny` (`dates.ts`), `messagesExcept` (`form-errors.ts`), `pageOrNullOnStaleCursor`
@@ -773,6 +783,15 @@ the field order, the labels) and the shared half does the assembling. A generic
 `createKeysetSearch(config)` was weighed and left out — it trades ~50 lines a reviewer
 checks by reading them once for a parameterised type that is harder to read than either
 copy.
+
+The exception is two screens over the _same_ contract. The catalogue and the admin's
+listings both put `listingQuerySchema`, so its half of the job — the boxes
+(`ListingFilterFields`), the chips (`listingFilterChips`), the orderings and their labels
+(`listingSortOptions`) — lives once in `features/listing-search`, and each slice hands it its own
+link builder. What stays in the slices is what differs: the route, `readXxxSearch`, and
+`ownerId`, the admin's extra filter. That also means a spec of either search module
+imports a component through the feature's public API, which is why `vitest.config.ts`
+compiles JSX although nothing is rendered.
 
 The `shared/ui` components are there rather than in `@repo/ui` because none of them is a
 primitive: one speaks this application's `FieldErrors` and ends in its `fieldMessages`,

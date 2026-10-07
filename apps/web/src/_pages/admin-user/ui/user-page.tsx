@@ -119,45 +119,54 @@ const AccessCard = ({
 );
 
 /**
- * What the account has behind it. The listings row is drawn for an owner, and for anybody
- * who still offers something — a role changed after a listing was published leaves the
- * listing where it was.
+ * What the account has behind it, as far as its role reaches: stays for a user, listings
+ * for an owner. A row outside the role is still drawn while it has something in it — a
+ * role changed later leaves the stays and the listings where they were. With neither row
+ * there is no card.
  */
-const ActivityCard = ({ user }: { user: ManagedUserDetail }) => (
-  <Card>
-    <CardHeader>
-      <CardTitle>Activity</CardTitle>
-    </CardHeader>
-    <CardContent>
-      <ul role="list" className="flex flex-col divide-y">
-        <ActivityRow
-          icon={<CalendarCheckIcon className="size-4" />}
-          label={countOf(user.bookingCount, "stay taken", "stays taken")}
-          href={
-            user.bookingCount > 0
-              ? filtersHref(ROUTES.bookings, { guestId: user.id })
-              : null
-          }
-        />
-        {(user.role === Role.OWNER || user.listingCount > 0) && (
-          <ActivityRow
-            icon={<WarehouseIcon className="size-4" />}
-            label={countOf(
-              user.listingCount,
-              "listing on offer",
-              "listings on offer",
-            )}
-            href={
-              user.listingCount > 0
-                ? filtersHref(ROUTES.admin, { ownerId: user.id })
-                : null
-            }
-          />
-        )}
-      </ul>
-    </CardContent>
-  </Card>
-);
+const ActivityCard = ({ user }: { user: ManagedUserDetail }) => {
+  const stays = user.role === Role.USER || user.bookingCount > 0;
+  const listings = user.role === Role.OWNER || user.listingCount > 0;
+  if (!stays && !listings) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Activity</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ul role="list" className="flex flex-col divide-y">
+          {stays && (
+            <ActivityRow
+              icon={<CalendarCheckIcon className="size-4" />}
+              label={countOf(user.bookingCount, "stay taken", "stays taken")}
+              href={
+                user.bookingCount > 0
+                  ? filtersHref(ROUTES.bookings, { guestId: user.id })
+                  : null
+              }
+            />
+          )}
+          {listings && (
+            <ActivityRow
+              icon={<WarehouseIcon className="size-4" />}
+              label={countOf(
+                user.listingCount,
+                "listing on offer",
+                "listings on offer",
+              )}
+              href={
+                user.listingCount > 0
+                  ? filtersHref(ROUTES.admin, { ownerId: user.id })
+                  : null
+              }
+            />
+          )}
+        </ul>
+      </CardContent>
+    </Card>
+  );
+};
 
 /** A count, and a link to the list behind it once there is anything in that list. */
 const ActivityRow = ({

@@ -1,5 +1,6 @@
+import { redirect } from "next/navigation";
 import { ArrowLeftIcon, WarehouseIcon } from "lucide-react";
-import { listingQuerySchema, Role } from "@repo/contracts";
+import { Role } from "@repo/contracts";
 import {
   Empty,
   EmptyDescription,
@@ -10,10 +11,22 @@ import {
 import { anyUser } from "#entities/user";
 import { requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { filtersHref, requireId, singleParam } from "#shared/lib";
-import { ButtonLink, Pager, StalePageNotice } from "#shared/ui";
+import { today } from "#shared/lib";
+import {
+  ButtonLink,
+  NoMatchesNotice,
+  Pager,
+  RefusedSearchNotice,
+  StalePageNotice,
+} from "#shared/ui";
 import { readListingsPage } from "../api/read-listings-page";
+import {
+  activeFilters,
+  adminListingsHref,
+  readAdminListingsSearch,
+} from "../lib/admin-listings-search";
 import { AdminListingCard } from "./admin-listing-card";
+import { AdminListingsToolbar } from "./admin-listings-toolbar";
 
 /**
  * The admin's half of the catalogue: every listing on offer, each of them editable — the
@@ -22,11 +35,11 @@ import { AdminListingCard } from "./admin-listing-card";
  * guest's is; what differs is the link on each card, and the API is what decides that it
  * works — `PATCH` and `DELETE` let an admin through on any row.
  *
- * Only the cursor and `ownerId` travel in the URL. Searching what is on offer is the
- * catalogue's job, and that screen is one link away; this one is for walking the list and
- * acting on a row. `ownerId` is how an account's own page links to what it offers, and it
- * is a link rather than a box — an id that names nobody is the 404 any other id gets. Any
- * other parameter is ignored rather than refused, because nothing here reads it.
+ * The filters are the catalogue's — dates, prices, guests and the ordering — plus
+ * `ownerId`, and they live in the URL with the shape every other list here has: one search
+ * at one address, a refusal shown under its box, a page that reads `no-store`. `ownerId`
+ * is how an account's own page links to what it offers; an id that parses and names
+ * nobody is the 404 any other id gets.
  *
  * Retired listings are not here, and that is the catalogue's rule rather than a choice of
  * this screen: a retired row answers `404` by id to everybody, and nothing in the API
@@ -35,75 +48,80 @@ import { AdminListingCard } from "./admin-listing-card";
 export const AdminListingsPage = async ({
   searchParams,
 }: PageProps<"/admin">) => {
-  const params = await searchParams;
-  const ownerParam = singleParam(params.ownerId);
-  const ownerId = ownerParam === "" ? "" : requireId(ownerParam);
-  const listHref = filtersHref(ROUTES.admin, { ownerId });
+  const { query, ownerId, errors, values, canonical } = readAdminListingsSearch(
+    await searchParams,
+  );
 
-  await requireRole(Role.ADMIN, listHref);
+  await requireRole(Role.ADMIN, adminListingsHref(values));
 
-  const cursor = singleParam(params.cursor);
-  const query = listingQuerySchema.parse({ cursor, ownerId });
+  // One search, one address — see `canonical` in `catalogue-search.ts`.
+  if (canonical !== null) redirect(canonical);
+
+  // The owner is read whenever the id parses, the list only when the whole search does:
+  // a refused date range still belongs to the account it was asked about.
   const [page, owner] = await Promise.all([
-    readListingsPage(query),
-    ownerId === "" ? null : anyUser(ownerId),
+    query === null ? null : readListingsPage(query),
+    ownerId === null ? null : anyUser(ownerId),
   ]);
+  const staleCursor = query !== null && page === null;
+  const filters = activeFilters(values, { owner: owner?.email });
+  // The owner narrows the list to one account rather than searching it, so an empty
+  // answer under that alone is the account's own empty state, not a search nothing matched.
+  const searched = filters.some((filter) => filter.key !== "ownerId");
 
   return (
     <div className="flex flex-col gap-6">
-      {owner === null ? (
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Listings</h1>
-          <p className="text-sm text-muted-foreground">
-            Every listing on offer, newest first. An admin may edit or retire
-            any of them; creating one stays the owner&apos;s.
-          </p>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-4">
-          <ButtonLink
-            href={ROUTES.adminUser(owner.id)}
-            variant="ghost"
-            size="sm"
-            className="-ml-2 self-start"
-          >
-            <ArrowLeftIcon />
-            Back to the account
-          </ButtonLink>
-          <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold tracking-tight">Listings</h1>
-            <p className="text-sm break-all text-muted-foreground">
-              What {owner.email} has on offer, newest first.
-            </p>
-            <ButtonLink
-              href={ROUTES.admin}
-              variant="link"
-              size="sm"
-              className="self-start px-0"
-            >
-              Show every listing
-            </ButtonLink>
-          </div>
-        </div>
+      {owner !== null && (
+        <ButtonLink
+          href={ROUTES.adminUser(owner.id)}
+          variant="ghost"
+          size="sm"
+          className="-ml-2 self-start"
+        >
+          <ArrowLeftIcon />
+          Back to the account
+        </ButtonLink>
       )}
 
-      {page === null && <StalePageNotice firstPageHref={listHref} />}
+      <div className="flex flex-col gap-1">
+        <h1 className="text-2xl font-semibold tracking-tight">Listings</h1>
+        <p className="text-sm break-words text-muted-foreground">
+          {owner === null
+            ? "Every listing on offer. An admin may edit or retire any of them; creating one stays the owner's."
+            : `What ${owner.email} has on offer.`}
+        </p>
+      </div>
+
+      <AdminListingsToolbar
+        values={values}
+        errors={errors}
+        filters={filters}
+        earliest={today()}
+      />
+
+      {staleCursor && (
+        <StalePageNotice firstPageHref={adminListingsHref(values)} />
+      )}
 
       {page !== null &&
         (page.items.length === 0 ? (
-          <Empty className="border">
-            <EmptyHeader>
-              <EmptyMedia variant="icon">
-                <WarehouseIcon />
-              </EmptyMedia>
-              <EmptyTitle>Nothing on offer</EmptyTitle>
-              <EmptyDescription>
-                {owner === null
-                  ? "No owner has published a listing yet, or every one has been retired."
-                  : "This account has no listing on offer."}
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
+          searched ? (
+            <NoMatchesNotice />
+          ) : (
+            <Empty className="border">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <WarehouseIcon />
+                </EmptyMedia>
+                <EmptyTitle>Nothing on offer</EmptyTitle>
+                <EmptyDescription>
+                  {owner === null
+                    ? "No owner has published a listing yet, or every one has been retired."
+                    : "This account has no listing on offer."}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          )
         ) : (
           <ul role="list" className="grid gap-4 sm:grid-cols-2">
             {page.items.map((listing) => (
@@ -114,14 +132,18 @@ export const AdminListingsPage = async ({
           </ul>
         ))}
 
+      {query === null && <RefusedSearchNotice />}
+
       {page !== null && (
         <Pager
           nextHref={
             page.nextCursor !== null
-              ? filtersHref(ROUTES.admin, { ownerId }, page.nextCursor)
+              ? adminListingsHref(values, page.nextCursor)
               : null
           }
-          firstHref={query.cursor !== undefined ? listHref : null}
+          firstHref={
+            query?.cursor !== undefined ? adminListingsHref(values) : null
+          }
         />
       )}
     </div>

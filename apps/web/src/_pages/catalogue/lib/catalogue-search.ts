@@ -1,36 +1,25 @@
+import { listingQuerySchema, type ListingQuery } from "@repo/contracts";
 import {
-  listingQuerySchema,
-  listingSortSchema,
-  type ListingQuery,
-  type ListingSort,
-} from "@repo/contracts";
+  listingFilterChips,
+  listingSortOptions,
+  withoutListingFilters,
+  type ListingFilterValues,
+} from "#features/listing-search";
 import { ROUTES } from "#shared/config";
 import {
-  countOf,
-  dayLabelOrAny,
   filtersHref,
-  formatMoney,
   searchParamsHref,
   singleParam,
   toFieldErrors,
   type FieldErrors,
 } from "#shared/lib";
-import type { SortOption } from "#shared/ui";
+import type { FilterChip, SortOption } from "#shared/ui";
 
 /**
- * What the boxes of the filter form hold — text, because that is what a URL carries.
- *
- * `sort` travels with them although it is not a filter: it is a value of the same URL, so
- * every link this file writes has to carry it or a chip would silently reorder the list.
+ * What the boxes of the filter form hold — the set `features/listing-search` describes, because
+ * the admin's listings put the same question to the same contract.
  */
-export type FilterValues = {
-  from: string;
-  to: string;
-  minPrice: string;
-  maxPrice: string;
-  guests: string;
-  sort: string;
-};
+export type FilterValues = ListingFilterValues;
 
 export type CatalogueSearch = {
   /**
@@ -110,49 +99,16 @@ export function catalogueHref(values: FilterValues, cursor?: string): string {
 }
 
 /**
- * How each ordering reads on the screen. The names of the contract say what is compared
- * and in which direction; these say what a visitor is choosing between.
- */
-const SORT_LABELS: Record<ListingSort, string> = {
-  newest: "Newest",
-  oldest: "Oldest",
-  priceAsc: "Price: low to high",
-  priceDesc: "Price: high to low",
-};
-
-/**
- * The ordering of a catalogue nobody has asked anything of — the same default
- * `listingQuerySchema` writes, because this side has to know which of the four is the
- * current one before the query is parsed.
- */
-const DEFAULT_SORT: ListingSort = "newest";
-
-/**
- * The four orderings the contract offers, each of them a link to this same search under it.
+ * The orderings the contract offers, each of them a link to this same search under it.
  *
  * An address rather than a value submitted somewhere: the ordering lives in the address
  * bar like every filter, so switching it survives a reload and is undone by the browser's
  * Back button — the select in the toolbar navigates to the link of the option it was
- * given. The set is `listingSortSchema.options` rather than a list written out here, so a
- * fifth ordering added to the contract appears on the screen with a label and nothing else
- * to remember.
- *
- * The default leaves no trace in the URL — a catalogue ordered by what has just appeared
- * is the bare `/listings` — so the value is dropped rather than spelled out when it is the
- * one the schema would have chosen anyway.
+ * given. The default leaves no trace in the URL — a catalogue ordered by what has just
+ * appeared is the bare `/listings`.
  */
 export function sortOptions(values: FilterValues): SortOption[] {
-  const current = currentSort(values.sort);
-
-  return listingSortSchema.options.map((value) => ({
-    value,
-    label: SORT_LABELS[value],
-    href: catalogueHref({
-      ...values,
-      sort: value === DEFAULT_SORT ? "" : value,
-    }),
-    current: value === current,
-  }));
+  return listingSortOptions(values, catalogueHref);
 }
 
 /**
@@ -161,103 +117,22 @@ export function sortOptions(values: FilterValues): SortOption[] {
  * so clearing the filters leaves it where the visitor put it.
  */
 export function clearedFiltersHref(values: FilterValues): string {
-  return catalogueHref({
-    from: "",
-    to: "",
-    minPrice: "",
-    maxPrice: "",
-    guests: "",
-    sort: values.sort,
-  });
-}
-
-/**
- * Which of the four is on. Nothing in the URL means the default; something the contract
- * refuses means none of them is marked — the parse has already refused the search, and the
- * message beside the box is what says so rather than an option pretending to be current.
- */
-function currentSort(value: string): ListingSort | null {
-  if (value === "") return DEFAULT_SORT;
-
-  const parsed = listingSortSchema.safeParse(value);
-
-  return parsed.success ? parsed.data : null;
+  return catalogueHref(withoutListingFilters(values));
 }
 
 /**
  * A filter as a chip: what it says, and the link that takes it off. Removing one is a
  * link rather than a button for the same reason searching is a `GET` form — the filters
  * live in the address bar, so taking one away is another address, and it needs neither
- * JavaScript nor a round trip through an action to be spelled.
+ * JavaScript nor a round trip through an action to be spelled. The link is written
+ * without a cursor, see `catalogueHref`.
  */
-export type ActiveFilter = {
-  key: string;
-  label: string;
-  /** The same search without this filter — and without a cursor, see `catalogueHref`. */
-  href: string;
-};
+export type ActiveFilter = FilterChip;
 
 /**
- * What this visitor is currently filtering by, as chips.
- *
- * The dates are one chip rather than two, and that is the contract's rule showing through:
- * `listingQuerySchema` refuses half a range, so taking away the check-in of a search that
- * still has a check-out would leave a link the catalogue cannot answer. They go together
- * because they arrived together.
- *
- * A value that is not a day or not a number is shown as it was typed. It reaches here
- * out of a URL, so it is untrusted text like everything else in `searchParams`: the
- * parse has already refused the search, and the chip's job is to name what was asked for
- * so that it can be taken off again.
+ * What this visitor is currently filtering by, as chips — the dates as one, the reason
+ * and the labels are in `listingFilterChips`.
  */
 export function activeFilters(values: FilterValues): ActiveFilter[] {
-  const filters: ActiveFilter[] = [];
-
-  if (values.from !== "" || values.to !== "") {
-    filters.push({
-      key: "dates",
-      label: `${dayLabelOrAny(values.from)} → ${dayLabelOrAny(values.to)}`,
-      href: catalogueHref({ ...values, from: "", to: "" }),
-    });
-  }
-
-  if (values.minPrice !== "") {
-    filters.push({
-      key: "minPrice",
-      label: `From ${priceLabel(values.minPrice)} a night`,
-      href: catalogueHref({ ...values, minPrice: "" }),
-    });
-  }
-
-  if (values.maxPrice !== "") {
-    filters.push({
-      key: "maxPrice",
-      label: `Up to ${priceLabel(values.maxPrice)} a night`,
-      href: catalogueHref({ ...values, maxPrice: "" }),
-    });
-  }
-
-  if (values.guests !== "") {
-    filters.push({
-      key: "guests",
-      label: guestsLabel(values.guests),
-      href: catalogueHref({ ...values, guests: "" }),
-    });
-  }
-
-  return filters;
-}
-
-/** A count of guests, agreed with its noun — or the text as it arrived, like the price. */
-function guestsLabel(value: string): string {
-  const count = Number(value);
-
-  return Number.isInteger(count) ? countOf(count, "guest") : `${value} guests`;
-}
-
-/** A price on its way to a screen, like everywhere else — or the text as it arrived. */
-function priceLabel(value: string): string {
-  const amount = Number(value);
-
-  return Number.isFinite(amount) ? formatMoney(amount) : value;
+  return listingFilterChips(values, catalogueHref);
 }

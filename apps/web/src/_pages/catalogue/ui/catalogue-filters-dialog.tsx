@@ -13,9 +13,10 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@repo/ui/components/dialog";
+import { ListingFilterFields } from "#features/listing-search";
 import { ROUTES } from "#shared/config";
 import type { FieldErrors } from "#shared/lib";
-import { ButtonLink, FilterField, FilterForm } from "#shared/ui";
+import { ButtonLink, FilterForm } from "#shared/ui";
 import {
   catalogueHref,
   clearedFiltersHref,
@@ -111,52 +112,10 @@ export const CatalogueFiltersDialog = ({
           onNavigate={() => setOpen(false)}
         >
           <div className="grid gap-4 sm:grid-cols-2">
-            <FilterField
-              name="from"
-              label="Check in"
-              type="date"
-              min={earliest}
-              value={values.from}
-              error={errors.from}
-            />
-            <FilterField
-              name="to"
-              label="Check out"
-              type="date"
-              min={earliest}
-              value={values.to}
-              error={errors.to}
-            />
-            <FilterField
-              name="minPrice"
-              label="Price from"
-              type="number"
-              min={0}
-              step={0.01}
-              value={values.minPrice}
-              error={errors.minPrice}
-              description="Per night."
-            />
-            <FilterField
-              name="maxPrice"
-              label="Price to"
-              type="number"
-              // A cent, not zero: a ceiling of nothing is a search with no answer, and the
-              // contract says so with `positive()` where `minPrice` says `nonnegative()`.
-              // The box agrees with it rather than sending a value it will refuse.
-              min={0.01}
-              step={0.01}
-              value={values.maxPrice}
-              error={errors.maxPrice}
-              description="120.50 is a hundred and twenty fifty."
-            />
-            <FilterField
-              name="guests"
-              label="Guests"
-              type="number"
-              min={1}
-              value={values.guests}
-              error={errors.guests}
+            <ListingFilterFields
+              values={values}
+              errors={errors}
+              earliest={earliest}
             />
           </div>
 
