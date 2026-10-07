@@ -1,10 +1,12 @@
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@repo/ui/components/field";
+import { Button } from "@repo/ui/components/button";
+import { Field, FieldError, FieldLabel } from "@repo/ui/components/field";
 import { Input } from "@repo/ui/components/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@repo/ui/components/popover";
+import { InfoIcon } from "lucide-react";
 import { fieldMessages } from "../lib";
 
 /**
@@ -19,6 +21,13 @@ import { fieldMessages } from "../lib";
  * The `id` is derived from the name rather than being the name: these boxes are portalled
  * into a dialog, and a label of theirs pointing at a bare `from` would follow whatever
  * else on the page ends up carrying that id.
+ *
+ * The description is a hint behind an icon beside the label rather than a line under the
+ * box: the dialog is a single column of boxes, and a paragraph under some of them breaks
+ * its rhythm. It is a popover that opens on hover, not a tooltip — Base UI's tooltip never
+ * opens on a tap, and a phone is where these dialogs are used most. The popup is only in
+ * the DOM while it is open, so the same text is kept as a visually hidden description of
+ * the box: a screen reader still hears it on focus.
  *
  * Uncontrolled on purpose. Nothing resets these — a submit is a navigation, and the values
  * come back out of the URL the server rendered from.
@@ -44,10 +53,35 @@ export const FilterField = ({
   description?: string;
 }) => {
   const id = `filter-${name}`;
+  const descriptionId =
+    description === undefined ? undefined : `${id}-description`;
 
   return (
     <Field data-invalid={error !== undefined}>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <div className="flex items-center gap-1">
+        <FieldLabel htmlFor={id}>{label}</FieldLabel>
+        {description !== undefined && (
+          <Popover>
+            <PopoverTrigger
+              openOnHover
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground"
+                  aria-label={`About ${label}`}
+                />
+              }
+            >
+              <InfoIcon />
+            </PopoverTrigger>
+            <PopoverContent side="top" className="w-auto max-w-96">
+              {description}
+            </PopoverContent>
+          </Popover>
+        )}
+      </div>
       <Input
         id={id}
         name={name}
@@ -65,9 +99,12 @@ export const FilterField = ({
         }
         defaultValue={value}
         aria-invalid={error !== undefined}
+        aria-describedby={descriptionId}
       />
       {description !== undefined && (
-        <FieldDescription>{description}</FieldDescription>
+        <span id={descriptionId} className="sr-only">
+          {description}
+        </span>
       )}
       <FieldError errors={fieldMessages(error)} />
     </Field>

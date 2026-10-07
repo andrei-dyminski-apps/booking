@@ -14,6 +14,7 @@ import { ROUTES } from "#shared/config";
 import {
   ButtonLink,
   NoMatchesNotice,
+  PageHeading,
   Pager,
   RefusedSearchNotice,
   StalePageNotice,
@@ -98,10 +99,7 @@ export const BookingsPage = async ({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">{scope.title}</h1>
-        <p className="text-sm text-muted-foreground">{scope.lead}</p>
-      </div>
+      <PageHeading title={scope.title} description={scope.lead} />
 
       <BookingsToolbar
         values={values}

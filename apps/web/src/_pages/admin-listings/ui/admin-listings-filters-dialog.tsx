@@ -79,17 +79,15 @@ export const AdminListingsFiltersDialog = ({
           }
           onNavigate={() => setOpen(false)}
         >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <FilterField
-                name="ownerId"
-                label="Owner"
-                type="text"
-                value={values.ownerId}
-                error={errors.ownerId}
-                description="The id from the address of an account's page."
-              />
-            </div>
+          <div className="grid gap-4">
+            <FilterField
+              name="ownerId"
+              label="Owner"
+              type="text"
+              value={values.ownerId}
+              error={errors.ownerId}
+              description="The id from the address of an account's page."
+            />
             <ListingFilterFields
               values={values}
               errors={errors}

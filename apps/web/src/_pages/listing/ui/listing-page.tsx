@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, UsersIcon } from "lucide-react";
+import { UsersIcon } from "lucide-react";
 import { Role, type Role as RoleName } from "@repo/contracts";
 import { Badge } from "@repo/ui/components/badge";
 import {
@@ -23,7 +23,7 @@ import {
   requireId,
   today,
 } from "#shared/lib";
-import { ButtonLink } from "#shared/ui";
+import { BackLink, ButtonLink } from "#shared/ui";
 import { buildMonths } from "../lib/months";
 import { AvailabilityCalendar } from "./availability-calendar";
 import { BookingForm } from "./booking-form";
@@ -93,15 +93,7 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-4">
-        <ButtonLink
-          href={ROUTES.catalogue}
-          variant="ghost"
-          size="sm"
-          className="-ml-2 self-start"
-        >
-          <ArrowLeftIcon />
-          All stays
-        </ButtonLink>
+        <BackLink href={ROUTES.catalogue}>All stays</BackLink>
 
         <div className="flex flex-col gap-3">
           <h1 className="text-3xl font-semibold tracking-tight text-balance">

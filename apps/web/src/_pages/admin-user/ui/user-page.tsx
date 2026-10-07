@@ -1,10 +1,5 @@
 import type { ReactNode } from "react";
-import {
-  ArrowLeftIcon,
-  CalendarCheckIcon,
-  CalendarIcon,
-  WarehouseIcon,
-} from "lucide-react";
+import { CalendarCheckIcon, CalendarIcon, WarehouseIcon } from "lucide-react";
 import { Role, type ManagedUserDetail } from "@repo/contracts";
 import { Badge } from "@repo/ui/components/badge";
 import {
@@ -25,7 +20,7 @@ import {
   formatMoment,
   requireId,
 } from "#shared/lib";
-import { ButtonLink } from "#shared/ui";
+import { BackLink, ButtonLink } from "#shared/ui";
 import { BlockButton } from "./block-button";
 import { RoleForm } from "./role-form";
 
@@ -44,15 +39,7 @@ export const UserPage = async ({ params }: PageProps<"/admin/users/[id]">) => {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4">
-        <ButtonLink
-          href={ROUTES.adminUsers}
-          variant="ghost"
-          size="sm"
-          className="-ml-2 self-start"
-        >
-          <ArrowLeftIcon />
-          All users
-        </ButtonLink>
+        <BackLink href={ROUTES.adminUsers}>All users</BackLink>
 
         <div className="flex flex-col gap-2">
           <h1 className="text-2xl font-semibold tracking-tight break-all">

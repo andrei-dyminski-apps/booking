@@ -10,7 +10,7 @@ import {
 } from "@repo/ui/components/empty";
 import { listingsApi, requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { ButtonLink } from "#shared/ui";
+import { ButtonLink, PageHeading } from "#shared/ui";
 import { ListingCard } from "./listing-card";
 
 /**
@@ -28,13 +28,10 @@ export const DashboardPage = async () => {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-end justify-between gap-4">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">
-            The listings you own. Guests book them; only you and an admin can
-            change them.
-          </p>
-        </div>
+        <PageHeading
+          title="Dashboard"
+          description="The listings you own. Guests book them; only you and an admin can change them."
+        />
 
         <ButtonLink href={ROUTES.newListing}>
           <PlusIcon />

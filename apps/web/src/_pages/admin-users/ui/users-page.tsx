@@ -12,6 +12,7 @@ import { requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
 import {
   NoMatchesNotice,
+  PageHeading,
   Pager,
   RefusedSearchNotice,
   StalePageNotice,
@@ -44,13 +45,10 @@ export const UsersPage = async ({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Users</h1>
-        <p className="text-sm text-muted-foreground">
-          Every account, newest first. Open one to change its role, block it, or
-          see its stays and listings.
-        </p>
-      </div>
+      <PageHeading
+        title="Users"
+        description="Every account, newest first. Open one to change its role, block it, or see its stays and listings."
+      />
 
       <UsersToolbar values={values} errors={errors} filters={filters} />
 

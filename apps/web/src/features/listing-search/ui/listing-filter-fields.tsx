@@ -4,7 +4,7 @@ import type { ListingFilterValues } from "../model/listing-filters";
 
 /**
  * The boxes of `listingQuerySchema`, as the filter dialog of either listings screen draws
- * them — dates, prices and guests, two to a row in the grid the dialog puts them in. The
+ * them — dates, prices and guests, one to a row in the grid the dialog puts them in. The
  * ordering is not one of them: it is the toolbar's select, carried by the form as a hidden
  * box of the dialog's own.
  */

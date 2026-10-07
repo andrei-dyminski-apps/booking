@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { ArrowLeftIcon, WarehouseIcon } from "lucide-react";
+import { WarehouseIcon } from "lucide-react";
 import { Role } from "@repo/contracts";
 import {
   Empty,
@@ -13,8 +13,9 @@ import { requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
 import { today } from "#shared/lib";
 import {
-  ButtonLink,
+  BackLink,
   NoMatchesNotice,
+  PageHeading,
   Pager,
   RefusedSearchNotice,
   StalePageNotice,
@@ -72,25 +73,19 @@ export const AdminListingsPage = async ({
   return (
     <div className="flex flex-col gap-6">
       {owner !== null && (
-        <ButtonLink
-          href={ROUTES.adminUser(owner.id)}
-          variant="ghost"
-          size="sm"
-          className="-ml-2 self-start"
-        >
-          <ArrowLeftIcon />
+        <BackLink href={ROUTES.adminUser(owner.id)}>
           Back to the account
-        </ButtonLink>
+        </BackLink>
       )}
 
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Listings</h1>
-        <p className="text-sm break-words text-muted-foreground">
-          {owner === null
+      <PageHeading
+        title="Listings"
+        description={
+          owner === null
             ? "Every listing on offer. An admin may edit or retire any of them; creating one stays the owner's."
-            : `What ${owner.email} has on offer.`}
-        </p>
-      </div>
+            : `What ${owner.email} has on offer.`
+        }
+      />
 
       <AdminListingsToolbar
         values={values}

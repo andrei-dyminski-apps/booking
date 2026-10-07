@@ -74,17 +74,15 @@ export const UsersFiltersDialog = ({
           }
           onNavigate={() => setOpen(false)}
         >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="sm:col-span-2">
-              <FilterField
-                name="email"
-                label="Email"
-                type="text"
-                value={values.email}
-                error={errors.email}
-                description="Any part of it, in any case."
-              />
-            </div>
+          <div className="grid gap-4">
+            <FilterField
+              name="email"
+              label="Email"
+              type="text"
+              value={values.email}
+              error={errors.email}
+              description="Any part of it, in any case."
+            />
 
             <FilterSelect
               name="role"

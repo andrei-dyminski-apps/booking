@@ -10,6 +10,7 @@ import {
 import { today } from "#shared/lib";
 import {
   NoMatchesNotice,
+  PageHeading,
   Pager,
   RefusedSearchNotice,
   StalePageNotice,
@@ -55,13 +56,10 @@ export const CataloguePage = async ({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Stays</h1>
-        <p className="text-sm text-muted-foreground">
-          Every listing on offer. The filters live in the address bar, so a
-          search is a link you can send.
-        </p>
-      </div>
+      <PageHeading
+        title="Stays"
+        description="Every listing on offer. The filters live in the address bar, so a search is a link you can send."
+      />
 
       <CatalogueToolbar
         values={values}

@@ -186,6 +186,7 @@ apps/web/
       lib/not-found.ts        # a 404 from the API, and an id a URL cannot carry
       lib/plural.ts           # a count and the noun it counts, made to agree
       lib/index.ts
+      ui/back-link.tsx        # the way up from a detail screen to its list
       ui/button-link.tsx      # a <Link> wearing the button classes, spelled once
       ui/filter-field.tsx     # one box of a search form, spelled once
       ui/filter-select.tsx    # …and one that picks out of a closed set
@@ -193,6 +194,7 @@ apps/web/
       ui/filter-form.tsx      # the `GET` form of a dialog, sent to the canonical URL
       ui/filter-chips.tsx     # what is applied, each chip a link that drops it
       ui/sort-select.tsx      # the orderings of a list, as one box
+      ui/page-heading.tsx     # a list screen's title and the line under it
       ui/pager.tsx            # forwards-only keyset paging: next, and back to the first
       ui/stale-page-notice.tsx  # what a list shows for a cursor the API will not read
       ui/refused-search-notice.tsx  # …and for a search the contract refuses
@@ -1044,7 +1046,9 @@ rather than in `src/shared`.
 component that knows this application's `FieldErrors`, or one whose whole job is to
 navigate with `useRouter`. The test is the dependency, not the size — anything that would
 have to import from `#shared/*` or from `next/*` is not a primitive and does not go into
-the package. Ten live there: `ButtonLink` — a `<Link>` wearing the button classes, the
+the package. Twelve live there: `PageHeading` — the title and the line under it at the top of
+a list screen —, `BackLink` — the ghost arrow link above a detail
+screen's heading, back to the list it was opened from —, `ButtonLink` — a `<Link>` wearing the button classes, the
 one spelling of "a link that looks like a button" (see below) —, `FormField`, the one box
 every form that submits is made of, and `FilterField`,
 `FilterForm`, `FilterChips`, `SortSelect`, `Pager`, `StalePageNotice`,
