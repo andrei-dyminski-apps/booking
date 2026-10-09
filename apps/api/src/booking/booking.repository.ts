@@ -144,7 +144,7 @@ export class BookingRepository {
     query: BookingQuery,
     cursor: BookingCursor | null,
   ): Promise<Page<Booking>> {
-    return this.findPage({ listing: { ownerId } }, query, cursor);
+    return this.findPage(againstListingsOf(ownerId), query, cursor);
   }
 
   /**
@@ -366,6 +366,16 @@ export class BookingRepository {
       hasMore: rows.length > query.limit,
     };
   }
+}
+
+/**
+ * The stays taken against this owner's listings — the owner's scope, written once because
+ * two reads narrow by it: the page of stays above, and the lookups that suggest what that
+ * page can be filtered by (`LookupRepository`), which must not offer an owner a guest or a
+ * listing their own list would never show.
+ */
+export function againstListingsOf(ownerId: string): Prisma.BookingWhereInput {
+  return { listing: { ownerId } };
 }
 
 /**

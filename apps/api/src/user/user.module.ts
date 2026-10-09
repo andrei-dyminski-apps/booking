@@ -9,7 +9,8 @@ import { UserService } from "./user.service";
   controllers: [UserController],
   providers: [UserService, UserRepository],
   // AuthService reads the account behind a login, a refresh and `/auth/me` through it —
-  // one repository per table, whichever module happens to need the rows.
+  // one repository per table, whichever module happens to need the rows. The lookups are
+  // the exception, and `LookupRepository` says why.
   exports: [UserRepository],
 })
 export class UserModule {}

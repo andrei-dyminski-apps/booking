@@ -13,6 +13,7 @@ import { z } from "zod";
 import { type Prisma, type User as UserRow } from "../generated/prisma/client";
 import { afterCreatedAt, CREATED_AT_ORDER, type Page } from "../common/paging";
 import { STILL_OFFERED } from "../listing/listing.repository";
+import { escapeLike } from "../prisma/escape-like";
 import {
   isPrismaError,
   PrismaErrorCode,
@@ -256,9 +257,8 @@ export class UserRepository {
  * The filters of `GET /users`, as a `where`. The address is a substring match — what an
  * admin remembers of somebody's address is a part of it — and a case-sensitive one: the
  * contract lower-cases the filter, and every stored address was lower-cased the same way
- * at registration, so an `ILIKE` would only add a `lower()` per row. No index serves it;
- * the table is read in the order of the one index it has, and the filter narrows that
- * walk.
+ * at registration, so an `ILIKE` would only add a `lower()` per row. The trigram index
+ * `users_email_trgm_idx` serves the match, the same one the account lookups read.
  */
 function userFilters(query: UserQuery): Prisma.UserWhereInput {
   return {
@@ -273,15 +273,6 @@ function userFilters(query: UserQuery): Prisma.UserWhereInput {
           blockedAt: query.status === UserStatus.BLOCKED ? { not: null } : null,
         }),
   };
-}
-
-/**
- * Prisma hands a `contains` to `LIKE` as it is, so `_` and `%` in what an admin typed would
- * match any character and any run of them — `john_doe` would find `johnxdoe` and `%` every
- * account. The backslash is the default escape character of `LIKE`, so it is escaped too.
- */
-function escapeLike(value: string): string {
-  return value.replace(/[\\%_]/g, "\\$&");
 }
 
 /**

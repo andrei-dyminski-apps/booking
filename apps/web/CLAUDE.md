@@ -170,6 +170,7 @@ apps/web/
       api/bookings.ts         # bookingsApi — the routes of the resource
       api/listings.ts         # listingsApi — the same, for the catalogue rows
       api/users.ts            # usersApi — the admin's routes over accounts
+      api/lookups.ts          # lookupsApi — what an id box suggests, abortable; nameOf for a page
       api/keyset-page.ts      # a stale cursor onto null, the one both paged reads share
       api/index.ts
       config/api-url.ts       # apiOrigin() and BFF_BASE_PATH
@@ -189,6 +190,8 @@ apps/web/
       ui/back-link.tsx        # the way up from a detail screen to its list
       ui/button-link.tsx      # a <Link> wearing the button classes, spelled once
       ui/filter-field.tsx     # one box of a search form, spelled once
+      ui/filter-label.tsx     # …its label and the hint beside it, shared with the next one
+      ui/lookup-field.tsx     # an id box filled in by name: suggestions paged as they scroll
       ui/filter-select.tsx    # …and one that picks out of a closed set
       ui/form-field.tsx       # one box of a form that submits, and the aria that ties it
       ui/filter-form.tsx      # the `GET` form of a dialog, sent to the canonical URL
@@ -801,9 +804,39 @@ another navigates with `useRouter`. What they compose — `Field`, `Input`, `Bad
 `Select`, `Empty` — is what lives in the design system.
 
 The rules below are written about the catalogue and hold for both, with two differences
-worth naming: the stays are personal, so that read is `no-store` and carries no tag; and one
-of its filters (`listingId`) is reached by a link on a card rather than by typing an id into
-a box, which is how an id-shaped filter stays usable at all.
+worth naming: the stays are personal, so that read is `no-store` and carries no tag; and
+`listingId` is also reached by a link on a card, which fills the box in through the URL.
+
+**An id filter is filled in by name** (`shared/ui/lookup-field.tsx`) — `ownerId` on the
+admin's listings, `listingId` and `guestId` on the stays. Nobody remembers a uuid, so the
+box is a combobox over `/lookups/*`: three characters of an address or a title are a
+search, a whole uuid is the one row it names, and what is picked travels in a hidden input
+as the id it always was — the URL, the contract, the chips and the canonical address do not
+know the box changed.
+
+- **The suggestions are the API's to scope**: each lookup answers with the rows its filter
+  can match for this session, so a suggestion is never a filter that empties the list.
+- **One request per pause, never one per letter**: the box waits 300 ms, and a keystroke
+  aborts whatever the previous one was waiting for (`signal` on `apiRequest`, joined with
+  the transport's timeout by hand — `AbortSignal.any` is newer than the browsers Next
+  targets). An abort, before the headers or while the body streams, arrives as
+  `ApiUnreachableError`.
+- **The list pages as it scrolls**: twenty at a time, the next page asked for with the
+  cursor the API handed back when the list nears its end — three letters can be half the
+  site's accounts. One page at a time: a ref guards the request, because two scroll events
+  can arrive before the render that shows it.
+- **A row the URL names only by id is named by the page, on the server** (`valueLabel`):
+  `lookupsApi.nameOf` asks the same lookup by the whole id once per render, beside the
+  list, and the chip reads the same name. Not the box — the dialog mounts it anew each time
+  it opens, and each opening would ask again. Where nothing answers, the box shows the id.
+- **Typed text that was not picked is submitted as it was typed**, a pasted id included: the
+  contract then answers it under the box, rather than the filter staying what it was. The
+  box keeps that text when its popup closes, which Base UI would otherwise reset to the
+  name of what was picked. A value the contract refused stays as it was typed, like in
+  every other box.
+- **It is a browser call by nature** — it runs on keystrokes in a box already on the
+  screen — and the dialog it lives in already needs JavaScript, so it costs nothing that
+  compact toolbar had not already spent.
 
 - **Every filter is a modal** (`catalogue-filters-dialog.tsx`), and the toolbar above the
   list is two controls: the button that opens it, with a count of what is applied, and the
@@ -1046,11 +1079,11 @@ rather than in `src/shared`.
 component that knows this application's `FieldErrors`, or one whose whole job is to
 navigate with `useRouter`. The test is the dependency, not the size — anything that would
 have to import from `#shared/*` or from `next/*` is not a primitive and does not go into
-the package. Twelve live there: `PageHeading` — the title and the line under it at the top of
+the package. Thirteen live there: `PageHeading` — the title and the line under it at the top of
 a list screen —, `BackLink` — the ghost arrow link above a detail
 screen's heading, back to the list it was opened from —, `ButtonLink` — a `<Link>` wearing the button classes, the
 one spelling of "a link that looks like a button" (see below) —, `FormField`, the one box
-every form that submits is made of, and `FilterField`,
+every form that submits is made of, and `FilterField`, `LookupField`,
 `FilterForm`, `FilterChips`, `SortSelect`, `Pager`, `StalePageNotice`,
 `RefusedSearchNotice` and `NoMatchesNotice`, the parts the
 catalogue and the stays screen search and page with. A component only one screen uses

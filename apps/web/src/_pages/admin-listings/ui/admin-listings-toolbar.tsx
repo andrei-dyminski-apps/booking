@@ -19,12 +19,15 @@ export const AdminListingsToolbar = ({
   errors,
   filters,
   earliest,
+  ownerLabel,
 }: {
   values: FilterValues;
   errors: FieldErrors;
   filters: ActiveFilter[];
   /** Today in UTC, computed on the server — see `CatalogueToolbar`. */
   earliest: string;
+  /** The owner's address, for the box that names them — see the dialog. */
+  ownerLabel: string | undefined;
 }) => {
   const hidden = messagesExcept(errors, "sort");
 
@@ -36,6 +39,7 @@ export const AdminListingsToolbar = ({
           errors={errors}
           earliest={earliest}
           count={filters.length}
+          ownerLabel={ownerLabel}
         />
 
         <SortSelect options={sortOptions(values)} error={errors.sort} />

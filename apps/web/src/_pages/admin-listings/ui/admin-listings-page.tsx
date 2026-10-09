@@ -92,6 +92,7 @@ export const AdminListingsPage = async ({
         errors={errors}
         filters={filters}
         earliest={today()}
+        ownerLabel={owner?.email}
       />
 
       {staleCursor && (

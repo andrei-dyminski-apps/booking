@@ -22,6 +22,8 @@ export const BookingsToolbar = ({
   errors,
   filters,
   byGuest,
+  listingLabel,
+  guestLabel,
 }: {
   values: FilterValues;
   errors: FieldErrors;
@@ -29,12 +31,16 @@ export const BookingsToolbar = ({
    * What is currently being filtered by, read once by the page: this row draws it as chips
    * and counts it on the button that opens the dialog, and the page asks the same list
    * whether there was a filter to blame for an empty result. It arrives already carrying
-   * the name of the listing where a row on the page resolved one — an id in a chip is
+   * the names of the listing and the guest where the page resolved them — an id in a chip is
    * something a visitor can only recognise, a name is something they can read.
    */
   filters: ActiveFilter[];
   /** Whether this role has a use for the guest box — see the dialog. */
   byGuest: boolean;
+  /** The title of the listing being filtered by, for the box that names it. */
+  listingLabel: string | undefined;
+  /** The address of the guest being filtered by, for the box that names them. */
+  guestLabel: string | undefined;
 }) => {
   // Everything the contract refused except the ordering, which has a control of its own to
   // sit under.
@@ -48,6 +54,8 @@ export const BookingsToolbar = ({
           errors={errors}
           count={filters.length}
           byGuest={byGuest}
+          listingLabel={listingLabel}
+          guestLabel={guestLabel}
         />
 
         <SortSelect options={sortOptions(values)} error={errors.sort} />

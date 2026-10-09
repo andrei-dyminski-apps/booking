@@ -7,6 +7,7 @@ export {
 } from "./auth";
 export { bookingsApi } from "./bookings";
 export { listingsApi } from "./listings";
+export { lookupsApi } from "./lookups";
 export { usersApi } from "./users";
 export {
   ApiResponseError,

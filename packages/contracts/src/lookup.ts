@@ -1,0 +1,67 @@
+import { z } from "zod";
+import { PAGING } from "./query.js";
+
+/**
+ * The shortest search a lookup answers. Fewer characters match too much of a table to be a
+ * question anybody is asking, and three is exactly one trigram — the unit of the index
+ * both searchable columns carry, so a search below it could not use the index at all.
+ */
+export const LOOKUP_MIN_LENGTH = 3;
+
+/**
+ * What a filter box asks while somebody types into it: the rows of one kind whose name
+ * contains `q`, regardless of case, or the one row whose id `q` is.
+ *
+ * **An id is matched whole or not at all.** A uuid is not something a person remembers a
+ * part of — it is pasted from an address — so a `q` that parses as one is an exact match on
+ * the id, and anything else is a search of the name. Part of a uuid would match names and
+ * ids alike, and nobody reads a list of rows that share four hex digits with what they
+ * typed.
+ *
+ * Paged like every other list here, because the answer has no ceiling: three letters of an
+ * address can be half of the site's accounts. The box asks for the next page as the list is
+ * scrolled to its end, with the `nextCursor` of the one before.
+ */
+export const lookupQuerySchema = z.object({
+  q: z
+    .string()
+    .trim()
+    .min(LOOKUP_MIN_LENGTH, {
+      message: `Type at least ${LOOKUP_MIN_LENGTH} characters`,
+    })
+    .max(254, { message: "A search is never longer than 254 characters" }),
+  ...PAGING,
+});
+
+/**
+ * One row as a filter box offers it: the id that goes into the URL, and the name a person
+ * picks it by — an address for an account, a title for a listing.
+ */
+export const lookupOptionSchema = z.object({
+  id: z.uuid(),
+  label: z.string(),
+});
+
+/**
+ * One page of matches, in the order of their names. `nextCursor` is `null` on the last
+ * page, exactly as on every other list of this API.
+ */
+export const lookupPageSchema = z.object({
+  items: z.array(lookupOptionSchema),
+  nextCursor: z.string().nullable(),
+});
+
+/**
+ * What a filter box can look up, one value per route of `/lookups`. Each answers with the
+ * rows its filter can actually match for the caller — the owners of what is on offer, the
+ * guests and the listings of the stays the caller may read — so a suggestion is never a
+ * filter that empties the list by construction.
+ */
+export const lookupKindSchema = z.enum(["owners", "guests", "listings"]);
+
+export const LookupKind = lookupKindSchema.enum;
+
+export type LookupQuery = z.infer<typeof lookupQuerySchema>;
+export type LookupOption = z.infer<typeof lookupOptionSchema>;
+export type LookupPage = z.infer<typeof lookupPageSchema>;
+export type LookupKind = z.infer<typeof lookupKindSchema>;

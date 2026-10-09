@@ -129,27 +129,35 @@ The three catalogue routes are the first cached reads in the application: `GET /
 Every route below except `/`, the four public `/auth/*` ones and the three reading routes
 of the catalogue is behind the global `JwtAuthGuard` and answers `401` without a session.
 
-| Method   | Path                         | What it does                                                                         |
-| -------- | ---------------------------- | ------------------------------------------------------------------------------------ |
-| `POST`   | `/auth/register`             | register and open a session; `400` — failed the schema, `409` — email is taken       |
-| `POST`   | `/auth/login`                | log in; `401` — wrong email or password, `403` — the account is blocked              |
-| `POST`   | `/auth/refresh`              | rotate the token pair; `401` — missing, spent or forged token, cookies cleared       |
-| `POST`   | `/auth/logout`               | end the session, `204`; answers the same without one                                 |
-| `GET`    | `/auth/me`                   | the current user; `401` — no session, the user is gone or blocked                    |
-| `GET`    | `/listings`                  | the catalogue: filters (`ownerId` among them), an ordering and a cursor; public      |
-| `GET`    | `/listings/mine`             | the caller's own listings; OWNER only                                                |
-| `GET`    | `/listings/:id`              | a single listing, `404` if missing or retired; public                                |
-| `GET`    | `/listings/:id/availability` | the nights already taken, for a `from`/`to` window; public                           |
-| `POST`   | `/listings`                  | create, the owner taken from the session; OWNER only                                 |
-| `PATCH`  | `/listings/:id`              | edit; OWNER (their own) or ADMIN, `403` otherwise                                    |
-| `DELETE` | `/listings/:id`              | retire, `204`; out of the catalogue, booked stays keep their record                  |
-| `GET`    | `/bookings`                  | one page of the stays the caller may see: filters, an ordering and a cursor          |
-| `GET`    | `/bookings/:id`              | a single booking; the guest, the owner of the listing or an admin                    |
-| `POST`   | `/bookings`                  | create a 15-minute hold; USER only, `404` — no such listing, `409` — dates are taken |
-| `DELETE` | `/bookings/:id`              | cancel, `204`; the guest or an admin. The row stays, with `status: CANCELLED`        |
-| `GET`    | `/users`                     | one page of accounts: role, status and address filters, a cursor; ADMIN only         |
-| `GET`    | `/users/:id`                 | one account with its stay and listing counts; ADMIN only                             |
-| `PATCH`  | `/users/:id`                 | change the role and/or block; ADMIN only, `403` on the caller's own account          |
+| Method   | Path                         | What it does                                                                          |
+| -------- | ---------------------------- | ------------------------------------------------------------------------------------- |
+| `POST`   | `/auth/register`             | register and open a session; `400` — failed the schema, `409` — email is taken        |
+| `POST`   | `/auth/login`                | log in; `401` — wrong email or password, `403` — the account is blocked               |
+| `POST`   | `/auth/refresh`              | rotate the token pair; `401` — missing, spent or forged token, cookies cleared        |
+| `POST`   | `/auth/logout`               | end the session, `204`; answers the same without one                                  |
+| `GET`    | `/auth/me`                   | the current user; `401` — no session, the user is gone or blocked                     |
+| `GET`    | `/listings`                  | the catalogue: filters (`ownerId` among them), an ordering and a cursor; public       |
+| `GET`    | `/listings/mine`             | the caller's own listings; OWNER only                                                 |
+| `GET`    | `/listings/:id`              | a single listing, `404` if missing or retired; public                                 |
+| `GET`    | `/listings/:id/availability` | the nights already taken, for a `from`/`to` window; public                            |
+| `POST`   | `/listings`                  | create, the owner taken from the session; OWNER only                                  |
+| `PATCH`  | `/listings/:id`              | edit; OWNER (their own) or ADMIN, `403` otherwise                                     |
+| `DELETE` | `/listings/:id`              | retire, `204`; out of the catalogue, booked stays keep their record                   |
+| `GET`    | `/bookings`                  | one page of the stays the caller may see: filters, an ordering and a cursor           |
+| `GET`    | `/bookings/:id`              | a single booking; the guest, the owner of the listing or an admin                     |
+| `POST`   | `/bookings`                  | create a 15-minute hold; USER only, `404` — no such listing, `409` — dates are taken  |
+| `DELETE` | `/bookings/:id`              | cancel, `204`; the guest or an admin. The row stays, with `status: CANCELLED`         |
+| `GET`    | `/users`                     | one page of accounts: role, status and address filters, a cursor; ADMIN only          |
+| `GET`    | `/users/:id`                 | one account with its stay and listing counts; ADMIN only                              |
+| `PATCH`  | `/users/:id`                 | change the role and/or block; ADMIN only, `403` on the caller's own account           |
+| `GET`    | `/lookups/owners`            | accounts with a listing on offer, by `q` — a part of the address or a whole id; ADMIN |
+| `GET`    | `/lookups/guests`            | the guests of the caller's stays, by `q`; OWNER (their listings') or ADMIN            |
+| `GET`    | `/lookups/listings`          | the listings of the caller's stays, retired included, by `q` — a part of the title    |
+
+The three lookups fill in the id filters of the admin's listings and of the stays: `q` is at
+least three characters, matched anywhere in the name regardless of case — or, when it is a
+whole uuid, only against the id. They are keyset-paged like the lists, in the order of the
+names.
 
 Overlapping dates on the same listing are rejected; back-to-back bookings (check-out on the day the next guest checks in) are allowed.
 

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { CalendarSearchIcon } from "lucide-react";
-import { Role, type Role as RoleName } from "@repo/contracts";
+import { LookupKind, Role, type Role as RoleName } from "@repo/contracts";
 import {
   Empty,
   EmptyContent,
@@ -9,7 +9,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@repo/ui/components/empty";
-import { requireUser } from "#shared/api";
+import { lookupsApi, requireUser } from "#shared/api";
 import { ROUTES } from "#shared/config";
 import {
   ButtonLink,
@@ -82,18 +82,25 @@ export const BookingsPage = async ({
   // and which addresses this one collapses is a decision of this slice.
   if (canonical !== null) redirect(canonical);
 
+  const byGuest = viewer.role !== Role.USER;
   // A question the contract refuses is not put to the API at all: the messages are under
-  // the boxes, and an unfiltered list beside them would read as the answer to it.
-  const page = query === null ? null : await readBookingsPage(query);
+  // the boxes, and an unfiltered list beside them would read as the answer to it. The names
+  // of the rows the filters name are read beside it — the chips read them, and so do the
+  // boxes in the dialog, which would otherwise ask again each time it opens. A guest has
+  // nobody to look up, so their `?guestId=` stays an id.
+  const [page, listingLabel, guestLabel] = await Promise.all([
+    query === null ? null : readBookingsPage(query),
+    lookupsApi.nameOf(LookupKind.listings, values.listingId),
+    byGuest ? lookupsApi.nameOf(LookupKind.guests, values.guestId) : undefined,
+  ]);
   const staleCursor = query !== null && page === null;
   const scope = SCOPE[viewer.role];
   // One read of what is on: the toolbar draws the same list as chips and counts it on the
   // button that opens the dialog, and the empty state asks whether there was a filter to
   // blame for it.
   const filters = activeFilters(values, {
-    // The name of the listing being filtered by, where a row on this page carries one.
-    listing: page?.items.find((stay) => stay.listingId === values.listingId)
-      ?.listing.title,
+    listing: listingLabel,
+    guest: guestLabel,
   });
   const filtered = filters.length > 0;
 
@@ -105,7 +112,9 @@ export const BookingsPage = async ({
         values={values}
         errors={errors}
         filters={filters}
-        byGuest={viewer.role !== Role.USER}
+        byGuest={byGuest}
+        listingLabel={listingLabel}
+        guestLabel={guestLabel}
       />
 
       {staleCursor && <StalePageNotice firstPageHref={bookingsHref(values)} />}

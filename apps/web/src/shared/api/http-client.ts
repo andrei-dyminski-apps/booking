@@ -67,6 +67,13 @@ type RequestOptions<T> = {
    * be nonsense in the first case and endless recursion in the second.
    */
   retryOnUnauthorized?: boolean;
+  /**
+   * The caller's own reason to give up — a search box abandoning the request for what was
+   * typed before the last keystroke. It joins the timeout below rather than replacing it,
+   * and its abort arrives as `ApiUnreachableError` like the timeout's does: the caller
+   * that aborted is the one place that knows to ignore it.
+   */
+  signal?: AbortSignal;
 };
 
 /**
@@ -206,6 +213,7 @@ async function send<T>({
   path,
   body,
   read,
+  signal,
 }: RequestOptions<T>): Promise<Response> {
   const headers = {
     ...(await serverHeaders(read)),
@@ -219,7 +227,7 @@ async function send<T>({
       // cookie and travels by default. `include` would still work and would still be
       // describing a topology this application no longer has.
       credentials: "same-origin",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: withTimeout(signal),
       headers,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       ...read,
@@ -228,6 +236,34 @@ async function send<T>({
     // Only a transport error means the API is not running: any status code is an answer.
     throw new ApiUnreachableError(cause);
   }
+}
+
+/**
+ * The timeout, joined with the caller's own signal where there is one. Joined by hand
+ * rather than with `AbortSignal.any`, which Safari only has from 17.4 and Firefox from 124
+ * — older than the browsers Next targets, and a `TypeError` there would read as an API
+ * that never answers. Either source aborts the request with its own reason, so a timeout
+ * still arrives as a `TimeoutError`.
+ */
+function withTimeout(signal: AbortSignal | undefined): AbortSignal {
+  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+
+  if (signal === undefined) return timeout;
+
+  const joined = new AbortController();
+
+  for (const source of [timeout, signal]) {
+    if (source.aborted) {
+      joined.abort(source.reason);
+      break;
+    }
+
+    source.addEventListener("abort", () => joined.abort(source.reason), {
+      once: true,
+    });
+  }
+
+  return joined.signal;
 }
 
 /** The browser reaches the API through the proxy of this origin; the server goes direct. */
@@ -246,9 +282,24 @@ async function settle<T>(
   // disguise itself as an unavailable API.
   if (hasNoBody(response)) return schema.parse(undefined);
 
-  const payload: unknown = await response.json();
+  const payload: unknown = await response.json().catch((error: unknown) => {
+    // The signal still covers the body: an abort or a timeout while it streams is the same
+    // event it is before the headers, and arrives the same way. Anything else — a body
+    // that is not JSON — is the drift above and is thrown as it is.
+    if (isAbort(error)) throw new ApiUnreachableError(error);
+
+    throw error;
+  });
 
   return schema.parse(payload);
+}
+
+/** What `fetch` and a body read throw when their signal fires: the caller's abort or the timeout. */
+function isAbort(error: unknown): boolean {
+  return (
+    error instanceof DOMException &&
+    (error.name === "AbortError" || error.name === "TimeoutError")
+  );
 }
 
 function canRetry<T>(

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { SlidersHorizontalIcon } from "lucide-react";
+import { LookupKind } from "@repo/contracts";
 import { Badge } from "@repo/ui/components/badge";
 import { Button } from "@repo/ui/components/button";
 import {
@@ -16,7 +17,7 @@ import {
 import { ListingFilterFields } from "#features/listing-search";
 import { ROUTES } from "#shared/config";
 import type { FieldErrors } from "#shared/lib";
-import { ButtonLink, FilterField, FilterForm } from "#shared/ui";
+import { ButtonLink, FilterForm, LookupField } from "#shared/ui";
 import {
   adminListingsHref,
   clearedFiltersHref,
@@ -33,6 +34,7 @@ export const AdminListingsFiltersDialog = ({
   errors,
   earliest,
   count,
+  ownerLabel,
 }: {
   values: FilterValues;
   errors: FieldErrors;
@@ -40,6 +42,8 @@ export const AdminListingsFiltersDialog = ({
   earliest: string;
   /** How many filters are on, for the badge on the button that opens this. */
   count: number;
+  /** The owner's address, where the page resolved `ownerId` to an account. */
+  ownerLabel: string | undefined;
 }) => {
   const [open, setOpen] = useState(false);
 
@@ -80,13 +84,15 @@ export const AdminListingsFiltersDialog = ({
           onNavigate={() => setOpen(false)}
         >
           <div className="grid gap-4">
-            <FilterField
+            <LookupField
               name="ownerId"
               label="Owner"
-              type="text"
+              kind={LookupKind.owners}
               value={values.ownerId}
+              valueLabel={ownerLabel}
               error={errors.ownerId}
-              description="The id from the address of an account's page."
+              placeholder="An address, or an account's id"
+              description="Any part of the owner's address, or the whole id from the address of their page."
             />
             <ListingFilterFields
               values={values}

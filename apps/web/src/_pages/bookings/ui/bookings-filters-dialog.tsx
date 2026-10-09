@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { SlidersHorizontalIcon } from "lucide-react";
+import { LookupKind } from "@repo/contracts";
 import { Badge } from "@repo/ui/components/badge";
 import { Button } from "@repo/ui/components/button";
 import {
@@ -15,7 +16,13 @@ import {
 } from "@repo/ui/components/dialog";
 import { ROUTES } from "#shared/config";
 import type { FieldErrors } from "#shared/lib";
-import { ButtonLink, FilterField, FilterForm, FilterSelect } from "#shared/ui";
+import {
+  ButtonLink,
+  FilterField,
+  FilterForm,
+  FilterSelect,
+  LookupField,
+} from "#shared/ui";
 import {
   bookingsHref,
   clearedFiltersHref,
@@ -40,15 +47,18 @@ import {
  * browser blocked in its own words would leave a visitor with a box they cannot correct by
  * pressing the only button in front of them.
  *
- * The two id boxes are text rather than a list of anything: an id names a row this screen
- * has no catalogue of — an owner's listings, every guest on the site — and the way they are
- * reached in practice is the link on a card, which fills this in through the URL.
+ * The two id boxes are filled in by name (`LookupField`): a part of a title or an address
+ * is looked up among the listings and the guests of the stays this session may read, and
+ * what is picked goes into the URL as the id it always was. The link on a card still fills
+ * them in through the URL, and the box then shows the name of what it names.
  */
 export const BookingsFiltersDialog = ({
   values,
   errors,
   count,
   byGuest,
+  listingLabel,
+  guestLabel,
 }: {
   values: FilterValues;
   errors: FieldErrors;
@@ -62,6 +72,10 @@ export const BookingsFiltersDialog = ({
    * that would be a rule in the wrong place.
    */
   byGuest: boolean;
+  /** The title of the listing being filtered by, where the page resolved it. */
+  listingLabel: string | undefined;
+  /** The address of the guest being filtered by, where the page resolved it. */
+  guestLabel: string | undefined;
 }) => {
   const [open, setOpen] = useState(false);
 
@@ -115,13 +129,15 @@ export const BookingsFiltersDialog = ({
               error={errors.status}
             />
 
-            <FilterField
+            <LookupField
               name="listingId"
               label="Listing"
-              type="text"
+              kind={LookupKind.listings}
               value={values.listingId}
+              valueLabel={listingLabel}
               error={errors.listingId}
-              description="The id from the address of a listing."
+              placeholder="A title, or a listing's id"
+              description="Any part of the title of a listing these stays were taken in, or its whole id."
             />
 
             {/*
@@ -144,13 +160,15 @@ export const BookingsFiltersDialog = ({
             />
 
             {byGuest && (
-              <FilterField
+              <LookupField
                 name="guestId"
                 label="Guest"
-                type="text"
+                kind={LookupKind.guests}
                 value={values.guestId}
+                valueLabel={guestLabel}
                 error={errors.guestId}
-                description="The id of the guest who took the stay."
+                placeholder="An address, or an account's id"
+                description="Any part of the address of the guest who took the stay, or their whole id."
               />
             )}
           </div>

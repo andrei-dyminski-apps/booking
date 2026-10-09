@@ -27,11 +27,12 @@ import type { CatalogueCursor } from "./catalogue-cursor";
  * class is already narrowed by it, and a caller cannot forget a filter it has no way to
  * spell. That is what makes the soft delete affordable — the rule is written once.
  *
- * The queries over `listings` written outside this file are in `BookingRepository`, and
- * each says which of the two it is: `findByIdWithListingOwner` deliberately does not
- * narrow at all, because it resolves the listing of a stay whether or not it is retired
- * and the stay is what the row was kept for, while the `FOR UPDATE` read inside `create`
- * checks `deleted_at` itself — the one place the check has to be atomic.
+ * Three queries over `listings` are written outside this file, and each says whether it
+ * narrows. `BookingRepository.findByIdWithListingOwner` deliberately does not, because it
+ * resolves the listing of a stay whether or not it is retired and the stay is what the
+ * row was kept for; `LookupRepository.findListings` does not either, for the same reason.
+ * The `FOR UPDATE` read inside `BookingRepository.create` checks `deleted_at` itself —
+ * the one place the check has to be atomic.
  *
  * The traffic goes the other way here: the catalogue's date filter asks which listings
  * have no stay holding the slot, and it imports that condition from `BookingRepository`

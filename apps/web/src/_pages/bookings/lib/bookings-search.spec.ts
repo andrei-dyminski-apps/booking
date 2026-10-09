@@ -361,6 +361,17 @@ describe("activeFilters", () => {
     });
   });
 
+  it("names a guest by their address where the page resolved one, and by their id otherwise", () => {
+    const values = { ...NO_FILTERS, guestId: LISTING_ID };
+
+    expect(
+      activeFilters(values, { guest: "guest@example.com" })[0],
+    ).toMatchObject({ label: "guest@example.com" });
+    expect(activeFilters(values)[0]).toMatchObject({
+      label: "Guest 6d0f2c1e…",
+    });
+  });
+
   it("carries a value the contract refuses as it was typed", () => {
     // It arrives out of a URL like every other filter: the parse has already refused the
     // search, and the chip is what lets a visitor take the refused filter off again.
