@@ -9,6 +9,8 @@ import {
   type BookedRange,
   type CreateListingInput,
   type Listing,
+  type ListingDetail,
+  type ListingPricing,
   type ListingQuery,
   type UpdateListingInput,
 } from "@repo/contracts";
@@ -28,6 +30,14 @@ const input: CreateListingInput = {
   description: "Two rooms under the roof and a wall of glass facing the water.",
   pricePerNight: 120,
   capacity: 4,
+};
+
+/** What a listing created without exceptions to its price has: none of either kind. */
+const NO_EXCEPTIONS: ListingPricing = { weekdays: {}, dates: [] };
+
+const weekendPricing: ListingPricing = {
+  weekdays: { fri: 150, sat: 160 },
+  dates: [{ date: "2099-12-31", price: 400 }],
 };
 
 /** The whole of a catalogue query, so a test names only the part it is about. */
@@ -63,6 +73,12 @@ class FakeListingRepository implements PublicOf<ListingRepository> {
 
   /** The ids `softDelete` has stamped: still stored, no longer offered to anybody. */
   readonly retired = new Set<string>();
+
+  /**
+   * The exceptions to each listing's price, apart from the row: they are a table of their
+   * own in storage, and a `Listing` answered by a write does not carry them.
+   */
+  readonly pricing = new Map<string, ListingPricing>();
 
   /**
    * Set to have a write lose the race against a retirement the read before it could not
@@ -106,18 +122,30 @@ class FakeListingRepository implements PublicOf<ListingRepository> {
     );
   }
 
+  findDetailById(id: string): Promise<ListingDetail | null> {
+    const stored = this.rows.get(id);
+
+    return Promise.resolve(
+      stored === undefined || this.retired.has(id)
+        ? null
+        : { ...stored, pricing: this.pricing.get(id) ?? NO_EXCEPTIONS },
+    );
+  }
+
   create(ownerId: string, listing: CreateListingInput): Promise<Listing> {
+    const { pricing, ...fields } = listing;
     const stored: Listing = {
       // Shaped like the real thing: a cursor carries the id and refuses one that is not a
       // uuid, so `listing-1` would make this fake unable to page.
       id: `00000000-0000-4000-8000-${String(this.rows.size + 1).padStart(12, "0")}`,
       ownerId,
-      ...listing,
+      ...fields,
       createdAt: "2026-08-20T12:00:00.000Z",
       updatedAt: "2026-08-20T12:00:00.000Z",
     };
 
     this.rows.set(stored.id, stored);
+    this.pricing.set(stored.id, pricing ?? NO_EXCEPTIONS);
 
     return Promise.resolve(stored);
   }
@@ -129,13 +157,17 @@ class FakeListingRepository implements PublicOf<ListingRepository> {
       return Promise.resolve(null);
     }
 
+    const { pricing, ...fields } = listing;
     const updated: Listing = {
       ...stored,
-      ...listing,
+      ...fields,
       updatedAt: "2026-08-21T12:00:00.000Z",
     };
 
     this.rows.set(id, updated);
+
+    // Replaced whole, never merged: see `pricing` on `createListingSchema`.
+    if (pricing !== undefined) this.pricing.set(id, pricing);
 
     return Promise.resolve(updated);
   }
@@ -378,6 +410,51 @@ describe("ListingService", () => {
     await expect(service.availability(id, window)).rejects.toThrow(
       NotFoundException,
     );
+  });
+
+  it("answers one listing with the exceptions to its price, and none for one created without", async () => {
+    const plain = await listedByOwner();
+    const priced = (
+      await service.create(OWNER_ID, { ...input, pricing: weekendPricing })
+    ).id;
+
+    await expect(service.findOne(plain)).resolves.toMatchObject({
+      pricePerNight: input.pricePerNight,
+      pricing: NO_EXCEPTIONS,
+    });
+    await expect(service.findOne(priced)).resolves.toMatchObject({
+      pricing: weekendPricing,
+    });
+  });
+
+  it("replaces the prices on an edit that carries them, and keeps them on one that does not", async () => {
+    const id = (
+      await service.create(OWNER_ID, { ...input, pricing: weekendPricing })
+    ).id;
+
+    await service.update(id, { capacity: 6 }, owner);
+    await expect(service.findOne(id)).resolves.toMatchObject({
+      pricing: weekendPricing,
+    });
+
+    const fridaysOnly: ListingPricing = { weekdays: { fri: 140 }, dates: [] };
+
+    await service.update(id, { pricing: fridaysOnly }, owner);
+    await expect(service.findOne(id)).resolves.toMatchObject({
+      capacity: 6,
+      pricing: fridaysOnly,
+    });
+  });
+
+  it("refuses to change the prices of somebody else's listing", async () => {
+    const id = await listedByOwner();
+
+    await expect(
+      service.update(id, { pricing: weekendPricing }, otherOwner),
+    ).rejects.toThrow(ForbiddenException);
+    await expect(service.findOne(id)).resolves.toMatchObject({
+      pricing: NO_EXCEPTIONS,
+    });
   });
 
   it("throws NotFoundException for an unknown id, before any ownership check", async () => {

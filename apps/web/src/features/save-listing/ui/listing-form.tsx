@@ -4,16 +4,22 @@ import { useId, type ReactNode } from "react";
 import {
   createListingSchema,
   type CreateListingInput,
-  type Listing,
+  type ListingDetail,
 } from "@repo/contracts";
 import { Button } from "@repo/ui/components/button";
-import { FieldError, FieldGroup } from "@repo/ui/components/field";
+import {
+  FieldError,
+  FieldGroup,
+  FieldSeparator,
+} from "@repo/ui/components/field";
 import { Input } from "@repo/ui/components/input";
 import { Textarea } from "@repo/ui/components/textarea";
 import { ROUTES } from "#shared/config";
 import { useActionForm } from "#shared/lib";
 import { ButtonLink, FormField } from "#shared/ui";
 import { saveListingAction } from "../api/save-listing-action";
+import { toNumber } from "../lib/to-number";
+import { PricingFields } from "./pricing-fields";
 
 /**
  * The one form two screens run: `listing` is what tells them apart, and it is also the id
@@ -21,14 +27,25 @@ import { saveListingAction } from "../api/save-listing-action";
  *
  * `createListingSchema` validates it here and again in the action, so a title of two
  * characters or a price with three decimals is refused in the box it was typed into. The
- * schema wants numbers and a box hands over text, which is what `toNumber` below is for.
+ * schema wants numbers and a box hands over text, which is what `toNumber` is for.
+ *
+ * The exceptions to the default price are part of the same form and the same save: the
+ * form always sends the whole set, which is what a `PATCH` carrying `pricing` replaces the
+ * stored one with — a date taken off the list here is a date without a price of its own.
  */
 export const ListingForm = ({
   listing,
+  earliest,
   cancelHref = ROUTES.dashboard,
   extraAction,
 }: {
-  listing?: Listing;
+  listing?: ListingDetail;
+  /**
+   * Today in UTC, from the server. A date price before it cannot be saved, and the cached
+   * row this form is filled from can still hold one that has passed since it was read —
+   * those are left off rather than handed back to be refused.
+   */
+  earliest: string;
   /** Where "Cancel" leads: the section of whoever is editing — an owner's or the admin's. */
   cancelHref?: string;
   /**
@@ -48,6 +65,11 @@ export const ListingForm = ({
       description: listing?.description ?? "",
       pricePerNight: listing?.pricePerNight,
       capacity: listing?.capacity,
+      pricing: {
+        weekdays: listing?.pricing.weekdays ?? {},
+        dates:
+          listing?.pricing.dates.filter(({ date }) => date >= earliest) ?? [],
+      },
     },
   });
 
@@ -84,8 +106,8 @@ export const ListingForm = ({
           <FormField
             form={form}
             name="pricePerNight"
-            label="Price per night"
-            description="Per night, to the cent: 120.50 is a hundred and twenty fifty."
+            label="Default price per night"
+            description="To the cent: 120.50 is a hundred and twenty fifty. A night costs this unless a price below says otherwise."
             options={{ setValueAs: toNumber }}
           >
             {(control) => (
@@ -125,6 +147,10 @@ export const ListingForm = ({
             )}
           </FormField>
 
+          <FieldSeparator />
+
+          <PricingFields form={form} pending={pending} earliest={earliest} />
+
           {message !== null && <FieldError>{message}</FieldError>}
         </FieldGroup>
       </form>
@@ -145,17 +171,3 @@ export const ListingForm = ({
     </div>
   );
 };
-
-/**
- * A box hands over text and the contract wants two numbers — a price to the cent and a
- * whole capacity. An empty box is not a zero: handing the schema `undefined` makes it say
- * the field is missing, which is what happened, instead of refusing a number nobody
- * typed. Text that is not a number at all becomes `NaN` and is refused as one.
- *
- * Not only text arrives here, though: `react-hook-form` runs a default value through
- * `setValueAs` too, and the listing being edited hands over numbers already.
- */
-function toNumber(value: string | number): number | undefined {
-  if (typeof value === "number") return value;
-  return value.trim() === "" ? undefined : Number(value);
-}

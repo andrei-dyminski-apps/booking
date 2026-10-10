@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import type { Listing } from "@repo/contracts";
+import type { ListingDetail } from "@repo/contracts";
 import { listingsApi } from "#shared/api";
 import { listingTag } from "#shared/config";
 import { orNotFound } from "#shared/lib";
@@ -24,7 +24,7 @@ import { orNotFound } from "#shared/lib";
 export async function ownListing(
   ownerId: string,
   id: string,
-): Promise<Listing> {
+): Promise<ListingDetail> {
   const listing = await orNotFound(
     listingsApi.get(id, {
       next: { revalidate: false, tags: [listingTag(id)] },

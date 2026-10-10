@@ -106,7 +106,9 @@ export function fieldMessages(
  * answer, for the reason `fieldMessages` above gives.
  */
 export function messagesOf(
-  error: FieldError | undefined,
+  // Partial: only `message` and `types` are read, and a group of boxes — a field array, a
+  // nested object — carries those without the `type` a single box's state always has.
+  error: Partial<FieldError> | undefined,
 ): string[] | undefined {
   if (error === undefined) return undefined;
 

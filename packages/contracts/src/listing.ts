@@ -1,4 +1,7 @@
+import { tz } from "@date-fns/tz";
+import { differenceInCalendarDays, parseISO } from "date-fns";
 import { z } from "zod";
+import { dayMessage, isDay, today } from "./day.js";
 import { blank, PAGING } from "./query.js";
 
 /**
@@ -93,6 +96,22 @@ const numberMessage =
   };
 
 /**
+ * One night's price, worded after the box it is typed into. The default price of a listing
+ * and every exception to it obey the same rules — more than zero, to the cent, under the
+ * ceiling — so the rules are written once and only the subject of the sentence differs.
+ */
+const nightPrice = (subject: string) =>
+  z
+    .number({
+      error: numberMessage(
+        `${subject} is required`,
+        `${subject} must be a number`,
+      ),
+    })
+    .positive({ message: `${subject} must be more than zero` })
+    .check(...MONEY);
+
+/**
  * A place to stay, owned by exactly one OWNER.
  *
  * `pricePerNight` is an amount of the currency itself — 120.50 is a hundred and twenty
@@ -116,15 +135,7 @@ export const listingSchema = z.object({
     .max(2000, {
       message: "A description may not be longer than 2000 characters",
     }),
-  pricePerNight: z
-    .number({
-      error: numberMessage(
-        "A price per night is required",
-        "A price per night must be a number",
-      ),
-    })
-    .positive({ message: "A price per night must be more than zero" })
-    .check(...MONEY),
+  pricePerNight: nightPrice("A price per night"),
   capacity: z
     .int({
       error: numberMessage(
@@ -138,6 +149,119 @@ export const listingSchema = z.object({
     }),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
+});
+
+/**
+ * The days of the week a price can be set for, Monday first — the order a calendar here
+ * draws them in.
+ */
+export const weekdaySchema = z.enum([
+  "mon",
+  "tue",
+  "wed",
+  "thu",
+  "fri",
+  "sat",
+  "sun",
+]);
+
+const WEEKDAY_PRICE = nightPrice("A weekday price").optional();
+
+/**
+ * A price for every night that falls on a given day of the week. A day left out costs the
+ * default price; an object rather than a list, because a day can have one price or none
+ * and a list would need a rule against naming Friday twice.
+ *
+ * Strict, unlike the other objects here: a `PATCH` carrying `pricing` replaces the whole
+ * set, so a key zod stripped as unknown — `Fri`, `friday` — would be a save that answers
+ * `200` and quietly takes every weekday price away.
+ */
+const weekdayPricesSchema = z.strictObject(
+  {
+    mon: WEEKDAY_PRICE,
+    tue: WEEKDAY_PRICE,
+    wed: WEEKDAY_PRICE,
+    thu: WEEKDAY_PRICE,
+    fri: WEEKDAY_PRICE,
+    sat: WEEKDAY_PRICE,
+    sun: WEEKDAY_PRICE,
+  } satisfies Record<z.infer<typeof weekdaySchema>, typeof WEEKDAY_PRICE>,
+  {
+    error: (issue) =>
+      issue.code === "unrecognized_keys"
+        ? `Not a day of the week: ${issue.keys.join(", ")}`
+        : undefined,
+  },
+);
+
+/**
+ * How many single dates a listing may price on its own. A year of them is more than any
+ * owner sets by hand, and the bound is what keeps `GET /listings/:id` — public and cached
+ * — from carrying a list nobody can see the end of.
+ */
+const MAX_DATE_PRICES = 366;
+
+/** The night that starts on `date` — the check-in day of a stay, never its check-out. */
+const datePriceSchema = z.object({
+  date: z.iso.date({
+    error: dayMessage(
+      "A date is required",
+      "A date must be written as YYYY-MM-DD",
+    ),
+  }),
+  price: nightPrice("A price for the date"),
+});
+
+/**
+ * What a write may set a date price for. Yesterday's price is a rule nobody can meet any
+ * more, so a write refuses one; the read does not, because a cached answer outlives the
+ * midnight that made one of its dates the past, and refusing to parse it would take the
+ * whole listing page down for a night that no longer matters.
+ */
+const datePriceInputSchema = datePriceSchema.refine(
+  (entry) => !isDay(entry.date) || entry.date >= today(),
+  { message: "A date price cannot be in the past", path: ["date"] },
+);
+
+/**
+ * The list of date prices, bounded and with one price per date. Two prices for one night
+ * would leave the rule that picks between them to whichever row a query returns first. A
+ * row whose date is not a day yet is left to its own message rather than counted.
+ */
+const datePrices = <Entry extends typeof datePriceSchema>(entry: Entry) =>
+  z
+    .array(entry)
+    .max(MAX_DATE_PRICES, {
+      message: `A listing may not price more than ${String(MAX_DATE_PRICES)} dates on their own`,
+    })
+    .refine(
+      (entries) => {
+        const days = entries.map(({ date }) => date).filter(isDay);
+
+        return new Set(days).size === days.length;
+      },
+      { message: "Each date may only have one price" },
+    );
+
+/**
+ * Every exception to a listing's default price. What a night costs is decided in one
+ * order, and it is part of what these fields mean: a price for that very date, then one
+ * for its day of the week, then `pricePerNight`. The most specific rule wins because it is
+ * the one somebody set deliberately for that night — a holiday is a Friday too.
+ * `nightlyPrice` (`pricing.ts`) is that order as code, the one both sides price a night by.
+ *
+ * The default stays on the listing itself — it is what the catalogue shows, filters and
+ * sorts by, and that is why the exceptions travel only with one listing rather than with
+ * every row of a page.
+ */
+export const listingPricingSchema = z.object({
+  weekdays: weekdayPricesSchema,
+  dates: datePrices(datePriceSchema),
+});
+
+/** The same, as a write sets it: `datePriceInputSchema` refuses a date in the past. */
+const listingPricingInputSchema = listingPricingSchema.extend({
+  dates: datePrices(datePriceInputSchema),
 });
 
 /**
@@ -158,17 +282,37 @@ export const listingSummarySchema = listingSchema.pick({
 });
 
 /**
+ * One listing as its own page reads it: the row, and every exception to its default
+ * price. Only `GET /listings/:id` answers with it — a page of the catalogue carries the
+ * default alone, and the exceptions are what a guest choosing dates on one listing needs.
+ */
+export const listingDetailSchema = listingSchema.extend({
+  pricing: listingPricingSchema,
+});
+
+/**
  * `ownerId` is omitted rather than optional: the owner is the signed-in user, taken from
  * the session on the server. Accepting it from the client would make the field a way to
  * create a listing in somebody else's name — the same reason the price of a stay is
  * computed by the server in phase 6 instead of being sent along with the booking.
  */
-export const createListingSchema = listingSchema.omit({
-  id: true,
-  ownerId: true,
-  createdAt: true,
-  updatedAt: true,
-});
+export const createListingSchema = listingSchema
+  .omit({
+    id: true,
+    ownerId: true,
+    createdAt: true,
+    updatedAt: true,
+  })
+  .extend({
+    /**
+     * Optional, and replaced whole when present: a listing created without it costs its
+     * default price every night, and a `PATCH` without it leaves the exceptions as they
+     * were. A `PATCH` with it is the complete set — a date missing from the list is a date
+     * that no longer has a price of its own — because a form shows every exception at
+     * once, and a merge would have no way to say that one was taken away.
+     */
+    pricing: listingPricingInputSchema.optional(),
+  });
 
 /**
  * A PATCH body: any subset of the editable fields, but not an empty one — an update that
@@ -286,13 +430,14 @@ export const listingPageSchema = z.object({
  */
 const MAX_WINDOW_NIGHTS = 366;
 
-const MS_PER_NIGHT = 24 * 60 * 60 * 1000;
+const IN_UTC = { in: tz("UTC") };
 
-/** Whole nights between two `YYYY-MM-DD` dates; both are read as UTC midnight, so it is exact. */
+/** Whole nights between two `YYYY-MM-DD` dates, both read as days in UTC. */
 const nights = (from: string, to: string): number =>
-  Math.round(
-    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) /
-      MS_PER_NIGHT,
+  differenceInCalendarDays(
+    parseISO(to, IN_UTC),
+    parseISO(from, IN_UTC),
+    IN_UTC,
   );
 
 export const availabilityQuerySchema = z
@@ -334,6 +479,9 @@ export const listingAvailabilitySchema = z.object({
 });
 
 export type Listing = z.infer<typeof listingSchema>;
+export type ListingDetail = z.infer<typeof listingDetailSchema>;
+export type ListingPricing = z.infer<typeof listingPricingSchema>;
+export type Weekday = z.infer<typeof weekdaySchema>;
 export type ListingSort = z.infer<typeof listingSortSchema>;
 export type ListingSummary = z.infer<typeof listingSummarySchema>;
 export type ListingQuery = z.infer<typeof listingQuerySchema>;

@@ -10,7 +10,7 @@ import { DeleteListingButton } from "#features/delete-listing";
 import { ListingForm } from "#features/save-listing";
 import { requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { requireId } from "#shared/lib";
+import { requireId, today } from "#shared/lib";
 import { ownListing } from "../api/own-listing";
 
 export const EditListingPage = async ({
@@ -32,6 +32,7 @@ export const EditListingPage = async ({
       <CardContent>
         <ListingForm
           listing={listing}
+          earliest={today()}
           extraAction={<DeleteListingButton listingId={listing.id} />}
         />
       </CardContent>

@@ -6,11 +6,13 @@ import {
   Role,
   bookingPageSchema,
   listingAvailabilitySchema,
+  listingDetailSchema,
   listingListSchema,
   listingPageSchema,
   listingSchema,
   type CreateListingInput,
   type ListingPage,
+  type ListingPricing,
 } from "@repo/contracts";
 import { AppModule } from "./../src/app.module";
 import { PrismaService } from "./../src/prisma/prisma.service";
@@ -497,6 +499,134 @@ describe("ListingController (e2e)", () => {
       .send({ pricePerNight: 135.5 })
       .expect(404);
     await owner.delete(`/listings/${listingId}`).expect(404);
+  });
+
+  it("stores the exceptions to a price, answers them on the listing alone, and replaces them whole", async () => {
+    const pricing: ListingPricing = {
+      weekdays: { fri: 150, sat: 160.5 },
+      dates: [
+        { date: inDays(20), price: 400 },
+        { date: inDays(10), price: 99.99 },
+      ],
+    };
+    const id = await publish({ pricing });
+
+    const detail = listingDetailSchema.parse(
+      (await anyone().get(`/listings/${id}`).expect(200)).body,
+    );
+
+    // The dates come back in the order of the calendar, not in the order they were sent.
+    expect(detail.pricing).toEqual({
+      weekdays: pricing.weekdays,
+      dates: [
+        { date: inDays(10), price: 99.99 },
+        { date: inDays(20), price: 400 },
+      ],
+    });
+
+    // A page of the catalogue carries the default alone.
+    const page = await anyone().get("/listings").expect(200);
+    expect(
+      (page.body as { items: Record<string, unknown>[] }).items.every(
+        (item) => !("pricing" in item),
+      ),
+    ).toBe(true);
+
+    // An edit that does not name the prices leaves them as they were...
+    await owner.patch(`/listings/${id}`).send({ capacity: 6 }).expect(200);
+    expect(
+      listingDetailSchema.parse(
+        (await anyone().get(`/listings/${id}`).expect(200)).body,
+      ).pricing,
+    ).toEqual(detail.pricing);
+
+    // ...and one that does is the whole set: what it leaves out is gone.
+    const fridaysOnly: ListingPricing = { weekdays: { fri: 140 }, dates: [] };
+
+    await owner
+      .patch(`/listings/${id}`)
+      .send({ pricing: fridaysOnly })
+      .expect(200);
+    expect(
+      listingDetailSchema.parse(
+        (await anyone().get(`/listings/${id}`).expect(200)).body,
+      ).pricing,
+    ).toEqual(fridaysOnly);
+  });
+
+  it("answers only the date prices still ahead, and drops the past ones on the next save", async () => {
+    // A date that has passed cannot be written over HTTP, so the row is put there the way
+    // time would have put it — by the calendar moving on after it was saved.
+    const prismaService = app.get(PrismaService);
+
+    await prismaService.listingDatePrice.createMany({
+      data: [
+        { listingId, date: new Date(inDays(-3)), price: 300 },
+        { listingId, date: new Date(inDays(3)), price: 200 },
+      ],
+    });
+
+    const read = async (): Promise<ListingPricing> =>
+      listingDetailSchema.parse(
+        (await anyone().get(`/listings/${listingId}`).expect(200)).body,
+      ).pricing;
+
+    expect((await read()).dates).toEqual([{ date: inDays(3), price: 200 }]);
+
+    await owner
+      .patch(`/listings/${listingId}`)
+      .send({ pricing: await read() })
+      .expect(200);
+
+    expect(
+      await prismaService.listingDatePrice.count({ where: { listingId } }),
+    ).toBe(1);
+  });
+
+  it("queues parallel saves of one listing's prices instead of colliding on the key", async () => {
+    // The same days in every set, so two saves interleaved between clearing and inserting
+    // would both insert `fri` and one of them would fail on the primary key.
+    const sets: ListingPricing[] = Array.from({ length: 10 }, (_, n) => ({
+      weekdays: { fri: 100 + n, sat: 200 + n },
+      dates: [{ date: inDays(7), price: 300 + n }],
+    }));
+
+    const responses = await Promise.all(
+      sets.map((pricing) =>
+        owner.patch(`/listings/${listingId}`).send({ pricing }),
+      ),
+    );
+
+    expect(responses.map(({ status }) => status)).toEqual(sets.map(() => 200));
+
+    // Whichever save went last, the stored set is one of them whole, never a mix.
+    const stored = listingDetailSchema.parse(
+      (await anyone().get(`/listings/${listingId}`).expect(200)).body,
+    ).pricing;
+
+    expect(sets).toContainEqual(stored);
+  });
+
+  it("refuses a date price in the past, twice for one date, or for a day of the week nobody has", async () => {
+    const send = (pricing: unknown) =>
+      owner.patch(`/listings/${listingId}`).send({ pricing });
+
+    await send({
+      weekdays: {},
+      dates: [{ date: inDays(-1), price: 100 }],
+    }).expect(400);
+    await send({
+      weekdays: {},
+      dates: [
+        { date: inDays(5), price: 100 },
+        { date: inDays(5), price: 120 },
+      ],
+    }).expect(400);
+    await send({ weekdays: { fri: 0 }, dates: [] }).expect(400);
+    await send({ weekdays: { fri: 150.555 }, dates: [] }).expect(400);
+    // Not a day of the week: refused rather than stripped, because a save that dropped the
+    // key would replace the set with an empty one and still answer 200.
+    await send({ weekdays: { Fri: 150 }, dates: [] }).expect(400);
   });
 
   it("rejects a body that does not pass the schema", async () => {

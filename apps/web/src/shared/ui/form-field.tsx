@@ -9,14 +9,10 @@ import {
   type UseFormRegisterReturn,
   type UseFormReturn,
 } from "react-hook-form";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@repo/ui/components/field";
+import { Field, FieldError } from "@repo/ui/components/field";
 import { fieldMessages, messagesOf } from "../lib";
 import { CharacterCount } from "./character-count";
+import { HintLabel, hintOf } from "./hint-label";
 
 /**
  * What the control is handed: everything `register` returns, plus the three attributes a
@@ -37,6 +33,9 @@ export type FormControl<Name extends string> = UseFormRegisterReturn<Name> & {
  * It is here rather than in `@repo/ui` for the reason `FilterField` beside it is: it
  * speaks `react-hook-form` and ends in this application's `fieldMessages`, while what it
  * composes — `Field`, `FieldLabel`, `FieldError` — is what lives in the design system.
+ *
+ * The description is a hint beside the label, drawn by `HintLabel` as it is in a filter
+ * dialog, rather than a line under the box: one spelling for every box that explains itself.
  *
  * The control is a child function rather than a prop, because the boxes differ: a
  * password reveals itself, a description is several lines, a price steps in cents. What
@@ -106,18 +105,15 @@ export const FormField = <Values extends FieldValues>({
   });
 
   const id = `field-${name}`;
-  const descriptionId =
-    description === undefined ? undefined : `${id}-description`;
+  const hint = hintOf(id, description);
   const countId = typeof limit === "number" ? `${id}-count` : undefined;
   const errorId = messages === undefined ? undefined : `${id}-error`;
-  const describedBy = [descriptionId, countId, errorId]
-    .filter(isText)
-    .join(" ");
+  const describedBy = [hint?.id, countId, errorId].filter(isText).join(" ");
 
   return (
     <Field data-invalid={invalid}>
       <div className="flex justify-between gap-6 items-end">
-        <FieldLabel htmlFor={id}>{label}</FieldLabel>
+        <HintLabel htmlFor={id} label={label} hint={hint} />
 
         {typeof limit === "number" && (
           <CharacterCount
@@ -136,10 +132,6 @@ export const FormField = <Values extends FieldValues>({
         "aria-invalid": invalid,
         "aria-describedby": describedBy === "" ? undefined : describedBy,
       })}
-
-      {description !== undefined && (
-        <FieldDescription id={descriptionId}>{description}</FieldDescription>
-      )}
 
       <FieldError id={errorId} errors={fieldMessages(messages)} />
     </Field>

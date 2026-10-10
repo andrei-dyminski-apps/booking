@@ -26,6 +26,7 @@ For changes in `apps/api`, additionally `pnpm test`.
 - The conversation with the user and commit messages are in Russian — they are not part of the tree.
 - TypeScript strict in every package, `apps/api` included: no `any`, no `@ts-ignore`, no `!` to silence `noUncheckedIndexedAccess`. If a type is not inferred — describe it explicitly.
 - Do not add new dependencies without need; first check whether something suitable is already in the repository.
+- Date arithmetic goes through `date-fns` v4, with the zone passed as the `in` option (`{ in: tz("UTC") }` from `@date-fns/tz` for the contract's `YYYY-MM-DD` days): `parseISO`, `addDays`, `eachDayOfInterval`, `differenceInCalendarDays`, `getISODay`, `format(day, "yyyy-MM-dd")`. Do not hand-roll it with `86_400_000`, `Date.parse(...T00:00:00.000Z)`, `toISOString().slice(0, 10)` or a `getUTCDay` shift.
 
 ## Git
 

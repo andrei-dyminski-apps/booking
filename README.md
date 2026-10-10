@@ -416,7 +416,7 @@ pnpm build          # build every package
 pnpm lint           # ESLint (formatting check included) + Steiger over the FSD structure of apps/web
 pnpm lint:fix       # ESLint --fix: autofixes + reformatting by Prettier
 pnpm check-types    # tsc --noEmit
-pnpm test           # unit tests: jest in apps/api, vitest in apps/web
+pnpm test           # unit tests: jest in apps/api, vitest in apps/web and packages/contracts
 pnpm format         # Prettier over **/*.{ts,tsx,md}
 ```
 
@@ -452,7 +452,7 @@ pnpm test           # unit, *.spec.ts next to the code; no database needed
 pnpm test:e2e       # e2e, apps/api/test/*.e2e-spec.ts; needs the database from docker-compose running
 ```
 
-`pnpm test` covers both applications, with a runner each: **Jest** in `apps/api`, where the specs run a service against fakes of its repositories through Nest's testing module, and **Vitest** in `apps/web`. What has a spec on the frontend is deliberately narrow — a parser whose input somebody else writes, which today means `?next=` after signing in ([`next-path.ts`](apps/web/src/shared/lib/next-path.ts)) and the `Set-Cookie` the proxy re-issues ([`session-cookies.ts`](apps/web/src/shared/api/session-cookies.ts)). Both are security decisions that a diff does not show, and neither is a component: a component that would break is one `check-types` and Steiger already refuse.
+`pnpm test` covers both applications, with a runner each: **Jest** in `apps/api`, where the specs run a service against fakes of its repositories through Nest's testing module, and **Vitest** in `apps/web` and in `packages/contracts` — the latter for `nightlyPrice`, the rule a night of a stay is priced by on both sides of the wire. What has a spec on the frontend is deliberately narrow — a parser whose input somebody else writes, which today means `?next=` after signing in ([`next-path.ts`](apps/web/src/shared/lib/next-path.ts)) and the `Set-Cookie` the proxy re-issues ([`session-cookies.ts`](apps/web/src/shared/api/session-cookies.ts)). Both are security decisions that a diff does not show, and neither is a component: a component that would break is one `check-types` and Steiger already refuse.
 
 All of them run through turbo, which builds `@repo/contracts` first — the specs import its schemas as values, and unlike `lint` and `check-types` they need the compiled `dist/`, not the sources.
 

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   listingAvailabilitySchema,
+  listingDetailSchema,
   listingListSchema,
   listingPageSchema,
   listingSchema,
@@ -8,6 +9,7 @@ import {
   type CreateListingInput,
   type Listing,
   type ListingAvailability,
+  type ListingDetail,
   type ListingPage,
   type ListingQuery,
   type UpdateListingInput,
@@ -42,11 +44,16 @@ export const listingsApi = {
       read,
     }),
 
-  get: (id: string, read: ReadOptions): Promise<Listing> =>
+  /**
+   * One listing with the exceptions to its default price — what its own page quotes a stay
+   * with and what its edit screens fill the price boxes from. A page of the catalogue
+   * carries the default alone.
+   */
+  get: (id: string, read: ReadOptions): Promise<ListingDetail> =>
     apiRequest({
       method: "GET",
       path: `/listings/${encodeURIComponent(id)}`,
-      schema: listingSchema,
+      schema: listingDetailSchema,
       read,
     }),
 

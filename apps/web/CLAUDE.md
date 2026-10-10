@@ -149,6 +149,8 @@ apps/web/
       admin-user/index.ts
     features/                 # a user action a second page also runs
       save-listing/ui/listing-form.tsx    # the one form the new and the edit screen run
+      save-listing/ui/pricing-fields.tsx  # …its weekday and date prices, saved with the row
+      save-listing/lib/to-number.ts       # a number box's text onto the contract's number
       save-listing/api/save-listing-action.ts
       save-listing/index.ts
       delete-listing/ui/delete-listing-button.tsx  # the owner's edit screen and the admin's
@@ -191,10 +193,10 @@ apps/web/
       ui/back-link.tsx        # the way up from a detail screen to its list
       ui/button-link.tsx      # a <Link> wearing the button classes, spelled once
       ui/filter-field.tsx     # one box of a search form, spelled once
-      ui/filter-label.tsx     # …its label and the hint beside it, shared with the next one
       ui/lookup-field.tsx     # an id box filled in by name: suggestions paged as they scroll
       ui/filter-select.tsx    # …and one that picks out of a closed set
       ui/form-field.tsx       # one box of a form that submits, and the aria that ties it
+      ui/hint-label.tsx       # the label of a box or a group, its description a hint beside it
       ui/filter-form.tsx      # the `GET` form of a dialog, sent to the canonical URL
       ui/filter-chips.tsx     # what is applied, each chip a link that drops it
       ui/sort-select.tsx      # the orderings of a list, as one box
@@ -699,6 +701,19 @@ rather than for the markup:
   there is no error, because `FieldError` renders
   nothing at all in that case and a reference to an element that is not there reads as no
   description rather than as an empty one.
+- **A description is a hint beside the label, never a paragraph under the box.** Every
+  box and every group of boxes that explains itself does it through
+  `shared/ui/hint-label.tsx`: `HintLabel` for a box — `FormField`, `FilterField` and
+  `LookupField` draw it from their `description` — and `HintFieldSet` for a group with a
+  `<legend>`, as the two price groups of the listing form are. A `FieldDescription` under
+  a box or a legend is not written by hand, and neither is the aria of a group: the text is
+  rendered twice, once in the popover and once visually hidden under the id `hintOf`
+  derives, and that id goes into the control's `aria-describedby` — or the fieldset's,
+  which `HintFieldSet` also points at the legend's text in `aria-labelledby`, because the
+  icon inside the legend would otherwise join the group's name. Every id is derived from
+  the one the component is handed, so no reference can name an element that is not there.
+  What stays a `FieldDescription` is a note about the whole form rather than one of its
+  boxes — the hold under the booking form, the resume under the login form.
 - **A bound on the length is a count, never a `maxLength`** (`limit`, drawn by
   `shared/ui/character-count.tsx`). A hundred characters of a title is not a number anybody
   counts on sight, so the box says how much of its allowance is gone; what it does not do
@@ -1206,7 +1221,7 @@ What has a spec here is narrow on purpose, and the rule is worth stating so the 
 not drift into testing the framework: **logic a reviewer cannot re-check by reading it once**
 — a parser whose input somebody else writes, a security gate, or an invariant that only
 breaks under concurrency or a malformed answer. Four kinds, all in `src/shared` or `_app`
-because that was where this logic lived until the catalogue arrived — the three specs in
+because that was where this logic lived until the catalogue arrived — the specs in
 `_pages/` are the same four kinds, on a layer rather than in a layer. None of them is a
 component:
 
@@ -1235,7 +1250,9 @@ component:
   (the trailing slash, the missing-env failure, the module-level cache) and
   `_pages/listing/lib/months.ts` (the half-open range the calendar shades, the month
   rollover, the Monday-first offset — a stay's check-out day drawn as taken would be a
-  free night the screen refuses to sell).
+  free night the screen refuses to sell). What a night of a stay costs is not here: the
+  booking form quotes by `nightlyPrice` from `@repo/contracts`, and its spec lives there,
+  because the payment has to charge by the same rule.
 
 A component is not tested: one that would break is one `check-types` and Steiger already
 refuse. Nor is a Server Action's own body once it is only forwarding to `authApi` and

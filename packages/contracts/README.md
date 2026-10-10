@@ -21,6 +21,8 @@ There is no `dev` script in this package on purpose. The root `pnpm dev` runs `t
 ## Rules
 
 - Contract only: schemas, the types inferred from them and contract constants. Business logic, database access and http clients do not belong here.
+- The one exception is a pure function that says what contract data means, when both sides have to apply it identically: `nightlyPrice` (`src/pricing.ts`) is the order in which a listing's prices apply to a night, which the listing page quotes by and the payment has to charge by. It reads no clock, no database and no environment.
+- Such a function gets a spec next to it (Vitest, `pnpm test` from the root): a quote and a charge that disagree would only show up as a complaint.
 - A schema describes what actually travels over the network. Internal models of `apps/api` stay in `apps/api`.
 - Change a schema — check both sides: `pnpm check-types` from the root reports the mismatch right away.
 - Error messages in schemas are written in English: they are returned by the API and read by developers.

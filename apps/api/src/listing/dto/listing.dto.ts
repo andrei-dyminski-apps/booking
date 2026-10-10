@@ -3,6 +3,7 @@ import {
   availabilityQuerySchema,
   createListingSchema,
   listingAvailabilitySchema,
+  listingDetailSchema,
   listingPageSchema,
   listingQuerySchema,
   listingSchema,
@@ -21,6 +22,9 @@ export class CreateListingDto extends createZodDto(createListingSchema) {}
 export class UpdateListingDto extends createZodDto(updateListingSchema) {}
 
 export class ListingDto extends createZodDto(listingSchema) {}
+
+/** `GET /listings/:id` alone: the row and the exceptions to its price. */
+export class ListingDetailDto extends createZodDto(listingDetailSchema) {}
 
 /**
  * A query string is a request the pipe validates like any other, and the DTO is what makes

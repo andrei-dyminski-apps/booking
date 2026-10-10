@@ -8,8 +8,8 @@ import { toFieldErrors, toFormErrors, type FormErrors } from "#shared/lib";
 
 /**
  * One action for both screens, because the form is one form: creating a listing and
- * editing one submit the same four fields, and which of the two happens is decided by
- * whether the page bound an id to it.
+ * editing one submit the same fields — the four of the row and the exceptions to its price
+ * — and which of the two happens is decided by whether the page bound an id to it.
  *
  * `createListingSchema` validates both, and it has already validated the same values in
  * the browser — this is the endpoint's own parse, because an action is reachable by
@@ -46,6 +46,9 @@ export async function saveListingAction(
   // save — so that read waits for a fresh answer. Every page of the catalogue now
   // describes something that is no longer true as well, and the rest of the site can be
   // shown the previous answer while a new one is fetched behind it: that is `"max"`.
+  //
+  // The exceptions to the price travel in the same read of the listing, so this one tag
+  // covers them too: the save that changes them is the save that changes the row.
   //
   // A listing that has just been created has no tag to update — nothing has read it yet,
   // and the id it would be spelled with is the one this answer only just handed back.

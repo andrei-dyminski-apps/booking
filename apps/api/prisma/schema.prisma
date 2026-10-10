@@ -119,6 +119,12 @@ model Listing {
   owner    User      @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   bookings Booking[]
 
+  /// The exceptions to `price_per_night`, which stays the default: a price for a day of
+  /// the week and a price for one date. Which of the three a night costs is decided by
+  /// `nightlyPrice` in `@repo/contracts`, not by the database.
+  weekdayPrices ListingWeekdayPrice[]
+  datePrices    ListingDatePrice[]
+
   @@index([ownerId])
   /// What the filter boxes of the stays look a listing up by: any part of its title,
   /// regardless of case (`GET /lookups/listings`). A btree cannot seek a `%part%`, a
@@ -135,6 +141,55 @@ model Listing {
   /// sort, so they are raw-SQL migrations (`index_offered_listings_for_the_catalogue`,
   /// `index_offered_listings_by_price`) like the EXCLUDE constraint above.
   @@map("listings")
+}
+
+/// Lower-case, unlike the other enums: these are the very values `weekdaySchema` in
+/// `@repo/contracts` names the keys of a listing's weekday prices with, so the row and the
+/// contract need no table between them.
+enum Weekday {
+  mon
+  tue
+  wed
+  thu
+  fri
+  sat
+  sun
+}
+
+/// What every night falling on `weekday` costs, instead of the listing's default. One row
+/// per day at most — the pair is the key — and a day without one costs the default.
+///
+/// Cascade, unlike the listing's other relations: a price is a property of the listing
+/// rather than a record of somebody else's, and nothing in the API hard-deletes a listing
+/// anyway — only the seed and the test cleanup do, and they should not have to name this
+/// table to do it. The price obeys the same `CHECK` as `listings.price_per_night`
+/// (`listing_weekday_prices_price_within_contract`, raw SQL in the migration that made the
+/// table), for the reason given there.
+model ListingWeekdayPrice {
+  listingId String  @map("listing_id") @db.Uuid
+  weekday   Weekday
+  price     Decimal @db.Decimal(10, 2)
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@id([listingId, weekday])
+  @@map("listing_weekday_prices")
+}
+
+/// What the night starting on `date` costs, ahead of both the weekday price and the
+/// default. The key is the pair again, which is what the contract's "one price per date"
+/// says on this end, and it is also the index the listing page reads the upcoming dates
+/// through. Past rows are not deleted on a timer: they stop being read the day they pass,
+/// and the next save of the listing's prices replaces the set, past rows included.
+model ListingDatePrice {
+  listingId String   @map("listing_id") @db.Uuid
+  date      DateTime @db.Date
+  price     Decimal  @db.Decimal(10, 2)
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@id([listingId, date])
+  @@map("listing_date_prices")
 }
 
 enum Role {

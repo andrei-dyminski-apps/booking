@@ -7,6 +7,7 @@ export {
   isDay,
   nightsBetween,
   today,
+  WEEKDAY_NAMES,
 } from "./dates";
 export {
   fieldMessages,

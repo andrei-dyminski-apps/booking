@@ -16,7 +16,7 @@ import {
 import { Field, FieldError } from "@repo/ui/components/field";
 import { lookupsApi } from "../api";
 import { fieldMessages } from "../lib";
-import { FilterLabel, filterHint } from "./filter-label";
+import { HintLabel, hintOf } from "./hint-label";
 
 /** How long typing has to pause before the box asks — one request per word, not per letter. */
 const DEBOUNCE_MS = 300;
@@ -88,7 +88,7 @@ export const LookupField = ({
   placeholder: string;
 }) => {
   const id = `filter-${name}`;
-  const hint = filterHint(id, description);
+  const hint = hintOf(id, description);
 
   const [selected, setSelected] = useState<LookupOption | null>(
     value === ""
@@ -208,7 +208,7 @@ export const LookupField = ({
 
   return (
     <Field data-invalid={error !== undefined}>
-      <FilterLabel htmlFor={id} label={label} hint={hint} />
+      <HintLabel htmlFor={id} label={label} hint={hint} />
 
       <Combobox
         items={items}

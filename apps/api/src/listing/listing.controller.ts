@@ -24,6 +24,7 @@ import {
   Role,
   type Listing,
   type ListingAvailability,
+  type ListingDetail,
   type ListingPage,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
@@ -36,6 +37,7 @@ import {
   AvailabilityQueryDto,
   CreateListingDto,
   ListingAvailabilityDto,
+  ListingDetailDto,
   ListingDto,
   ListingPageDto,
   ListingQueryDto,
@@ -119,12 +121,12 @@ export class ListingController {
   @Get(":id")
   @Public()
   @Throttle(CATALOGUE_READS)
-  @ApiOkResponse({ type: ListingDto })
+  @ApiOkResponse({ type: ListingDetailDto })
   @ApiNotFoundResponse({
     description: "The listing does not exist, or has been retired",
     type: ApiErrorDto,
   })
-  findOne(@Param("id", ParseUUIDPipe) id: string): Promise<Listing> {
+  findOne(@Param("id", ParseUUIDPipe) id: string): Promise<ListingDetail> {
     return this.listingService.findOne(id);
   }
 

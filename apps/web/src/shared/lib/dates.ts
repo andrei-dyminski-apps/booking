@@ -10,9 +10,21 @@
  * rather than as the bug it is.
  */
 
-const MS_PER_DAY = 86_400_000;
+import { tz } from "@date-fns/tz";
+import type { Weekday } from "@repo/contracts";
+import {
+  addDays as addDaysTo,
+  differenceInCalendarDays,
+  format,
+  isValid,
+  parseISO,
+} from "date-fns";
+
+const IN_UTC = { in: tz("UTC") };
 
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+const DAY_FORMAT = "yyyy-MM-dd";
 
 /**
  * Today in UTC, the way the contract means it. It is computed on the server and handed to
@@ -21,16 +33,16 @@ const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
  * difference would be reported on.
  */
 export function today(): string {
-  return toDay(new Date());
+  return format(new Date(), DAY_FORMAT, IN_UTC);
 }
 
 export function addDays(day: string, days: number): string {
-  return toDay(new Date(startOf(day) + days * MS_PER_DAY));
+  return format(addDaysTo(startOf(day), days), DAY_FORMAT);
 }
 
 /** How many nights a stay is: check-out is exclusive, so it is the plain difference. */
 export function nightsBetween(from: string, to: string): number {
-  return Math.round((startOf(to) - startOf(from)) / MS_PER_DAY);
+  return differenceInCalendarDays(startOf(to), startOf(from), IN_UTC);
 }
 
 /**
@@ -38,12 +50,27 @@ export function nightsBetween(from: string, to: string): number {
  * URL and out of a date input, and a browser with no date input hands over free text.
  */
 export function isDay(value: string): boolean {
-  return DAY_PATTERN.test(value) && !Number.isNaN(startOf(value));
+  return DAY_PATTERN.test(value) && isValid(startOf(value));
 }
+
+/**
+ * A day of the week for a person to read, keyed by the contract's own names — the keys a
+ * listing's weekday prices are stored under. Written out rather than asked of `Intl`: the
+ * contract's week starts on Monday and the names never change with the date.
+ */
+export const WEEKDAY_NAMES: Record<Weekday, string> = {
+  mon: "Monday",
+  tue: "Tuesday",
+  wed: "Wednesday",
+  thu: "Thursday",
+  fri: "Friday",
+  sat: "Saturday",
+  sun: "Sunday",
+};
 
 /** A day for a person to read. Fixed locale and time zone, for the reason above. */
 export function formatDay(day: string): string {
-  return dayFormat.format(new Date(startOf(day)));
+  return dayFormat.format(startOf(day));
 }
 
 /**
@@ -88,10 +115,6 @@ const momentFormat = new Intl.DateTimeFormat("en-GB", {
   timeZone: "UTC",
 });
 
-function startOf(day: string): number {
-  return Date.parse(`${day}T00:00:00.000Z`);
-}
-
-function toDay(moment: Date): string {
-  return moment.toISOString().slice(0, 10);
+function startOf(day: string): Date {
+  return parseISO(day, IN_UTC);
 }

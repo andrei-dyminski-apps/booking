@@ -1,5 +1,5 @@
 import { UsersIcon } from "lucide-react";
-import { Role, type Role as RoleName } from "@repo/contracts";
+import { Role, weekdaySchema, type Role as RoleName } from "@repo/contracts";
 import { Badge } from "@repo/ui/components/badge";
 import {
   Card,
@@ -19,9 +19,11 @@ import {
 import {
   addDays,
   formatMoney,
+  countOf,
   orNotFound,
   requireId,
   today,
+  WEEKDAY_NAMES,
 } from "#shared/lib";
 import { BackLink, ButtonLink } from "#shared/ui";
 import { buildMonths } from "../lib/months";
@@ -90,6 +92,13 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
     currentUser(),
   ]);
 
+  // The days of the week priced differently from the default, in the order of the week.
+  const weekdayPrices = weekdaySchema.options.flatMap((weekday) => {
+    const price = listing.pricing.weekdays[weekday];
+
+    return price === undefined ? [] : [{ weekday, price }];
+  });
+
   return (
     <div className="flex flex-col gap-8">
       <div className="flex flex-col gap-4">
@@ -108,6 +117,21 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
               Sleeps {listing.capacity}
             </Badge>
           </div>
+          {(weekdayPrices.length > 0 || listing.pricing.dates.length > 0) && (
+            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              {weekdayPrices.map(({ weekday, price }) => (
+                <Badge key={weekday} variant="outline" className="h-6">
+                  {WEEKDAY_NAMES[weekday]} {formatMoney(price)}
+                </Badge>
+              ))}
+              {listing.pricing.dates.length > 0 && (
+                <span>
+                  {countOf(listing.pricing.dates.length, "date")} priced on
+                  their own — the form below counts every night.
+                </span>
+              )}
+            </div>
+          )}
           <p className="max-w-2xl text-sm text-muted-foreground">
             {listing.description}
           </p>
@@ -160,7 +184,7 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
             ) : viewer.role === Role.USER ? (
               <BookingForm
                 listingId={listing.id}
-                pricePerNight={listing.pricePerNight}
+                prices={listing}
                 earliest={from}
               />
             ) : (

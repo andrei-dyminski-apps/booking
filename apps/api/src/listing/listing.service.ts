@@ -8,6 +8,7 @@ import type {
   CreateListingInput,
   Listing,
   ListingAvailability,
+  ListingDetail,
   ListingPage,
   ListingQuery,
   UpdateListingInput,
@@ -84,8 +85,15 @@ export class ListingService {
     return this.listingRepository.findByOwner(ownerId);
   }
 
-  findOne(id: string): Promise<Listing> {
-    return this.getListing(id);
+  /** The listing with the exceptions to its price — what its own page needs to quote a stay. */
+  async findOne(id: string): Promise<ListingDetail> {
+    const listing = await this.listingRepository.findDetailById(id);
+
+    if (listing === null) {
+      throw new NotFoundException(`Listing ${id} not found`);
+    }
+
+    return listing;
   }
 
   create(ownerId: string, input: CreateListingInput): Promise<Listing> {

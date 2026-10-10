@@ -1,6 +1,13 @@
 "use client";
 
-import { createBookingSchema, type CreateBookingInput } from "@repo/contracts";
+import {
+  createBookingSchema,
+  pricedNights,
+  stayTotal,
+  type CreateBookingInput,
+  type PricedListing,
+  type PricedNight,
+} from "@repo/contracts";
 import { Button } from "@repo/ui/components/button";
 import {
   FieldDescription,
@@ -23,9 +30,10 @@ import { createBookingAction } from "../api/create-booking-action";
  * this site that creates a booking, and until the payment step exists the hold it takes
  * lives out its fifteen minutes and lapses.
  *
- * The price is worked out here as the dates change, and it is worked out again by the
- * server when there is something to pay for — this number is what the guest is told, not
- * what they are charged. Nothing about it is sent: the API reads the nightly price off the
+ * The price is worked out here as the dates change, night by night — a weekend or a date
+ * priced on its own costs what the owner set for it (`nightlyPrice` in the contract, the
+ * rule the payment of phase 6 charges by too). This number is what the guest is told, not
+ * what they are charged. Nothing about it is sent: the API reads the prices off the
  * listing, which is why `createBookingSchema` has no amount on it at all.
  *
  * `createBookingSchema` is also what refuses a check-out before the check-in and a stay in
@@ -35,11 +43,12 @@ import { createBookingAction } from "../api/create-booking-action";
  */
 export const BookingForm = ({
   listingId,
-  pricePerNight,
+  prices,
   earliest,
 }: {
   listingId: string;
-  pricePerNight: number;
+  /** The default price and the exceptions to it, off the listing being booked. */
+  prices: PricedListing;
   /** Today in UTC, from the server — see `shared/lib/dates.ts`. */
   earliest: string;
 }) => {
@@ -53,7 +62,9 @@ export const BookingForm = ({
   const from = form.watch("from");
   const to = form.watch("to");
 
-  const nights = isDay(from) && isDay(to) ? nightsBetween(from, to) : 0;
+  const length = isDay(from) && isDay(to) ? nightsBetween(from, to) : 0;
+  const nights =
+    length > 0 && length <= QUOTED_NIGHTS ? pricedNights(prices, from, to) : [];
 
   return (
     // `method` is what a page with no scripts falls back to — see `register-form.tsx`.
@@ -96,11 +107,17 @@ export const BookingForm = ({
               Hold these dates
             </Button>
 
-            {nights > 0 && (
+            {nights.length > 0 && (
               <p className="text-sm">
-                {countOf(nights, "night")} × {formatMoney(pricePerNight)} ={" "}
+                {byPrice(nights)
+                  .map(
+                    ({ price, count }) =>
+                      `${countOf(count, "night")} × ${formatMoney(price)}`,
+                  )
+                  .join(" + ")}{" "}
+                ={" "}
                 <span className="font-semibold">
-                  {formatMoney(nights * pricePerNight)}
+                  {formatMoney(stayTotal(nights))}
                 </span>
               </p>
             )}
@@ -117,3 +134,29 @@ export const BookingForm = ({
     </form>
   );
 };
+
+/**
+ * The longest stay the form quotes as the dates are typed. A year typed a digit at a time
+ * passes through 0002 on its way to 2026, and a quote of every night between would be
+ * thousands of entries on a keystroke; the API refuses nothing of the kind on its own, so
+ * the bound is the screen's, and a stay longer than a year gets no line rather than a slow
+ * one.
+ */
+const QUOTED_NIGHTS = 366;
+
+/**
+ * The nights of a stay grouped by what they cost, in the order the prices first appear —
+ * `2 nights × 120.00 + 1 night × 150.00` reads as a sum, where one line per night would be
+ * a list as long as the stay.
+ */
+function byPrice(
+  nights: readonly PricedNight[],
+): { price: number; count: number }[] {
+  const counts = new Map<number, number>();
+
+  for (const { price } of nights) {
+    counts.set(price, (counts.get(price) ?? 0) + 1);
+  }
+
+  return [...counts].map(([price, count]) => ({ price, count }));
+}

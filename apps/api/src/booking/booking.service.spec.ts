@@ -1,3 +1,4 @@
+import { tz } from "@date-fns/tz";
 import {
   BadRequestException,
   ConflictException,
@@ -6,6 +7,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
+import { addDays, format, parseISO } from "date-fns";
 import { randomUUID } from "node:crypto";
 import {
   bookingQuerySchema,
@@ -50,12 +52,10 @@ const input: CreateBookingInput = {
   to: "2026-09-05",
 };
 
-const MS_PER_DAY = 86_400_000;
+const IN_UTC = { in: tz("UTC") };
 
 const day = (offset: number): string =>
-  new Date(Date.parse("2026-09-01T00:00:00.000Z") + offset * MS_PER_DAY)
-    .toISOString()
-    .slice(0, 10);
+  format(addDays(parseISO("2026-09-01", IN_UTC), offset), "yyyy-MM-dd");
 
 /**
  * The nth stay of a fixture that needs several: a week apart, so no two of them overlap

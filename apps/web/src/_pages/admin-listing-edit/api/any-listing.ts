@@ -1,4 +1,4 @@
-import type { Listing } from "@repo/contracts";
+import type { ListingDetail } from "@repo/contracts";
 import { listingsApi } from "#shared/api";
 import { listingTag } from "#shared/config";
 import { orNotFound } from "#shared/lib";
@@ -12,7 +12,7 @@ import { orNotFound } from "#shared/lib";
  * same for everybody, and `updateTag` in the action that saves it is what keeps the admin
  * from editing a stale copy.
  */
-export function anyListing(id: string): Promise<Listing> {
+export function anyListing(id: string): Promise<ListingDetail> {
   return orNotFound(
     listingsApi.get(id, {
       next: { revalidate: false, tags: [listingTag(id)] },

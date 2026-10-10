@@ -1,7 +1,7 @@
 import { Field, FieldError } from "@repo/ui/components/field";
 import { Input } from "@repo/ui/components/input";
 import { fieldMessages } from "../lib";
-import { FilterLabel, filterHint } from "./filter-label";
+import { HintLabel, hintOf } from "./hint-label";
 
 /**
  * One box of a search form — its label, its messages and the two attributes that have to
@@ -18,7 +18,7 @@ import { FilterLabel, filterHint } from "./filter-label";
  *
  * The description is a hint behind an icon beside the label rather than a line under the
  * box: the dialog is a single column of boxes, and a paragraph under some of them breaks
- * its rhythm. `FilterLabel` draws it, and says why it is kept a second time as a visually
+ * its rhythm. `HintLabel` draws it, and says why it is kept a second time as a visually
  * hidden description of the box.
  *
  * Uncontrolled on purpose. Nothing resets these — a submit is a navigation, and the values
@@ -45,11 +45,11 @@ export const FilterField = ({
   description?: string;
 }) => {
   const id = `filter-${name}`;
-  const hint = filterHint(id, description);
+  const hint = hintOf(id, description);
 
   return (
     <Field data-invalid={error !== undefined}>
-      <FilterLabel htmlFor={id} label={label} hint={hint} />
+      <HintLabel htmlFor={id} label={label} hint={hint} />
       <Input
         id={id}
         name={name}

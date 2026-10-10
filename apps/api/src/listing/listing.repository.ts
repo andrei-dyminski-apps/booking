@@ -1,7 +1,12 @@
 import { Injectable } from "@nestjs/common";
+import { tz } from "@date-fns/tz";
+import { format } from "date-fns";
+import { weekdaySchema, type Weekday } from "@repo/contracts";
 import type {
   CreateListingInput,
   Listing,
+  ListingDetail,
+  ListingPricing,
   ListingQuery,
   ListingSort,
   UpdateListingInput,
@@ -10,6 +15,8 @@ import { holdsTheSlot, overlapping } from "../booking/booking.repository";
 import {
   type Prisma,
   type Listing as ListingRow,
+  type ListingDatePrice as DatePriceRow,
+  type ListingWeekdayPrice as WeekdayPriceRow,
 } from "../generated/prisma/client";
 import { afterCreatedAt, CREATED_AT_ORDER, type Page } from "../common/paging";
 import { isPrismaError, PrismaErrorCode } from "../prisma/prisma.errors";
@@ -93,9 +100,43 @@ export class ListingRepository {
     return row === null ? null : toListing(row);
   }
 
+  /**
+   * The row with the exceptions to its price — what the listing's own page reads. Only the
+   * date prices from today (UTC) on: a past night is never booked again, and the contract
+   * caps how many dates a listing may price, so the ones that have passed should not count
+   * against a list the owner sees and edits.
+   */
+  async findDetailById(id: string): Promise<ListingDetail | null> {
+    const today = format(new Date(), "yyyy-MM-dd", { in: tz("UTC") });
+    const row = await this.prismaService.listing.findFirst({
+      where: { id, ...STILL_OFFERED },
+      include: {
+        weekdayPrices: true,
+        datePrices: {
+          where: { date: { gte: new Date(today) } },
+          orderBy: { date: "asc" },
+        },
+      },
+    });
+
+    return row === null
+      ? null
+      : {
+          ...toListing(row),
+          pricing: toPricing(row.weekdayPrices, row.datePrices),
+        };
+  }
+
+  /** One statement, nested writes included, so a listing never exists without its prices. */
   async create(ownerId: string, input: CreateListingInput): Promise<Listing> {
+    const { pricing, ...fields } = input;
+
     const row = await this.prismaService.listing.create({
-      data: { ...input, ownerId },
+      data: {
+        ...fields,
+        ownerId,
+        ...(pricing === undefined ? {} : pricingRows(pricing)),
+      },
     });
 
     return toListing(row);
@@ -106,12 +147,28 @@ export class ListingRepository {
    * read that authorized this update and the update itself. Retired is gone here too:
    * editing a listing nobody is offered is a write the owner has no way to see the result
    * of.
+   *
+   * Prices present in the input replace the whole set, past dates included. The listing
+   * row is written first and inside the same transaction, and that order is the point: the
+   * `UPDATE` locks the row, so two saves of the same listing's prices run one after the
+   * other instead of both clearing the set and then colliding on the key as each inserts
+   * its own. With prices in the input `updatedAt` is stamped explicitly, and both halves
+   * hang on that stamp: given nested writes alone, Prisma issues no `UPDATE` of the row at
+   * all — `@updatedAt` is left as it was and nothing is locked. Without prices there is
+   * nothing to lock for, and `@updatedAt` stamps the row on its own.
    */
   async update(id: string, input: UpdateListingInput): Promise<Listing | null> {
+    const { pricing, ...fields } = input;
+
     try {
       const row = await this.prismaService.listing.update({
         where: { id, ...STILL_OFFERED },
-        data: input,
+        data: {
+          ...fields,
+          ...(pricing === undefined
+            ? {}
+            : { updatedAt: new Date(), ...pricingRows(pricing, true) }),
+        },
       });
 
       return toListing(row);
@@ -268,5 +325,70 @@ function toListing(row: ListingRow): Listing {
     capacity: row.capacity,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * The prices as nested writes of the listing. `replace` clears the old set first — inside
+ * the same statement, so the listing is never seen with half a set — which is what makes a
+ * `PATCH` carrying prices the whole of them rather than a merge.
+ */
+function pricingRows(
+  pricing: ListingPricing,
+  replace = false,
+): Pick<Prisma.ListingUpdateInput, "weekdayPrices" | "datePrices"> &
+  Pick<Prisma.ListingCreateInput, "weekdayPrices" | "datePrices"> {
+  const weekdays = Object.entries(pricing.weekdays).flatMap(
+    ([weekday, price]) =>
+      price === undefined ? [] : [{ weekday: weekdayOf(weekday), price }],
+  );
+  const dates = pricing.dates.map(({ date, price }) => ({
+    // A `YYYY-MM-DD` parses as UTC midnight, which is what a `@db.Date` holds.
+    date: new Date(date),
+    price,
+  }));
+
+  return {
+    weekdayPrices: {
+      ...(replace ? { deleteMany: {} } : {}),
+      create: weekdays,
+    },
+    datePrices: {
+      ...(replace ? { deleteMany: {} } : {}),
+      create: dates,
+    },
+  };
+}
+
+/**
+ * `Object.entries` widens the keys of `weekdays` back to `string`; the parse narrows one
+ * again without a cast, and the input was validated against the same enum before it got
+ * here, so the throw is unreachable from a request.
+ */
+function weekdayOf(key: string): Weekday {
+  const parsed = weekdaySchema.safeParse(key);
+
+  if (!parsed.success) throw new Error(`${key} is not a day of the week`);
+
+  return parsed.data;
+}
+
+/**
+ * The exception rows onto the contract. The `Decimal` becomes a `number` here for the
+ * reason `toListing` gives, and the date is cut back to its day the way `BookingRepository`
+ * cuts a stay's.
+ */
+function toPricing(
+  weekdayRows: WeekdayPriceRow[],
+  dateRows: DatePriceRow[],
+): ListingPricing {
+  return {
+    weekdays: Object.fromEntries(
+      weekdayRows.map((row) => [row.weekday, row.price.toNumber()]),
+    ),
+    dates: dateRows.map((row) => ({
+      date: format(row.date, "yyyy-MM-dd", { in: tz("UTC") }),
+      price: row.price.toNumber(),
+    })),
   };
 }

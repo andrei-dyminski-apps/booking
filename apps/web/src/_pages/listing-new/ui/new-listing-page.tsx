@@ -9,6 +9,7 @@ import {
 import { ListingForm } from "#features/save-listing";
 import { requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
+import { today } from "#shared/lib";
 
 export const NewListingPage = async () => {
   await requireRole(Role.OWNER, ROUTES.newListing);
@@ -23,7 +24,7 @@ export const NewListingPage = async () => {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <ListingForm />
+        <ListingForm earliest={today()} />
       </CardContent>
     </Card>
   );

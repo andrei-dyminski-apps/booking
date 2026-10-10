@@ -6,6 +6,7 @@ import {
   BookingStatus,
   PrismaClient,
   Role,
+  Weekday,
 } from "../src/generated/prisma/client";
 
 const connectionString = process.env.DATABASE_URL;
@@ -54,6 +55,11 @@ type UserKey = keyof typeof users;
 /**
  * Prices are the currency itself, to the cent: 120 is a hundred and twenty a night. The
  * owner holds most of the catalogue and the second host the last two listings.
+ *
+ * `pricePerNight` is the default; a few listings carry the exceptions as well — dearer
+ * weekends, a cheaper midweek, a few dates priced on their own — so the listing page has
+ * a stay whose nights do not all cost the same to quote. The dates are days from the run,
+ * for the reason `inDays` below gives.
  */
 const listings: Array<{
   owner: UserKey;
@@ -61,6 +67,8 @@ const listings: Array<{
   description: string;
   pricePerNight: number;
   capacity: number;
+  weekdayPrices?: Partial<Record<Weekday, number>>;
+  datePrices?: Array<{ inDays: number; price: number }>;
 }> = [
   {
     owner: "owner",
@@ -69,6 +77,11 @@ const listings: Array<{
       "Two rooms under the roof, a wall of glass facing the water and a kitchen that fits four.",
     pricePerNight: 120,
     capacity: 4,
+    weekdayPrices: { fri: 150, sat: 150 },
+    datePrices: [
+      { inDays: 30, price: 199 },
+      { inDays: 31, price: 199 },
+    ],
   },
   {
     owner: "owner",
@@ -77,6 +90,7 @@ const listings: Array<{
       "A wood stove, a long table and nothing within earshot but the forest road.",
     pricePerNight: 85,
     capacity: 6,
+    weekdayPrices: { mon: 70, tue: 70, wed: 70, thu: 70 },
   },
   {
     owner: "owner",
@@ -109,6 +123,8 @@ const listings: Array<{
       "A deck facing west, an outdoor shower and sand from the bottom step onwards.",
     pricePerNight: 165,
     capacity: 8,
+    weekdayPrices: { sat: 195, sun: 195 },
+    datePrices: [{ inDays: 45, price: 250 }],
   },
   {
     owner: "host",
@@ -197,8 +213,26 @@ async function main(): Promise<void> {
   };
 
   const rooms = await Promise.all(
-    listings.map(({ owner, ...listing }) =>
-      prisma.listing.create({ data: { ...listing, ownerId: idOf(owner) } }),
+    listings.map(({ owner, weekdayPrices = {}, datePrices = [], ...listing }) =>
+      prisma.listing.create({
+        data: {
+          ...listing,
+          ownerId: idOf(owner),
+          weekdayPrices: {
+            create: Object.values(Weekday).flatMap((weekday) => {
+              const price = weekdayPrices[weekday];
+
+              return price === undefined ? [] : [{ weekday, price }];
+            }),
+          },
+          datePrices: {
+            create: datePrices.map((entry) => ({
+              date: inDays(entry.inDays),
+              price: entry.price,
+            })),
+          },
+        },
+      }),
     ),
   );
 

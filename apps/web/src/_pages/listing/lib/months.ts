@@ -1,4 +1,16 @@
+import { tz } from "@date-fns/tz";
 import type { BookedRange } from "@repo/contracts";
+import {
+  addMonths,
+  eachDayOfInterval,
+  endOfMonth,
+  format,
+  getISODay,
+  parseISO,
+  startOfMonth,
+} from "date-fns";
+
+const IN_UTC = { in: tz("UTC") };
 
 /** One cell of the calendar. A day is either on offer, already taken, or behind us. */
 export type CalendarDay = {
@@ -36,29 +48,24 @@ export function buildMonths(
   booked: readonly BookedRange[],
   today: string,
 ): CalendarMonth[] {
-  const start = new Date(`${anchor}T00:00:00.000Z`);
+  const start = startOfMonth(parseISO(anchor, IN_UTC));
   const months: CalendarMonth[] = [];
 
   for (let index = 0; index < count; index += 1) {
-    const first = new Date(
-      Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + index, 1),
-    );
-    const days: CalendarDay[] = [];
+    const first = addMonths(start, index);
+    const days = eachDayOfInterval(
+      { start: first, end: endOfMonth(first) },
+      IN_UTC,
+    ).map((cursor): CalendarDay => {
+      const day = format(cursor, "yyyy-MM-dd");
 
-    for (
-      const cursor = new Date(first);
-      cursor.getUTCMonth() === first.getUTCMonth();
-      cursor.setUTCDate(cursor.getUTCDate() + 1)
-    ) {
-      const day = cursor.toISOString().slice(0, 10);
-
-      days.push({ day, taken: isTaken(day, booked), past: day < today });
-    }
+      return { day, taken: isTaken(day, booked), past: day < today };
+    });
 
     months.push({
       label: monthLabel.format(first),
-      // The week starts on Monday here, and `getUTCDay` counts from Sunday.
-      offset: (first.getUTCDay() + 6) % 7,
+      // The week starts on Monday here, and the ISO count gives Monday 1.
+      offset: getISODay(first) - 1,
       days,
     });
   }
