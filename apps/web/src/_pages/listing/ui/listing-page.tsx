@@ -26,9 +26,11 @@ import {
   WEEKDAY_NAMES,
 } from "#shared/lib";
 import { BackLink, ButtonLink } from "#shared/ui";
+import { readListingReviews } from "../api/read-listing-reviews";
 import { buildMonths } from "../lib/months";
 import { AvailabilityCalendar } from "./availability-calendar";
 import { BookingForm } from "./booking-form";
+import { ListingReviews } from "./listing-reviews";
 
 /**
  * Three months is what the calendar draws, and the window has to reach the end of the
@@ -41,6 +43,9 @@ import { BookingForm } from "./booking-form";
  */
 const CALENDAR_MONTHS = 3;
 const CALENDAR_DAYS = 92;
+
+/** How many reviews the listing's screen draws under the summary of all of them. */
+const REVIEWS_SHOWN = 10;
 
 /**
  * Why an account that is not a guest has no form. Keyed by the two roles that reach it
@@ -67,7 +72,11 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
   // for the row before asking who is reading it was a round trip spent on nothing. It
   // stays outside the cached pair, and it must — a session attached to a cached request
   // would be handed to whoever asks for the same URL next.
-  const [[listing, availability], viewer] = await Promise.all([
+  //
+  // The reviews are the third public read, tagged on their own for the same reason, and
+  // they sit outside `orNotFound`: a failure of theirs is drawn as a notice in their
+  // place rather than taking the page down — see `readListingReviews`.
+  const [[listing, availability], reviews, viewer] = await Promise.all([
     orNotFound(
       Promise.all([
         // No lifetime beside the tag, unlike the availability: nothing about the row
@@ -89,6 +98,7 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
         ),
       ]),
     ),
+    readListingReviews(id, REVIEWS_SHOWN),
     currentUser(),
   ]);
 
@@ -197,6 +207,14 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
             )}
           </CardContent>
         </Card>
+
+        <Separator />
+
+        <ListingReviews
+          listingId={listing.id}
+          page={reviews}
+          moderating={viewer?.role === Role.ADMIN}
+        />
       </div>
     </div>
   );

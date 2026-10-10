@@ -111,6 +111,7 @@ Routing belongs to Next.js and everything else to Feature-Sliced Design, so each
 | `/listings`                        | the catalogue: filters in the URL, keyset pages, cached and tagged    | everyone    |
 | `/listings/:id`                    | one listing, its availability calendar and the form that takes a hold | everyone    |
 | `/bookings`                        | stays in the caller's scope: filters in the URL, keyset pages         | signed in   |
+| `/guests/:id/reviews`              | what hosts said about one guest, for the guest and their hosts        | signed in   |
 | `/login`, `/register`              | the session forms, submitted to Server Actions                        | everyone    |
 | `/profile`                         | the session as the API sees it, and "Sign out"                        | signed in   |
 | `/dashboard`                       | the owner's own listings                                              | OWNER       |
@@ -126,38 +127,50 @@ The three catalogue routes are the first cached reads in the application: `GET /
 
 ## Endpoints
 
-Every route below except `/`, the four public `/auth/*` ones and the three reading routes
-of the catalogue is behind the global `JwtAuthGuard` and answers `401` without a session.
+Every route below except `/`, the four public `/auth/*` ones, the three reading routes
+of the catalogue and a listing's reviews is behind the global `JwtAuthGuard` and answers `401` without a session.
 
-| Method   | Path                         | What it does                                                                          |
-| -------- | ---------------------------- | ------------------------------------------------------------------------------------- |
-| `POST`   | `/auth/register`             | register and open a session; `400` — failed the schema, `409` — email is taken        |
-| `POST`   | `/auth/login`                | log in; `401` — wrong email or password, `403` — the account is blocked               |
-| `POST`   | `/auth/refresh`              | rotate the token pair; `401` — missing, spent or forged token, cookies cleared        |
-| `POST`   | `/auth/logout`               | end the session, `204`; answers the same without one                                  |
-| `GET`    | `/auth/me`                   | the current user; `401` — no session, the user is gone or blocked                     |
-| `GET`    | `/listings`                  | the catalogue: filters (`ownerId` among them), an ordering and a cursor; public       |
-| `GET`    | `/listings/mine`             | the caller's own listings; OWNER only                                                 |
-| `GET`    | `/listings/:id`              | a single listing, `404` if missing or retired; public                                 |
-| `GET`    | `/listings/:id/availability` | the nights already taken, for a `from`/`to` window; public                            |
-| `POST`   | `/listings`                  | create, the owner taken from the session; OWNER only                                  |
-| `PATCH`  | `/listings/:id`              | edit; OWNER (their own) or ADMIN, `403` otherwise                                     |
-| `DELETE` | `/listings/:id`              | retire, `204`; out of the catalogue, booked stays keep their record                   |
-| `GET`    | `/bookings`                  | one page of the stays the caller may see: filters, an ordering and a cursor           |
-| `GET`    | `/bookings/:id`              | a single booking; the guest, the owner of the listing or an admin                     |
-| `POST`   | `/bookings`                  | create a 15-minute hold; USER only, `404` — no such listing, `409` — dates are taken  |
-| `DELETE` | `/bookings/:id`              | cancel, `204`; the guest or an admin. The row stays, with `status: CANCELLED`         |
-| `GET`    | `/users`                     | one page of accounts: role, status, name and address filters, a cursor; ADMIN only    |
-| `GET`    | `/users/:id`                 | one account with its stay and listing counts; ADMIN only                              |
-| `PATCH`  | `/users/:id`                 | change the role and/or block; ADMIN only, `403` on the caller's own account           |
-| `GET`    | `/lookups/owners`            | accounts with a listing on offer, by `q` — a part of the address or a whole id; ADMIN |
-| `GET`    | `/lookups/guests`            | the guests of the caller's stays, by `q`; OWNER (their listings') or ADMIN            |
-| `GET`    | `/lookups/listings`          | the listings of the caller's stays, retired included, by `q` — a part of the title    |
+| Method   | Path                         | What it does                                                                           |
+| -------- | ---------------------------- | -------------------------------------------------------------------------------------- |
+| `POST`   | `/auth/register`             | register and open a session; `400` — failed the schema, `409` — email is taken         |
+| `POST`   | `/auth/login`                | log in; `401` — wrong email or password, `403` — the account is blocked                |
+| `POST`   | `/auth/refresh`              | rotate the token pair; `401` — missing, spent or forged token, cookies cleared         |
+| `POST`   | `/auth/logout`               | end the session, `204`; answers the same without one                                   |
+| `GET`    | `/auth/me`                   | the current user; `401` — no session, the user is gone or blocked                      |
+| `GET`    | `/listings`                  | the catalogue: filters (`ownerId` among them), an ordering and a cursor; public        |
+| `GET`    | `/listings/mine`             | the caller's own listings; OWNER only                                                  |
+| `GET`    | `/listings/:id`              | a single listing, `404` if missing or retired; public                                  |
+| `GET`    | `/listings/:id/availability` | the nights already taken, for a `from`/`to` window; public                             |
+| `POST`   | `/listings`                  | create, the owner taken from the session; OWNER only                                   |
+| `PATCH`  | `/listings/:id`              | edit; OWNER (their own) or ADMIN, `403` otherwise                                      |
+| `DELETE` | `/listings/:id`              | retire, `204`; out of the catalogue, booked stays keep their record                    |
+| `GET`    | `/bookings`                  | one page of the stays the caller may see: filters, an ordering and a cursor            |
+| `GET`    | `/bookings/:id`              | a single booking; the guest, the owner of the listing or an admin                      |
+| `POST`   | `/bookings`                  | create a 15-minute hold; USER only, `404` — no such listing, `409` — dates are taken   |
+| `DELETE` | `/bookings/:id`              | cancel, `204`; the guest or an admin. The row stays, with `status: CANCELLED`          |
+| `GET`    | `/users`                     | one page of accounts: role, status, name and address filters, a cursor; ADMIN only     |
+| `GET`    | `/users/:id`                 | one account with its stay and listing counts; ADMIN only                               |
+| `PATCH`  | `/users/:id`                 | change the role and/or block; ADMIN only, `403` on the caller's own account            |
+| `GET`    | `/lookups/owners`            | accounts with a listing on offer, by `q` — a part of the address or a whole id; ADMIN  |
+| `GET`    | `/lookups/guests`            | the guests of the caller's stays, by `q`; OWNER (their listings') or ADMIN             |
+| `GET`    | `/lookups/listings`          | the listings of the caller's stays, retired included, by `q` — a part of the title     |
+| `GET`    | `/listings/:id/reviews`      | the guests' reviews of a listing, a page and a summary; `404` if retired; public       |
+| `GET`    | `/guests/:id/reviews`        | the hosts' reviews of a guest; the guest, a host they booked with or ADMIN, else `404` |
+| `POST`   | `/bookings/:id/reviews`      | review a confirmed stay that is over; the guest or the owner, `409` — not yet or twice |
+| `DELETE` | `/reviews/:id`               | remove a review, `204`; ADMIN only                                                     |
 
 The three lookups fill in the id filters of the admin's listings and of the stays: `q` is at
 least three characters, matched anywhere in the name regardless of case — or, when it is a
 whole uuid, only against the id. They are keyset-paged like the lists, in the order of the
 names.
+
+Reviews are two-sided and hang off a stay: once a `CONFIRMED` booking reaches its check-out
+day, its guest may review the listing and the owner of the listing may review the guest —
+one review of each kind per booking, a rating of 1 to 5 stars and a comment. Which half a
+request writes follows from who sends it, so the body has no kind. The guest's half is
+public, on the listing's page; the host's half is read only by the guest it is about, by
+the hosts that guest has a live hold or a confirmed stay with (a cancelled or expired request does not count) and by an admin, who may also remove
+either kind. Nothing on a review names its author: the kind says which side wrote it.
 
 Overlapping dates on the same listing are rejected; back-to-back bookings (check-out on the day the next guest checks in) are allowed.
 
@@ -307,13 +320,13 @@ Implemented by hand rather than taken from Auth.js or Clerk — the parts an int
 
 The secrets have no fallback in the code: an unset `JWT_ACCESS_SECRET` stops the process at boot instead of shipping a key that is in a public repository. `.env.example` carries development values — replace them anywhere else, `openssl rand -hex 32` generates one.
 
-`pnpm --filter @repo/api db:seed` creates three demo logins, one per role — `guest@example.com`, `owner@example.com` and `admin@example.com`, all with the password `password123` — plus a second host and three more guests, two of whom share the name "Alex Morgan" so a lookup has two rows of one name to tell apart; eight listings, six owned by the owner and two by the second host, and ten bookings spread over the guests — enough for the catalogue's filters to have something to keep as well as something to drop — so every rule below has something to act on from the first request. The stays are dated from the day the seed runs: a check-in in the past is refused by the contract, and demo data the API itself would not accept ages into a puzzle.
+`pnpm --filter @repo/api db:seed` creates three demo logins, one per role — `guest@example.com`, `owner@example.com` and `admin@example.com`, all with the password `password123` — plus a second host and three more guests, two of whom share the name "Alex Morgan" so a lookup has two rows of one name to tell apart; eight listings, six owned by the owner and two by the second host, and ten bookings ahead spread over the guests — enough for the catalogue's filters to have something to keep as well as something to drop — plus three stays of the demo guest that are already over, reviewed by both sides, by the guest alone and by nobody, so the demo guest and the demo owner each have a review left to write — so every rule below has something to act on from the first request. The stays are dated from the day the seed runs, so the data never ages into a puzzle. The bookings ahead are ones the API itself would accept; the three that are over are the exception it cannot write — the contract refuses a check-in in the past — which is why only the seed can give a review something to be about.
 
 ### The same session on the frontend
 
 The two cookie scopes are what shape the browser half of it, so it is worth reading them together: the access token is scoped to `/` and the refresh token to `/auth` on the API's host. The Next.js server therefore receives a visitor's access token and never their refresh token.
 
-- **`apps/web/proxy.ts`** (Next.js 16 renamed `middleware.ts` to that) guards `/profile`, `/bookings`, `/dashboard` and `/admin`, and answers one question — is there an access cookie. It cannot answer more: the cookie is httpOnly and only the API holds the secret that would verify it, so this only spares the server a render nobody could see. The page behind it reads `/auth/me` anyway and copes with a `401` of its own.
+- **`apps/web/proxy.ts`** (Next.js 16 renamed `middleware.ts` to that) guards `/profile`, `/bookings`, `/dashboard`, `/admin` and `/guests`, and answers one question — is there an access cookie. It cannot answer more: the cookie is httpOnly and only the API holds the secret that would verify it, so this only spares the server a render nobody could see. The page behind it reads `/auth/me` anyway and copes with a `401` of its own.
 - **A server render reads the API as the visitor.** `credentials: "include"` is a rule for browsers and does nothing in Node, so the transport copies the access cookie out of the request Next.js is answering. It does that for uncached reads only: the answer to a cached one goes into the Data Cache under its URL and is then served to whoever asks next.
 - **An expired access token is not a signed-out user.** The browser drops that cookie after fifteen minutes while the refresh token lives a week, so the login page spends one `/auth/refresh` before it shows a form and sends the visitor on where they were going. It has to happen there: the refresh cookie's path means it is attached to a request that leaves the browser for the API and to nothing that leaves the Next.js server — neither the proxy nor a render can perform that trade.
 - **The forms post straight to the API**, not through a server action that would have to re-issue both cookies with attributes copied from the backend, and they validate with `loginSchema` / `registerSchema` — the same schemas that refuse the request on the other side, so a message reads the same wherever it was produced.
@@ -335,6 +348,9 @@ The guard is membership of a set, not a hierarchy: an ADMIN does not pass an `@R
 | create a booking        | ✅        | —                      | —                 |
 | read bookings           | their own | against their listings | all               |
 | cancel a booking        | their own | —                      | any               |
+| review a finished stay  | the place | the guest              | —                 |
+| read guest reviews      | their own | of guests who booked   | all               |
+| remove a review         | —         | —                      | any               |
 | manage users            | —         | —                      | any but their own |
 
 Reading and writing are separate rules over the same row: an owner sees the stays booked against their listing and cannot cancel one out from under a guest. `GET /bookings` narrows by the role of the caller inside the `where` rather than through a query parameter, so the query cannot return a row the caller may not see.

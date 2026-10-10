@@ -26,6 +26,7 @@ export const ROUTES = {
   adminListing: (id: string) => `/admin/listings/${encodeURIComponent(id)}`,
   adminUsers: "/admin/users",
   adminUser: (id: string) => `/admin/users/${encodeURIComponent(id)}`,
+  guestReviews: (id: string) => `/guests/${encodeURIComponent(id)}/reviews`,
 } as const;
 
 /**

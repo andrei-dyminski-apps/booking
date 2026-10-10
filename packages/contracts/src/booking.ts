@@ -62,6 +62,14 @@ export const bookingSchema = z.object({
    */
   expiresAt: z.iso.datetime().nullable(),
   createdAt: z.iso.datetime(),
+  /**
+   * Which halves of the stay have been reviewed — the guest's word on the listing and the
+   * host's word on the guest. Flags rather than the reviews themselves: the reader of a
+   * booking is either of the two, and the half written about them is read where it is
+   * public (the listing) or where it is scoped (`GET /guests/:id/reviews`), not here.
+   * What the screen needs from the booking is whether to offer the form.
+   */
+  reviewed: z.object({ byGuest: z.boolean(), byOwner: z.boolean() }),
 });
 
 /**
@@ -79,6 +87,7 @@ export const createBookingSchema = bookingSchema
     status: true,
     expiresAt: true,
     createdAt: true,
+    reviewed: true,
   })
   // Both rules are about a date and wait for one: without the guard an empty check-in box
   // reads as a stay in the past — `"" >= today()` is false — and the form puts that under a

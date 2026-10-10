@@ -8,6 +8,7 @@ export {
 export { bookingsApi } from "./bookings";
 export { listingsApi } from "./listings";
 export { lookupsApi } from "./lookups";
+export { reviewsApi } from "./reviews";
 export { usersApi } from "./users";
 export {
   ApiResponseError,

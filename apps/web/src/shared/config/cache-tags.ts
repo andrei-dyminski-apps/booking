@@ -19,6 +19,13 @@ export const CATALOGUE_TAG = "catalogue";
 /** One row of the catalogue, as `GET /listings/:id` answers it. */
 export const listingTag = (id: string): string => `listing:${id}`;
 
+/**
+ * What guests have said about one listing — a review's business, and neither the row's
+ * nor the calendar's: writing one changes nothing else about the listing.
+ */
+export const listingReviewsTag = (id: string): string =>
+  `listing:${id}:reviews`;
+
 /** The nights taken against one listing — a booking's business, not the row's. */
 export const availabilityTag = (id: string): string =>
   `listing:${id}:availability`;

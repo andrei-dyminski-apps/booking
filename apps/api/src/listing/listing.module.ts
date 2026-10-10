@@ -11,5 +11,8 @@ import { ListingService } from "./listing.service";
   imports: [PrismaModule, BookingModule],
   controllers: [ListingController],
   providers: [ListingService, ListingRepository],
+  // ReviewService asks it whether a listing is still offered before answering for its
+  // reviews — "still offered" is `STILL_OFFERED`, and this class is where it is spelled.
+  exports: [ListingRepository],
 })
 export class ListingModule {}

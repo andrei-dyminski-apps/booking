@@ -8,7 +8,8 @@ import { PrismaService } from "./../src/prisma/prisma.service";
  * place rather than in every `beforeEach`: bookings reference listings with
  * `onDelete: Restrict`, and listings reference their owner the same way, so deleting the
  * users first fails on the foreign key rather than taking the rows with it. Refresh
- * tokens are the one thing that does go with its user (`onDelete: Cascade`).
+ * tokens go with their user and reviews with their booking (`onDelete: Cascade`), so
+ * neither needs a line of its own.
  */
 export async function resetDatabase(app: INestApplication<App>): Promise<void> {
   const prismaService = app.get(PrismaService);

@@ -19,7 +19,7 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
 } from "@nestjs/swagger";
-import { Throttle, minutes } from "@nestjs/throttler";
+import { Throttle } from "@nestjs/throttler";
 import {
   Role,
   type Listing,
@@ -32,6 +32,7 @@ import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { Public } from "../auth/decorators/public.decorator";
 import { Roles } from "../auth/decorators/roles.decorator";
 import { ApiErrorDto } from "../common/dto/api-error.dto";
+import { CATALOGUE_READS } from "../common/throttle";
 import { ListingService } from "./listing.service";
 import {
   AvailabilityQueryDto,
@@ -52,30 +53,6 @@ import {
  */
 const NOT_YOUR_LISTING =
   "The listing exists but belongs to another owner; an admin passes without owning it";
-
-/**
- * The limit the three reading routes carry instead of the API-wide one, and the reason is
- * that "per address" stops meaning "per visitor" for exactly these three.
- *
- * They are the only `@Public()` reads, which is why the frontend caches them — and a
- * cached read is served from that server rather than from a browser: it reaches this API
- * from the frontend's single address, with no `x-forwarded-for` to bucket it by. Attaching
- * one would not help either; the header would go into the Data Cache key and split the
- * shared entry per visitor, which is the opposite of what caching them is for. So every
- * visitor browsing the catalogue arrives here as one client, and the default 120 a minute
- * is a ceiling on the whole site's cache misses rather than on one client's requests.
- *
- * 600 is what a cold cache costs rather than a number picked for the feel of it: a page
- * of the catalogue and a listing beside its availability are three URLs, the frontend
- * stores each of them for a minute, and the filters are free text — so the misses scale
- * with the searches being asked, not with the visitors asking them. It is still a limit:
- * `limit` caps a page at 50 rows and the availability window at a year, so nothing here
- * hands over the table faster than it would without one.
- *
- * A route that stops being public stops needing this — the session buckets it by visitor
- * again, and the default is the right ceiling for that.
- */
-const CATALOGUE_READS = { default: { ttl: minutes(1), limit: 600 } };
 
 /**
  * The three reading routes are `@Public()`: a catalogue nobody can see before signing up

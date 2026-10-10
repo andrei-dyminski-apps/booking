@@ -11,7 +11,7 @@ import {
 } from "@repo/ui/components/empty";
 import { lookupsApi, requireUser } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { lookupOptionText } from "#shared/lib";
+import { lookupOptionText, today } from "#shared/lib";
 import {
   ButtonLink,
   NoMatchesNotice,
@@ -84,6 +84,8 @@ export const BookingsPage = async ({
   if (canonical !== null) redirect(canonical);
 
   const byGuest = viewer.role !== Role.USER;
+  // Computed here and handed down rather than read by each card — see `shared/lib/dates.ts`.
+  const day = today();
   // A question the contract refuses is not put to the API at all: the messages are under
   // the boxes, and an unfiltered list beside them would read as the answer to it. The names
   // of the rows the filters name are read beside it — the chips read them, and so do the
@@ -151,7 +153,7 @@ export const BookingsPage = async ({
           <ul role="list" className="flex flex-col gap-4">
             {page.items.map((booking) => (
               <li key={booking.id}>
-                <BookingCard booking={booking} viewer={viewer} />
+                <BookingCard booking={booking} viewer={viewer} today={day} />
               </li>
             ))}
           </ul>

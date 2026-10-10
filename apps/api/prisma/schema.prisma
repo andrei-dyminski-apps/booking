@@ -46,6 +46,7 @@ model Booking {
   /// is, see `deleted_at` below.
   listing Listing @relation(fields: [listingId], references: [id], onDelete: Restrict)
   guest   User    @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  reviews Review[]
 
   @@index([listingId, from, to])
   /// Serves both halves of hold expiry: the repeatable sweep, which asks for every lapsed
@@ -82,6 +83,45 @@ enum BookingStatus {
   CONFIRMED
   CANCELLED
   EXPIRED
+}
+
+/// What one side of a finished stay said about the other. `kind` is both what the review
+/// is about and who wrote it — `LISTING` is the guest's, `GUEST` is the host's — so there
+/// is no author column: the booking already names both people, and a third key could only
+/// disagree with it.
+///
+/// No listing or guest column either. Both lists of reviews are reached through the
+/// booking (`booking.listing_id`, `booking.guest_id`), each of which is indexed on
+/// `bookings`, and the unique pair below finds the review of each stay. What that read
+/// costs is bounded by the stays of one listing or one guest rather than by the site — the
+/// same trade the owner's scope of `GET /bookings` makes — and copying the two ids onto
+/// this table would be two columns to keep in step with a row that already holds them.
+model Review {
+  id        String     @id @default(uuid()) @db.Uuid
+  bookingId String     @map("booking_id") @db.Uuid
+  kind      ReviewKind
+  /// Whole stars, 1 to 5. The bounds are the contract's (`MIN_RATING`, `MAX_RATING`) and
+  /// are written on the column again as the raw-SQL `CHECK` `reviews_rating_within_contract`,
+  /// for the writes that go around the API — the seed, `psql` — exactly as the ceiling on a
+  /// price is.
+  rating    Int        @db.SmallInt
+  comment   String
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  /// Cascade: a review is about a stay and means nothing without it. Bookings are never
+  /// deleted by the API — cancelling keeps the row — so what reaches this is a guest's
+  /// account going with their bookings, and the test and seed cleanups.
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  /// One review of each kind per stay. It is also what the two lists join through — a
+  /// booking's review of a given kind is one seek on this pair.
+  @@unique([bookingId, kind])
+  @@map("reviews")
+}
+
+enum ReviewKind {
+  LISTING
+  GUEST
 }
 
 /// A place to stay. `price_per_night` is an amount of the currency itself, exact to the

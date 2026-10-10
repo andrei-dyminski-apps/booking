@@ -35,6 +35,8 @@ apps/web/
     admin/users/loading.tsx
     admin/users/[id]/page.tsx # one account: its role, its block, its stays and listings
     admin/users/[id]/loading.tsx
+    guests/[id]/reviews/page.tsx  # what hosts said about a guest; the API decides who may look
+    guests/[id]/reviews/loading.tsx
     not-found.tsx             # what notFound() renders — an id, a role, a retired row
     error.tsx                 # the boundary under the shell; "use client" + re-export
     global-error.tsx          # the boundary above it, for a shell that cannot render
@@ -76,6 +78,7 @@ apps/web/
       register/api/register-action.ts
       register/index.ts
       profile/ui/profile-page.tsx
+      profile/api/has-reviews-of.ts       # whether hosts said anything — the link to them, or none
       profile/index.ts
       catalogue/ui/catalogue-page.tsx     # the filtered, cursor-paged list of listings
       catalogue/ui/catalogue-toolbar.tsx  # one row: the filters, the ordering, the chips
@@ -89,8 +92,10 @@ apps/web/
       listing/ui/listing-page.tsx         # one listing: the calendar and the form
       listing/ui/availability-calendar.tsx  # the nights already taken, drawn
       listing/ui/booking-form.tsx         # the only thing here that creates a booking
+      listing/ui/listing-reviews.tsx      # the guests' reviews: the summary and the newest page
       listing/ui/listing-skeleton.tsx
       listing/api/create-booking-action.ts
+      listing/api/read-listing-reviews.ts # the cached page, or null — the screen draws without it
       listing/lib/months.ts               # the booked ranges laid out as month grids
       listing/lib/months.spec.ts
       listing/index.ts
@@ -100,9 +105,11 @@ apps/web/
       bookings/ui/booking-card.tsx
       bookings/ui/booking-status-badge.tsx
       bookings/ui/cancel-booking-button.tsx
+      bookings/ui/review-booking-button.tsx  # one half of a finished stay, in a dialog
       bookings/ui/bookings-skeleton.tsx
       bookings/api/read-bookings-page.ts  # the personal read, and the cursor it refuses
       bookings/api/cancel-booking-action.ts
+      bookings/api/review-booking-action.ts
       bookings/lib/bookings-search.ts     # searchParams onto the contract's query
       bookings/lib/bookings-search.spec.ts
       bookings/index.ts
@@ -147,6 +154,10 @@ apps/web/
       admin-user/ui/user-skeleton.tsx
       admin-user/api/update-user-actions.ts
       admin-user/index.ts
+      guest-reviews/ui/guest-reviews-page.tsx  # the hosts' half, paged; reached from a stay or the profile
+      guest-reviews/ui/guest-reviews-skeleton.tsx
+      guest-reviews/api/read-guest-reviews.ts  # `no-store`, a 404 outside the API's scope
+      guest-reviews/index.ts
     features/                 # a user action a second page also runs
       save-listing/ui/listing-form.tsx    # the one form the new and the edit screen run
       save-listing/ui/pricing-fields.tsx  # …its weekday and date prices, saved with the row
@@ -156,6 +167,9 @@ apps/web/
       delete-listing/ui/delete-listing-button.tsx  # the owner's edit screen and the admin's
       delete-listing/api/delete-listing-action.ts
       delete-listing/index.ts
+      delete-review/ui/delete-review-button.tsx  # the admin's, on a listing's reviews and a guest's
+      delete-review/api/delete-review-action.ts
+      delete-review/index.ts
       logout/ui/logout-button.tsx         # the browser's call: only it holds a refresh token
       logout/index.ts
       listing-search/model/listing-filters.ts  # the catalogue query's chips, orderings, labels
@@ -165,6 +179,10 @@ apps/web/
       user/model/roles.ts     # the roles named for a person: both admin screens read them
       user/api/any-user.ts    # the account with its counts, or a 404: its page and `?ownerId=`
       user/index.ts
+      review/ui/review-card.tsx  # one review, with a slot for what the screen may do to it
+      review/ui/rating-stars.tsx
+      review/ui/review-summary.tsx  # the mean and the count of every review, not of the page
+      review/index.ts
     shared/                   # no domain knowledge: transport, routes, config
       api/http-client.ts      # apiRequest(), refreshSession(), the two errors
       api/auth.ts             # authApi, currentUser() — memoized, requireUser/requireRole
@@ -173,6 +191,7 @@ apps/web/
       api/listings.ts         # listingsApi — the same, for the catalogue rows
       api/users.ts            # usersApi — the admin's routes over accounts
       api/lookups.ts          # lookupsApi — what an id box suggests, abortable; optionOf for a page
+      api/reviews.ts          # reviewsApi — a listing's (public), a guest's (scoped), write, remove
       api/keyset-page.ts      # a stale cursor onto null, the one both paged reads share
       api/index.ts
       config/api-url.ts       # apiOrigin() and BFF_BASE_PATH
@@ -999,17 +1018,24 @@ How the result is made visible, by what kind of data it is:
   to nothing — `{ next: { tags } }` looks like caching and is not, and the mutation
   invalidating that tag then has nothing to invalidate. It fails by being fresh, which is
   why nothing reports it. `ReadOptions` requires the field for that reason, and a read
-  whose only invalidation is its tag says `revalidate: false` — `listingTag(id)` is that
-  case, while the two reads a lapsing hold changes carry the minute below instead.
+  whose only invalidation is its tag says `revalidate: false` — `listingTag(id)` and
+  `listingReviewsTag(id)` are that case, while the two reads a lapsing hold changes carry
+  the minute below instead.
+- **`revalidate: false` trusts that every write goes through a Server Action here.** A
+  row changed around the frontend — `db:seed`, `psql`, a call straight to the API — names
+  no tag, so the cached answer outlives it until the Data Cache is cleared (`rm -rf
+apps/web/.next/cache`, or a new deploy). After a re-seed that is the listings and their
+  reviews: the pages keep drawing the previous data until then. That is the trade of a read with no lifetime, made deliberately — nothing in the
+  API writes these rows on its own, unlike the holds below.
 - **The names live in `shared/config/cache-tags.ts`**, for the same reason `ROUTES` does:
   a tag is a string a read and a mutation have to spell the same way, and a typo in either
   half is a page that never updates or one that updates for nothing.
 - **A tag is named after what a write changes, not after what a read shows.** There are
-  three — `CATALOGUE_TAG`, `listingTag(id)`, `availabilityTag(id)` — because editing a
-  listing changes the row and the catalogue but not who has booked it, and taking a
-  booking changes what is free without touching the row. Tagging the availability with
-  the row's tag would make every edit refetch every calendar and every booking refetch
-  every row.
+  four — `CATALOGUE_TAG`, `listingTag(id)`, `availabilityTag(id)`, `listingReviewsTag(id)` —
+  because editing a listing changes the row and the catalogue but not who has booked it, and taking a
+  booking changes what is free without touching the row, and a review changes neither.
+  Tagging the availability with the row's tag would make every edit refetch every
+  calendar and every booking refetch every row.
 - **A read whose answer changes on a timer needs a lifetime as well as a tag**, and the
   two reads a hold affects are the case. A `PENDING_PAYMENT` hold lapses fifteen minutes
   after it was taken and puts its nights back on offer; nothing on this side mutates when
@@ -1037,6 +1063,7 @@ How the result is made visible, by what kind of data it is:
 A mutation nobody can undo — deleting a row, revoking access, anything the API answers
 with a `DELETE` — asks first, in an `AlertDialog` from `@repo/ui`
 (`features/delete-listing/ui/delete-listing-button.tsx`,
+`features/delete-review/ui/delete-review-button.tsx`,
 `_pages/bookings/ui/cancel-booking-button.tsx` and `_pages/admin-user/ui/block-button.tsx`). Not a second
 button that takes the place of the first: a modal takes the focus and refuses a click
 outside itself, which is what stops the confirmation being hit by the hand that was

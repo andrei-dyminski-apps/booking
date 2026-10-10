@@ -1,6 +1,13 @@
 import Link from "next/link";
 import { CalendarIcon, MoonIcon } from "lucide-react";
-import { BookingStatus, Role, type Booking, type User } from "@repo/contracts";
+import {
+  BookingStatus,
+  isReviewable,
+  Role,
+  type Booking,
+  type User,
+} from "@repo/contracts";
+import { Badge } from "@repo/ui/components/badge";
 import {
   Card,
   CardAction,
@@ -21,6 +28,7 @@ import { ButtonLink } from "#shared/ui";
 import { listingStaysHref } from "../lib/bookings-search";
 import { BookingStatusBadge } from "./booking-status-badge";
 import { CancelBookingButton } from "./cancel-booking-button";
+import { ReviewBookingButton } from "./review-booking-button";
 
 /**
  * One stay. The listing it names comes on the booking itself rather than from a second
@@ -34,11 +42,15 @@ import { CancelBookingButton } from "./cancel-booking-button";
 export const BookingCard = ({
   booking,
   viewer,
+  today,
 }: {
   booking: Booking;
   viewer: User;
+  /** Today in UTC, from the server — the day `isReviewable` compares the check-out to. */
+  today: string;
 }) => {
   const nights = nightsBetween(booking.from, booking.to);
+  const review = reviewHalf(booking, viewer, today);
 
   return (
     <Card>
@@ -88,7 +100,36 @@ export const BookingCard = ({
               Stays here
             </ButtonLink>
           )}
+          {/*
+            What other hosts said about this guest, for the two roles the API lets read it
+            from here: the host the guest asked to stay with, and an admin. A guest reads
+            their own from the profile.
+          */}
+          {viewer.role !== Role.USER && (
+            <ButtonLink
+              href={ROUTES.guestReviews(booking.guestId)}
+              variant="ghost"
+              size="sm"
+            >
+              Guest reviews
+            </ButtonLink>
+          )}
           <BookingStatusBadge status={booking.status} />
+          {review === "written" && <Badge variant="outline">Reviewed</Badge>}
+          {review === "listing" && (
+            <ReviewBookingButton
+              bookingId={booking.id}
+              listingId={booking.listingId}
+              about="listing"
+            />
+          )}
+          {review === "guest" && (
+            <ReviewBookingButton
+              bookingId={booking.id}
+              listingId={null}
+              about="guest"
+            />
+          )}
           {mayCancel(booking, viewer) && (
             <CancelBookingButton
               bookingId={booking.id}
@@ -111,6 +152,32 @@ export const BookingCard = ({
     </Card>
   );
 };
+
+/**
+ * Which half of the stay this viewer could write, if any — `written` once they have. The
+ * guest writes about the listing and the host about the guest, which is the same rule the
+ * API reads off the session: the guest by the id alone, whatever role the account has
+ * since been given, and the host by the role. An admin reads every stay and writes
+ * neither half, so they are offered nothing. Like the "Cancel" below, it offers rather
+ * than permits: the API refuses a review of somebody else's stay whatever was drawn here.
+ */
+function reviewHalf(
+  booking: Booking,
+  viewer: User,
+  today: string,
+): "listing" | "guest" | "written" | null {
+  const half =
+    viewer.role !== Role.ADMIN && viewer.id === booking.guestId
+      ? { kind: "listing" as const, done: booking.reviewed.byGuest }
+      : viewer.role === Role.OWNER
+        ? { kind: "guest" as const, done: booking.reviewed.byOwner }
+        : null;
+
+  if (half === null) return null;
+  if (half.done) return "written";
+
+  return isReviewable(booking, today) ? half.kind : null;
+}
 
 /**
  * Whether the button is worth offering, which is not the same as whether it is allowed:

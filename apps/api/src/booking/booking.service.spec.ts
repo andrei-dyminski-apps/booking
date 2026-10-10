@@ -181,6 +181,17 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
     return Promise.resolve(this.rows.get(id) ?? null);
   }
 
+  hasStayedWith(guestId: string, ownerId: string): Promise<boolean> {
+    return Promise.resolve(
+      [...this.rows.values()].some(
+        (found) =>
+          found.booking.guestId === guestId &&
+          found.listingOwnerId === ownerId &&
+          isActive(found.booking),
+      ),
+    );
+  }
+
   create(guestId: string, booking: CreateBookingInput): Promise<Booking> {
     if (this.vanishingListing) {
       return Promise.reject(new ListingNotFoundError(booking.listingId));
@@ -219,6 +230,7 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
       createdAt: new Date(
         Date.parse("2026-08-17T12:00:00.000Z") + this.rows.size * 1_000,
       ).toISOString(),
+      reviewed: { byGuest: false, byOwner: false },
     };
 
     this.rows.set(stored.id, {

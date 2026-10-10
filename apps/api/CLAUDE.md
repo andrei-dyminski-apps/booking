@@ -20,6 +20,7 @@ src/
   app.module.ts          # root module: feature modules + the global ZodValidationPipe and JwtAuthGuard
   generated/prisma/      # the generated client — gitignored, never edit it
   common/paging.ts       # Page<T>, the cursor envelope and the two refusals every keyset page shares
+  common/throttle.ts     # CATALOGUE_READS — the widened limit of the public, cached reads
   common/dto/            # ApiErrorDto — the error body, for the Swagger error responses
   prisma/                # PrismaModule + PrismaService (extends PrismaClient)
     prisma.errors.ts     # isPrismaError, violatedConstraint — driver failures, read once
@@ -71,6 +72,14 @@ src/
     booking-cursor.ts        # the keyset cursor of GET /bookings, encoded and parsed
     booking-cursor.spec.ts
     dto/booking.dto.ts
+  review/                # the two-sided review of a finished stay
+    review.controller.ts # no prefix: each route names its parent — a listing, a guest, a stay
+    review.service.ts    # which half a caller writes, when a stay opens for review, who reads a guest's
+    review.repository.ts # both lists reached through the booking, the summary, the unique pair
+    review-cursor.ts     # keyset over created_at; the kind is in the resource tag
+    review.service.spec.ts
+    review-cursor.spec.ts
+    dto/review.dto.ts
 ```
 
 ## Prisma
@@ -106,6 +115,8 @@ src/
 - **Hold expiry has three halves, and the third one is why the other two may fail.** `BookingExpiryQueue.scheduleExpiry` puts a job in Redis for `expires_at` and `BookingExpiryProcessor` runs `BookingRepository.expireHold` on it — that is the precise release. The `updateMany` at the top of `create`'s transaction is the lazy one, and it only ever looks at the listing being booked. Behind both is a **repeatable sweep**: a job scheduler (`SWEEP_INTERVAL_MS`, one minute) whose job runs `expireLapsedHolds` over every listing. It is not redundancy for its own sake — the queue has no volume under it, so a Redis restart drops every scheduled job, and without the sweep a hold on a listing nobody books again would keep its slot forever. That is also what lets `scheduleExpiry` and `cancelExpiry` swallow their failures: by the time either runs the booking is committed, so raising would answer an existing booking with a `500`, and the worst a lost job costs is up to a minute of delay. Redis (`REDIS_URL`, no fallback) is a service in docker-compose, pinned to `maxmemory-policy noeviction` because BullMQ requires it.
 - **A search by a part of a column is a trigram index** (`pg_trgm`, GIN): `users.email`, `users.name` and `listings.title`, which the `name` and `email` filters of `GET /users` and the lookups of `/lookups` read with a `contains` — `LIKE`, or `ILIKE` with `mode: "insensitive"`, both of which the index serves and no btree can seek. Unlike the partial indexes above, Prisma can spell these (`@@index([title(ops: raw("gin_trgm_ops"))], type: Gin)`), so they are declared on the models; the extension is not, because Prisma no longer manages extensions, and is created by the migration that introduced the first of them. The contract's floor of three characters on a lookup is one trigram — the shortest search the index can answer.
 - **A lookup answers with the rows its filter can match for the caller**, never the whole table: the owners of what is on offer, and the guests and listings of the stays the caller may read — the scope of `GET /bookings`, written once as `againstListingsOf` in `booking.repository.ts` and read by both. The listings it offers include retired ones (see `STILL_OFFERED` above). A `q` that parses as a uuid is matched against the id alone and whole — nobody remembers a part of one. An account is offered by its `name`, which is not unique, so an admin's lookup also matches the address and hands it back as `hint`; a host's lookup of their guests matches the name alone and answers `hint: null`, because a guest's address is not the host's to read. `LookupRepository` reads `users` and `listings` itself rather than through their repositories, taking only their `where`; its class comment says why.
+- **A review is about a stay, and `kind` is who wrote it** (`LISTING` — the guest, about the place; `GUEST` — the host, about the guest). So `reviews` has neither an author nor a listing or guest column: the booking names both people, the two lists join through it (`booking.listing_id`, `booking.guest_id`, both indexed on `bookings`), and `@@unique([bookingId, kind])` is both the one-per-side rule and the seek of the join. The guest's half is written by the stay's guest whatever role the account has since been given — the role is the account's now, not the one it booked under — and the host's by an `OWNER` who owns the listing. A stay at a listing retired since is still reviewable on both sides, deliberately: the stay happened. The guest's half then waits unread — `GET /listings/:id/reviews` answers `404` for a retired listing — and counts again if the listing is ever offered again. What the join costs is bounded by the stays of one listing or one guest — the trade the owner's scope of `GET /bookings` already makes. The rule for when a stay opens is `isReviewable` in `@repo/contracts` (`CONFIRMED`, check-out day reached, UTC), read by the service and by the card that offers the form. A second review of one half is the unique key's `P2002`, not a read first, because two submits race. The rating's bounds are a raw-SQL `CHECK` (`reviews_rating_within_contract`) beside the contract's, for the reason the price ceiling has one. Reviews cascade with their booking; nothing in the API deletes a booking, so that is the guest's account and the cleanups.
+- **The host's half is not public.** `GET /guests/:id/reviews` answers the guest themselves (whatever their role now), an admin, and an owner the guest has a live hold or a confirmed stay with — `BookingRepository.hasStayedWith`, `holdsTheSlot` over the `againstListingsOf` scope of the owner's page of stays — and `404` to everybody else, for the reason a booking does. A cancelled, expired or lapsed request grants nothing: having asked once is not a standing licence to read a guest's record, so the owner's page can show a stay whose guest's reviews it no longer opens. The guest's half is `@Public()` and widened by `CATALOGUE_READS`, because the frontend caches it beside the listing.
 - A model change means a migration (`db:migrate`), and the migration files are committed.
 - `db:migrate` is `prisma migrate dev` and belongs to a developer machine only — it can decide to reset the database. A deployed environment runs `db:deploy` (`prisma migrate deploy`), which only applies what is already committed; that is what `railway.json` hangs on `preDeployCommand`.
 - Prisma 7 dropped the automatic steps of v6: neither `migrate dev` nor `migrate reset` runs the seed script, and `migrate dev` no longer regenerates the client. So a schema change is `db:migrate` + `db:generate`, and a recreated database is `db:migrate` + `db:seed`.
@@ -156,8 +167,9 @@ cookies, refresh tokens rotated with reuse detection.
   `req.ip`, which is only the real client when `TRUST_PROXY` names how many
   `X-Forwarded-For` entries to believe — `main.ts` turns it into Express's `trust proxy`.
 - **A route overrides that ceiling in whichever direction its own traffic needs**, and the
-  three `@Public()` reads of the catalogue are the case for widening it (`CATALOGUE_READS`
-  in `listing.controller.ts`, 600 a minute). They are the only reads the frontend caches,
+  `@Public()` reads — the three of the catalogue and a listing's reviews — are the case for
+  widening it (`CATALOGUE_READS` in `src/common/throttle.ts`, 600 a minute, shared by both
+  controllers). They are the only reads the frontend caches,
   and a cached read is served from that server rather than from a browser: it arrives here
   from one address with no `X-Forwarded-For` to bucket it by, so the default would be a
   ceiling on the whole site's cache misses rather than on one client. Forwarding the header

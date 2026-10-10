@@ -12,6 +12,7 @@ const booking: Booking = {
   status: BookingStatus.PENDING_PAYMENT,
   expiresAt: "2026-08-20T12:15:00.000Z",
   createdAt: "2026-08-20T12:00:00.000Z",
+  reviewed: { byGuest: false, byOwner: false },
 };
 
 /** A cursor of this resource, spelled by hand — with the resource tag the envelope adds. */

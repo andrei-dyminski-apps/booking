@@ -9,9 +9,12 @@ import { LogoutButton } from "#features/logout";
 import { requireUser } from "#shared/api";
 import { ROUTES } from "#shared/config";
 import { formatDate } from "#shared/lib";
+import { ButtonLink } from "#shared/ui";
+import { hasReviewsOf } from "../api/has-reviews-of";
 
 export const ProfilePage = async () => {
   const user = await requireUser(ROUTES.profile);
+  const reviewed = await hasReviewsOf(user.id);
 
   return (
     <Card className="mx-auto w-full max-w-md">
@@ -36,6 +39,14 @@ export const ProfilePage = async () => {
           <dt className="text-muted-foreground">Member since</dt>
           <dd>{formatDate(user.createdAt)}</dd>
         </dl>
+
+        {/* What hosts said about this account — a guest's half of the reviews is not
+            public, and this is where its subject reads it, whatever their role now. */}
+        {reviewed && (
+          <ButtonLink href={ROUTES.guestReviews(user.id)} variant="outline">
+            Reviews of you
+          </ButtonLink>
+        )}
 
         <LogoutButton />
       </CardContent>

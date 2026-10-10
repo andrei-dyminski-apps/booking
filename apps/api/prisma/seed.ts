@@ -5,6 +5,7 @@ import { addDays, format } from "date-fns";
 import {
   BookingStatus,
   PrismaClient,
+  ReviewKind,
   Role,
   Weekday,
 } from "../src/generated/prisma/client";
@@ -180,12 +181,57 @@ const bookings: Array<{
   { guest: "sam", listing: 7, from: inDays(25), to: inDays(28) },
 ];
 
+/**
+ * Stays of the demo guest that are over, so the reviews have something to be about — the API books nothing
+ * in the past, which is why only the seed can write these. Each says which halves were
+ * reviewed: one is reviewed by both sides, one by the guest alone and one by nobody, so
+ * the demo guest and the demo owner each have a form left to fill in.
+ */
+const pastStays = [
+  {
+    listing: 0,
+    from: inDays(-40),
+    to: inDays(-36),
+    byGuest: {
+      rating: 5,
+      comment:
+        "The light off the water in the morning is worth the stairs. Spotless, and the kitchen really does fit four.",
+    },
+    byOwner: {
+      rating: 5,
+      comment:
+        "Left the loft as they found it and kept to the check-out time. Welcome back any time.",
+    },
+  },
+  {
+    listing: 1,
+    from: inDays(-25),
+    to: inDays(-21),
+    byGuest: {
+      rating: 4,
+      comment:
+        "Exactly the quiet we came for. The stove takes some getting used to, the forest does not.",
+    },
+    byOwner: null,
+  },
+  {
+    listing: 2,
+    from: inDays(-9),
+    to: inDays(-6),
+    byGuest: null,
+    byOwner: null,
+  },
+];
+
 async function main(): Promise<void> {
   // Order matters, and both steps are refusals rather than cascades: bookings reference
   // listings with onDelete: Restrict, and listings reference their owner the same way, so
   // deleting the users first fails on the foreign key instead of taking the rows with it.
   // Deleting the users does take their refresh tokens (onDelete: Cascade), so a re-seed
   // ends every session issued against the previous data.
+  // Reviews would go with their bookings anyway (onDelete: Cascade); deleting them first
+  // keeps the order readable as the dependency it is.
+  await prisma.review.deleteMany();
   await prisma.booking.deleteMany();
   await prisma.listing.deleteMany();
   await prisma.user.deleteMany();
@@ -256,13 +302,44 @@ async function main(): Promise<void> {
     }),
   });
 
+  for (const past of pastStays) {
+    const listing = rooms[past.listing];
+
+    if (listing === undefined) {
+      throw new Error(`No demo listing at index ${past.listing}`);
+    }
+
+    const booking = await prisma.booking.create({
+      data: {
+        listingId: listing.id,
+        guestId: idOf("guest"),
+        from: past.from,
+        to: past.to,
+        status: BookingStatus.CONFIRMED,
+      },
+    });
+
+    const reviews = [
+      past.byGuest === null
+        ? null
+        : { kind: ReviewKind.LISTING, ...past.byGuest },
+      past.byOwner === null
+        ? null
+        : { kind: ReviewKind.GUEST, ...past.byOwner },
+    ].filter((review) => review !== null);
+
+    await prisma.review.createMany({
+      data: reviews.map((review) => ({ ...review, bookingId: booking.id })),
+    });
+  }
+
   console.log(
     `Seeded users: ${Object.values(users)
       .map((user) => `${user.name} <${user.email}>`)
       .join(", ")} — password "${DEMO_PASSWORD}"`,
   );
   console.log(
-    `Seeded listings: ${listings.length}, bookings: ${bookings.length}`,
+    `Seeded listings: ${listings.length}, bookings: ${bookings.length + pastStays.length} (${pastStays.length} of them over, some reviewed)`,
   );
 }
 

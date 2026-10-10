@@ -104,3 +104,23 @@ export {
   type LookupOption,
   type LookupPage,
 } from "./lookup.js";
+
+export {
+  MAX_RATING,
+  MIN_RATING,
+  ReviewKind,
+  createReviewSchema,
+  isReviewable,
+  reviewKindSchema,
+  reviewPageSchema,
+  reviewQuerySchema,
+  reviewSchema,
+  reviewSortSchema,
+  reviewSummarySchema,
+  type CreateReviewInput,
+  type Review,
+  type ReviewPage,
+  type ReviewQuery,
+  type ReviewSort,
+  type ReviewSummary,
+} from "./review.js";

@@ -12,8 +12,10 @@ import { format } from "date-fns";
 import { z } from "zod";
 import {
   type Prisma,
+  ReviewKind,
   type Booking as BookingRow,
   type Listing as ListingRow,
+  type Review as ReviewRow,
 } from "../generated/prisma/client";
 import {
   isExclusionViolation,
@@ -94,6 +96,22 @@ const LISTING_SUMMARY = {
 } satisfies Prisma.BookingInclude;
 
 /**
+ * Which halves of the stay have been reviewed, read beside the listing on every booking —
+ * the contract's `reviewed`. The kinds and nothing else: what a review says is read through
+ * the lists that are scoped for it, and a booking is read by both of the people it names.
+ * At most two rows, found through the unique `(booking_id, kind)` pair.
+ */
+const REVIEW_KINDS = {
+  reviews: { select: { kind: true } },
+} satisfies Prisma.BookingInclude;
+
+/** Everything `toBooking` reads off a row besides its own columns. */
+const BOOKING_INCLUDE = {
+  ...LISTING_SUMMARY,
+  ...REVIEW_KINDS,
+} satisfies Prisma.BookingInclude;
+
+/**
  * A stored booking with the listing columns the contract's `listing` is built from. Taken
  * off the row rather than off `ListingSummary`: the price is a `numeric` column and
  * therefore a `Decimal` here, while the contract speaks a `number` — `toBooking` is where
@@ -101,6 +119,7 @@ const LISTING_SUMMARY = {
  */
 type BookingRowWithListing = BookingRow & {
   listing: Pick<ListingRow, "title" | "pricePerNight">;
+  reviews: Pick<ReviewRow, "kind">[];
 };
 
 /**
@@ -161,6 +180,7 @@ export class BookingRepository {
     const row = await this.prismaService.booking.findFirst({
       where: { id },
       include: {
+        ...REVIEW_KINDS,
         listing: {
           select: { ...LISTING_SUMMARY.listing.select, ownerId: true },
         },
@@ -170,6 +190,29 @@ export class BookingRepository {
     if (row === null) return null;
 
     return { booking: toBooking(row), listingOwnerId: row.listing.ownerId };
+  }
+
+  /**
+   * Whether this guest has a live hold or a confirmed stay against one of this owner's
+   * listings. It is what lets a host read what other hosts said about a guest: one who is
+   * asking to stay with them — a hold is asking — or has stayed is somebody they have a
+   * reason to look up, and everybody else is not. A cancelled, expired or lapsed request
+   * is not: asking once is not a standing licence to read a guest's record. That is
+   * `holdsTheSlot`, which reads no dates, so a confirmed stay keeps counting after it is
+   * over — the host is the one who may review it. The listings are `againstListingsOf`,
+   * the scope of the owner's page of stays.
+   */
+  async hasStayedWith(guestId: string, ownerId: string): Promise<boolean> {
+    const row = await this.prismaService.booking.findFirst({
+      where: {
+        guestId,
+        ...againstListingsOf(ownerId),
+        ...holdsTheSlot(new Date()),
+      },
+      select: { id: true },
+    });
+
+    return row !== null;
   }
 
   /**
@@ -259,7 +302,7 @@ export class BookingRepository {
             status: BookingStatus.PENDING_PAYMENT,
             expiresAt: holdExpiry(now),
           },
-          include: LISTING_SUMMARY,
+          include: BOOKING_INCLUDE,
         });
 
         return toBooking(row);
@@ -356,7 +399,7 @@ export class BookingRepository {
           ...(cursor === null ? [] : [afterCursor(cursor)]),
         ],
       },
-      include: LISTING_SUMMARY,
+      include: BOOKING_INCLUDE,
       orderBy: ORDER_BY[query.sort],
       take: query.limit + 1,
     });
@@ -552,5 +595,9 @@ function toBooking(row: BookingRowWithListing): Booking {
     status: row.status,
     expiresAt: row.expiresAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
+    reviewed: {
+      byGuest: row.reviews.some((review) => review.kind === ReviewKind.LISTING),
+      byOwner: row.reviews.some((review) => review.kind === ReviewKind.GUEST),
+    },
   };
 }

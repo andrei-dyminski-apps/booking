@@ -11,6 +11,7 @@ import { RolesGuard } from "./auth/guards/roles.guard";
 import { BookingModule } from "./booking/booking.module";
 import { ListingModule } from "./listing/listing.module";
 import { LookupModule } from "./lookup/lookup.module";
+import { ReviewModule } from "./review/review.module";
 import { UserModule } from "./user/user.module";
 
 @Module({
@@ -35,6 +36,7 @@ import { UserModule } from "./user/user.module";
     BookingModule,
     ListingModule,
     LookupModule,
+    ReviewModule,
     UserModule,
   ],
   controllers: [AppController],
