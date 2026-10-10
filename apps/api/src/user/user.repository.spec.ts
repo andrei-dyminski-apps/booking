@@ -3,7 +3,11 @@ import { Prisma } from "../generated/prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { EmailAlreadyRegisteredError, UserRepository } from "./user.repository";
 
-const input = { email: "guest@example.com", passwordHash: "hash" };
+const input = {
+  name: "Guest",
+  email: "guest@example.com",
+  passwordHash: "hash",
+};
 
 /**
  * A P2002 in the shape Prisma 7 actually produces. The columns do not arrive in the

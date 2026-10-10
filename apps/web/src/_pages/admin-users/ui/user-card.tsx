@@ -28,8 +28,9 @@ export const UserCard = ({
 }) => (
   <Card>
     <CardHeader>
-      <CardTitle className="break-all">{user.email}</CardTitle>
+      <CardTitle className="break-words">{user.name}</CardTitle>
       <CardDescription className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span className="break-all">{user.email}</span>
         <span className="flex items-center gap-1.5">
           <CalendarIcon className="size-3.5" />
           Joined {formatDate(user.createdAt)}

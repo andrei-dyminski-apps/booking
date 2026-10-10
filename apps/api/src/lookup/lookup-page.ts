@@ -8,10 +8,9 @@ import type { Prisma } from "../generated/prisma/client";
 import type { LookupCursor } from "./lookup-cursor";
 
 /**
- * One model's `where` spelled from the column a lookup names its rows by and the id —
- * `(name, id) => ({ email: name, id })`. An `undefined` is how Prisma spells "no
- * condition", so one callback covers the search, the whole id and both halves of the
- * cursor.
+The browser  * One model's `where` spelled from the column a lookup orders its rows by and the id —
+ * `(name, id) => ({ name, id })`. An `undefined` is how Prisma spells "no condition", so
+ * one callback covers the whole id and both halves of the cursor.
  */
 type NameAndId<Where> = (
   name: Prisma.StringFilter | undefined,
@@ -19,23 +18,23 @@ type NameAndId<Where> = (
 ) => Where;
 
 /**
- * What every lookup adds to its scope: the search — `contains`, which the caller spells
- * because an address and a title are matched differently — or the whole id `q` names, and
- * the keyset after the cursor. The cursor says the name twice for the reason `afterCursor`
- * gives in `listing.repository.ts`: `>=` is the half an index can start from. The result
- * goes into an `AND` beside the scope, never spread into it, so the search cannot replace
- * a condition of the scope on the same column.
+ * What every lookup adds to its scope: the search — which the caller spells, because an
+ * account and a listing are matched on different columns and in different ways — or the
+ * whole id `q` names, and the keyset after the cursor. The cursor says the name twice for
+ * the reason `afterCursor` gives in `listing.repository.ts`: `>=` is the half an index can
+ * start from. The result goes into an `AND` beside the scope, never spread into it, so the
+ * search cannot replace a condition of the scope on the same column.
  */
 export function lookupConditions<Where>(
   where: NameAndId<Where>,
-  contains: Prisma.StringFilter,
+  search: Where,
   query: LookupQuery,
   cursor: LookupCursor | null,
 ): Array<Where | { OR: Where[] }> {
   const id = idIn(query.q);
 
   return [
-    id === null ? where(contains) : where(undefined, { equals: id }),
+    id === null ? search : where(undefined, { equals: id }),
     ...(cursor === null
       ? []
       : [

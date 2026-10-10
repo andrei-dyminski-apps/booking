@@ -29,11 +29,12 @@ export const RegisterForm = ({ next }: { next: string }) => {
     // contract describes, and a password typed twice is one password.
     action: (state: FormErrors, values: RegisterFormInput) =>
       registerAction(next, state, {
+        name: values.name,
         email: values.email,
         password: values.password,
       }),
     schema: registerFormSchema,
-    defaultValues: { email: "", password: "", confirmPassword: "" },
+    defaultValues: { name: "", email: "", password: "", confirmPassword: "" },
   });
 
   const { unregister } = form;
@@ -46,6 +47,22 @@ export const RegisterForm = ({ next }: { next: string }) => {
     // its own.
     <form method="post" onSubmit={submit} noValidate>
       <FieldGroup>
+        <FormField
+          form={form}
+          name="name"
+          label="Name"
+          description="How hosts and the people who run the site will see you."
+        >
+          {(control) => (
+            <Input
+              {...control}
+              size="lg"
+              autoComplete="name"
+              disabled={pending}
+            />
+          )}
+        </FormField>
+
         <FormField form={form} name="email" label="Email">
           {(control) => (
             <Input

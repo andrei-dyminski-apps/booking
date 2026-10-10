@@ -18,18 +18,52 @@ const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString }),
 });
 
-/** Demo logins, one per role. Documented in the README — they exist only in this seed. */
+/** Every demo login shares it. Documented in the README — they exist only in this seed. */
 const DEMO_PASSWORD = "password123";
 
-const users = [
-  { email: "guest@example.com", role: Role.USER },
-  { email: "owner@example.com", role: Role.OWNER },
-  { email: "admin@example.com", role: Role.ADMIN },
-];
+/**
+ * One login per role, plus the accounts that give the filter boxes something to suggest:
+ * a second host, so the admin's owner filter has a choice, and three more guests, two of
+ * them with the same name — what the address beside a name exists to tell apart for an
+ * admin, and what a host sees only by the id.
+ */
+const users = {
+  guest: {
+    name: "Maya Lindqvist",
+    email: "guest@example.com",
+    role: Role.USER,
+  },
+  owner: { name: "Tomas Berg", email: "owner@example.com", role: Role.OWNER },
+  admin: { name: "Nora Hale", email: "admin@example.com", role: Role.ADMIN },
+  host: { name: "Ines Duarte", email: "ines@example.com", role: Role.OWNER },
+  alex: {
+    name: "Alex Morgan",
+    email: "alex.morgan@example.com",
+    role: Role.USER,
+  },
+  otherAlex: {
+    name: "Alex Morgan",
+    email: "amorgan@example.com",
+    role: Role.USER,
+  },
+  sam: { name: "Sam Ortega", email: "sam@example.com", role: Role.USER },
+} satisfies Record<string, { name: string; email: string; role: Role }>;
 
-/** Prices are the currency itself, to the cent: 120 is a hundred and twenty a night. */
-const listings = [
+type UserKey = keyof typeof users;
+
+/**
+ * Prices are the currency itself, to the cent: 120 is a hundred and twenty a night. The
+ * owner holds most of the catalogue and the second host the last two listings.
+ */
+const listings: Array<{
+  owner: UserKey;
+  title: string;
+  description: string;
+  pricePerNight: number;
+  capacity: number;
+}> = [
   {
+    owner: "owner",
     title: "Loft above the harbour",
     description:
       "Two rooms under the roof, a wall of glass facing the water and a kitchen that fits four.",
@@ -37,6 +71,7 @@ const listings = [
     capacity: 4,
   },
   {
+    owner: "owner",
     title: "Cottage at the edge of the pines",
     description:
       "A wood stove, a long table and nothing within earshot but the forest road.",
@@ -44,6 +79,7 @@ const listings = [
     capacity: 6,
   },
   {
+    owner: "owner",
     title: "Studio on the market square",
     description:
       "One room, one window over the awnings, and every tram line within a minute's walk.",
@@ -51,6 +87,7 @@ const listings = [
     capacity: 2,
   },
   {
+    owner: "owner",
     title: "Farmhouse with the long table",
     description:
       "Six bedrooms, a kitchen built for a crowd and a field that ends at the river.",
@@ -58,6 +95,7 @@ const listings = [
     capacity: 12,
   },
   {
+    owner: "owner",
     title: "Attic room off the canal",
     description:
       "A bed under the beams, a desk at the window and the water two floors down.",
@@ -65,6 +103,7 @@ const listings = [
     capacity: 1,
   },
   {
+    owner: "owner",
     title: "Beach house on stilts",
     description:
       "A deck facing west, an outdoor shower and sand from the bottom step onwards.",
@@ -72,6 +111,7 @@ const listings = [
     capacity: 8,
   },
   {
+    owner: "host",
     title: "Vineyard cottage",
     description:
       "Two rooms at the end of a row of vines, with the press house for a neighbour.",
@@ -79,6 +119,7 @@ const listings = [
     capacity: 3,
   },
   {
+    owner: "host",
     title: "Cabin at the tree line",
     description:
       "A stove, a drying rack for boots and the last road before the path takes over.",
@@ -102,15 +143,25 @@ function inDays(days: number): Date {
 /**
  * Indexes into `listings`; the ids only exist once the rows are written. Several listings
  * are left with no stay at all on purpose: the catalogue's date filter has to have
- * something to keep as well as something to drop.
+ * something to keep as well as something to drop. The stays of one listing never overlap
+ * — `bookings_no_overlap` would refuse the seed.
  */
-const bookings = [
-  { listing: 0, from: inDays(10), to: inDays(14) },
-  { listing: 0, from: inDays(19), to: inDays(21) },
-  { listing: 1, from: inDays(12), to: inDays(16) },
-  { listing: 2, from: inDays(40), to: inDays(53) },
-  { listing: 3, from: inDays(5), to: inDays(9) },
-  { listing: 6, from: inDays(30), to: inDays(37) },
+const bookings: Array<{
+  guest: UserKey;
+  listing: number;
+  from: Date;
+  to: Date;
+}> = [
+  { guest: "guest", listing: 0, from: inDays(10), to: inDays(14) },
+  { guest: "guest", listing: 0, from: inDays(19), to: inDays(21) },
+  { guest: "guest", listing: 1, from: inDays(12), to: inDays(16) },
+  { guest: "guest", listing: 2, from: inDays(40), to: inDays(53) },
+  { guest: "guest", listing: 3, from: inDays(5), to: inDays(9) },
+  { guest: "guest", listing: 6, from: inDays(30), to: inDays(37) },
+  { guest: "alex", listing: 1, from: inDays(20), to: inDays(23) },
+  { guest: "otherAlex", listing: 2, from: inDays(8), to: inDays(11) },
+  { guest: "sam", listing: 3, from: inDays(15), to: inDays(18) },
+  { guest: "sam", listing: 7, from: inDays(25), to: inDays(28) },
 ];
 
 async function main(): Promise<void> {
@@ -123,27 +174,31 @@ async function main(): Promise<void> {
   await prisma.listing.deleteMany();
   await prisma.user.deleteMany();
 
-  // One hash for all three: argon2 is deliberately slow, and the demo password is the same.
+  // One hash for every account: argon2 is deliberately slow, and the demo password is the same.
   const passwordHash = await argon2.hash(DEMO_PASSWORD, {
     type: argon2.argon2id,
   });
 
   const created = await Promise.all(
-    users.map((user) =>
+    Object.values(users).map((user) =>
       prisma.user.create({ data: { ...user, passwordHash } }),
     ),
   );
 
-  const owner = created.find((user) => user.role === Role.OWNER);
-  const guest = created.find((user) => user.role === Role.USER);
+  // Found by the address, the one unique column a demo account is written with.
+  const idOf = (key: UserKey): string => {
+    const row = created.find((user) => user.email === users[key].email);
 
-  if (owner === undefined || guest === undefined) {
-    throw new Error("The demo users must include an owner and a guest");
-  }
+    if (row === undefined) {
+      throw new Error(`The demo account "${key}" was not written`);
+    }
+
+    return row.id;
+  };
 
   const rooms = await Promise.all(
-    listings.map((listing) =>
-      prisma.listing.create({ data: { ...listing, ownerId: owner.id } }),
+    listings.map(({ owner, ...listing }) =>
+      prisma.listing.create({ data: { ...listing, ownerId: idOf(owner) } }),
     ),
   );
 
@@ -157,7 +212,7 @@ async function main(): Promise<void> {
 
       return {
         listingId: listing.id,
-        guestId: guest.id,
+        guestId: idOf(booking.guest),
         from: booking.from,
         to: booking.to,
         // Confirmed, not holds: a PENDING_PAYMENT booking would lapse 15 minutes after
@@ -168,10 +223,12 @@ async function main(): Promise<void> {
   });
 
   console.log(
-    `Seeded users: ${users.map((user) => user.email).join(", ")} — password "${DEMO_PASSWORD}"`,
+    `Seeded users: ${Object.values(users)
+      .map((user) => `${user.name} <${user.email}>`)
+      .join(", ")} — password "${DEMO_PASSWORD}"`,
   );
   console.log(
-    `Seeded listings: ${listings.length} owned by ${owner.email}, bookings: ${bookings.length} taken by ${guest.email}`,
+    `Seeded listings: ${listings.length}, bookings: ${bookings.length}`,
   );
 }
 

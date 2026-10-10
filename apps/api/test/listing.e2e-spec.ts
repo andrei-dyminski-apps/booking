@@ -72,6 +72,7 @@ describe("ListingController (e2e)", () => {
     guest = await signInAs(app, Role.USER);
     owner = await signInAs(app, Role.OWNER);
     otherOwner = await signInAs(app, Role.OWNER, {
+      name: "E2E Second Owner",
       email: "e2e-owner-2@example.com",
       password: "password123",
     });

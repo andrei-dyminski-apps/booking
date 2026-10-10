@@ -25,7 +25,7 @@ pnpm dev
 - API — http://localhost:3001
 - OpenAPI — http://localhost:3001/docs (not published when `NODE_ENV=production`)
 
-The seed also creates three demo logins, one per role: `guest@example.com`, `owner@example.com`, `admin@example.com` — password `password123`.
+The seed also creates three demo logins, one per role: `guest@example.com`, `owner@example.com`, `admin@example.com` — password `password123`. A few more accounts (`ines@example.com`, a second host; `alex.morgan@example.com`, `amorgan@example.com`, `sam@example.com`, guests) share that password and exist so the filter boxes have names to suggest.
 
 ## Layout
 
@@ -147,7 +147,7 @@ of the catalogue is behind the global `JwtAuthGuard` and answers `401` without a
 | `GET`    | `/bookings/:id`              | a single booking; the guest, the owner of the listing or an admin                     |
 | `POST`   | `/bookings`                  | create a 15-minute hold; USER only, `404` — no such listing, `409` — dates are taken  |
 | `DELETE` | `/bookings/:id`              | cancel, `204`; the guest or an admin. The row stays, with `status: CANCELLED`         |
-| `GET`    | `/users`                     | one page of accounts: role, status and address filters, a cursor; ADMIN only          |
+| `GET`    | `/users`                     | one page of accounts: role, status, name and address filters, a cursor; ADMIN only    |
 | `GET`    | `/users/:id`                 | one account with its stay and listing counts; ADMIN only                              |
 | `PATCH`  | `/users/:id`                 | change the role and/or block; ADMIN only, `403` on the caller's own account           |
 | `GET`    | `/lookups/owners`            | accounts with a listing on offer, by `q` — a part of the address or a whole id; ADMIN |
@@ -307,7 +307,7 @@ Implemented by hand rather than taken from Auth.js or Clerk — the parts an int
 
 The secrets have no fallback in the code: an unset `JWT_ACCESS_SECRET` stops the process at boot instead of shipping a key that is in a public repository. `.env.example` carries development values — replace them anywhere else, `openssl rand -hex 32` generates one.
 
-`pnpm --filter @repo/api db:seed` creates three demo logins, one per role — `guest@example.com`, `owner@example.com` and `admin@example.com`, all with the password `password123` — eight listings owned by the owner and six bookings taken by the guest — enough for the catalogue's filters to have something to keep as well as something to drop — so every rule below has something to act on from the first request. The stays are dated from the day the seed runs: a check-in in the past is refused by the contract, and demo data the API itself would not accept ages into a puzzle.
+`pnpm --filter @repo/api db:seed` creates three demo logins, one per role — `guest@example.com`, `owner@example.com` and `admin@example.com`, all with the password `password123` — plus a second host and three more guests, two of whom share the name "Alex Morgan" so a lookup has two rows of one name to tell apart; eight listings, six owned by the owner and two by the second host, and ten bookings spread over the guests — enough for the catalogue's filters to have something to keep as well as something to drop — so every rule below has something to act on from the first request. The stays are dated from the day the seed runs: a check-in in the past is refused by the contract, and demo data the API itself would not accept ages into a puzzle.
 
 ### The same session on the frontend
 

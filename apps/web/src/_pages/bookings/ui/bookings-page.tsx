@@ -11,6 +11,7 @@ import {
 } from "@repo/ui/components/empty";
 import { lookupsApi, requireUser } from "#shared/api";
 import { ROUTES } from "#shared/config";
+import { lookupOptionText } from "#shared/lib";
 import {
   ButtonLink,
   NoMatchesNotice,
@@ -88,10 +89,12 @@ export const BookingsPage = async ({
   // of the rows the filters name are read beside it — the chips read them, and so do the
   // boxes in the dialog, which would otherwise ask again each time it opens. A guest has
   // nobody to look up, so their `?guestId=` stays an id.
-  const [page, listingLabel, guestLabel] = await Promise.all([
+  const [page, listing, guest] = await Promise.all([
     query === null ? null : readBookingsPage(query),
-    lookupsApi.nameOf(LookupKind.listings, values.listingId),
-    byGuest ? lookupsApi.nameOf(LookupKind.guests, values.guestId) : undefined,
+    lookupsApi.optionOf(LookupKind.listings, values.listingId),
+    byGuest
+      ? lookupsApi.optionOf(LookupKind.guests, values.guestId)
+      : undefined,
   ]);
   const staleCursor = query !== null && page === null;
   const scope = SCOPE[viewer.role];
@@ -99,8 +102,8 @@ export const BookingsPage = async ({
   // button that opens the dialog, and the empty state asks whether there was a filter to
   // blame for it.
   const filters = activeFilters(values, {
-    listing: listingLabel,
-    guest: guestLabel,
+    listing: listing && lookupOptionText(listing),
+    guest: guest && lookupOptionText(guest),
   });
   const filtered = filters.length > 0;
 
@@ -113,8 +116,8 @@ export const BookingsPage = async ({
         errors={errors}
         filters={filters}
         byGuest={byGuest}
-        listingLabel={listingLabel}
-        guestLabel={guestLabel}
+        listing={listing}
+        guest={guest}
       />
 
       {staleCursor && <StalePageNotice firstPageHref={bookingsHref(values)} />}

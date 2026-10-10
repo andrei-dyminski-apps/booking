@@ -42,6 +42,7 @@ describe("AuthController (e2e)", () => {
     const user = userSchema.parse(response.body);
 
     expect(user.email).toBe(testCredentials.email);
+    expect(user.name).toBe(testCredentials.name);
     expect(user.role).toBe("USER");
     // Nothing in the body is a credential — the tokens leave only through Set-Cookie.
     expect(JSON.stringify(response.body)).not.toContain("token");
@@ -81,6 +82,28 @@ describe("AuthController (e2e)", () => {
     expect(error.errors).toEqual([
       expect.objectContaining({ path: ["password"] }),
     ]);
+  });
+
+  it("rejects a name that is only whitespace", async () => {
+    const response = await request(server)
+      .post("/auth/register")
+      .send({ ...testCredentials, name: "   " })
+      .expect(400);
+
+    const error = apiErrorSchema.parse(response.body);
+
+    expect(error.errors).toEqual([expect.objectContaining({ path: ["name"] })]);
+  });
+
+  it("rejects a name with no letter in it, however long", async () => {
+    const response = await request(server)
+      .post("/auth/register")
+      .send({ ...testCredentials, name: "\u200b\u200b\u200b" })
+      .expect(400);
+
+    const error = apiErrorSchema.parse(response.body);
+
+    expect(error.errors).toEqual([expect.objectContaining({ path: ["name"] })]);
   });
 
   it("normalises the email, so the address is stored and matched in one shape", async () => {

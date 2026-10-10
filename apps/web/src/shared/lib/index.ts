@@ -18,6 +18,7 @@ export {
   type FieldErrors,
   type FormErrors,
 } from "./form-errors";
+export { lookupOptionText } from "./lookup-option";
 export { formatMoney } from "./money";
 export { toLocalPath } from "./next-path";
 export { orNotFound, requireId } from "./not-found";

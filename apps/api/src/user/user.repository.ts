@@ -55,6 +55,7 @@ type LockedUser = { id: string; role: Role; blocked_at: Date | null };
  */
 const MANAGED_USER = {
   id: true,
+  name: true,
   email: true,
   role: true,
   createdAt: true,
@@ -79,7 +80,11 @@ export type UserCredentials = {
 export class UserRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
-  async create(input: { email: string; passwordHash: string }): Promise<User> {
+  async create(input: {
+    name: string;
+    email: string;
+    passwordHash: string;
+  }): Promise<User> {
     try {
       return toUser(await this.prismaService.user.create({ data: input }));
     } catch (error) {
@@ -259,10 +264,17 @@ export class UserRepository {
  * contract lower-cases the filter, and every stored address was lower-cased the same way
  * at registration, so an `ILIKE` would only add a `lower()` per row. The trigram index
  * `users_email_trgm_idx` serves the match, the same one the account lookups read.
+ *
+ * The name is the other way round: stored as its owner typed it, so it is matched with
+ * `ILIKE`, which `users_name_trgm_idx` serves just as well.
  */
 function userFilters(query: UserQuery): Prisma.UserWhereInput {
   return {
     role: query.role,
+    name:
+      query.name === undefined
+        ? undefined
+        : { contains: escapeLike(query.name), mode: "insensitive" },
     email:
       query.email === undefined
         ? undefined
@@ -306,10 +318,11 @@ function conflictsOnEmail(
 
 /** Exported for RefreshTokenRepository, which reads the user row through its relation. */
 export function toUser(
-  row: Pick<UserRow, "id" | "email" | "role" | "createdAt">,
+  row: Pick<UserRow, "id" | "name" | "email" | "role" | "createdAt">,
 ): User {
   return {
     id: row.id,
+    name: row.name,
     email: row.email,
     role: row.role,
     createdAt: row.createdAt.toISOString(),

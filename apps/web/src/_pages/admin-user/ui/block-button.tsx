@@ -29,11 +29,11 @@ import { setBlockedAction } from "../api/update-user-actions";
  */
 export const BlockButton = ({
   userId,
-  email,
+  name,
   blocked,
 }: {
   userId: string;
-  email: string;
+  name: string;
   blocked: boolean;
 }) => {
   const [errors, submit, pending] = useActionState<FormErrors, FormData>(
@@ -64,7 +64,7 @@ export const BlockButton = ({
             <AlertDialogMedia>
               <BanIcon className="text-destructive" />
             </AlertDialogMedia>
-            <AlertDialogTitle>Block {email}?</AlertDialogTitle>
+            <AlertDialogTitle>Block {name}?</AlertDialogTitle>
             <AlertDialogDescription>
               Every session of this account ends and it cannot sign in again
               until it is unblocked. A page already open keeps working until its

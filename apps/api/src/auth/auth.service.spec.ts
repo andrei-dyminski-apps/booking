@@ -32,7 +32,11 @@ const config: AuthConfig = {
   cookie: { httpOnly: true, secure: false, sameSite: "lax" },
 };
 
-const credentials = { email: "guest@example.com", password: "password123" };
+const credentials = {
+  name: "Guest",
+  email: "guest@example.com",
+  password: "password123",
+};
 
 /**
  * A homomorphic mapped type keeps only the public surface of a class — private members are
@@ -55,13 +59,18 @@ type PublicOf<T> = { [K in keyof T]: T[K] };
 class FakeUserRepository implements PublicOf<UserRepository> {
   readonly rows = new Map<string, UserCredentials>();
 
-  create(input: { email: string; passwordHash: string }): Promise<User> {
+  create(input: {
+    name: string;
+    email: string;
+    passwordHash: string;
+  }): Promise<User> {
     if (this.rowByEmail(input.email) !== undefined) {
       return Promise.reject(new EmailAlreadyRegisteredError(input.email));
     }
 
     const user: User = {
       id: randomUUID(),
+      name: input.name,
       email: input.email,
       role: "USER",
       createdAt: new Date("2026-08-19T12:00:00.000Z").toISOString(),
@@ -284,6 +293,7 @@ describe("AuthService", () => {
       // The answer carries the contract user and nothing from the row beyond it.
       expect(result.user).toEqual({
         id: expect.any(String) as string,
+        name: credentials.name,
         email: credentials.email,
         role: "USER",
         createdAt: expect.any(String) as string,
@@ -542,6 +552,7 @@ describe("AuthService", () => {
       });
       // Another user's expired row: the sweep is scoped to one user, not to the table.
       const stranger = await userRepository.create({
+        name: "Other",
         email: "other@example.com",
         passwordHash: "hash",
       });

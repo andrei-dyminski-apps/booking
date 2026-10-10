@@ -10,7 +10,8 @@ export const LOOKUP_MIN_LENGTH = 3;
 
 /**
  * What a filter box asks while somebody types into it: the rows of one kind whose name
- * contains `q`, regardless of case, or the one row whose id `q` is.
+ * contains `q`, regardless of case, or the one row whose id `q` is. An admin's lookup of
+ * accounts matches the address as well — see `hint` below for why only theirs.
  *
  * **An id is matched whole or not at all.** A uuid is not something a person remembers a
  * part of — it is pasted from an address — so a `q` that parses as one is an exact match on
@@ -18,8 +19,8 @@ export const LOOKUP_MIN_LENGTH = 3;
  * ids alike, and nobody reads a list of rows that share four hex digits with what they
  * typed.
  *
- * Paged like every other list here, because the answer has no ceiling: three letters of an
- * address can be half of the site's accounts. The box asks for the next page as the list is
+ * Paged like every other list here, because the answer has no ceiling: three letters of a
+ * name can be half of the site's accounts. The box asks for the next page as the list is
  * scrolled to its end, with the `nextCursor` of the one before.
  */
 export const lookupQuerySchema = z.object({
@@ -34,12 +35,20 @@ export const lookupQuerySchema = z.object({
 });
 
 /**
- * One row as a filter box offers it: the id that goes into the URL, and the name a person
- * picks it by — an address for an account, a title for a listing.
+ * One row as a filter box offers it: the id that goes into the URL, the name a person picks
+ * it by — an account's name, a listing's title — and, where the caller may read one, a
+ * second line that tells two rows of the same name apart.
+ *
+ * `hint` is an account's address, and only an admin is handed it: a name is not unique,
+ * and the address is what an admin already sees on every account. A host is not — the
+ * address of somebody who stayed with them is not theirs to read, which is why the lookup
+ * of their guests matches the name alone and answers `null` here. A listing has no hint:
+ * its title is what everybody reads.
  */
 export const lookupOptionSchema = z.object({
   id: z.uuid(),
   label: z.string(),
+  hint: z.string().nullable(),
 });
 
 /**

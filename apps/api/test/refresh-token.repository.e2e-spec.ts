@@ -37,7 +37,11 @@ describe("RefreshTokenRepository (e2e)", () => {
     await resetDatabase(app);
 
     const user = await prismaService.user.create({
-      data: { email: "rotation@example.com", passwordHash: "hash" },
+      data: {
+        name: "Rotation",
+        email: "rotation@example.com",
+        passwordHash: "hash",
+      },
     });
 
     userId = user.id;

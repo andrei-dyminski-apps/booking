@@ -52,6 +52,7 @@ describe("BookingController (e2e)", () => {
 
     guest = await signInAs(app, Role.USER);
     otherGuest = await signInAs(app, Role.USER, {
+      name: "E2E Second Guest",
       email: "e2e-guest-2@example.com",
       password: "password123",
     });

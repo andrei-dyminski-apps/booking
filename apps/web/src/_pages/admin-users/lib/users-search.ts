@@ -27,6 +27,7 @@ import type { SortOption } from "#shared/ui";
 export type FilterValues = {
   role: string;
   status: string;
+  name: string;
   email: string;
   sort: string;
 };
@@ -52,6 +53,7 @@ export function readUsersSearch(
   const values: FilterValues = {
     role: singleParam(params.role),
     status: singleParam(params.status),
+    name: singleParam(params.name),
     email: singleParam(params.email),
     sort: singleParam(params.sort),
   };
@@ -110,7 +112,13 @@ export function sortOptions(values: FilterValues): SortOption[] {
 
 /** The same ordering with nothing filtered — an ordering is not a filter. */
 export function clearedFiltersHref(values: FilterValues): string {
-  return usersHref({ role: "", status: "", email: "", sort: values.sort });
+  return usersHref({
+    role: "",
+    status: "",
+    name: "",
+    email: "",
+    sort: values.sort,
+  });
 }
 
 function currentSort(value: string): UserSort | null {
@@ -149,6 +157,14 @@ export function activeFilters(values: FilterValues): ActiveFilter[] {
       key: "status",
       label: statusLabel(values.status),
       href: usersHref({ ...values, status: "" }),
+    });
+  }
+
+  if (values.name !== "") {
+    filters.push({
+      key: "name",
+      label: `Name has “${values.name}”`,
+      href: usersHref({ ...values, name: "" }),
     });
   }
 

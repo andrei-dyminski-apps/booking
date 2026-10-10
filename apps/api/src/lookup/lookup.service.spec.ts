@@ -139,6 +139,7 @@ function page(
 const option = (label: string): LookupOption => ({
   id: crypto.randomUUID(),
   label,
+  hint: null,
 });
 
 describe("LookupService", () => {

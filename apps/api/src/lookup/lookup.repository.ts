@@ -10,12 +10,21 @@ import type { LookupCursor } from "./lookup-cursor";
 import { lookupConditions, toLookupPage } from "./lookup-page";
 
 /**
- * The queries behind the filter boxes: accounts by their address and listings by their
- * title, each narrowed to the rows the list beside the box can actually show — a
+ * Whether a lookup of accounts may match and show their addresses: an admin's may, a
+ * host's may not. Two named values rather than a bare boolean, so a call site says which.
+ */
+const WITH_ADDRESS = "withAddress";
+const NAME_ONLY = "nameOnly";
+
+type Addresses = typeof WITH_ADDRESS | typeof NAME_ONLY;
+
+/**
+ * The queries behind the filter boxes: accounts by their name — and by their address, for
+ * an admin — and listings by their title, each narrowed to the rows the list beside the box can actually show — a
  * suggestion that empties the list by construction is a box that lies.
  *
- * The rows leave as a `LookupOption`, a shape of this module's own: only the id and the
- * name a person picks it by. Both tables are read here rather than through the repository
+ * The rows leave as a `LookupOption`, a shape of this module's own: the id, the name a
+ * person picks it by and the hint that tells two of one name apart. Both tables are read here rather than through the repository
  * each belongs to, because a lookup is a query of its own — two columns, a search and a
  * keyset — and nothing of the row mapping those repositories keep. Listings could not be
  * read there in any case: the lookup offers retired ones, and every read of
@@ -38,6 +47,7 @@ export class LookupRepository {
   ): Promise<Page<LookupOption>> {
     return this.findAccounts(
       { listings: { some: STILL_OFFERED } },
+      WITH_ADDRESS,
       query,
       cursor,
     );
@@ -48,10 +58,19 @@ export class LookupRepository {
     query: LookupQuery,
     cursor: LookupCursor | null,
   ): Promise<Page<LookupOption>> {
-    return this.findAccounts({ bookings: { some: {} } }, query, cursor);
+    return this.findAccounts(
+      { bookings: { some: {} } },
+      WITH_ADDRESS,
+      query,
+      cursor,
+    );
   }
 
-  /** The accounts that took a stay against one of this owner's listings. */
+  /**
+   * The accounts that took a stay against one of this owner's listings — by name alone:
+   * the address of a guest is not the host's to read, so it is neither matched nor handed
+   * back (see `lookupOptionSchema`).
+   */
   findGuestsOfListingOwner(
     ownerId: string,
     query: LookupQuery,
@@ -59,6 +78,7 @@ export class LookupRepository {
   ): Promise<Page<LookupOption>> {
     return this.findAccounts(
       { bookings: { some: againstListingsOf(ownerId) } },
+      NAME_ONLY,
       query,
       cursor,
     );
@@ -104,36 +124,51 @@ export class LookupRepository {
   }
 
   /**
-   * Accounts by a part of their address. The search is case-sensitive for the reason
-   * `userFilters` in `user.repository.ts` gives — every stored address is lower-case, so
-   * the term is lower-cased instead of the column — and `users_email_trgm_idx` serves it.
-   * The order is the unique btree of `email` read forwards.
+   * Accounts by a part of their name, regardless of case — a name is stored as its owner
+   * typed it — through `users_name_trgm_idx`, ordered by the name with the id behind it.
+   * Where the caller may read addresses, a part of one matches too and is handed back as
+   * the hint. That half is case-sensitive for the reason `userFilters` in
+   * `user.repository.ts` gives — every stored address is lower-case, so the term is
+   * lower-cased instead of the column — and `users_email_trgm_idx` serves it; Postgres
+   * reads an `OR` of the two as a union of the two indexes.
    */
   private async findAccounts(
     scope: Prisma.UserWhereInput,
+    addresses: Addresses,
     query: LookupQuery,
     cursor: LookupCursor | null,
   ): Promise<Page<LookupOption>> {
+    const byName: Prisma.UserWhereInput = {
+      name: { contains: escapeLike(query.q), mode: "insensitive" },
+    };
     const rows = await this.prismaService.user.findMany({
       where: {
         AND: [
           scope,
           ...lookupConditions(
-            (email, id): Prisma.UserWhereInput => ({ email, id }),
-            { contains: escapeLike(query.q.toLowerCase()) },
+            (name, id): Prisma.UserWhereInput => ({ name, id }),
+            addresses === WITH_ADDRESS
+              ? {
+                  OR: [
+                    byName,
+                    { email: { contains: escapeLike(query.q.toLowerCase()) } },
+                  ],
+                }
+              : byName,
             query,
             cursor,
           ),
         ],
       },
-      orderBy: [{ email: "asc" }, { id: "asc" }],
+      orderBy: [{ name: "asc" }, { id: "asc" }],
       take: query.limit + 1,
-      select: { id: true, email: true },
+      select: { id: true, name: true, email: true },
     });
 
     return toLookupPage(rows, query.limit, (row) => ({
       id: row.id,
-      label: row.email,
+      label: row.name,
+      hint: addresses === WITH_ADDRESS ? row.email : null,
     }));
   }
 
@@ -154,7 +189,7 @@ export class LookupRepository {
           scope,
           ...lookupConditions(
             (title, id): Prisma.ListingWhereInput => ({ title, id }),
-            { contains: escapeLike(query.q), mode: "insensitive" },
+            { title: { contains: escapeLike(query.q), mode: "insensitive" } },
             query,
             cursor,
           ),
@@ -168,6 +203,7 @@ export class LookupRepository {
     return toLookupPage(rows, query.limit, (row) => ({
       id: row.id,
       label: row.title,
+      hint: null,
     }));
   }
 }

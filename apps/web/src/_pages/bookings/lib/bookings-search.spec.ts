@@ -361,12 +361,12 @@ describe("activeFilters", () => {
     });
   });
 
-  it("names a guest by their address where the page resolved one, and by their id otherwise", () => {
+  it("names a guest by their name where the page resolved one, and by their id otherwise", () => {
     const values = { ...NO_FILTERS, guestId: LISTING_ID };
 
-    expect(
-      activeFilters(values, { guest: "guest@example.com" })[0],
-    ).toMatchObject({ label: "guest@example.com" });
+    expect(activeFilters(values, { guest: "Maya Lindqvist" })[0]).toMatchObject(
+      { label: "Maya Lindqvist" },
+    );
     expect(activeFilters(values)[0]).toMatchObject({
       label: "Guest 6d0f2c1e…",
     });

@@ -7,7 +7,7 @@ import {
   usersHref,
 } from "./users-search";
 
-const NO_FILTERS = { role: "", status: "", email: "", sort: "" };
+const NO_FILTERS = { role: "", status: "", name: "", email: "", sort: "" };
 
 describe("readUsersSearch", () => {
   it("asks the unfiltered question when the URL carries nothing", () => {
@@ -19,10 +19,11 @@ describe("readUsersSearch", () => {
     expect(canonical).toBeNull();
   });
 
-  it("carries the filters the contract takes, the address lower-cased", () => {
+  it("carries the filters the contract takes, the address lower-cased and the name as typed", () => {
     const { query } = readUsersSearch({
       role: "OWNER",
       status: "BLOCKED",
+      name: " Anna ",
       email: "Smith@",
       sort: "oldest",
     });
@@ -31,6 +32,7 @@ describe("readUsersSearch", () => {
       limit: 20,
       role: "OWNER",
       status: "BLOCKED",
+      name: "Anna",
       email: "smith@",
       sort: "oldest",
     });
@@ -58,6 +60,7 @@ describe("readUsersSearch", () => {
     const { canonical } = readUsersSearch({
       role: "",
       status: "BLOCKED",
+      name: "",
       email: "",
       sort: "",
     });
@@ -67,7 +70,7 @@ describe("readUsersSearch", () => {
 
   it("leaves the canonical address alone — a redirect that is not a fixed point loops", () => {
     const href = usersHref(
-      { role: "ADMIN", status: "", email: "a@b", sort: "oldest" },
+      { role: "ADMIN", status: "", name: "Ann", email: "a@b", sort: "oldest" },
       "cursor-value",
     );
     const params = Object.fromEntries(
@@ -89,6 +92,7 @@ describe("activeFilters", () => {
     const values = {
       role: "OWNER",
       status: "ACTIVE",
+      name: "Anna",
       email: "smith",
       sort: "oldest",
     };
@@ -97,17 +101,22 @@ describe("activeFilters", () => {
       {
         key: "role",
         label: "Owner",
-        href: "/admin/users?status=ACTIVE&email=smith&sort=oldest",
+        href: "/admin/users?status=ACTIVE&name=Anna&email=smith&sort=oldest",
       },
       {
         key: "status",
         label: "Active",
-        href: "/admin/users?role=OWNER&email=smith&sort=oldest",
+        href: "/admin/users?role=OWNER&name=Anna&email=smith&sort=oldest",
+      },
+      {
+        key: "name",
+        label: "Name has “Anna”",
+        href: "/admin/users?role=OWNER&status=ACTIVE&email=smith&sort=oldest",
       },
       {
         key: "email",
         label: "Address has “smith”",
-        href: "/admin/users?role=OWNER&status=ACTIVE&sort=oldest",
+        href: "/admin/users?role=OWNER&status=ACTIVE&name=Anna&sort=oldest",
       },
     ]);
     expect(clearedFiltersHref(values)).toBe("/admin/users?sort=oldest");

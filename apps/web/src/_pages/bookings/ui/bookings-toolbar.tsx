@@ -1,3 +1,4 @@
+import type { LookupOption } from "@repo/contracts";
 import { FieldError } from "@repo/ui/components/field";
 import { fieldMessages, messagesExcept, type FieldErrors } from "#shared/lib";
 import { FilterChips, SortSelect } from "#shared/ui";
@@ -22,8 +23,8 @@ export const BookingsToolbar = ({
   errors,
   filters,
   byGuest,
-  listingLabel,
-  guestLabel,
+  listing,
+  guest,
 }: {
   values: FilterValues;
   errors: FieldErrors;
@@ -37,10 +38,10 @@ export const BookingsToolbar = ({
   filters: ActiveFilter[];
   /** Whether this role has a use for the guest box — see the dialog. */
   byGuest: boolean;
-  /** The title of the listing being filtered by, for the box that names it. */
-  listingLabel: string | undefined;
-  /** The address of the guest being filtered by, for the box that names them. */
-  guestLabel: string | undefined;
+  /** The listing being filtered by, for the box that names it. */
+  listing: LookupOption | undefined;
+  /** The guest being filtered by, for the box that names them. */
+  guest: LookupOption | undefined;
 }) => {
   // Everything the contract refused except the ordering, which has a control of its own to
   // sit under.
@@ -54,8 +55,8 @@ export const BookingsToolbar = ({
           errors={errors}
           count={filters.length}
           byGuest={byGuest}
-          listingLabel={listingLabel}
-          guestLabel={guestLabel}
+          listing={listing}
+          guest={guest}
         />
 
         <SortSelect options={sortOptions(values)} error={errors.sort} />

@@ -53,10 +53,15 @@ describe("Booking hold expiry (e2e)", () => {
     await resetQueue(app);
 
     const guest = await prismaService.user.create({
-      data: { email: "expiry-guest@example.com", passwordHash: "hash" },
+      data: {
+        name: "Expiry Guest",
+        email: "expiry-guest@example.com",
+        passwordHash: "hash",
+      },
     });
     const owner = await prismaService.user.create({
       data: {
+        name: "Expiry Owner",
         email: "expiry-owner@example.com",
         passwordHash: "hash",
         role: "OWNER",

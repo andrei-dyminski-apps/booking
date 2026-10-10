@@ -50,6 +50,7 @@ export {
   REFRESH_TOKEN_COOKIE,
   Role,
   roleSchema,
+  nameSchema,
   userSchema,
   registerSchema,
   registerFormSchema,

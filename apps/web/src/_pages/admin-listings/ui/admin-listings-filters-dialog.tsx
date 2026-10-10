@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { SlidersHorizontalIcon } from "lucide-react";
-import { LookupKind } from "@repo/contracts";
+import { LookupKind, type LookupOption } from "@repo/contracts";
 import { Badge } from "@repo/ui/components/badge";
 import { Button } from "@repo/ui/components/button";
 import {
@@ -34,7 +34,7 @@ export const AdminListingsFiltersDialog = ({
   errors,
   earliest,
   count,
-  ownerLabel,
+  owner,
 }: {
   values: FilterValues;
   errors: FieldErrors;
@@ -42,8 +42,8 @@ export const AdminListingsFiltersDialog = ({
   earliest: string;
   /** How many filters are on, for the badge on the button that opens this. */
   count: number;
-  /** The owner's address, where the page resolved `ownerId` to an account. */
-  ownerLabel: string | undefined;
+  /** The owner, where the page resolved `ownerId` to an account. */
+  owner: LookupOption | undefined;
 }) => {
   const [open, setOpen] = useState(false);
 
@@ -89,10 +89,10 @@ export const AdminListingsFiltersDialog = ({
               label="Owner"
               kind={LookupKind.owners}
               value={values.ownerId}
-              valueLabel={ownerLabel}
+              valueOption={owner}
               error={errors.ownerId}
-              placeholder="An address, or an account's id"
-              description="Any part of the owner's address, or the whole id from the address of their page."
+              placeholder="A name or an address, or an account's id"
+              description="Any part of the owner's name or email, or the whole id from the address of their page."
             />
             <ListingFilterFields
               values={values}

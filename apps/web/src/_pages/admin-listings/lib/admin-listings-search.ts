@@ -99,8 +99,8 @@ export type ActiveFilter = FilterChip;
 
 /**
  * What is currently being filtered by, as chips: the owner first, then the catalogue's
- * own (`listingFilterChips`). The owner is named by their address where the page could
- * resolve the id, and by a shortened id where it could not — a value the contract refused
+ * own (`listingFilterChips`). The owner is named by their name and address where the page
+ * could resolve the id, and by a shortened id where it could not — a value the contract refused
  * is shown as it was typed, so that it can be taken off.
  */
 export function activeFilters(

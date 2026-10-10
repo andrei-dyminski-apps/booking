@@ -42,9 +42,14 @@ export const UserPage = async ({ params }: PageProps<"/admin/users/[id]">) => {
         <BackLink href={ROUTES.adminUsers}>All users</BackLink>
 
         <div className="flex flex-col gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight break-all">
-            {user.email}
-          </h1>
+          <div className="flex flex-col gap-1">
+            <h1 className="text-2xl font-semibold tracking-tight break-words">
+              {user.name}
+            </h1>
+            <p className="text-sm break-all text-muted-foreground">
+              {user.email}
+            </p>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             {self && <Badge variant="secondary">You</Badge>}
             {user.blockedAt !== null && (
@@ -94,10 +99,10 @@ const AccessCard = ({
 
     {!self && (
       <CardFooter className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <RoleForm userId={user.id} role={user.role} email={user.email} />
+        <RoleForm userId={user.id} role={user.role} name={user.name} />
         <BlockButton
           userId={user.id}
-          email={user.email}
+          name={user.name}
           blocked={user.blockedAt !== null}
         />
       </CardFooter>

@@ -39,11 +39,12 @@ type Search =
     };
 
 /**
- * A box of a filter dialog that takes an id, filled in by name: three characters of an
- * address or a title are a search, a whole uuid is the one row it names, and what is picked
- * goes into the form as its id — so the URL, the contract and the chips are the ones a typed
- * id always had. The suggestions are the rows the filter can match for this session, which
- * is the API's to decide (`/lookups`).
+ * A box of a filter dialog that takes an id, filled in by name: three characters of a
+ * person's name or a title are a search, a whole uuid is the one row it names, and what is
+ * picked goes into the form as its id — so the URL, the contract and the chips are the ones
+ * a typed id always had. The suggestions are the rows the filter can match for this
+ * session, which is the API's to decide (`/lookups`) — an admin's search of accounts
+ * matches the address too, and shows it under the name.
  *
  * **The id travels in a hidden input, not in the box.** The box holds the name a person
  * reads; the form submits what the filter means. Emptying the box empties the filter. Text
@@ -66,7 +67,7 @@ export const LookupField = ({
   label,
   kind,
   value,
-  valueLabel,
+  valueOption,
   error,
   description,
   placeholder,
@@ -77,11 +78,11 @@ export const LookupField = ({
   /** The id the URL carries, or the text it carries where the contract refused it. */
   value: string;
   /**
-   * The name of that row, which the page resolves on the server — once per render, where
-   * the dialog this sits in mounts the box anew each time it opens. Without one the box
-   * shows the id.
+   * That row as the lookup offers it, which the page resolves on the server — once per
+   * render, where the dialog this sits in mounts the box anew each time it opens. Without
+   * one the box shows the id.
    */
-  valueLabel?: string | undefined;
+  valueOption?: LookupOption | undefined;
   error: string[] | undefined;
   description?: string;
   placeholder: string;
@@ -90,7 +91,9 @@ export const LookupField = ({
   const hint = filterHint(id, description);
 
   const [selected, setSelected] = useState<LookupOption | null>(
-    value === "" ? null : { id: value, label: valueLabel ?? value },
+    value === ""
+      ? null
+      : (valueOption ?? { id: value, label: value, hint: null }),
   );
   const [inputValue, setInputValue] = useState(selected?.label ?? "");
   const [term, setTerm] = useState("");
@@ -246,8 +249,17 @@ export const LookupField = ({
           <ComboboxList onScroll={onScroll}>
             {(option: LookupOption) => (
               <ComboboxItem key={option.id} value={option}>
-                <span className="truncate">{option.label}</span>
-                <span className="ml-auto font-mono text-xs text-muted-foreground">
+                {/* Two rows of one name — two guests called the same — are told apart by
+                    the hint where the API hands one over, and by the id where it does not. */}
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate">{option.label}</span>
+                  {option.hint !== null && (
+                    <span className="truncate text-xs text-muted-foreground">
+                      {option.hint}
+                    </span>
+                  )}
+                </span>
+                <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground">
                   {option.id.slice(0, 8)}
                 </span>
               </ComboboxItem>
@@ -260,6 +272,16 @@ export const LookupField = ({
           )}
         </ComboboxContent>
       </Combobox>
+
+      {/* The box holds one line, so the hint of what was picked goes under it: a name alone
+          would not say which of two people called the same the filter is about. */}
+      {selected !== null &&
+        selected.hint !== null &&
+        inputValue === selected.label && (
+          <p className="truncate text-xs text-muted-foreground">
+            {selected.hint}
+          </p>
+        )}
 
       {/* What the filter means, as opposed to what the box shows — see above. */}
       <input

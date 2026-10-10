@@ -56,6 +56,7 @@ export class AuthService {
 
     try {
       user = await this.userRepository.create({
+        name: input.name,
         email: input.email,
         passwordHash,
       });

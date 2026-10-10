@@ -170,7 +170,7 @@ apps/web/
       api/bookings.ts         # bookingsApi — the routes of the resource
       api/listings.ts         # listingsApi — the same, for the catalogue rows
       api/users.ts            # usersApi — the admin's routes over accounts
-      api/lookups.ts          # lookupsApi — what an id box suggests, abortable; nameOf for a page
+      api/lookups.ts          # lookupsApi — what an id box suggests, abortable; optionOf for a page
       api/keyset-page.ts      # a stale cursor onto null, the one both paged reads share
       api/index.ts
       config/api-url.ts       # apiOrigin() and BFF_BASE_PATH
@@ -186,6 +186,7 @@ apps/web/
       lib/money.ts            # a price onto the screen, in one place
       lib/not-found.ts        # a 404 from the API, and an id a URL cannot carry
       lib/plural.ts           # a count and the noun it counts, made to agree
+      lib/lookup-option.ts    # a picked row as one line: the name, and the hint beside it
       lib/index.ts
       ui/back-link.tsx        # the way up from a detail screen to its list
       ui/button-link.tsx      # a <Link> wearing the button classes, spelled once
@@ -773,7 +774,7 @@ the three notices a list shows in place of itself — a cursor the API will not 
 the filters emptied (`NoMatchesNotice`). The two admin lists are the same shape again:
 `_pages/admin-users` over accounts, and `_pages/admin-listings` over the catalogue's own
 filters plus `ownerId` — the one the catalogue's contract takes and only an admin has a
-use for, shown as a chip named by the owner's address. In `shared/lib`
+use for, shown as a chip named by the owner's name and address. In `shared/lib`
 and `shared/api`, the domain-free mechanics the two slices' search modules would otherwise
 each spell: `filtersHref` and `singleParam` and `searchParamsHref` (`search-params.ts`),
 `dayLabelOrAny` (`dates.ts`), `messagesExcept` (`form-errors.ts`), `pageOrNullOnStaleCursor`
@@ -809,7 +810,7 @@ worth naming: the stays are personal, so that read is `no-store` and carries no 
 
 **An id filter is filled in by name** (`shared/ui/lookup-field.tsx`) — `ownerId` on the
 admin's listings, `listingId` and `guestId` on the stays. Nobody remembers a uuid, so the
-box is a combobox over `/lookups/*`: three characters of an address or a title are a
+box is a combobox over `/lookups/*`: three characters of a name or a title are a
 search, a whole uuid is the one row it names, and what is picked travels in a hidden input
 as the id it always was — the URL, the contract, the chips and the canonical address do not
 know the box changed.
@@ -825,8 +826,8 @@ know the box changed.
   cursor the API handed back when the list nears its end — three letters can be half the
   site's accounts. One page at a time: a ref guards the request, because two scroll events
   can arrive before the render that shows it.
-- **A row the URL names only by id is named by the page, on the server** (`valueLabel`):
-  `lookupsApi.nameOf` asks the same lookup by the whole id once per render, beside the
+- **A row the URL names only by id is named by the page, on the server** (`valueOption`):
+  `lookupsApi.optionOf` asks the same lookup by the whole id once per render, beside the
   list, and the chip reads the same name. Not the box — the dialog mounts it anew each time
   it opens, and each opening would ask again. Where nothing answers, the box shows the id.
 - **Typed text that was not picked is submitted as it was typed**, a pasted id included: the

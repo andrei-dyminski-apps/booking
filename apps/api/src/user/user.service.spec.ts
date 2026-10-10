@@ -55,6 +55,7 @@ class FakeUserRepository implements PublicOf<UserRepository> {
     const index = this.rows.length;
     const row: ManagedUser = {
       id: crypto.randomUUID(),
+      name: `User ${index}`,
       email: `user${index}@example.com`,
       role: Role.USER,
       // One second apart and in insertion order, so `newest` is the reverse of it.
@@ -87,6 +88,7 @@ class FakeUserRepository implements PublicOf<UserRepository> {
 
     return Promise.resolve({
       id: row.id,
+      name: row.name,
       email: row.email,
       role: row.role,
       createdAt: row.createdAt,

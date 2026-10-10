@@ -52,10 +52,15 @@ describe("BookingRepository foreign keys (e2e)", () => {
     await resetQueue(app);
 
     const guest = await prismaService.user.create({
-      data: { email: "keys-guest@example.com", passwordHash: "hash" },
+      data: {
+        name: "Keys Guest",
+        email: "keys-guest@example.com",
+        passwordHash: "hash",
+      },
     });
     const owner = await prismaService.user.create({
       data: {
+        name: "Keys Owner",
         email: "keys-owner@example.com",
         passwordHash: "hash",
         role: "OWNER",

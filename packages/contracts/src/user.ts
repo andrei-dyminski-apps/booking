@@ -41,9 +41,9 @@ export const userStatusSchema = z.enum(["ACTIVE", "BLOCKED"]);
 export const UserStatus = userStatusSchema.enum;
 
 /**
- * Two orderings over the one column every account has. An ordering by address was left
- * out on purpose: the `email` filter below already finds one account by name, and a third
- * key would be a third index for a list an admin reads by recency.
+ * Two orderings over the one column every account has. An ordering by name or address was
+ * left out on purpose: the `name` and `email` filters below already find one account, and a
+ * third key would be a third index for a list an admin reads by recency.
  */
 export const userSortSchema = z.enum(["newest", "oldest"]);
 
@@ -56,10 +56,22 @@ export const userSortSchema = z.enum(["newest", "oldest"]);
  * lower-cased the way a registration is, because that is how every stored address was
  * written, and a box holding nothing but spaces is refused rather than read as "any" — a
  * filter that looks set and matches everything is the one a person cannot see through.
+ *
+ * `name` is a part of a name, matched without regard to case as well, but not lower-cased
+ * here: a name is stored as its owner typed it, so it is the match that ignores case rather
+ * than the term. Bounded by what `nameSchema` lets a name be.
  */
 export const userQuerySchema = z.object({
   role: blank(roleSchema.optional()),
   status: blank(userStatusSchema.optional()),
+  name: blank(
+    z
+      .string()
+      .trim()
+      .min(1, { message: "Type at least one character of the name" })
+      .max(100, { message: "A name is never longer than 100 characters" })
+      .optional(),
+  ),
   email: blank(
     z
       .string()

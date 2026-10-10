@@ -245,7 +245,7 @@ export type ActiveFilter = {
  * arrived together.
  *
  * An id is shown by the name of the row it names where the page could resolve one — the
- * title of the listing, the address of the guest. Where it could not, the id is shortened
+ * title of the listing, the name of the guest. Where it could not, the id is shortened
  * rather than dropped: it came out of a URL and the chip's job is to name what was asked
  * for so that it can be taken off again. The same is true of a value the contract refused,
  * which is shown exactly as it was typed.

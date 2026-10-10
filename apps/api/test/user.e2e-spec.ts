@@ -136,7 +136,7 @@ describe("UserController (e2e)", () => {
     ]);
   });
 
-  it("filters by role, by a part of the address, and by whether the account is blocked", async () => {
+  it("filters by role, by a part of the name or the address, and by whether the account is blocked", async () => {
     expect(emails(await page("?role=OWNER"))).toEqual([
       credentialsFor.OWNER.email,
     ]);
@@ -147,6 +147,11 @@ describe("UserController (e2e)", () => {
     // Taken as written: `LIKE` would read these two as wildcards and match every address.
     expect(emails(await page("?email=%25"))).toEqual([]);
     expect(emails(await page("?email=e2e_"))).toEqual([]);
+    // A name is stored as typed, so it is the match that ignores the case.
+    expect(emails(await page("?name=e2e%20own"))).toEqual([
+      credentialsFor.OWNER.email,
+    ]);
+    expect(emails(await page("?name=%25"))).toEqual([]);
 
     const guestId = await idOf(credentialsFor.USER.email);
 
@@ -163,6 +168,7 @@ describe("UserController (e2e)", () => {
   it("refuses a filter the contract refuses, and a cursor it did not issue", async () => {
     await admin.get("/users?role=SUPERUSER").expect(400);
     await admin.get("/users?email=%20%20").expect(400);
+    await admin.get("/users?name=%20%20").expect(400);
     await admin.get("/users?cursor=not-a-cursor").expect(400);
   });
 
@@ -260,6 +266,7 @@ describe("UserController (e2e)", () => {
 
   it("lets only one of two admins blocking each other at once through", async () => {
     const second = await signInAs(app, Role.ADMIN, {
+      name: "E2E Second Admin",
       email: "e2e-admin-2@example.com",
       password: "password123",
     });

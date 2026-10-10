@@ -1,6 +1,6 @@
 import {
+  LookupKind,
   lookupOptionSchema,
-  type LookupKind,
   type LookupOption,
 } from "@repo/contracts";
 import { z } from "zod";
@@ -24,10 +24,16 @@ export type LookupCursor = {
 };
 
 /**
- * One tag per kind: an account is ordered by its address in two lookups, and without the
- * tag a cursor of the guests would read as a good place among the owners.
+ * One tag per kind: an account is ordered by its name in two lookups, and without the tag
+ * a cursor of the guests would read as a good place among the owners.
+ *
+ * The accounts' tags say `by-name` because accounts were once ordered by their address. A
+ * cursor issued then names a place in an ordering that no longer exists, and under the old
+ * tag it would decode as a good one and start the next page at the wrong row; under the new
+ * one it is the `400` every cursor this API did not write gets.
  */
-const resource = (kind: LookupKind): string => `lookup-${kind}`;
+const resource = (kind: LookupKind): string =>
+  kind === LookupKind.listings ? `lookup-${kind}` : `lookup-${kind}-by-name`;
 
 /**
  * The name is base64url-encoded inside the envelope, unlike the key of any other cursor. A

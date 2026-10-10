@@ -10,7 +10,7 @@ import { ButtonLink } from "#shared/ui";
  * shell about themselves — who they are signed in as, and the way out.
  *
  * Nothing here is a permission. The role is a claim of a signed access token that only
- * the API can verify, and what it decides on this side is a word under an email address.
+ * the API can verify, and what it decides on this side is a word under a name.
  */
 export const AccountPanel = ({ user }: { user: User | null }) => {
   if (user === null) {
@@ -34,10 +34,10 @@ export const AccountPanel = ({ user }: { user: User | null }) => {
           aria-hidden
           className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-xs font-semibold text-primary-foreground uppercase"
         >
-          {user.email.slice(0, 2)}
+          {initialsOf(user.name)}
         </span>
         <span className="flex min-w-0 flex-col">
-          <span className="truncate text-sm">{user.email}</span>
+          <span className="truncate text-sm">{user.name}</span>
           <span className="text-xs text-muted-foreground">
             {ROLE_LABEL[user.role]}
           </span>
@@ -58,3 +58,17 @@ const ROLE_LABEL: Record<Role, string> = {
   [Role.OWNER]: "Host",
   [Role.ADMIN]: "Administrator",
 };
+
+/**
+ * The first letter of the first two words — "Maya Lindqvist" is "ML", a single word is one
+ * letter. Read by code point rather than by UTF-16 unit, so a letter outside the Basic
+ * Multilingual Plane is not cut in half into a character nobody can draw.
+ */
+function initialsOf(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter((word) => word !== "")
+    .slice(0, 2)
+    .map((word) => Array.from(word).at(0) ?? "")
+    .join("");
+}

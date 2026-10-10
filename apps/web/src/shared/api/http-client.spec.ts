@@ -25,6 +25,7 @@ const jsonResponse = (
 
 const validUser = {
   id: "9c6f6f1e-6b8b-4b8a-9f2e-8f6b6b8b6b8b",
+  name: "User",
   email: "user@example.com",
   role: "USER",
   createdAt: "2026-08-24T00:00:00.000Z",

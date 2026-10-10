@@ -33,15 +33,37 @@ const passwordSchema = z
   .min(8, { message: "Password must be at least 8 characters long" })
   .max(128, { message: "Password may not be longer than 128 characters" });
 
+/**
+ * The name a person goes by on the site — what a host reads on a stay instead of an
+ * address, and what the filter boxes of the stays and the listings suggest. Free text,
+ * because names do not follow a format; trimmed, because a box that held only spaces is
+ * not a name, and bounded, because it is drawn on a card. It is not unique and is never a
+ * key: two guests may share one, and the id behind it is what a filter carries.
+ *
+ * It has to hold a letter or a digit of some script. `trim` takes off the whitespace it
+ * knows, and a zero-width space or a control character is not that — a name made only of
+ * them passes as one and reaches every card as an empty line nobody can search for.
+ */
+export const nameSchema = z
+  .string()
+  .trim()
+  .min(1, { message: "Enter your name" })
+  .max(100, { message: "A name may not be longer than 100 characters" })
+  .regex(/[\p{L}\p{N}]/u, {
+    message: "A name has to have at least one letter in it",
+  });
+
 /** What the API tells the client about the signed-in person — never the password hash. */
 export const userSchema = z.object({
   id: z.uuid(),
+  name: z.string(),
   email: z.email(),
   role: roleSchema,
   createdAt: z.iso.datetime(),
 });
 
 export const registerSchema = z.object({
+  name: nameSchema,
   email: emailSchema,
   password: passwordSchema,
 });

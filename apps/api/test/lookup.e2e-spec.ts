@@ -6,7 +6,7 @@ import { Role, lookupPageSchema, type LookupPage } from "@repo/contracts";
 import { AppModule } from "./../src/app.module";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
-import { credentialsFor, signInAs, type Agent } from "./session";
+import { credentialsFor, signIn, signInAs, type Agent } from "./session";
 
 const LISTING = {
   description: "Two rooms under the roof and a wall of glass.",
@@ -16,6 +16,7 @@ const LISTING = {
 
 /** A second owner, with listings nobody has stayed in. */
 const otherOwner = {
+  name: "E2E Other Owner",
   email: "e2e-other-owner@example.com",
   password: "password123",
 };
@@ -102,10 +103,16 @@ describe("LookupController (e2e)", () => {
     await admin.get("/lookups/owners?q=%20%20e2%20").expect(400);
   });
 
-  it("offers the owners of what is on offer, by any part of the address and any case", async () => {
-    expect(labels(await lookup(admin, "owners", "OWNER"))).toEqual([
-      otherOwner.email,
-      credentialsFor.OWNER.email,
+  it("offers the owners of what is on offer by name, with the address beside it", async () => {
+    const owners = await lookup(admin, "owners", "OWNER");
+
+    expect(owners.items.map(({ label, hint }) => [label, hint])).toEqual([
+      [otherOwner.name, otherOwner.email],
+      [credentialsFor.OWNER.name, credentialsFor.OWNER.email],
+    ]);
+    // An admin may look an account up by its address as well.
+    expect(labels(await lookup(admin, "owners", "other-owner@"))).toEqual([
+      otherOwner.name,
     ]);
     // The guest and the admin offer nothing, so neither is an owner to filter by.
     expect(labels(await lookup(admin, "owners", "e2e@"))).toEqual([]);
@@ -137,11 +144,28 @@ describe("LookupController (e2e)", () => {
 
   it("offers the guests of the caller's stays", async () => {
     expect(labels(await lookup(owner, "guests", "e2e"))).toEqual([
-      credentialsFor.USER.email,
+      credentialsFor.USER.name,
     ]);
     expect(labels(await lookup(other, "guests", "e2e"))).toEqual([]);
     expect(labels(await lookup(admin, "guests", "example"))).toEqual([
-      credentialsFor.USER.email,
+      credentialsFor.USER.name,
+    ]);
+  });
+
+  it("shows a host the names of their guests and never the addresses", async () => {
+    const guests = await lookup(owner, "guests", "guest");
+
+    expect(guests.items).toEqual([
+      expect.objectContaining({ label: credentialsFor.USER.name, hint: null }),
+    ]);
+    // An address is neither shown to a host nor something they can search by.
+    expect(labels(await lookup(owner, "guests", "e2e@example"))).toEqual([]);
+
+    expect((await lookup(admin, "guests", "guest")).items).toEqual([
+      expect.objectContaining({
+        label: credentialsFor.USER.name,
+        hint: credentialsFor.USER.email,
+      }),
     ]);
   });
 
@@ -170,5 +194,40 @@ describe("LookupController (e2e)", () => {
     await owner
       .get(`/lookups/guests?q=e2e&cursor=${first.nextCursor ?? ""}`)
       .expect(400);
+  });
+
+  it("pages past two guests of one name by their ids", async () => {
+    for (const [index, from] of [
+      [1, 30],
+      [2, 40],
+    ] as const) {
+      const twin = await signIn(app, {
+        name: "E2E Twin",
+        email: `e2e-twin-${index}@example.com`,
+        password: "password123",
+      });
+
+      await twin
+        .post("/bookings")
+        .send({ listingId: loftId, from: inDays(from), to: inDays(from + 2) })
+        .expect(201);
+    }
+
+    const first = await lookup(owner, "guests", "twin", "&limit=1");
+    const second = await lookup(
+      owner,
+      "guests",
+      "twin",
+      `&limit=1&cursor=${first.nextCursor ?? ""}`,
+    );
+    const ids = [...first.items, ...second.items].map((item) => item.id);
+
+    // Accounts are no longer ordered by a unique column, so the id behind the name is
+    // what moves the second page past the first rather than back onto it.
+    expect(labels(first)).toEqual(["E2E Twin"]);
+    expect(labels(second)).toEqual(["E2E Twin"]);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids).toEqual([...ids].sort());
+    expect(second.nextCursor).toBeNull();
   });
 });

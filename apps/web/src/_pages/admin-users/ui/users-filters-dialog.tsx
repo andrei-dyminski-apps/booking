@@ -68,6 +68,7 @@ export const UsersFiltersDialog = ({
             usersHref({
               role: fields.role ?? "",
               status: fields.status ?? "",
+              name: fields.name ?? "",
               email: fields.email ?? "",
               sort: fields.sort ?? "",
             })
@@ -75,6 +76,15 @@ export const UsersFiltersDialog = ({
           onNavigate={() => setOpen(false)}
         >
           <div className="grid gap-4">
+            <FilterField
+              name="name"
+              label="Name"
+              type="text"
+              value={values.name}
+              error={errors.name}
+              description="Any part of it, in any case."
+            />
+
             <FilterField
               name="email"
               label="Email"

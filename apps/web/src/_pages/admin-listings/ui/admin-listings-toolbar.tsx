@@ -1,3 +1,4 @@
+import type { LookupOption } from "@repo/contracts";
 import { FieldError } from "@repo/ui/components/field";
 import { fieldMessages, messagesExcept, type FieldErrors } from "#shared/lib";
 import { FilterChips, SortSelect } from "#shared/ui";
@@ -19,15 +20,15 @@ export const AdminListingsToolbar = ({
   errors,
   filters,
   earliest,
-  ownerLabel,
+  owner,
 }: {
   values: FilterValues;
   errors: FieldErrors;
   filters: ActiveFilter[];
   /** Today in UTC, computed on the server — see `CatalogueToolbar`. */
   earliest: string;
-  /** The owner's address, for the box that names them — see the dialog. */
-  ownerLabel: string | undefined;
+  /** The owner being filtered by, for the box that names them — see the dialog. */
+  owner: LookupOption | undefined;
 }) => {
   const hidden = messagesExcept(errors, "sort");
 
@@ -39,7 +40,7 @@ export const AdminListingsToolbar = ({
           errors={errors}
           earliest={earliest}
           count={filters.length}
-          ownerLabel={ownerLabel}
+          owner={owner}
         />
 
         <SortSelect options={sortOptions(values)} error={errors.sort} />

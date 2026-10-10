@@ -5,6 +5,7 @@ import { decodeCursor, encodeCursor } from "./lookup-cursor";
 const option: LookupOption = {
   id: "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a",
   label: "Loft | river view",
+  hint: null,
 };
 
 const label = (value: string): string =>
@@ -47,11 +48,28 @@ describe("lookup cursor", () => {
     }
   });
 
-  /** An account is ordered by its address in two lookups; the tag keeps them apart. */
+  /** An account is ordered by its name in two lookups; the tag keeps them apart. */
   it("refuses a cursor another lookup or list of this API issued", () => {
     expect(decode(encodeCursor(LookupKind.guests, option))).toBeNull();
     expect(
+      decodeCursor(LookupKind.owners)(encodeCursor(LookupKind.guests, option)),
+    ).toBeNull();
+    expect(
       decode(encodeParts("listings", "name", label(option.label), option.id)),
+    ).toBeNull();
+  });
+
+  /** Its key was an address, so the place it names is not one in an ordering by name. */
+  it("refuses a cursor of the accounts issued while they were ordered by their address", () => {
+    expect(
+      decodeCursor(LookupKind.guests)(
+        encodeParts(
+          "lookup-guests",
+          "name",
+          label("guest@example.com"),
+          option.id,
+        ),
+      ),
     ).toBeNull();
   });
 });

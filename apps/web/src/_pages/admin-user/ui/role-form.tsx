@@ -29,12 +29,12 @@ import { changeRoleAction } from "../api/update-user-actions";
 export const RoleForm = ({
   userId,
   role,
-  email,
+  name,
 }: {
   userId: string;
   role: Role;
   /** Whose role this is, for the label a screen reader announces with the box. */
-  email: string;
+  name: string;
 }) => {
   const [errors, submit, pending] = useActionState<FormErrors, FormData>(
     changeRoleAction.bind(null, userId),
@@ -57,7 +57,7 @@ export const RoleForm = ({
         >
           <SelectTrigger
             size="sm"
-            aria-label={`Role of ${email}`}
+            aria-label={`Role of ${name}`}
             className="w-full sm:w-32"
           >
             <SelectValue />

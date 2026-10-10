@@ -4,6 +4,7 @@ import { decodeCursor, encodeCursor } from "./user-cursor";
 
 const user: ManagedUser = {
   id: "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a",
+  name: "Guest",
   email: "guest@example.com",
   role: Role.USER,
   createdAt: "2026-08-20T12:00:00.000Z",

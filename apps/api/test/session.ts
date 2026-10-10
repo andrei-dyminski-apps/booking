@@ -6,17 +6,28 @@ import { PrismaService } from "./../src/prisma/prisma.service";
 
 /** The credentials every e2e spec registers with; the tables are wiped before each test. */
 export const testCredentials = {
+  name: "E2E Guest",
   email: "e2e@example.com",
   password: "password123",
 };
 
+/** What registration takes; login reads the address and the password and ignores the name. */
+export type Credentials = typeof testCredentials;
+
 /** One address per role, so a spec can hold several agents at once. */
-export const credentialsFor: Record<Role, { email: string; password: string }> =
-  {
-    USER: testCredentials,
-    OWNER: { email: "e2e-owner@example.com", password: "password123" },
-    ADMIN: { email: "e2e-admin@example.com", password: "password123" },
-  };
+export const credentialsFor: Record<Role, Credentials> = {
+  USER: testCredentials,
+  OWNER: {
+    name: "E2E Owner",
+    email: "e2e-owner@example.com",
+    password: "password123",
+  },
+  ADMIN: {
+    name: "E2E Admin",
+    email: "e2e-admin@example.com",
+    password: "password123",
+  },
+};
 
 export type Agent = ReturnType<typeof request.agent>;
 

@@ -145,6 +145,9 @@ enum Role {
 
 model User {
   id           String   @id @default(uuid()) @db.Uuid
+  /// What the person goes by, as they typed it at registration — not unique, never a key.
+  /// Accounts that predate the column were given the part of their address before the `@`.
+  name         String
   email        String   @unique
   passwordHash String   @map("password_hash")
   role         Role     @default(USER)
@@ -171,8 +174,12 @@ model User {
   /// `email` is a substring match no btree can seek — the `email` filter of `GET /users`
   /// and the account lookups of the filter boxes (`GET /lookups/owners`, `/lookups/guests`)
   /// — so it gets a trigram index, the same one the listings' titles have and for the same
-  /// reason. The unique btree above still serves the alphabetical order of a lookup.
+  /// reason.
   @@index([email(ops: raw("gin_trgm_ops"))], type: Gin, map: "users_email_trgm_idx")
+  /// The account lookups search the name first — the address only for an admin — so it
+  /// gets one too. No btree orders by it, for the reason `listings.title` has none: the rows
+  /// a search matches are sorted, not the table.
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "users_name_trgm_idx")
   @@map("users")
 }
 

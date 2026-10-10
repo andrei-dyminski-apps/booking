@@ -24,6 +24,9 @@ export const ProfilePage = async () => {
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
         <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
+          <dt className="text-muted-foreground">Name</dt>
+          <dd>{user.name}</dd>
+
           <dt className="text-muted-foreground">Email</dt>
           <dd>{user.email}</dd>
 

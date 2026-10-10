@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { WarehouseIcon } from "lucide-react";
-import { Role } from "@repo/contracts";
+import { Role, type LookupOption } from "@repo/contracts";
 import {
   Empty,
   EmptyDescription,
@@ -11,7 +11,7 @@ import {
 import { anyUser } from "#entities/user";
 import { requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { today } from "#shared/lib";
+import { lookupOptionText, today } from "#shared/lib";
 import {
   BackLink,
   NoMatchesNotice,
@@ -65,7 +65,15 @@ export const AdminListingsPage = async ({
     ownerId === null ? null : anyUser(ownerId),
   ]);
   const staleCursor = query !== null && page === null;
-  const filters = activeFilters(values, { owner: owner?.email });
+  // The account as the owner box offers it, so the box and the chip read what a pick from
+  // the list would have said — the address beside the name, since an admin may read it.
+  const ownerOption: LookupOption | undefined =
+    owner === null
+      ? undefined
+      : { id: owner.id, label: owner.name, hint: owner.email };
+  const filters = activeFilters(values, {
+    owner: ownerOption && lookupOptionText(ownerOption),
+  });
   // The owner narrows the list to one account rather than searching it, so an empty
   // answer under that alone is the account's own empty state, not a search nothing matched.
   const searched = filters.some((filter) => filter.key !== "ownerId");
@@ -83,7 +91,7 @@ export const AdminListingsPage = async ({
         description={
           owner === null
             ? "Every listing on offer. An admin may edit or retire any of them; creating one stays the owner's."
-            : `What ${owner.email} has on offer.`
+            : `What ${owner.name} has on offer.`
         }
       />
 
@@ -92,7 +100,7 @@ export const AdminListingsPage = async ({
         errors={errors}
         filters={filters}
         earliest={today()}
-        ownerLabel={owner?.email}
+        owner={ownerOption}
       />
 
       {staleCursor && (
