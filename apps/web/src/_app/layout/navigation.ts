@@ -3,6 +3,7 @@ import {
   CalendarCheckIcon,
   HomeIcon,
   LayoutDashboardIcon,
+  MessagesSquareIcon,
   ShieldIcon,
   UserIcon,
   UsersIcon,
@@ -56,6 +57,17 @@ export function navigationFor(user: User | null): NavItem[] {
     hint: "Stays and holds",
     icon: CalendarCheckIcon,
   });
+
+  // A thread has two sides, a guest and the host of a listing, and nobody else reads it —
+  // the API refuses an admin the route, so the shell does not offer it.
+  if (user.role === Role.USER || user.role === Role.OWNER) {
+    items.push({
+      href: ROUTES.messages,
+      label: "Messages",
+      hint: user.role === Role.USER ? "Your hosts" : "Guests and hosts",
+      icon: MessagesSquareIcon,
+    });
+  }
 
   // Membership of a set rather than a hierarchy, the way `RolesGuard` reads it: an admin
   // does not reach an owner's dashboard by being senior to one. `GET /listings/mine` is

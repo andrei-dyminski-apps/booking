@@ -6,6 +6,7 @@ export {
   requireUser,
 } from "./auth";
 export { bookingsApi } from "./bookings";
+export { conversationsApi } from "./conversations";
 export { listingsApi } from "./listings";
 export { lookupsApi } from "./lookups";
 export { reviewsApi } from "./reviews";

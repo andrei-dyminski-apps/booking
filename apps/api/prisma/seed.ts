@@ -4,6 +4,7 @@ import * as argon2 from "argon2";
 import { addDays, format } from "date-fns";
 import {
   BookingStatus,
+  ConversationSide,
   PrismaClient,
   ReviewKind,
   Role,
@@ -223,16 +224,56 @@ const pastStays = [
   },
 ];
 
+/**
+ * Two threads about the guest's stays at the owner's listings, written as a short exchange
+ * each. The last one is the guest's and the host has not opened it, so the owner's list
+ * starts with something unread and the guest's with nothing.
+ */
+const conversations: Array<{
+  guest: UserKey;
+  listing: number;
+  messages: Array<{ sender: ConversationSide; body: string }>;
+}> = [
+  {
+    guest: "guest",
+    listing: 0,
+    messages: [
+      {
+        sender: ConversationSide.GUEST,
+        body: "Hi! Is early check-in possible?",
+      },
+      {
+        sender: ConversationSide.HOST,
+        body: "Usually from noon — I will confirm the day before.",
+      },
+    ],
+  },
+  {
+    guest: "guest",
+    listing: 2,
+    messages: [
+      {
+        sender: ConversationSide.GUEST,
+        body: "Is there a place to leave bicycles?",
+      },
+    ],
+  },
+];
+
+const MS_PER_MINUTE = 60_000;
+
 async function main(): Promise<void> {
   // Order matters, and both steps are refusals rather than cascades: bookings reference
   // listings with onDelete: Restrict, and listings reference their owner the same way, so
   // deleting the users first fails on the foreign key instead of taking the rows with it.
   // Deleting the users does take their refresh tokens (onDelete: Cascade), so a re-seed
-  // ends every session issued against the previous data.
+  // ends every session issued against the previous data. Conversations restrict their
+  // listing like a booking does, and take their messages with them.
   // Reviews would go with their bookings anyway (onDelete: Cascade); deleting them first
   // keeps the order readable as the dependency it is.
   await prisma.review.deleteMany();
   await prisma.booking.deleteMany();
+  await prisma.conversation.deleteMany();
   await prisma.listing.deleteMany();
   await prisma.user.deleteMany();
 
@@ -333,13 +374,57 @@ async function main(): Promise<void> {
     });
   }
 
+  // One minute between messages, oldest first, so the threads read in the order written.
+  let minutesAgo = conversations.reduce(
+    (total, conversation) => total + conversation.messages.length,
+    0,
+  );
+
+  for (const conversation of conversations) {
+    const listing = rooms[conversation.listing];
+
+    if (listing === undefined) {
+      throw new Error(`No demo listing at index ${conversation.listing}`);
+    }
+
+    const messages = conversation.messages.map((message) => ({
+      ...message,
+      createdAt: new Date(Date.now() - minutesAgo-- * MS_PER_MINUTE),
+    }));
+    const first = messages.at(0);
+    const last = messages.at(-1);
+
+    if (first === undefined || last === undefined) {
+      throw new Error("A demo conversation needs at least one message");
+    }
+
+    const lastBy = (sender: ConversationSide): Date | null =>
+      messages.findLast((message) => message.sender === sender)?.createdAt ??
+      null;
+
+    await prisma.conversation.create({
+      data: {
+        listingId: listing.id,
+        guestId: idOf(conversation.guest),
+        // A thread is opened by its first message, so it is as old as that one.
+        createdAt: first.createdAt,
+        lastMessageAt: last.createdAt,
+        lastMessageBody: last.body,
+        lastMessageSender: last.sender,
+        guestReadAt: last.createdAt,
+        hostReadAt: lastBy(ConversationSide.HOST),
+        messages: { create: messages },
+      },
+    });
+  }
+
   console.log(
     `Seeded users: ${Object.values(users)
       .map((user) => `${user.name} <${user.email}>`)
       .join(", ")} — password "${DEMO_PASSWORD}"`,
   );
   console.log(
-    `Seeded listings: ${listings.length}, bookings: ${bookings.length + pastStays.length} (${pastStays.length} of them over, some reviewed)`,
+    `Seeded listings: ${listings.length}, bookings: ${bookings.length + pastStays.length} (${pastStays.length} of them over, some reviewed), conversations: ${conversations.length}`,
   );
 }
 

@@ -19,6 +19,8 @@ export const ROUTES = {
   catalogue: "/listings",
   listing: (id: string) => `/listings/${encodeURIComponent(id)}`,
   bookings: "/bookings",
+  messages: "/messages",
+  conversation: (id: string) => `/messages/${encodeURIComponent(id)}`,
   dashboard: "/dashboard",
   newListing: "/dashboard/listings/new",
   editListing: (id: string) => `/dashboard/listings/${encodeURIComponent(id)}`,

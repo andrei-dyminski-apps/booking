@@ -15,6 +15,8 @@ export async function resetDatabase(app: INestApplication<App>): Promise<void> {
   const prismaService = app.get(PrismaService);
 
   await prismaService.booking.deleteMany();
+  // Restricts its listing like a booking does; the messages go with it (`Cascade`).
+  await prismaService.conversation.deleteMany();
   await prismaService.listing.deleteMany();
   await prismaService.user.deleteMany();
 }

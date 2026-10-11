@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { UsersIcon } from "lucide-react";
 import { Role, weekdaySchema, type Role as RoleName } from "@repo/contracts";
 import { Badge } from "@repo/ui/components/badge";
@@ -28,6 +29,7 @@ import {
 import { BackLink, ButtonLink } from "#shared/ui";
 import { readListingReviews } from "../api/read-listing-reviews";
 import { buildMonths } from "../lib/months";
+import { AskHost, AskHostCard, AskHostSkeleton } from "./ask-host";
 import { AvailabilityCalendar } from "./availability-calendar";
 import { BookingForm } from "./booking-form";
 import { ListingReviews } from "./listing-reviews";
@@ -207,6 +209,34 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
             )}
           </CardContent>
         </Card>
+
+        {/* Only a guest writes first — `POST /conversations` is `@Roles(Role.USER)` — so
+            nobody else is offered a box the API would refuse; an owner still gets the way
+            back to a thread they started as a guest. The listing's own owner is every
+            thread's host here, and an admin is a side of none. */}
+        {viewer === null ? (
+          <AskHostCard>
+            <ButtonLink
+              href={`${ROUTES.login}?next=${encodeURIComponent(ROUTES.listing(id))}`}
+              variant="outline"
+              className="w-full"
+            >
+              Sign in to ask
+            </ButtonLink>
+          </AskHostCard>
+        ) : (
+          viewer.role !== Role.ADMIN &&
+          viewer.id !== listing.ownerId && (
+            <Suspense
+              fallback={viewer.role === Role.USER ? <AskHostSkeleton /> : null}
+            >
+              <AskHost
+                listingId={listing.id}
+                canStart={viewer.role === Role.USER}
+              />
+            </Suspense>
+          )
+        )}
 
         <Separator />
 

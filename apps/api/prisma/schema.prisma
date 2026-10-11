@@ -44,8 +44,8 @@ model Booking {
   /// quietly take down with it. What an owner asks for is answered without ever reaching
   /// this key — `DELETE /listings/:id` retires the listing and leaves the row where it
   /// is, see `deleted_at` below.
-  listing Listing @relation(fields: [listingId], references: [id], onDelete: Restrict)
-  guest   User    @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  listing Listing  @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  guest   User     @relation(fields: [guestId], references: [id], onDelete: Cascade)
   reviews Review[]
 
   @@index([listingId, from, to])
@@ -156,8 +156,9 @@ model Listing {
   /// listings first. Nothing in the API reaches that path any more — retiring is what
   /// `DELETE /listings/:id` does — so what the constraint guards now is the hard delete
   /// of the seed, the test cleanup and whatever account deletion turns out to be.
-  owner    User      @relation(fields: [ownerId], references: [id], onDelete: Restrict)
-  bookings Booking[]
+  owner         User           @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  bookings      Booking[]
+  conversations Conversation[]
 
   /// The exceptions to `price_per_night`, which stays the default: a price for a day of
   /// the week and a price for one date. Which of the three a night costs is decided by
@@ -260,6 +261,7 @@ model User {
   refreshTokens RefreshToken[]
   listings      Listing[]
   bookings      Booking[]
+  conversations Conversation[]
 
   /// `GET /users` is a keyset page ordered by `created_at` with `id` behind it — the pair
   /// `user-cursor.ts` encodes. One index serves both directions, the same arithmetic as the
@@ -298,4 +300,71 @@ model RefreshToken {
   @@index([userId, expiresAt])
   @@index([familyId])
   @@map("refresh_tokens")
+}
+
+/// One thread between a guest and the host of one listing — the host being whoever owns
+/// it, which is why no column names them: the owner is read through the listing, so the
+/// thread is addressed to the same person every other rule about that listing is.
+/// One per pair (`@@unique` below): asking about the same listing again continues it.
+model Conversation {
+  id        String   @id @default(uuid()) @db.Uuid
+  listingId String   @map("listing_id") @db.Uuid
+  guestId   String   @map("guest_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// When the newest message was written — denormalised from `messages` because it is the
+  /// key the list of conversations is ordered and paged by, and an index cannot order by an
+  /// aggregate of another table. Written in the same transaction as the message itself.
+  lastMessageAt DateTime @map("last_message_at")
+
+  /// The newest message's text and side, denormalised beside its moment for the list: every
+  /// card shows it, and reading it through the relation loads every message of every thread
+  /// on the page — Prisma applies a nested `take` in memory when it has several parents.
+  /// Written by the same `UPDATE` as `last_message_at`, under the thread's lock.
+  lastMessageBody   String           @map("last_message_body")
+  lastMessageSender ConversationSide @map("last_message_sender")
+
+  /// When each side last opened the thread. A conversation is unread for a side while the
+  /// newest message is later than this; sending stamps the sender's own column, so what
+  /// one writes is never news to oneself. `NULL` is a side that has never opened it — the
+  /// host, until they first read what the guest sent.
+  guestReadAt DateTime? @map("guest_read_at")
+  hostReadAt  DateTime? @map("host_read_at")
+
+  /// Restrict, for the reason a booking restricts its listing: a listing is retired rather
+  /// than deleted, and the thread keeps naming it the way a stay does.
+  listing  Listing   @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  guest    User      @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@unique([listingId, guestId])
+  /// `GET /conversations` is a keyset page ordered by the newest message with `id` behind
+  /// it. A guest's scope is a seek on this index; a host's narrows by `listings.owner_id`, a
+  /// column of another table, so it gets none of its own — the same trade the owner's scope
+  /// of the stays makes, bounded by the host's listings rather than by the site.
+  @@index([guestId, lastMessageAt(sort: Desc), id(sort: Desc)])
+  @@map("conversations")
+}
+
+/// What one side of a conversation wrote. The author is a side rather than an account: the
+/// two people are fixed by the conversation, so the side is the whole of what a row has to
+/// say about who wrote it.
+model Message {
+  id             String           @id @default(uuid()) @db.Uuid
+  conversationId String           @map("conversation_id") @db.Uuid
+  sender         ConversationSide
+  body           String
+  createdAt      DateTime         @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  /// A thread is read from its end, a page at a time: the newest first, `id` behind it.
+  @@index([conversationId, createdAt(sort: Desc), id(sort: Desc)])
+  @@map("messages")
+}
+
+/// Mirrored by `conversationSideSchema` in `@repo/contracts`.
+enum ConversationSide {
+  GUEST
+  HOST
 }

@@ -124,3 +124,28 @@ export {
   type ReviewSort,
   type ReviewSummary,
 } from "./review.js";
+
+export {
+  MAX_MESSAGE_LENGTH,
+  conversationSideSchema,
+  messageBodySchema,
+  messageSchema,
+  conversationSchema,
+  startConversationSchema,
+  sendMessageSchema,
+  markReadSchema,
+  conversationQuerySchema,
+  messageQuerySchema,
+  conversationPageSchema,
+  messagePageSchema,
+  ConversationSide,
+  type Message,
+  type Conversation,
+  type StartConversationInput,
+  type SendMessageInput,
+  type MarkReadInput,
+  type ConversationQuery,
+  type MessageQuery,
+  type ConversationPage,
+  type MessagePage,
+} from "./conversation.js";

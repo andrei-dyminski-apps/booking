@@ -23,6 +23,10 @@ apps/web/
     listings/[id]/loading.tsx
     bookings/page.tsx
     bookings/loading.tsx
+    messages/page.tsx         # the caller's threads; a guest's and a host's, never an admin's
+    messages/loading.tsx
+    messages/[id]/page.tsx    # one thread and the reply box
+    messages/[id]/loading.tsx
     dashboard/page.tsx
     dashboard/loading.tsx
     dashboard/listings/new/page.tsx
@@ -94,8 +98,11 @@ apps/web/
       listing/ui/booking-form.tsx         # the only thing here that creates a booking
       listing/ui/listing-reviews.tsx      # the guests' reviews: the summary and the newest page
       listing/ui/listing-skeleton.tsx
+      listing/ui/ask-host.tsx             # a guest's question, or the way back to their thread; streamed, degrades
+      listing/ui/ask-host-form.tsx
       listing/api/create-booking-action.ts
       listing/api/read-listing-reviews.ts # the cached page, or null — the screen draws without it
+      listing/api/start-conversation-action.ts  # opens the thread, redirects into it
       listing/lib/months.ts               # the booked ranges laid out as month grids
       listing/lib/months.spec.ts
       listing/index.ts
@@ -113,6 +120,16 @@ apps/web/
       bookings/lib/bookings-search.ts     # searchParams onto the contract's query
       bookings/lib/bookings-search.spec.ts
       bookings/index.ts
+      messages/ui/messages-page.tsx       # the threads the account is a side of, either role
+      messages/ui/conversation-card.tsx
+      messages/ui/messages-skeleton.tsx
+      messages/index.ts
+      conversation/ui/conversation-page.tsx  # a thread read from its end, `?cursor=` for earlier
+      conversation/ui/send-message-form.tsx  # remounted by the page when the thread grows
+      conversation/ui/mark-read.tsx       # the browser's POST /read, up to the newest message drawn
+      conversation/ui/conversation-skeleton.tsx
+      conversation/api/send-message-action.ts
+      conversation/index.ts
       dashboard/ui/dashboard-page.tsx     # the owner's listings, read by the session
       dashboard/ui/listing-card.tsx
       dashboard/ui/dashboard-skeleton.tsx
@@ -183,11 +200,14 @@ apps/web/
       review/ui/rating-stars.tsx
       review/ui/review-summary.tsx  # the mean and the count of every review, not of the page
       review/index.ts
+      conversation/model/sides.ts  # "You" or the other person's name: the list and the thread both say who wrote
+      conversation/index.ts
     shared/                   # no domain knowledge: transport, routes, config
       api/http-client.ts      # apiRequest(), refreshSession(), the two errors
       api/auth.ts             # authApi, currentUser() — memoized, requireUser/requireRole
       api/session-cookies.ts  # the API's Set-Cookie, re-issued for this origin
       api/bookings.ts         # bookingsApi — the routes of the resource
+      api/conversations.ts    # conversationsApi — threads and messages, every read personal
       api/listings.ts         # listingsApi — the same, for the catalogue rows
       api/users.ts            # usersApi — the admin's routes over accounts
       api/lookups.ts          # lookupsApi — what an id box suggests, abortable; optionOf for a page

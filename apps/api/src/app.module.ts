@@ -9,6 +9,7 @@ import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/guards/jwt-auth.guard";
 import { RolesGuard } from "./auth/guards/roles.guard";
 import { BookingModule } from "./booking/booking.module";
+import { ConversationModule } from "./conversation/conversation.module";
 import { ListingModule } from "./listing/listing.module";
 import { LookupModule } from "./lookup/lookup.module";
 import { ReviewModule } from "./review/review.module";
@@ -34,6 +35,7 @@ import { UserModule } from "./user/user.module";
     }),
     AuthModule,
     BookingModule,
+    ConversationModule,
     ListingModule,
     LookupModule,
     ReviewModule,
