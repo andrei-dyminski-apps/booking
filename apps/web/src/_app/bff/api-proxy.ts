@@ -41,7 +41,7 @@ export const DELETE = handle;
 /**
  * Shorter than the ten seconds the browser gives this handler, so a stalled API is
  * reported as a 502 by the side that knows why rather than aborted by the side that does
- * not.
+ * not. The event stream is the exception: the deadline covers its headers only.
  */
 const UPSTREAM_TIMEOUT_MS = 9_000;
 
@@ -89,34 +89,93 @@ async function handle(request: NextRequest): Promise<Response> {
     return misconfigured(cause);
   }
 
-  let upstream: Response;
+  const upstreamSignal = new AbortController();
+  const deadline = setTimeout(() => {
+    upstreamSignal.abort(
+      new DOMException("The API did not answer in time", "TimeoutError"),
+    );
+  }, UPSTREAM_TIMEOUT_MS);
+
+  // A browser that goes away takes its upstream request with it — for an ordinary request
+  // that saves a little, for the event stream it is the only thing that ever closes it.
+  request.signal.addEventListener(
+    "abort",
+    () => upstreamSignal.abort(request.signal.reason),
+    { once: true },
+  );
 
   try {
-    upstream = await fetch(target, {
-      method: request.method,
-      headers: upstreamHeaders(request),
-      body: await upstreamBody(request),
-      // This proxy answers for a person, never for the next person to ask the same thing.
-      cache: "no-store",
-      // A redirect is an answer the browser is entitled to see, not something to follow
-      // on its behalf against a host it does not know about.
-      redirect: "manual",
-      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    let upstream: Response;
+
+    try {
+      upstream = await fetch(target, {
+        method: request.method,
+        headers: upstreamHeaders(request),
+        body: await upstreamBody(request),
+        // This proxy answers for a person, never for the next person to ask the same thing.
+        cache: "no-store",
+        // A redirect is an answer the browser is entitled to see, not something to follow
+        // on its behalf against a host it does not know about.
+        redirect: "manual",
+        signal: upstreamSignal.signal,
+      });
+    } catch {
+      return unreachable();
+    }
+
+    // Before the headers are copied, and before they are dropped with the rest of them: the
+    // session belongs to this origin now, so it is taken out of the answer rather than
+    // passed through it.
+    await mirrorSessionCookies(upstream);
+
+    // The one answer that is never finished: the deadline covered its headers and stops
+    // there, and the body is handed on as it arrives rather than buffered — see
+    // `isEventStream`.
+    if (isEventStream(upstream)) {
+      clearTimeout(deadline);
+
+      return new NextResponse(upstream.body, {
+        status: upstream.status,
+        statusText: upstream.statusText,
+        headers: downstreamHeaders(upstream),
+      });
+    }
+
+    let body: ArrayBuffer | null;
+
+    try {
+      body = await downstreamBody(upstream);
+    } catch {
+      // The deadline covers the body as well as the headers, as the timeout did before it.
+      return unreachable();
+    }
+
+    return new NextResponse(body, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers: downstreamHeaders(upstream),
     });
-  } catch {
-    return unreachable();
+  } finally {
+    clearTimeout(deadline);
   }
+}
 
-  // Before the headers are copied, and before they are dropped with the rest of them: the
-  // session belongs to this origin now, so it is taken out of the answer rather than
-  // passed through it.
-  await mirrorSessionCookies(upstream);
-
-  return new NextResponse(await downstreamBody(upstream), {
-    status: upstream.status,
-    statusText: upstream.statusText,
-    headers: downstreamHeaders(upstream),
-  });
+/**
+ * `GET /events` — Server-Sent Events, which is why this proxy streams at all. Every other
+ * answer is a small JSON body read whole; this one stays open for minutes and is useful
+ * only line by line, so buffering it would deliver nothing, and the deadline above would
+ * cut it off after nine seconds.
+ *
+ * The API marks the stream `Cache-Control: no-transform`, and the header is passed on
+ * like the rest: it is what keeps the compression of `next start` from holding the lines
+ * back to fill a gzip block.
+ */
+function isEventStream(upstream: Response): boolean {
+  return (
+    upstream.ok &&
+    upstream.body !== null &&
+    (upstream.headers.get("content-type") ?? "").startsWith("text/event-stream")
+  );
 }
 
 /**

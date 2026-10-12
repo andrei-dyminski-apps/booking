@@ -262,6 +262,7 @@ model User {
   listings      Listing[]
   bookings      Booking[]
   conversations Conversation[]
+  notifications Notification[]
 
   /// `GET /users` is a keyset page ordered by `created_at` with `id` behind it — the pair
   /// `user-cursor.ts` encodes. One index serves both directions, the same arithmetic as the
@@ -367,4 +368,39 @@ model Message {
 enum ConversationSide {
   GUEST
   HOST
+}
+
+enum NotificationType {
+  BOOKING_REQUESTED
+  BOOKING_CANCELLED
+  REVIEW_RECEIVED
+}
+
+/// Something that happened which one account should hear about. `type` and `data` are one
+/// value of `notificationContentSchema` in `@repo/contracts`: the column is `jsonb` because
+/// each type carries a shape of its own, and the repository parses it against the contract
+/// on the way out rather than trusting what is stored — the same treatment a cursor gets.
+///
+/// The data is a copy of what was true at the time (a listing's title, the dates of a
+/// stay), not a key resolved on read: what the recipient was told stays what they were
+/// told after the listing is renamed or retired. That is also why there is no foreign key
+/// to the booking or the review — a notice outlives neither, and is about both.
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  type      NotificationType
+  data      Json
+  /// When the recipient read it; `null` is unread. A moment rather than a flag, for the
+  /// reason `users.blocked_at` is one.
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  /// Cascade: a notice is its recipient's alone and means nothing without them.
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The feed of one account, newest first — the pair the keyset cursor carries, behind
+  /// the recipient. The unread count has an index of its own that Prisma cannot spell
+  /// (partial on `read_at IS NULL`), in the raw SQL of the migration that made the table.
+  @@index([userId, createdAt(sort: Desc), id(sort: Desc)])
+  @@map("notifications")
 }

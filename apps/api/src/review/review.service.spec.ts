@@ -9,12 +9,14 @@ import { addDays, format } from "date-fns";
 import { randomUUID } from "node:crypto";
 import {
   BookingStatus,
+  NotificationType,
   reviewQuerySchema,
   ReviewKind,
   Role,
   type Booking,
   type CreateReviewInput,
   type Listing,
+  type NotificationContent,
   type Review,
   type ReviewQuery,
   type ReviewSummary,
@@ -26,6 +28,7 @@ import {
 } from "../booking/booking.repository";
 import type { Page } from "../common/paging";
 import { ListingRepository } from "../listing/listing.repository";
+import { NotificationService } from "../notification/notification.service";
 import type { ReviewCursor } from "./review-cursor";
 import {
   ReviewAlreadyWrittenError,
@@ -278,14 +281,27 @@ class FakeListingRepository implements Pick<
   }
 }
 
+/** Who was told what — the storing and pushing are `notification.service.spec.ts`'s. */
+class FakeNotificationService implements Pick<NotificationService, "notify"> {
+  readonly notices: { userId: string; content: NotificationContent }[] = [];
+
+  notify(userId: string, content: NotificationContent): Promise<void> {
+    this.notices.push({ userId, content });
+
+    return Promise.resolve();
+  }
+}
+
 describe("ReviewService", () => {
   let service: ReviewService;
   let reviewRepository: FakeReviewRepository;
   let bookingRepository: FakeBookingRepository;
+  let notificationService: FakeNotificationService;
 
   beforeEach(async () => {
     bookingRepository = new FakeBookingRepository();
     reviewRepository = new FakeReviewRepository(bookingRepository);
+    notificationService = new FakeNotificationService();
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -293,6 +309,7 @@ describe("ReviewService", () => {
         { provide: ReviewRepository, useValue: reviewRepository },
         { provide: BookingRepository, useValue: bookingRepository },
         { provide: ListingRepository, useValue: new FakeListingRepository() },
+        { provide: NotificationService, useValue: notificationService },
       ],
     }).compile();
 
@@ -308,6 +325,42 @@ describe("ReviewService", () => {
     await expect(service.create(bookingId, owner, input)).resolves.toEqual(
       expect.objectContaining({ kind: ReviewKind.GUEST }),
     );
+  });
+
+  it("tells the side of the stay a review is about, and nobody else", async () => {
+    const bookingId = bookingRepository.add(stay());
+
+    await service.create(bookingId, guest, input);
+    await service.create(bookingId, owner, input);
+
+    expect(
+      notificationService.notices.map(({ userId, content }) => ({
+        userId,
+        type: content.type,
+        kind:
+          content.type === NotificationType.REVIEW_RECEIVED &&
+          content.data.kind,
+      })),
+    ).toEqual([
+      {
+        userId: OWNER_ID,
+        type: NotificationType.REVIEW_RECEIVED,
+        kind: ReviewKind.LISTING,
+      },
+      {
+        userId: GUEST_ID,
+        type: NotificationType.REVIEW_RECEIVED,
+        kind: ReviewKind.GUEST,
+      },
+    ]);
+  });
+
+  it("does not tell an owner about a review of their own listing they wrote", async () => {
+    const bookingId = bookingRepository.add(stay({ guestId: OWNER_ID }));
+
+    await service.create(bookingId, owner, input);
+
+    expect(notificationService.notices).toEqual([]);
   });
 
   it("refuses a second review of the same half of a stay", async () => {

@@ -81,7 +81,11 @@ export type BookingWithListingOwner = {
 };
 
 /** One row of the `FOR UPDATE` read — raw SQL, so the column keeps its stored name. */
-type LockedListing = { id: string; deleted_at: Date | null };
+type LockedListing = {
+  id: string;
+  owner_id: string;
+  deleted_at: Date | null;
+};
 
 /**
  * What every read of a booking selects from the listing it names, and it is not narrowed
@@ -258,8 +262,14 @@ export class BookingRepository {
    *  3. refuse an overlap with an active stay — the informative `409`.
    *  4. insert the hold. The `EXCLUDE` constraint is the last line of defence if a bug
    *     ever reaches here, and it is answered as the same `409`.
+   *
+   * The owner comes back beside the booking because the locked read has it anyway, and the
+   * service tells that owner about the hold — without a second query after the commit.
    */
-  async create(guestId: string, input: CreateBookingInput): Promise<Booking> {
+  async create(
+    guestId: string,
+    input: CreateBookingInput,
+  ): Promise<BookingWithListingOwner> {
     // One reading of the clock for the whole transaction: the sweep below, the overlap
     // check and the deadline of the hold are three halves of one decision, and a second
     // `new Date()` between them would let a hold expire in the middle of it.
@@ -267,10 +277,12 @@ export class BookingRepository {
 
     return this.prismaService.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<LockedListing[]>`
-        SELECT id, deleted_at FROM listings WHERE id = ${input.listingId}::uuid FOR UPDATE
+        SELECT id, owner_id, deleted_at FROM listings WHERE id = ${input.listingId}::uuid FOR UPDATE
       `;
 
-      if (locked[0] === undefined || locked[0].deleted_at !== null) {
+      const listing = locked[0];
+
+      if (listing === undefined || listing.deleted_at !== null) {
         throw new ListingNotFoundError(input.listingId);
       }
 
@@ -305,7 +317,7 @@ export class BookingRepository {
           include: BOOKING_INCLUDE,
         });
 
-        return toBooking(row);
+        return { booking: toBooking(row), listingOwnerId: listing.owner_id };
       } catch (error) {
         if (isExclusionViolation(error)) {
           throw new DatesUnavailableError(input);

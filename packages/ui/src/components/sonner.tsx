@@ -1,7 +1,7 @@
 "use client";
 
 import { useTheme } from "next-themes";
-import { Toaster as Sonner, type ToasterProps } from "sonner";
+import { Toaster as Sonner, toast, type ToasterProps } from "sonner";
 import {
   CircleCheckIcon,
   InfoIcon,
@@ -42,4 +42,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
   );
 };
 
-export { Toaster };
+// The function that raises a toast travels with the component that draws it, so an
+// application reaches both through the design system rather than depending on `sonner`
+// itself.
+export { Toaster, toast };

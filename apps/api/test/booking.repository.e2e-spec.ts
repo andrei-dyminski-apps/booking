@@ -87,7 +87,7 @@ describe("BookingRepository foreign keys (e2e)", () => {
   const dates = { from: inDays(30), to: inDays(34) };
 
   it("writes a booking as a pending hold when both rows are there", async () => {
-    const booking = await bookingRepository.create(guestId, {
+    const { booking } = await bookingRepository.create(guestId, {
       listingId,
       ...dates,
     });

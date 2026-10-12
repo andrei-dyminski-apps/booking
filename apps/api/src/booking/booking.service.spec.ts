@@ -12,16 +12,20 @@ import { randomUUID } from "node:crypto";
 import {
   bookingQuerySchema,
   BookingStatus,
+  NotificationType,
   Role,
+  StayParty,
   type BookedRange,
   type Booking,
   type BookingQuery,
   type BookingSort,
   type CreateBookingInput,
   type ListingSummary,
+  type NotificationContent,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import type { Page } from "../common/paging";
+import { NotificationService } from "../notification/notification.service";
 import {
   BookingRepository,
   DatesUnavailableError,
@@ -192,7 +196,10 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
     );
   }
 
-  create(guestId: string, booking: CreateBookingInput): Promise<Booking> {
+  create(
+    guestId: string,
+    booking: CreateBookingInput,
+  ): Promise<BookingWithListingOwner> {
     if (this.vanishingListing) {
       return Promise.reject(new ListingNotFoundError(booking.listingId));
     }
@@ -233,12 +240,11 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
       reviewed: { byGuest: false, byOwner: false },
     };
 
-    this.rows.set(stored.id, {
-      booking: stored,
-      listingOwnerId: this.listingOwnerId,
-    });
+    const created = { booking: stored, listingOwnerId: this.listingOwnerId };
 
-    return Promise.resolve(stored);
+    this.rows.set(stored.id, created);
+
+    return Promise.resolve(created);
   }
 
   cancel(id: string): Promise<boolean> {
@@ -357,10 +363,25 @@ class FakeBookingExpiryQueue implements PublicOf<BookingExpiryQueue> {
   }
 }
 
+/**
+ * Only `notify`, the one method this service calls: what is asserted is who was told what,
+ * and the storing and pushing behind it are `notification.service.spec.ts`'s.
+ */
+class FakeNotificationService implements Pick<NotificationService, "notify"> {
+  readonly notices: { userId: string; content: NotificationContent }[] = [];
+
+  notify(userId: string, content: NotificationContent): Promise<void> {
+    this.notices.push({ userId, content });
+
+    return Promise.resolve();
+  }
+}
+
 describe("BookingService", () => {
   let service: BookingService;
   let bookingRepository: FakeBookingRepository;
   let bookingExpiryQueue: FakeBookingExpiryQueue;
+  let notificationService: FakeNotificationService;
 
   /** A booking `guest` took against a listing `owner` owns — the row every rule acts on. */
   const bookedByGuest = async (): Promise<string> =>
@@ -376,12 +397,14 @@ describe("BookingService", () => {
   beforeEach(async () => {
     bookingRepository = new FakeBookingRepository();
     bookingExpiryQueue = new FakeBookingExpiryQueue();
+    notificationService = new FakeNotificationService();
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         BookingService,
         { provide: BookingRepository, useValue: bookingRepository },
         { provide: BookingExpiryQueue, useValue: bookingExpiryQueue },
+        { provide: NotificationService, useValue: notificationService },
       ],
     }).compile();
 
@@ -584,6 +607,69 @@ describe("BookingService", () => {
     await service.remove(second, admin);
 
     await expect(seenBy(admin)).resolves.toHaveLength(2);
+  });
+
+  it("tells the host about a hold the moment it is taken", async () => {
+    const booking = await service.create(GUEST_ID, input);
+
+    expect(notificationService.notices).toEqual([
+      {
+        userId: OWNER_ID,
+        content: {
+          type: NotificationType.BOOKING_REQUESTED,
+          data: {
+            bookingId: booking.id,
+            listingId: LISTING_ID,
+            listingTitle: listing.title,
+            from: input.from,
+            to: input.to,
+          },
+        },
+      },
+    ]);
+  });
+
+  it("does not tell an owner about a hold they took on their own listing", async () => {
+    bookingRepository.listingOwnerId = GUEST_ID;
+    await service.create(GUEST_ID, input);
+
+    expect(notificationService.notices).toEqual([]);
+  });
+
+  it("tells the host when the guest cancels, and both sides when an admin does", async () => {
+    const recipientsOfCancelling = async (
+      canceller: AuthenticatedUser,
+    ): Promise<{ userId: string; recipient: string }[]> => {
+      const id = await bookedByGuest();
+
+      notificationService.notices.length = 0;
+      await service.remove(id, canceller);
+
+      return notificationService.notices.map(({ userId, content }) => {
+        if (content.type !== NotificationType.BOOKING_CANCELLED) {
+          throw new Error(`Unexpected ${content.type}`);
+        }
+
+        return { userId, recipient: content.data.recipient };
+      });
+    };
+
+    await expect(recipientsOfCancelling(guest)).resolves.toEqual([
+      { userId: OWNER_ID, recipient: StayParty.HOST },
+    ]);
+    await expect(recipientsOfCancelling(admin)).resolves.toEqual([
+      { userId: GUEST_ID, recipient: StayParty.GUEST },
+      { userId: OWNER_ID, recipient: StayParty.HOST },
+    ]);
+  });
+
+  it("tells nobody about a cancellation it refused", async () => {
+    const id = await bookedByGuest();
+
+    notificationService.notices.length = 0;
+    await expect(service.remove(id, owner)).rejects.toThrow(ForbiddenException);
+
+    expect(notificationService.notices).toEqual([]);
   });
 
   /**

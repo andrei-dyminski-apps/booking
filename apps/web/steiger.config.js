@@ -45,4 +45,13 @@ export default defineConfig([
       "fsd/insignificant-slice": "off",
     },
   },
+  {
+    // The same blind spot, for the same reason: the notification's wording and its row are
+    // drawn by the feed's page and by the shell's bell, and the bell is a segment of the app
+    // layer — invisible to the count, so the slice reads as having one consumer.
+    files: ["./src/entities/notification/**"],
+    rules: {
+      "fsd/insignificant-slice": "off",
+    },
+  },
 ]);

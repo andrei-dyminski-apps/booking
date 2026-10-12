@@ -6,15 +6,19 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import {
+  NotificationType,
   Role,
+  StayParty,
   type Booking,
   type BookingPage,
+  type StayNotice,
   type BookingQuery,
   type CreateBookingInput,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { ownsOrIsAdmin } from "../auth/ownership";
 import { readCursor, type Page } from "../common/paging";
+import { NotificationService } from "../notification/notification.service";
 import {
   BookingRepository,
   DatesUnavailableError,
@@ -34,6 +38,7 @@ export class BookingService {
   constructor(
     private readonly bookingRepository: BookingRepository,
     private readonly bookingExpiryQueue: BookingExpiryQueue,
+    private readonly notificationService: NotificationService,
   ) {}
 
   /**
@@ -115,12 +120,15 @@ export class BookingService {
    * fail this request: the booking is committed by then, so a Redis that is down would
    * otherwise answer an existing booking with a 500 and never hand the caller its id. The
    * repeatable sweep behind the queue releases a hold whose job never got written.
+   *
+   * The owner of the listing is told last, and that cannot fail the request either — see
+   * `NotificationService.notify`.
    */
   async create(guestId: string, input: CreateBookingInput): Promise<Booking> {
-    let booking: Booking;
+    let created: BookingWithListingOwner;
 
     try {
-      booking = await this.bookingRepository.create(guestId, input);
+      created = await this.bookingRepository.create(guestId, input);
     } catch (error) {
       // A hard delete of the listing from outside the API — retiring one leaves the row.
       if (error instanceof ListingNotFoundError) {
@@ -143,12 +151,16 @@ export class BookingService {
       throw error;
     }
 
+    const { booking, listingOwnerId } = created;
+
     if (booking.expiresAt !== null) {
       await this.bookingExpiryQueue.scheduleExpiry(
         booking.id,
         new Date(booking.expiresAt),
       );
     }
+
+    await this.notifyOwnerOf(booking, listingOwnerId);
 
     return booking;
   }
@@ -162,7 +174,7 @@ export class BookingService {
    * see it at all is told nothing, and gets the 404 `getReadable` throws.
    */
   async remove(id: string, user: AuthenticatedUser): Promise<void> {
-    const { booking } = await this.getReadable(id, user);
+    const { booking, listingOwnerId } = await this.getReadable(id, user);
 
     if (!ownsOrIsAdmin(user, booking.guestId)) {
       throw new ForbiddenException("This booking cannot be cancelled by you");
@@ -175,6 +187,50 @@ export class BookingService {
     // The hold no longer needs releasing; the job is idempotent, so this is a tidy-up and
     // fails silently for the same reason scheduling one does.
     await this.bookingExpiryQueue.cancelExpiry(id);
+    await this.notifyCancellation(booking, listingOwnerId, user);
+  }
+
+  /**
+   * The host hears about a hold the moment it is taken, not when it is paid: the nights are
+   * off the calendar from now on, and a hold is the earliest a host can know a stay is
+   * coming. An owner booking their own listing is not told about it — the same rule as a
+   * cancellation, nobody hears about what they did themselves.
+   */
+  private async notifyOwnerOf(
+    booking: Booking,
+    listingOwnerId: string,
+  ): Promise<void> {
+    if (listingOwnerId === booking.guestId) return;
+
+    await this.notificationService.notify(listingOwnerId, {
+      type: NotificationType.BOOKING_REQUESTED,
+      data: stayNoticeOf(booking),
+    });
+  }
+
+  /**
+   * Both sides of the stay hear about a cancellation except the one who made it: a guest's
+   * reaches the host, an admin's reaches both. Each is told which side of the stay they are,
+   * because "your stay" and "a stay at your listing" are different news.
+   */
+  private async notifyCancellation(
+    booking: Booking,
+    listingOwnerId: string,
+    canceller: AuthenticatedUser,
+  ): Promise<void> {
+    const parties = [
+      { userId: booking.guestId, recipient: StayParty.GUEST },
+      { userId: listingOwnerId, recipient: StayParty.HOST },
+    ].filter(({ userId }) => userId !== canceller.id);
+
+    await Promise.all(
+      parties.map(({ userId, recipient }) =>
+        this.notificationService.notify(userId, {
+          type: NotificationType.BOOKING_CANCELLED,
+          data: { ...stayNoticeOf(booking), recipient },
+        }),
+      ),
+    );
   }
 
   /**
@@ -208,4 +264,15 @@ export class BookingService {
 
     return found;
   }
+}
+
+/** What a notice about a stay copies off it — see `stayNoticeSchema` in the contract. */
+function stayNoticeOf(booking: Booking): StayNotice {
+  return {
+    bookingId: booking.id,
+    listingId: booking.listingId,
+    listingTitle: booking.listing.title,
+    from: booking.from,
+    to: booking.to,
+  };
 }

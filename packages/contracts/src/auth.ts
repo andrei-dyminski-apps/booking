@@ -47,7 +47,8 @@ const passwordSchema = z
 export const nameSchema = z
   .string()
   .trim()
-  .min(1, { message: "Enter your name" })
+  // `abort`: an empty box is one mistake, and "no letter in it" would only say it twice.
+  .min(1, { message: "Enter your name", abort: true })
   .max(100, { message: "A name may not be longer than 100 characters" })
   .regex(/[\p{L}\p{N}]/u, {
     message: "A name has to have at least one letter in it",

@@ -87,7 +87,7 @@ describe("Booking hold expiry (e2e)", () => {
 
   /** A hold whose fifteen minutes are already spent, without waiting fifteen minutes. */
   const lapsedHold = async (): Promise<string> => {
-    const booking = await bookingRepository.create(guestId, {
+    const { booking } = await bookingRepository.create(guestId, {
       listingId,
       ...dates,
     });
@@ -120,7 +120,7 @@ describe("Booking hold expiry (e2e)", () => {
     // The slot is free, which is the whole point of releasing a hold.
     await expect(
       bookingRepository.create(guestId, { listingId, ...dates }),
-    ).resolves.toMatchObject({ status: "PENDING_PAYMENT" });
+    ).resolves.toMatchObject({ booking: { status: "PENDING_PAYMENT" } });
   });
 
   it("sweeps a lapsed hold nobody comes back to", async () => {
@@ -133,7 +133,7 @@ describe("Booking hold expiry (e2e)", () => {
   });
 
   it("leaves a hold that still has time on it", async () => {
-    const booking = await bookingRepository.create(guestId, {
+    const { booking } = await bookingRepository.create(guestId, {
       listingId,
       ...dates,
     });

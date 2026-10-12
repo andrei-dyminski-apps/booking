@@ -114,6 +114,7 @@ Routing belongs to Next.js and everything else to Feature-Sliced Design, so each
 | `/guests/:id/reviews`              | what hosts said about one guest, for the guest and their hosts        | signed in   |
 | `/messages`                        | the caller's conversations, the most recent first                     | USER, OWNER |
 | `/messages/:id`                    | one thread, paged back from its end, and the reply box                | its 2 sides |
+| `/notifications`                   | the caller's notifications, newest first, kept live by the stream     | signed in   |
 | `/login`, `/register`              | the session forms, submitted to Server Actions                        | everyone    |
 | `/profile`                         | the session as the API sees it, and "Sign out"                        | signed in   |
 | `/dashboard`                       | the owner's own listings                                              | OWNER       |
@@ -166,6 +167,11 @@ of the catalogue and a listing's reviews is behind the global `JwtAuthGuard` and
 | `GET`    | `/guests/:id/reviews`         | the hosts' reviews of a guest; the guest, a host they booked with or ADMIN, else `404`         |
 | `POST`   | `/bookings/:id/reviews`       | review a confirmed stay that is over; the guest or the owner, `409` — not yet or twice         |
 | `DELETE` | `/reviews/:id`                | remove a review, `204`; ADMIN only                                                             |
+| `GET`    | `/notifications`              | one page of the caller's notifications, newest first, with a cursor                            |
+| `GET`    | `/notifications/unread-count` | how many of them are unread                                                                    |
+| `POST`   | `/notifications/:id/read`     | mark one read, answers the unread count; `404` — not one of the caller's                       |
+| `POST`   | `/notifications/read`         | mark all read, answers the unread count                                                        |
+| `GET`    | `/events`                     | the caller's event stream (Server-Sent Events): a `sync`, then whatever happens                |
 
 The three lookups fill in the id filters of the admin's listings and of the stays: `q` is at
 least three characters, matched anywhere in the name regardless of case — or, when it is a
@@ -185,6 +191,29 @@ Only a guest writes first; after that either side may reply. A thread carries th
 each of its two people and the address of neither; a message says which side wrote it
 (`GUEST` or `HOST`). Each side has its own read marker, so `unread` is per caller,
 and an admin is not a side of any thread.
+
+### Notifications and the event stream
+
+The API tells an account about what concerns it: a host about a hold taken on their
+listing, both sides of a stay about a cancellation (except whoever cancelled), and the
+side of a finished stay a review is about. Each is a row in `notifications` first — the
+record, paged at `GET /notifications` — and then an event on the account's live stream.
+
+`GET /events` is that stream: Server-Sent Events over plain HTTP, one connection per
+browser — one tab holds it and hands the events to the others — through the frontend's
+proxy like every other request. Each `data` line is a value of
+`serverEventSchema` in `@repo/contracts`; the first one of every connection is a `sync`
+with the unread count, and every event after it carries the absolute count again, so a tab
+that missed something is corrected by the next event rather than drifting. Each count comes
+with a revision that only grows, so one that arrives late cannot overwrite a newer one. The API fans
+events out through Redis pub/sub, so the instance that writes a notification does not
+have to be the one holding the connection, and it closes each stream after five minutes so
+the reconnect passes the guard again — a blocked account or a lapsed token does not keep a
+stream open. The stream is one channel for everything the API pushes: the messages between
+users are meant to arrive as new members of the same union, not as a second connection.
+
+On the frontend a bell in the header shows the count and the latest notices, a new one is
+announced with a toast, and `/notifications` is the whole feed.
 
 Overlapping dates on the same listing are rejected; back-to-back bookings (check-out on the day the next guest checks in) are allowed.
 
@@ -414,7 +443,7 @@ All settings live in a single `.env` in the repository root — there are no per
 | `POSTGRES_PORT`      | host port the Postgres container publishes                     | `5432`                    |
 | `DATABASE_URL`       | PostgreSQL connection string for the application               | see `.env.example`        |
 | `REDIS_PORT`         | host port the Redis container publishes                        | `6379`                    |
-| `REDIS_URL`          | Redis for the BullMQ hold-expiry queue; no fallback            | see `.env.example`        |
+| `REDIS_URL`          | Redis for the hold-expiry queue and the event stream's pub/sub | see `.env.example`        |
 | `JWT_ACCESS_SECRET`  | signing key of the access token                                | required, no fallback     |
 | `JWT_REFRESH_SECRET` | signing key of the refresh token — a different one on purpose  | required, no fallback     |
 | `JWT_ACCESS_TTL`     | access token lifetime, seconds (also the cookie Max-Age)       | `900`                     |

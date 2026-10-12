@@ -41,6 +41,8 @@ apps/web/
     admin/users/[id]/loading.tsx
     guests/[id]/reviews/page.tsx  # what hosts said about a guest; the API decides who may look
     guests/[id]/reviews/loading.tsx
+    notifications/page.tsx    # the account's whole feed; the bell shows its top
+    notifications/loading.tsx
     not-found.tsx             # what notFound() renders — an id, a role, a retired row
     error.tsx                 # the boundary under the shell; "use client" + re-export
     global-error.tsx          # the boundary above it, for a shell that cannot render
@@ -59,6 +61,7 @@ apps/web/
       layout/site-footer.tsx  # the quiet end, and the third thing given the session
       layout/session-recovery.tsx  # the one rotation a server-rendered header cannot run
       layout/theme-toggle.tsx
+      layout/notification-bell.tsx  # the unread count off the event stream, the latest in a popup
       layout/global-error.tsx # the document a failed shell render is replaced with
       layout/index.ts
       providers/providers.tsx # theme + toaster, the only client boundary around the tree
@@ -175,6 +178,13 @@ apps/web/
       guest-reviews/ui/guest-reviews-skeleton.tsx
       guest-reviews/api/read-guest-reviews.ts  # `no-store`, a 404 outside the API's scope
       guest-reviews/index.ts
+      notifications/ui/notifications-page.tsx  # the feed, paged; "Mark all as read"
+      notifications/ui/live-refresh.tsx        # router.refresh() on an event, first page only
+      notifications/ui/mark-all-read-button.tsx
+      notifications/ui/notifications-skeleton.tsx
+      notifications/api/read-notifications.ts  # `no-store`, a stale cursor onto null
+      notifications/api/mark-all-read-action.ts
+      notifications/index.ts
     features/                 # a user action a second page also runs
       save-listing/ui/listing-form.tsx    # the one form the new and the edit screen run
       save-listing/ui/pricing-fields.tsx  # …its weekday and date prices, saved with the row
@@ -202,6 +212,9 @@ apps/web/
       review/index.ts
       conversation/model/sides.ts  # "You" or the other person's name: the list and the thread both say who wrote
       conversation/index.ts
+      notification/model/describe-notification.ts  # every kind as a title, a detail and a link
+      notification/ui/notification-item.tsx  # one row, marking itself read on the way out
+      notification/index.ts
     shared/                   # no domain knowledge: transport, routes, config
       api/http-client.ts      # apiRequest(), refreshSession(), the two errors
       api/auth.ts             # authApi, currentUser() — memoized, requireUser/requireRole
@@ -213,6 +226,8 @@ apps/web/
       api/lookups.ts          # lookupsApi — what an id box suggests, abortable; optionOf for a page
       api/reviews.ts          # reviewsApi — a listing's (public), a guest's (scoped), write, remove
       api/keyset-page.ts      # a stale cursor onto null, the one both paged reads share
+      api/notifications.ts    # notificationsApi — the caller's feed and its two marks
+      api/server-events.ts    # the tab's one EventSource on /api/events, shared by listeners
       api/index.ts
       config/api-url.ts       # apiOrigin() and BFF_BASE_PATH
       config/routes.ts        # ROUTES — every path of this application
@@ -228,6 +243,7 @@ apps/web/
       lib/not-found.ts        # a 404 from the API, and an id a URL cannot carry
       lib/plural.ts           # a count and the noun it counts, made to agree
       lib/lookup-option.ts    # a picked row as one line: the name, and the hint beside it
+      lib/use-server-events.ts  # useServerEvents(listener) — a subscription per component
       lib/index.ts
       ui/back-link.tsx        # the way up from a detail screen to its list
       ui/button-link.tsx      # a <Link> wearing the button classes, spelled once
@@ -995,6 +1011,54 @@ know the box changed.
   as chips while the empty state asks whether it is empty, and two calls would be two
   chances to answer the same question differently.
 
+## Live updates
+
+The API pushes over one stream per browser — `GET /events`, Server-Sent Events, read
+through the BFF at `/api/events` — and everything live on this side listens to that one
+stream.
+
+- **One connection, many listeners, many tabs** (`shared/api/server-events.ts`). The first
+  `useServerEvents` of a tab joins and the last one to unmount quits. Across tabs, the one
+  holding a `navigator.locks` lock opens the `EventSource` and passes every event to the
+  others over a `BroadcastChannel`; the others queue for the lock and the next one takes
+  over when the leader quits or closes. A browser holds six connections per origin over
+  HTTP/1.1 for all its tabs together, so a stream per tab would queue the whole site behind
+  six tabs. A feature that wants live data — the messages between users are the next — adds
+  a listener and a member to `serverEventSchema`, never a second stream.
+- **Every listener starts with a `sync`.** The connection's own, or one built from the
+  latest count the tab knows of for a listener that arrives later — so a first `sync` means
+  "the state now" and a later one "there was a gap" (`LiveRefresh` on the feed redraws on
+  the second kind).
+- **The browser reconnects by itself after a drop, and gives up on a non-`200`** without
+  saying which. The API closes every stream after five minutes so the reconnect passes its
+  guard again, and by then the access token may have lapsed. A stream the browser gave up on
+  is answered with one ordinary request — `GET /notifications/unread-count`, which refreshes
+  the session through the transport if it gets a `401` and does nothing else otherwise —
+  and a reconnect that waits twice as long with every failure in a row, up to five minutes,
+  until a connection opens. Refreshing blindly would rotate the session every two seconds
+  against a route that answers `404` or `500`.
+- **Counts are absolute, not deltas, and ordered by revision.** Every event carries the
+  unread count and every connection opens with a `sync`, so the bell takes the number it is
+  given and never counts for itself. The count also arrives in the answers to this tab's own
+  reads, and two roads do not keep each other's order: each count carries its
+  `unreadRevision`, and the bell keeps the highest.
+- **The BFF streams this one answer.** Everything else is buffered and cut off after nine
+  seconds; a `text/event-stream` is handed on as it arrives, the deadline covers its
+  headers only, and the browser leaving is what aborts the upstream request.
+- **The bell is the shell's** (`_app/layout/notification-bell.tsx`) and renders for a
+  session only. Its count comes from the stream rather than the server render — one number
+  should have one source — and its list is read when the popup opens. A new notice is
+  announced with a toast (`toast` is re-exported by `@repo/ui/components/sonner`, beside
+  the `Toaster` that draws it).
+- **The wording is `entities/notification`**: the bell, the toast and `/notifications` all
+  draw a notice, and `describeNotification` is an exhaustive switch over the contract's
+  types, so a new kind stops compiling there. Steiger cannot see the shell as its second
+  consumer — the `features/logout` case — and its `insignificant-slice` is off for it.
+- **Marking one read is a browser call**, made on the click of the link, because the click
+  is a navigation and must not wait for an action; marking all read on the feed page is a
+  Server Action plus `refresh()`. Either way the API publishes the new count, and every tab
+  of the account hears it.
+
 ## Mutations and revalidation
 
 Where a mutation goes:
@@ -1287,9 +1351,12 @@ component:
 - A security gate — `_app/proxy/proxy.ts`, which decides whether a request reaches a page
   or is bounced to `/login?next=…`.
 - A concurrency or protocol invariant — the single-flight session refresh and the
-  retry-one-401-once rule in `shared/api/http-client.ts`: both have a real way to be wrong
-  (a second rotation spent on an already-refreshed session, a retry loop) that only shows up
-  under a race or a specific server answer, not by reading the function.
+  retry-one-401-once rule in `shared/api/http-client.ts`, and the event stream's protocol in
+  `shared/api/server-events.ts` (one stream per browser and its handover between tabs, the
+  growing delay before a refused stream is tried again, the `sync` every listener starts
+  with): each has a real way to be wrong (a second rotation spent on an already-refreshed
+  session, a retry loop) that only shows up under a race or a specific server answer, not
+  by reading the function.
 - A mapping with more than one rule to keep straight — `shared/lib/form-errors.ts` (a zod
   issue, an `apiErrorSchema` issue and `react-hook-form`'s own field state reduced to one
   shape: which of `types` and `message` a box's messages come out of, and that a rule

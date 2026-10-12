@@ -9,9 +9,12 @@ import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/guards/jwt-auth.guard";
 import { RolesGuard } from "./auth/guards/roles.guard";
 import { BookingModule } from "./booking/booking.module";
+import { requireRedisUrl } from "./common/redis-url";
 import { ConversationModule } from "./conversation/conversation.module";
+import { EventsModule } from "./events/events.module";
 import { ListingModule } from "./listing/listing.module";
 import { LookupModule } from "./lookup/lookup.module";
+import { NotificationModule } from "./notification/notification.module";
 import { ReviewModule } from "./review/review.module";
 import { UserModule } from "./user/user.module";
 
@@ -36,8 +39,10 @@ import { UserModule } from "./user/user.module";
     AuthModule,
     BookingModule,
     ConversationModule,
+    EventsModule,
     ListingModule,
     LookupModule,
+    NotificationModule,
     ReviewModule,
     UserModule,
   ],
@@ -58,13 +63,3 @@ import { UserModule } from "./user/user.module";
   ],
 })
 export class AppModule {}
-
-function requireRedisUrl(): string {
-  const url = process.env.REDIS_URL;
-
-  if (url === undefined || url === "") {
-    throw new Error("REDIS_URL is not set — copy .env.example to .env");
-  }
-
-  return url;
-}

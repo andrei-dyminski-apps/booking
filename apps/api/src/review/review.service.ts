@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import {
   isReviewable,
+  NotificationType,
   ReviewKind,
   Role,
   type CreateReviewInput,
@@ -22,6 +23,7 @@ import {
 } from "../booking/booking.repository";
 import { readCursor, type Page } from "../common/paging";
 import { ListingRepository } from "../listing/listing.repository";
+import { NotificationService } from "../notification/notification.service";
 import { decodeCursor, encodeCursor, type ReviewCursor } from "./review-cursor";
 import {
   ReviewAlreadyWrittenError,
@@ -40,6 +42,7 @@ export class ReviewService {
     private readonly reviewRepository: ReviewRepository,
     private readonly bookingRepository: BookingRepository,
     private readonly listingRepository: ListingRepository,
+    private readonly notificationService: NotificationService,
   ) {}
 
   /**
@@ -130,8 +133,10 @@ export class ReviewService {
       );
     }
 
+    let review: Review;
+
     try {
-      return await this.reviewRepository.create(bookingId, kind, input);
+      review = await this.reviewRepository.create(bookingId, kind, input);
     } catch (error) {
       if (error instanceof ReviewAlreadyWrittenError) {
         throw new ConflictException("You have already reviewed this stay");
@@ -139,6 +144,39 @@ export class ReviewService {
 
       throw error;
     }
+
+    await this.notifyReviewed(found, review, user);
+
+    return review;
+  }
+
+  /**
+   * The other side of the stay is told — the host about the guest's half, the guest about
+   * the host's. That is the person the review is about, which `kind` already names. A
+   * guest who stayed at their own listing wrote about themselves, and is not told so.
+   */
+  private async notifyReviewed(
+    { booking, listingOwnerId }: BookingWithListingOwner,
+    review: Review,
+    author: AuthenticatedUser,
+  ): Promise<void> {
+    const recipient =
+      review.kind === ReviewKind.LISTING ? listingOwnerId : booking.guestId;
+
+    if (recipient === author.id) return;
+
+    await this.notificationService.notify(recipient, {
+      type: NotificationType.REVIEW_RECEIVED,
+      data: {
+        reviewId: review.id,
+        bookingId: booking.id,
+        kind: review.kind,
+        listingId: booking.listingId,
+        listingTitle: booking.listing.title,
+        guestId: booking.guestId,
+        rating: review.rating,
+      },
+    });
   }
 
   /** Moderation, the admin's alone — `@Roles` on the route says so, and nothing here re-checks it. */

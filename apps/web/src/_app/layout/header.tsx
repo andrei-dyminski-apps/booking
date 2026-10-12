@@ -4,14 +4,15 @@ import type { User } from "@repo/contracts";
 import { ROUTES } from "#shared/config";
 import { ButtonLink } from "#shared/ui";
 import { MobileNav } from "./mobile-nav";
+import { NotificationBell } from "./notification-bell";
 import { SessionRecovery } from "./session-recovery";
 import { ThemeToggle } from "./theme-toggle";
 
 /**
  * The bar above the page. Most of the navigation moved into the sidebar beside it, so
  * what is left here is what belongs to the window rather than to the site: the way to
- * open that navigation on a narrow screen, the theme, and the two calls to action a
- * stranger has.
+ * open that navigation on a narrow screen, the theme, the two calls to action a
+ * stranger has, and the notification bell of somebody who is not one.
  *
  * It is handed the session instead of reading one — `AppShell` asks once for the whole
  * shell. `null` there means "no live access token", which is not the same as signed out,
@@ -60,6 +61,9 @@ export const Header = ({ user }: { user: User | null }) => (
             </ButtonLink>
           </>
         )}
+
+        {/* Only for a session: the stream behind it is the account's own. */}
+        {user !== null && <NotificationBell />}
 
         <ThemeToggle />
       </div>
