@@ -23,9 +23,9 @@ export const MAX_MESSAGE_LENGTH = 2000;
 export const messageBodySchema = z
   .string()
   .trim()
-  .min(1, { message: "Write a message first" })
+  .min(1, { error: "Write a message first" })
   .max(MAX_MESSAGE_LENGTH, {
-    message: `A message may not be longer than ${MAX_MESSAGE_LENGTH} characters`,
+    error: `A message may not be longer than ${MAX_MESSAGE_LENGTH} characters`,
   });
 
 export const messageSchema = z.object({
@@ -73,7 +73,7 @@ export const conversationSchema = z.object({
  * session, and the host is whoever owns the listing; neither is the client's to name.
  */
 export const startConversationSchema = z.object({
-  listingId: z.uuid({ message: "Choose a listing to write about" }),
+  listingId: z.uuid({ error: "Choose a listing to write about" }),
   body: messageBodySchema,
 });
 

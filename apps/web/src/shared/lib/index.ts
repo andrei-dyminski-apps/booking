@@ -1,3 +1,4 @@
+export { badgeCount } from "./badge-count";
 export {
   addDays,
   dayLabelOrAny,
@@ -26,4 +27,6 @@ export { orNotFound, requireId } from "./not-found";
 export { countOf } from "./plural";
 export { filtersHref, searchParamsHref, singleParam } from "./search-params";
 export { useActionForm } from "./use-action-form";
-export { useServerEvents } from "./use-server-events";
+export { useLatestCount } from "./server-events/use-latest-count";
+export { useRefreshOnEvents } from "./server-events/use-refresh-on-events";
+export { useServerEvents } from "./server-events/use-server-events";

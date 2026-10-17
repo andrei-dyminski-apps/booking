@@ -1,27 +1,43 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { sendMessageSchema, type SendMessageInput } from "@repo/contracts";
 import { Button } from "@repo/ui/components/button";
 import { FieldError, FieldGroup } from "@repo/ui/components/field";
 import { Textarea } from "@repo/ui/components/textarea";
+import { ROUTES } from "#shared/config";
 import { useActionForm } from "#shared/lib";
 import { FormField } from "#shared/ui";
 import { sendMessageAction } from "../api/send-message-action";
 
 /**
  * The reply box under a thread. `sendMessageSchema` refuses an empty message here and
- * again in the action; the thread is bound by the page, never typed. The page remounts
- * this form when the thread gains a message, which is what empties the box after a send.
+ * again in the action; the thread is bound by the page, never typed.
+ *
+ * **The box empties on a send that landed, and on nothing else.** Not by a remount keyed by
+ * what the page drew: every render the thread goes through — a reply arriving live, a
+ * message from the visitor's other tab, a turn to an earlier page — would decide anew what
+ * the key is, and each change would throw a draft away. A send from an earlier page goes to
+ * the newest one afterwards, where the message just written is.
  */
 export const SendMessageForm = ({
   conversationId,
+  earlier,
 }: {
   conversationId: string;
+  /** Drawn under an earlier page of the thread rather than its end. */
+  earlier: boolean;
 }) => {
+  const router = useRouter();
   const { form, submit, pending, message } = useActionForm<SendMessageInput>({
     action: sendMessageAction.bind(null, conversationId),
     schema: sendMessageSchema,
     defaultValues: { body: "" },
+    onSuccess: (sent) => {
+      sent.reset();
+
+      if (earlier) router.push(ROUTES.conversation(conversationId));
+    },
   });
 
   return (

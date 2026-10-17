@@ -20,7 +20,13 @@ import {
 } from "#shared/api";
 import { ROUTES } from "#shared/config";
 import { filtersHref, singleParam } from "#shared/lib";
-import { ButtonLink, PageHeading, Pager, StalePageNotice } from "#shared/ui";
+import {
+  ButtonLink,
+  LiveRefresh,
+  PageHeading,
+  Pager,
+  StalePageNotice,
+} from "#shared/ui";
 import { ConversationCard } from "./conversation-card";
 
 /**
@@ -67,6 +73,11 @@ export const MessagesPage = async ({
   return (
     <div className="flex flex-col gap-6">
       <PageHeading title={scope.title} description={scope.lead} />
+
+      {/* A new message moves its thread to the top; a read elsewhere un-bolds it. */}
+      {query.cursor === undefined && (
+        <LiveRefresh on={["message.created", "conversation.read"]} />
+      )}
 
       {page === null && <StalePageNotice firstPageHref={ROUTES.messages} />}
 

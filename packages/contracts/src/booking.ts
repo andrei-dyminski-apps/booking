@@ -97,12 +97,12 @@ export const createBookingSchema = bookingSchema
     (booking) =>
       !isDay(booking.from) || !isDay(booking.to) || booking.from < booking.to,
     {
-      message: "Check-out date must be later than check-in date",
+      error: "Check-out date must be later than check-in date",
       path: ["to"],
     },
   )
   .refine((booking) => !isDay(booking.from) || booking.from >= today(), {
-    message: "Check-in date cannot be in the past",
+    error: "Check-in date cannot be in the past",
     path: ["from"],
   });
 
@@ -155,7 +155,7 @@ export const bookingQuerySchema = z
     ...PAGING,
   })
   .refine((query) => (query.from === undefined) === (query.to === undefined), {
-    message: "Filtering by dates needs both a start and an end",
+    error: "Filtering by dates needs both a start and an end",
     path: ["to"],
   })
   .refine(
@@ -164,7 +164,7 @@ export const bookingQuerySchema = z
       query.to === undefined ||
       query.from < query.to,
     {
-      message: "The end of the window must be later than its start",
+      error: "The end of the window must be later than its start",
       path: ["to"],
     },
   );

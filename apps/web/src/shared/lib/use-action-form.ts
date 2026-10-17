@@ -46,6 +46,7 @@ export function useActionForm<Values extends FieldValues>({
   schema,
   defaultValues,
   bound,
+  onSuccess,
 }: {
   /** Already bound to whatever the screen decides — an id, a `?next=`. */
   action: (state: FormErrors, values: Values) => Promise<FormErrors>;
@@ -65,6 +66,12 @@ export function useActionForm<Values extends FieldValues>({
    * one they could fix. The action binds the same value again and overwrites what arrives.
    */
   bound?: DefaultValues<Values>;
+  /**
+   * What the form does once the action answered with nothing to refuse — the
+   * `NO_FORM_ERRORS` of an action that does not redirect. An action that ends in a redirect
+   * never gets here: the navigation takes the place of its answer.
+   */
+  onSuccess?: (form: UseFormReturn<Values>) => void;
 }): {
   form: UseFormReturn<Values>;
   /** The `onSubmit` of the `<form>`: validate, then hand the values to the action. */
@@ -73,11 +80,6 @@ export function useActionForm<Values extends FieldValues>({
   /** What the whole form was refused for, when it was not one field's fault. */
   message: string | null;
 } {
-  const [errors, dispatch, pending] = useActionState<FormErrors, Values>(
-    action,
-    NO_FORM_ERRORS,
-  );
-
   const form = useForm<Values>({
     resolver: zodResolver(schema),
     // What the form holds, which is not the same as what it draws: the bound values go in
@@ -93,6 +95,26 @@ export function useActionForm<Values extends FieldValues>({
     // A field can break more than one rule at once, and `FieldError` already draws a list.
     criteriaMode: "all",
   });
+
+  // The latest callback, read when the answer arrives rather than when the action began.
+  const succeeded = useRef(onSuccess);
+
+  useEffect(() => {
+    succeeded.current = onSuccess;
+  });
+
+  const [errors, dispatch, pending] = useActionState<FormErrors, Values>(
+    async (state, values) => {
+      const answer = await action(state, values);
+
+      if (answer.message === null && Object.keys(answer.fields).length === 0) {
+        succeeded.current?.(form);
+      }
+
+      return answer;
+    },
+    NO_FORM_ERRORS,
+  );
 
   const { setError } = form;
 

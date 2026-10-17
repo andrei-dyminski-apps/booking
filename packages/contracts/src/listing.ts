@@ -65,10 +65,10 @@ const cents = (amount: number): boolean =>
  */
 const MONEY = [
   z.lte(MAX_PRICE, {
-    message: `A price may not be above ${MAX_PRICE_LABEL}`,
+    error: `A price may not be above ${MAX_PRICE_LABEL}`,
   }),
   z.refine<number>(cents, {
-    message: "A price may not be finer than a cent",
+    error: "A price may not be finer than a cent",
   }),
 ];
 
@@ -108,7 +108,7 @@ const nightPrice = (subject: string) =>
         `${subject} must be a number`,
       ),
     })
-    .positive({ message: `${subject} must be more than zero` })
+    .positive({ error: `${subject} must be more than zero` })
     .check(...MONEY);
 
 /**
@@ -126,14 +126,14 @@ export const listingSchema = z.object({
   title: z
     .string()
     .trim()
-    .min(3, { message: "A title needs at least 3 characters" })
-    .max(100, { message: "A title may not be longer than 100 characters" }),
+    .min(3, { error: "A title needs at least 3 characters" })
+    .max(100, { error: "A title may not be longer than 100 characters" }),
   description: z
     .string()
     .trim()
-    .min(10, { message: "A description needs at least 10 characters" })
+    .min(10, { error: "A description needs at least 10 characters" })
     .max(2000, {
-      message: "A description may not be longer than 2000 characters",
+      error: "A description may not be longer than 2000 characters",
     }),
   pricePerNight: nightPrice("A price per night"),
   capacity: z
@@ -143,9 +143,9 @@ export const listingSchema = z.object({
         "A capacity must be a whole number",
       ),
     })
-    .min(1, { message: "A listing has to sleep at least one guest" })
+    .min(1, { error: "A listing has to sleep at least one guest" })
     .max(MAX_CAPACITY, {
-      message: `A listing may not sleep more than ${String(MAX_CAPACITY)} guests`,
+      error: `A listing may not sleep more than ${String(MAX_CAPACITY)} guests`,
     }),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
@@ -220,7 +220,7 @@ const datePriceSchema = z.object({
  */
 const datePriceInputSchema = datePriceSchema.refine(
   (entry) => !isDay(entry.date) || entry.date >= today(),
-  { message: "A date price cannot be in the past", path: ["date"] },
+  { error: "A date price cannot be in the past", path: ["date"] },
 );
 
 /**
@@ -232,7 +232,7 @@ const datePrices = <Entry extends typeof datePriceSchema>(entry: Entry) =>
   z
     .array(entry)
     .max(MAX_DATE_PRICES, {
-      message: `A listing may not price more than ${String(MAX_DATE_PRICES)} dates on their own`,
+      error: `A listing may not price more than ${String(MAX_DATE_PRICES)} dates on their own`,
     })
     .refine(
       (entries) => {
@@ -240,7 +240,7 @@ const datePrices = <Entry extends typeof datePriceSchema>(entry: Entry) =>
 
         return new Set(days).size === days.length;
       },
-      { message: "Each date may only have one price" },
+      { error: "Each date may only have one price" },
     );
 
 /**
@@ -321,7 +321,7 @@ export const createListingSchema = listingSchema
 export const updateListingSchema = createListingSchema
   .partial()
   .refine((listing) => Object.keys(listing).length > 0, {
-    message: "At least one field must be provided",
+    error: "At least one field must be provided",
   });
 
 export const listingListSchema = z.array(listingSchema);
@@ -385,7 +385,7 @@ export const listingQuerySchema = z
     ...PAGING,
   })
   .refine((query) => (query.from === undefined) === (query.to === undefined), {
-    message: "Filtering by dates needs both a check-in and a check-out date",
+    error: "Filtering by dates needs both a check-in and a check-out date",
     path: ["to"],
   })
   .refine(
@@ -394,7 +394,7 @@ export const listingQuerySchema = z
       query.to === undefined ||
       query.from < query.to,
     {
-      message: "Check-out date must be later than check-in date",
+      error: "Check-out date must be later than check-in date",
       path: ["to"],
     },
   )
@@ -404,7 +404,7 @@ export const listingQuerySchema = z
       query.maxPrice === undefined ||
       query.minPrice <= query.maxPrice,
     {
-      message: "The lowest price must not be above the highest",
+      error: "The lowest price must not be above the highest",
       path: ["maxPrice"],
     },
   );
@@ -446,7 +446,7 @@ export const availabilityQuerySchema = z
     to: z.iso.date(),
   })
   .refine((window) => window.from < window.to, {
-    message: "The end of the window must be later than its start",
+    error: "The end of the window must be later than its start",
     path: ["to"],
   })
   .refine(
@@ -454,7 +454,7 @@ export const availabilityQuerySchema = z
       window.from >= window.to ||
       nights(window.from, window.to) <= MAX_WINDOW_NIGHTS,
     {
-      message: `The window may not be wider than ${String(MAX_WINDOW_NIGHTS)} nights`,
+      error: `The window may not be wider than ${String(MAX_WINDOW_NIGHTS)} nights`,
       path: ["to"],
     },
   );

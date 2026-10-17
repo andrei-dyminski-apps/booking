@@ -19,7 +19,10 @@ import {
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { readCursor, type Page } from "../common/paging";
+import { RealtimeService } from "../realtime/realtime.service";
+import { unreadFieldsOf } from "../unread/unread.types";
 import {
+  type AppendedMessage,
   ConversationNotFoundError,
   ConversationRepository,
   GuestNotFoundError,
@@ -36,10 +39,20 @@ import {
   type ConversationCursor,
 } from "./conversation-cursor";
 
+/**
+ * The threads, and the news of them on the account's event stream: every message is
+ * published to both sides, and opening a thread to the reader's other tabs. The row comes
+ * first and the event second, as with a notification — a publish never throws, and what a
+ * lost one costs is repaired by the next event or the next `sync`.
+ *
+ * A message is not a notification: the thread holds its own unread state, and a notice
+ * per message would bury the bookings and the reviews on the bell.
+ */
 @Injectable()
 export class ConversationService {
   constructor(
     private readonly conversationRepository: ConversationRepository,
+    private readonly realtimeService: RealtimeService,
   ) {}
 
   /**
@@ -111,7 +124,12 @@ export class ConversationService {
     input: StartConversationInput,
   ): Promise<Conversation> {
     try {
-      return await this.conversationRepository.start(guestId, input);
+      const { conversation, ...appended } =
+        await this.conversationRepository.start(guestId, input);
+
+      await this.announce(appended);
+
+      return conversation;
     } catch (error) {
       if (error instanceof ListingNotFoundError) {
         throw new NotFoundException(error.message);
@@ -160,24 +178,63 @@ export class ConversationService {
   ): Promise<Message> {
     const side = await this.sideOf(id, user);
 
+    let appended: AppendedMessage;
+
     try {
-      return await this.conversationRepository.append(id, side, input.body);
+      appended = await this.conversationRepository.append(id, side, input.body);
     } catch (error) {
       // The thread went with its guest's account after `sideOf` read it.
       if (error instanceof ConversationNotFoundError) throw notFound(id);
 
       throw error;
     }
+
+    await this.announce(appended);
+
+    return appended.message;
   }
 
+  /**
+   * A read that moved nothing — a second tab, a thread already read — is news to nobody,
+   * the rule `NotificationService` follows for its own marks.
+   */
   async markRead(
     id: string,
     user: AuthenticatedUser,
     input: MarkReadInput,
   ): Promise<void> {
     const side = await this.sideOf(id, user);
+    const counts = await this.conversationRepository.markRead(
+      id,
+      side,
+      new Date(input.upTo),
+      user.id,
+    );
 
-    await this.conversationRepository.markRead(id, side, new Date(input.upTo));
+    if (counts !== null) {
+      await this.realtimeService.publish(user.id, {
+        type: "conversation.read",
+        conversationId: id,
+        ...unreadFieldsOf(counts),
+      });
+    }
+  }
+
+  /**
+   * To both sides, each with its own counts: the other side has news, and the sender's
+   * other tabs have a thread to redraw — and, if the sender had not opened it since the last
+   * reply, one unread thread fewer.
+   */
+  private async announce({ message, unread }: AppendedMessage): Promise<void> {
+    await Promise.all(
+      unread.map(({ userId, counts }) =>
+        this.realtimeService.publish(userId, {
+          type: "message.created",
+          message,
+          ...unreadFieldsOf(counts),
+        }),
+      ),
+    );
   }
 
   /**

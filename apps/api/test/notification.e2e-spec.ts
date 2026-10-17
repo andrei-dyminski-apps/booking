@@ -7,14 +7,13 @@ import {
   Role,
   StayParty,
   notificationPageSchema,
-  serverEventSchema,
   unreadCountSchema,
   type CreateListingInput,
-  type ServerEvent,
 } from "@repo/contracts";
 import { AppModule } from "./../src/app.module";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
+import { EventStream } from "./event-stream";
 import { resetQueue } from "./queue";
 import { credentialsFor, signInAs, type Agent } from "./session";
 
@@ -24,69 +23,6 @@ const listingInput: CreateListingInput = {
   pricePerNight: 120,
   capacity: 4,
 };
-
-/**
- * The events of one account's stream, read off a real connection: the stream is the one
- * route supertest cannot wait for — it never ends — so the spec listens on a port and reads
- * the body as it arrives, the way a browser's `EventSource` does.
- */
-class EventStream {
-  private buffer = "";
-  private readonly decoder = new TextDecoder();
-
-  private constructor(
-    private readonly reader: ReadableStreamDefaultReader<Uint8Array>,
-    private readonly controller: AbortController,
-  ) {}
-
-  static async open(baseUrl: string, cookie: string): Promise<EventStream> {
-    const controller = new AbortController();
-    const response = await fetch(`${baseUrl}/events`, {
-      headers: { cookie },
-      signal: controller.signal,
-    });
-
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toMatch(/^text\/event-stream/);
-
-    if (response.body === null) throw new Error("The stream has no body");
-
-    return new EventStream(response.body.getReader(), controller);
-  }
-
-  /** The next `data:` line, parsed by the contract; comments and ids are skipped. */
-  async next(): Promise<ServerEvent> {
-    for (;;) {
-      const end = this.buffer.indexOf("\n\n");
-
-      if (end >= 0) {
-        const frame = this.buffer.slice(0, end);
-
-        this.buffer = this.buffer.slice(end + 2);
-
-        const data = frame
-          .split("\n")
-          .filter((line) => line.startsWith("data:"))
-          .map((line) => line.slice("data:".length).trim())
-          .join("\n");
-
-        if (data !== "") return serverEventSchema.parse(JSON.parse(data));
-
-        continue;
-      }
-
-      const { value, done } = await this.reader.read();
-
-      if (done) throw new Error("The stream ended");
-
-      this.buffer += this.decoder.decode(value, { stream: true });
-    }
-  }
-
-  close(): void {
-    this.controller.abort();
-  }
-}
 
 describe("Notifications (e2e)", () => {
   let app: INestApplication<App>;
@@ -221,23 +157,7 @@ describe("Notifications (e2e)", () => {
   it("opens the stream with the count, then pushes what happens while it is open", async () => {
     await book();
 
-    await app.listen(0, "127.0.0.1");
-
-    const baseUrl = await app.getUrl();
-    const login = await fetch(`${baseUrl}/auth/login`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        email: credentialsFor.OWNER.email,
-        password: credentialsFor.OWNER.password,
-      }),
-    });
-    const cookie = login.headers
-      .getSetCookie()
-      .map((header) => header.split(";")[0])
-      .join("; ");
-
-    const stream = await EventStream.open(baseUrl, cookie);
+    const stream = await EventStream.openAs(app, credentialsFor.OWNER);
 
     try {
       await expect(stream.next()).resolves.toMatchObject({

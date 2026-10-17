@@ -30,8 +30,8 @@ const emailSchema = z.email().max(254).toLowerCase();
  */
 const passwordSchema = z
   .string()
-  .min(8, { message: "Password must be at least 8 characters long" })
-  .max(128, { message: "Password may not be longer than 128 characters" });
+  .min(8, { error: "Password must be at least 8 characters long" })
+  .max(128, { error: "Password may not be longer than 128 characters" });
 
 /**
  * The name a person goes by on the site — what a host reads on a stay instead of an
@@ -48,10 +48,10 @@ export const nameSchema = z
   .string()
   .trim()
   // `abort`: an empty box is one mistake, and "no letter in it" would only say it twice.
-  .min(1, { message: "Enter your name", abort: true })
-  .max(100, { message: "A name may not be longer than 100 characters" })
+  .min(1, { error: "Enter your name", abort: true })
+  .max(100, { error: "A name may not be longer than 100 characters" })
   .regex(/[\p{L}\p{N}]/u, {
-    message: "A name has to have at least one letter in it",
+    error: "A name has to have at least one letter in it",
   });
 
 /** What the API tells the client about the signed-in person — never the password hash. */
@@ -87,7 +87,7 @@ export const registerFormSchema = registerSchema
       values.confirmPassword === undefined ||
       values.confirmPassword === values.password,
     {
-      message: "Passwords do not match",
+      error: "Passwords do not match",
       path: ["confirmPassword"],
     },
   );
@@ -99,7 +99,7 @@ export const registerFormSchema = registerSchema
  */
 export const loginSchema = z.object({
   email: emailSchema,
-  password: z.string().min(1, { message: "Password is required" }),
+  password: z.string().min(1, { error: "Password is required" }),
 });
 
 export type Role = z.infer<typeof roleSchema>;

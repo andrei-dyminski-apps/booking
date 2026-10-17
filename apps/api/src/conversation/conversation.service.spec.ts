@@ -15,11 +15,15 @@ import {
   type ConversationQuery,
   type Message,
   type MessageQuery,
+  type ServerEvent,
   type StartConversationInput,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import type { Page } from "../common/paging";
+import { RealtimeService } from "../realtime/realtime.service";
+import type { AccountUnread, UnreadCounts } from "../unread/unread.types";
 import {
+  type AppendedMessage,
   ConversationNotFoundError,
   ConversationRepository,
   GuestNotFoundError,
@@ -98,6 +102,9 @@ class FakeConversationRepository implements PublicOf<ConversationRepository> {
   /** Every write gets a moment of its own, so the orderings are never left to the id. */
   private clock = Date.parse("2026-08-17T12:00:00.000Z");
 
+  /** The fake's revision: every count is one tick later than the last, as under the real lock. */
+  private revision = 0;
+
   findPageFor(
     userId: string,
     query: ConversationQuery,
@@ -151,7 +158,10 @@ class FakeConversationRepository implements PublicOf<ConversationRepository> {
     );
   }
 
-  start(guestId: string, input: StartConversationInput): Promise<Conversation> {
+  start(
+    guestId: string,
+    input: StartConversationInput,
+  ): Promise<AppendedMessage & { conversation: Conversation }> {
     const listing = this.listings.get(input.listingId);
 
     if (listing === undefined || !listing.offered) {
@@ -183,30 +193,38 @@ class FakeConversationRepository implements PublicOf<ConversationRepository> {
     };
 
     this.threads.set(thread.id, thread);
-    this.write(thread, ConversationSide.GUEST, input.body, now);
 
-    return Promise.resolve(this.toConversation(thread, ConversationSide.GUEST));
+    const message = this.write(thread, ConversationSide.GUEST, input.body, now);
+
+    return Promise.resolve({
+      conversation: this.toConversation(thread, ConversationSide.GUEST),
+      message,
+      unread: this.unreadOf(thread),
+    });
   }
 
   append(
     conversationId: string,
     sender: ConversationSide,
     body: string,
-  ): Promise<Message> {
+  ): Promise<AppendedMessage> {
     const thread = this.threads.get(conversationId);
 
     if (thread === undefined) {
       return Promise.reject(new ConversationNotFoundError(conversationId));
     }
 
-    return Promise.resolve(this.write(thread, sender, body, this.tick()));
+    const message = this.write(thread, sender, body, this.tick());
+
+    return Promise.resolve({ message, unread: this.unreadOf(thread) });
   }
 
   markRead(
     conversationId: string,
     side: ConversationSide,
     upTo: Date,
-  ): Promise<void> {
+    readerId: string,
+  ): Promise<UnreadCounts | null> {
     const thread = this.threads.get(conversationId);
     const marker =
       side === ConversationSide.GUEST ? "guestReadAt" : "hostReadAt";
@@ -218,9 +236,11 @@ class FakeConversationRepository implements PublicOf<ConversationRepository> {
       (thread[marker] === null || thread[marker] < upTo)
     ) {
       thread[marker] = upTo;
+
+      return Promise.resolve(this.countOf(readerId));
     }
 
-    return Promise.resolve();
+    return Promise.resolve(null);
   }
 
   findMessagePage(
@@ -296,6 +316,31 @@ class FakeConversationRepository implements PublicOf<ConversationRepository> {
     };
   }
 
+  private unreadOf(thread: StoredThread): AccountUnread[] {
+    return [thread.guestId, thread.hostId].map((userId) => ({
+      userId,
+      counts: this.countOf(userId),
+    }));
+  }
+
+  /** No notices here: what they add to the counts is `NotificationService`'s to test. */
+  private countOf(userId: string): UnreadCounts {
+    this.revision += 1;
+
+    const conversations = [...this.threads.values()].filter((thread) => {
+      const readAt =
+        thread.guestId === userId
+          ? thread.guestReadAt
+          : thread.hostId === userId
+            ? thread.hostReadAt
+            : thread.lastMessageAt;
+
+      return readAt === null || readAt < thread.lastMessageAt;
+    }).length;
+
+    return { notifications: 0, conversations, revision: this.revision };
+  }
+
   private tick(): Date {
     this.clock += 1_000;
 
@@ -303,17 +348,31 @@ class FakeConversationRepository implements PublicOf<ConversationRepository> {
   }
 }
 
+/** Records what reached each account's channel. */
+class FakeRealtimeService implements Pick<RealtimeService, "publish"> {
+  readonly published: { userId: string; event: ServerEvent }[] = [];
+
+  publish(userId: string, event: ServerEvent): Promise<void> {
+    this.published.push({ userId, event });
+
+    return Promise.resolve();
+  }
+}
+
 describe("ConversationService", () => {
   let service: ConversationService;
   let conversationRepository: FakeConversationRepository;
+  let realtimeService: FakeRealtimeService;
 
   beforeEach(async () => {
     conversationRepository = new FakeConversationRepository();
+    realtimeService = new FakeRealtimeService();
 
     const moduleRef = await Test.createTestingModule({
       providers: [
         ConversationService,
         { provide: ConversationRepository, useValue: conversationRepository },
+        { provide: RealtimeService, useValue: realtimeService },
       ],
     }).compile();
 
@@ -542,6 +601,74 @@ describe("ConversationService", () => {
       await expect(service.findOne(randomUUID(), guest)).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe("the event stream", () => {
+    it("pushes a new thread's first message to both sides, each with its own counts", async () => {
+      await service.start(GUEST_ID, about(LISTING_ID));
+
+      expect(realtimeService.published).toEqual([
+        {
+          userId: GUEST_ID,
+          event: expect.objectContaining({
+            type: "message.created",
+            unreadConversations: 0,
+          }) as ServerEvent,
+        },
+        {
+          userId: OWNER_ID,
+          event: expect.objectContaining({
+            type: "message.created",
+            message: expect.objectContaining({
+              sender: ConversationSide.GUEST,
+              body: "Hello",
+            }) as Message,
+            unreadConversations: 1,
+          }) as ServerEvent,
+        },
+      ]);
+    });
+
+    it("counts the thread read for its sender once they reply", async () => {
+      const { id } = await service.start(GUEST_ID, about(LISTING_ID));
+
+      realtimeService.published.length = 0;
+      await service.send(id, owner, { body: "Welcome" });
+
+      const counts = Object.fromEntries(
+        realtimeService.published.map(({ userId, event }) => [
+          userId,
+          event.unreadConversations,
+        ]),
+      );
+
+      expect(counts).toEqual({ [GUEST_ID]: 1, [OWNER_ID]: 0 });
+    });
+
+    it("tells the reader's tabs about a read, and nobody about one that moved nothing", async () => {
+      const started = await service.start(GUEST_ID, about(LISTING_ID));
+      const upTo = started.lastMessage.createdAt;
+
+      realtimeService.published.length = 0;
+      await service.markRead(started.id, owner, { upTo });
+
+      expect(realtimeService.published).toEqual([
+        {
+          userId: OWNER_ID,
+          event: {
+            type: "conversation.read",
+            conversationId: started.id,
+            unreadNotifications: 0,
+            unreadConversations: 0,
+            unreadRevision: expect.any(Number) as number,
+          },
+        },
+      ]);
+
+      await service.markRead(started.id, owner, { upTo });
+
+      expect(realtimeService.published).toHaveLength(1);
     });
   });
 });

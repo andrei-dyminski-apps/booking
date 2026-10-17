@@ -56,7 +56,7 @@ The shape of requests and responses is described once — as zod schemas in `@re
 export const createBookingSchema = bookingSchema
   .omit({ id: true, createdAt: true })
   .refine((booking) => booking.from < booking.to, {
-    message: "Check-out date must be later than check-in date",
+    error: "Check-out date must be later than check-in date",
     path: ["to"],
   });
 ```

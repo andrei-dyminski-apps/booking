@@ -4,7 +4,6 @@ import {
   type Notification,
   type NotificationContent,
   type NotificationQuery,
-  type UnreadCount,
 } from "@repo/contracts";
 import type {
   Notification as NotificationRow,
@@ -12,10 +11,9 @@ import type {
 } from "../generated/prisma/client";
 import { afterCreatedAt, CREATED_AT_ORDER, type Page } from "../common/paging";
 import { PrismaService } from "../prisma/prisma.service";
+import { countUnreadOfOne } from "../unread/unread.repository";
+import type { UnreadCounts } from "../unread/unread.types";
 import type { NotificationCursor } from "./notification-cursor";
-
-/** Namespaces the account's lock among whatever else takes an advisory lock one day. */
-const UNREAD_LOCK_PREFIX = "notifications:unread:";
 
 /**
  * Every query over `notifications`. Each one is scoped to the recipient by a `userId` in
@@ -23,11 +21,9 @@ const UNREAD_LOCK_PREFIX = "notifications:unread:";
  * so an id from somebody else's feed matches nothing — which is the `404` the service
  * answers — rather than being read first and refused after.
  *
- * **Every write that changes the unread count returns the count it left**, and every count
- * is taken under a per-account advisory lock together with the write before it. That
- * serialises the counts of one account, which is what lets each carry a `revision` that
- * only grows — see `unreadRevisionSchema` in the contract — however many requests and
- * instances of the API are writing at once.
+ * **Every write that changes the unread count returns the counts it left**, taken in the
+ * same transaction by `countUnreadOf` — which is where the lock and the revision that
+ * orders them are explained.
  */
 @Injectable()
 export class NotificationRepository {
@@ -36,7 +32,7 @@ export class NotificationRepository {
   async create(
     userId: string,
     content: NotificationContent,
-  ): Promise<{ notification: Notification; count: UnreadCount }> {
+  ): Promise<{ notification: Notification; count: UnreadCounts }> {
     const { result, count } = await this.counted(userId, async (tx) =>
       toNotification(
         await tx.notification.create({
@@ -69,7 +65,7 @@ export class NotificationRepository {
   }
 
   /** Served by the partial index on `read_at IS NULL`, see the migration. */
-  async countUnread(userId: string): Promise<UnreadCount> {
+  async countUnread(userId: string): Promise<UnreadCounts> {
     const { count } = await this.counted(userId, () => Promise.resolve());
 
     return count;
@@ -84,7 +80,7 @@ export class NotificationRepository {
   async markRead(
     userId: string,
     id: string,
-  ): Promise<{ changed: boolean; count: UnreadCount } | null> {
+  ): Promise<{ changed: boolean; count: UnreadCounts } | null> {
     const { result, count } = await this.counted(userId, async (tx) => {
       const { count: updated } = await tx.notification.updateMany({
         where: { id, userId, readAt: null },
@@ -106,7 +102,7 @@ export class NotificationRepository {
   /** `changed` is how many were unread a moment ago. */
   async markAllRead(
     userId: string,
-  ): Promise<{ changed: number; count: UnreadCount }> {
+  ): Promise<{ changed: number; count: UnreadCounts }> {
     const { result, count } = await this.counted(userId, async (tx) => {
       const { count: updated } = await tx.notification.updateMany({
         where: { userId, readAt: null },
@@ -119,35 +115,15 @@ export class NotificationRepository {
     return { changed: result, count };
   }
 
-  /**
-   * `work`, then the count it leaves, in one transaction holding the account's advisory
-   * lock — released by the commit, so nothing here can leave it held. The revision is the
-   * database's own clock read under that lock, in microseconds: two counts of one account
-   * cannot overlap, so the later one reads the later clock, and one clock serves every
-   * instance of the API.
-   */
+  /** `work`, then the counts it leaves, in one transaction. */
   private counted<T>(
     userId: string,
     work: (tx: Prisma.TransactionClient) => Promise<T>,
-  ): Promise<{ result: T; count: UnreadCount }> {
+  ): Promise<{ result: T; count: UnreadCounts }> {
     return this.prismaService.$transaction(async (tx) => {
-      await tx.$executeRaw`
-        SELECT pg_advisory_xact_lock(hashtextextended(${UNREAD_LOCK_PREFIX + userId}, 0))
-      `;
-
       const result = await work(tx);
-      const unread = await tx.notification.count({
-        where: { userId, readAt: null },
-      });
-      const [clock] = await tx.$queryRaw<{ revision: bigint }[]>`
-        SELECT (extract(epoch FROM clock_timestamp()) * 1000000)::bigint AS revision
-      `;
 
-      if (clock === undefined) {
-        throw new Error("The database did not answer its clock");
-      }
-
-      return { result, count: { unread, revision: Number(clock.revision) } };
+      return { result, count: await countUnreadOfOne(tx, userId) };
     });
   }
 }

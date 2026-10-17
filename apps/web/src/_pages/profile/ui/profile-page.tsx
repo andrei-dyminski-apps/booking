@@ -1,3 +1,4 @@
+import { Role } from "@repo/contracts";
 import {
   Card,
   CardContent,
@@ -5,16 +6,21 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
+import { ReviewSummary } from "#entities/review";
 import { LogoutButton } from "#features/logout";
 import { requireUser } from "#shared/api";
 import { ROUTES } from "#shared/config";
 import { formatDate } from "#shared/lib";
 import { ButtonLink } from "#shared/ui";
-import { hasReviewsOf } from "../api/has-reviews-of";
+import { readReviewSummaryOf } from "../api/read-review-summary-of";
 
 export const ProfilePage = async () => {
   const user = await requireUser(ROUTES.profile);
-  const reviewed = await hasReviewsOf(user.id);
+  const reviews = await readReviewSummaryOf(user.id);
+  const reviewed = reviews !== null && reviews.count > 0;
+  // The summary is a guest's figure, so it is shown to a USER alone. The reviews outlive a
+  // change of role, though: an owner or an admin still reaches theirs through the link.
+  const showSummary = reviewed && user.role === Role.USER;
 
   return (
     <Card className="mx-auto w-full max-w-md">
@@ -38,6 +44,15 @@ export const ProfilePage = async () => {
 
           <dt className="text-muted-foreground">Member since</dt>
           <dd>{formatDate(user.createdAt)}</dd>
+
+          {showSummary && (
+            <>
+              <dt className="text-muted-foreground">Reviews</dt>
+              <dd>
+                <ReviewSummary summary={reviews} />
+              </dd>
+            </>
+          )}
         </dl>
 
         {/* What hosts said about this account — a guest's half of the reviews is not

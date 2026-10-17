@@ -17,6 +17,8 @@ import {
 import { STILL_OFFERED } from "../listing/listing.repository";
 import { isPrismaError, PrismaErrorCode } from "../prisma/prisma.errors";
 import { PrismaService } from "../prisma/prisma.service";
+import { countUnreadOf, countUnreadOfOne } from "../unread/unread.repository";
+import type { AccountUnread, UnreadCounts } from "../unread/unread.types";
 import type { ConversationCursor, MessageCursor } from "./conversation-cursor";
 
 /**
@@ -88,6 +90,15 @@ const CONVERSATION_INCLUDE = {
   guest: { select: { name: true } },
 } satisfies Prisma.ConversationInclude;
 
+/**
+ * A message as it was written, and what each side of its thread has left unread after it —
+ * both sides, because sending stamps the sender's own marker too.
+ */
+export type AppendedMessage = {
+  message: Message;
+  unread: AccountUnread[];
+};
+
 type ConversationRowWithSummary = ConversationRow & {
   listing: { title: string; owner: { name: string } };
   guest: { name: string };
@@ -98,6 +109,9 @@ type ConversationRowWithSummary = ConversationRow & {
  * message never exists outside its thread, and writing one moves the thread's
  * `last_message_at` and its sender's read marker in the same transaction — so they share a
  * repository rather than getting one apiece.
+ *
+ * Every write that moves a read marker or the newest message counts what its people have
+ * left unread in the same transaction (`countUnreadOf`), after the thread's row lock.
  */
 @Injectable()
 export class ConversationRepository {
@@ -208,7 +222,7 @@ export class ConversationRepository {
   async start(
     guestId: string,
     input: StartConversationInput,
-  ): Promise<Conversation> {
+  ): Promise<AppendedMessage & { conversation: Conversation }> {
     try {
       return await this.prismaService.$transaction(async (tx) => {
         const listing = await tx.listing.findFirst({
@@ -248,14 +262,23 @@ export class ConversationRepository {
           select: { id: true },
         });
 
-        await appendIn(tx, id, ConversationSide.GUEST, input.body);
+        const { message } = await appendIn(
+          tx,
+          id,
+          ConversationSide.GUEST,
+          input.body,
+        );
 
         const row = await tx.conversation.findUniqueOrThrow({
           where: { id },
           include: CONVERSATION_INCLUDE,
         });
 
-        return toConversation(row, ConversationSide.GUEST);
+        return {
+          conversation: toConversation(row, ConversationSide.GUEST),
+          message,
+          unread: await countUnreadOf(tx, [guestId, listing.ownerId]),
+        };
       });
     } catch (error) {
       // The listing was read a moment ago, so the one key left to give way is the guest's.
@@ -267,15 +290,31 @@ export class ConversationRepository {
     }
   }
 
-  /** One message from either side — see `appendIn` for what it moves and why it locks. */
+  /**
+   * One message from either side — see `appendIn` for what it moves and why it locks, and
+   * for the two people it reads under that lock.
+   */
   append(
     conversationId: string,
     sender: ConversationSide,
     body: string,
-  ): Promise<Message> {
-    return this.prismaService.$transaction((tx) =>
-      appendIn(tx, conversationId, sender, body),
-    );
+  ): Promise<AppendedMessage> {
+    return this.prismaService.$transaction(async (tx) => {
+      const { message, participants } = await appendIn(
+        tx,
+        conversationId,
+        sender,
+        body,
+      );
+
+      return {
+        message,
+        unread: await countUnreadOf(tx, [
+          participants.guestId,
+          participants.hostId,
+        ]),
+      };
+    });
   }
 
   /**
@@ -283,21 +322,31 @@ export class ConversationRepository {
    * marker only moves forwards, and never past the thread's newest message: a moment later
    * than that names nothing a screen could have shown, so it is a no-op rather than a
    * marker that would swallow the next message unread.
+   *
+   * `null` when the marker did not move — the thread was read already, or the moment names
+   * nothing newer — and otherwise the reader's counts after it.
    */
-  async markRead(
+  markRead(
     conversationId: string,
     side: ConversationSide,
     upTo: Date,
-  ): Promise<void> {
-    // `updateMany`, so a thread that went with its guest's account between the read that
-    // authorized this and here is a no-op rather than a 500.
-    await this.prismaService.conversation.updateMany({
-      where: {
-        id: conversationId,
-        lastMessageAt: { gte: upTo },
-        ...readBefore(side, upTo),
-      },
-      data: readUpTo(side, upTo),
+    readerId: string,
+  ): Promise<UnreadCounts | null> {
+    return this.prismaService.$transaction(async (tx) => {
+      // `updateMany`, so a thread that went with its guest's account between the read that
+      // authorized this and here is a no-op rather than a 500.
+      const { count } = await tx.conversation.updateMany({
+        where: {
+          id: conversationId,
+          lastMessageAt: { gte: upTo },
+          ...readBefore(side, upTo),
+        },
+        data: readUpTo(side, upTo),
+      });
+
+      if (count === 0) return null;
+
+      return countUnreadOfOne(tx, readerId);
     });
   }
 
@@ -339,13 +388,17 @@ export class ConversationRepository {
  * would no longer match the column it is compared against. The millisecond is the column's
  * precision: two messages in one would leave a marker equal to the newer one, which reads
  * as seen.
+ *
+ * The two people of the thread are read by the same query as its newest moment — the host
+ * through the listing, as everywhere else — so whoever counts after the message has them
+ * without asking again.
  */
 async function appendIn(
   tx: Prisma.TransactionClient,
   conversationId: string,
   sender: ConversationSide,
   body: string,
-): Promise<Message> {
+): Promise<{ message: Message; participants: ConversationParticipants }> {
   const locked = await tx.$queryRaw<LockedConversation[]>`
     SELECT id FROM conversations WHERE id = ${conversationId}::uuid FOR UPDATE
   `;
@@ -354,10 +407,15 @@ async function appendIn(
     throw new ConversationNotFoundError(conversationId);
   }
 
-  const { lastMessageAt } = await tx.conversation.findUniqueOrThrow({
-    where: { id: conversationId },
-    select: { lastMessageAt: true },
-  });
+  const { lastMessageAt, guestId, listing } =
+    await tx.conversation.findUniqueOrThrow({
+      where: { id: conversationId },
+      select: {
+        lastMessageAt: true,
+        guestId: true,
+        listing: { select: { ownerId: true } },
+      },
+    });
   const at = max([new Date(), addMilliseconds(lastMessageAt, 1)]);
 
   const row = await tx.message.create({
@@ -374,7 +432,10 @@ async function appendIn(
     },
   });
 
-  return toMessage(row);
+  return {
+    message: toMessage(row),
+    participants: { guestId, hostId: listing.ownerId },
+  };
 }
 
 /** One row of the `FOR UPDATE` read — raw SQL, so the column keeps its stored name. */

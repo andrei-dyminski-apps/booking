@@ -1,15 +1,15 @@
 import { Module } from "@nestjs/common";
-import { NotificationModule } from "../notification/notification.module";
 import { RealtimeModule } from "../realtime/realtime.module";
+import { UnreadModule } from "../unread/unread.module";
 import { EventsController } from "./events.controller";
 
 /**
- * The stream, kept apart from the transport because it is the one place that knows every
- * feature that pushes: the opening `sync` restates each of their counts. The messages
- * between users are the next import here, beside the notifications.
+ * The stream, kept apart from the transport because it is the one place that knows what a
+ * fresh connection is told first: the opening `sync` restates the counts of every feature
+ * that pushes — the notifications and the threads, both counted by `UnreadModule`.
  */
 @Module({
-  imports: [RealtimeModule, NotificationModule],
+  imports: [RealtimeModule, UnreadModule],
   controllers: [EventsController],
 })
 export class EventsModule {}

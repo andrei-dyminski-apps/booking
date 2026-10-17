@@ -14,8 +14,9 @@ import {
 } from "rxjs";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
-import { NotificationService } from "../notification/notification.service";
 import { RealtimeService } from "../realtime/realtime.service";
+import { UnreadService } from "../unread/unread.service";
+import { unreadFieldsOf } from "../unread/unread.types";
 
 /**
  * Often enough that no proxy between here and a browser takes the stream for idle and
@@ -48,7 +49,7 @@ const STREAM_LIFETIME_MS = 5 * 60 * 1000;
  *
  * Every event is a JSON `data:` line of the contract's `serverEventSchema`, sent as the
  * default event type: a client reads one `message` listener and switches on `type`, and a
- * new member of the union (a chat message) needs no new listener.
+ * new member of the union needs no new listener.
  *
  * Behind the global guard like everything else: the stream is the caller's own account.
  */
@@ -58,7 +59,7 @@ export class EventsController {
 
   constructor(
     private readonly realtimeService: RealtimeService,
-    private readonly notificationService: NotificationService,
+    private readonly unreadService: UnreadService,
   ) {}
 
   @Sse()
@@ -91,20 +92,16 @@ export class EventsController {
   /**
    * What a fresh connection is told first: the counts, which is all a client needs to be
    * right again after any gap. A failure to read them leaves the stream open without it —
-   * the live events still carry the count, and the next reconnect asks again.
+   * the live events still carry the counts, and the next reconnect asks again.
    */
   private syncOf(userId: string): Observable<ServerEvent> {
-    return defer(() => this.notificationService.unreadCount(userId)).pipe(
+    return defer(() => this.unreadService.count(userId)).pipe(
       map(
-        ({ unread, revision }): ServerEvent => ({
-          type: "sync",
-          unreadNotifications: unread,
-          unreadRevision: revision,
-        }),
+        (counts): ServerEvent => ({ type: "sync", ...unreadFieldsOf(counts) }),
       ),
       catchError((error: unknown) => {
         this.logger.warn(
-          `Could not count the unread notifications of ${userId}: ${String(error)}`,
+          `Could not count what ${userId} has unread: ${String(error)}`,
         );
 
         return EMPTY;

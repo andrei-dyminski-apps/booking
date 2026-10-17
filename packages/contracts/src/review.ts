@@ -35,10 +35,10 @@ const ratingSchema = z
     },
   })
   .min(MIN_RATING, {
-    message: `A rating is at least ${String(MIN_RATING)} star`,
+    error: `A rating is at least ${String(MIN_RATING)} star`,
   })
   .max(MAX_RATING, {
-    message: `A rating is at most ${String(MAX_RATING)} stars`,
+    error: `A rating is at most ${String(MAX_RATING)} stars`,
   });
 
 /**
@@ -66,8 +66,8 @@ export const createReviewSchema = z.object({
   comment: z
     .string()
     .trim()
-    .min(10, { message: "A review needs at least 10 characters" })
-    .max(1000, { message: "A review may not be longer than 1000 characters" }),
+    .min(10, { error: "A review needs at least 10 characters" })
+    .max(1000, { error: "A review may not be longer than 1000 characters" }),
 });
 
 /**

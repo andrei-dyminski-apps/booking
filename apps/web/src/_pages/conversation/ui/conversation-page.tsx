@@ -17,7 +17,8 @@ import {
   requireId,
   singleParam,
 } from "#shared/lib";
-import { BackLink, ButtonLink, StalePageNotice } from "#shared/ui";
+import { BackLink, ButtonLink, PageHeading, StalePageNotice } from "#shared/ui";
+import { LiveThread } from "./live-thread";
 import { MarkRead } from "./mark-read";
 import { SendMessageForm } from "./send-message-form";
 
@@ -57,12 +58,9 @@ export const ConversationPage = async ({
   ]);
   const latestHref = ROUTES.conversation(id);
   const { side } = conversation;
-  // The form is remounted whenever the thread gains a message, and that is how it empties
-  // after a send: the action ends in a redirect to this page, which keeps a client
-  // component's state, and a new newest message is the one thing that says the send landed.
-  const latest = conversation.lastMessage.createdAt;
   // Only the newest page shows the end of the thread, and what it shows is what is read:
-  // its first item, which may be newer or older than `latest` — the two reads race.
+  // its first item, which may be newer or older than the thread's `lastMessage` — the two
+  // reads race.
   const newestShown = query.cursor === undefined ? page?.items[0] : undefined;
 
   return (
@@ -70,25 +68,25 @@ export const ConversationPage = async ({
       <div className="flex flex-col gap-4">
         <BackLink href={ROUTES.messages}>All messages</BackLink>
 
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight text-balance">
-            {conversation.listing.title}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Your conversation with {counterpartName(conversation)}.{" "}
-            {/* The catalogue page answers 404 for a retired listing; the thread goes on. */}
-            <Link
-              href={ROUTES.listing(conversation.listingId)}
-              className="text-primary underline-offset-4 hover:underline"
-            >
-              See the listing
-            </Link>
-          </p>
-        </div>
+        <PageHeading
+          title={conversation.listing.title}
+          description={
+            <>
+              Your conversation with {counterpartName(conversation)}.{" "}
+              {/* The catalogue page answers 404 for a retired listing; the thread goes on. */}
+              <Link
+                href={ROUTES.listing(conversation.listingId)}
+                className="text-primary underline-offset-4 hover:underline"
+              >
+                See the listing
+              </Link>
+            </>
+          }
+        />
       </div>
 
-      {conversation.unread && newestShown !== undefined && (
-        <MarkRead conversationId={id} upTo={newestShown.createdAt} />
+      {query.cursor === undefined && (
+        <LiveThread conversationId={id} shownUpTo={newestShown?.createdAt} />
       )}
 
       {page === null ? (
@@ -112,40 +110,50 @@ export const ConversationPage = async ({
             )}
           </div>
 
-          <ol role="list" className="flex flex-col gap-3">
-            {[...page.items].reverse().map((message) => {
-              const mine = message.sender === side;
+          {/* A block of its own, so the mark after the list takes no gap of the column. */}
+          <div>
+            <ol role="list" className="flex flex-col gap-3">
+              {[...page.items].reverse().map((message) => {
+                const mine = message.sender === side;
 
-              return (
-                <li
-                  key={message.id}
-                  className={cn(
-                    "flex max-w-[85%] flex-col gap-1 sm:max-w-[70%]",
-                    mine ? "items-end self-end" : "items-start self-start",
-                  )}
-                >
-                  <span className="text-xs text-muted-foreground">
-                    {authorLabel(conversation, message.sender)} ·{" "}
-                    {formatMoment(message.createdAt)} UTC
-                  </span>
-                  <p
+                return (
+                  <li
+                    key={message.id}
                     className={cn(
-                      "rounded-xl px-3 py-2 text-sm break-words whitespace-pre-wrap",
-                      mine
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-foreground",
+                      "flex max-w-[85%] flex-col gap-1 sm:max-w-[70%]",
+                      mine ? "items-end self-end" : "items-start self-start",
                     )}
                   >
-                    {message.body}
-                  </p>
-                </li>
-              );
-            })}
-          </ol>
+                    <span className="text-xs text-muted-foreground">
+                      {authorLabel(conversation, message.sender)} ·{" "}
+                      {formatMoment(message.createdAt)} UTC
+                    </span>
+                    <p
+                      className={cn(
+                        "rounded-xl px-3 py-2 text-sm break-words whitespace-pre-wrap",
+                        mine
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted text-foreground",
+                      )}
+                    >
+                      {message.body}
+                    </p>
+                  </li>
+                );
+              })}
+            </ol>
+
+            {conversation.unread && newestShown !== undefined && (
+              <MarkRead conversationId={id} upTo={newestShown.createdAt} />
+            )}
+          </div>
         </>
       )}
 
-      <SendMessageForm key={latest} conversationId={id} />
+      <SendMessageForm
+        conversationId={id}
+        earlier={query.cursor !== undefined}
+      />
     </div>
   );
 };

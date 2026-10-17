@@ -9,8 +9,7 @@ import { NotificationService } from "./notification.service";
   imports: [PrismaModule, RealtimeModule],
   controllers: [NotificationController],
   providers: [NotificationService, NotificationRepository],
-  // `notify` for the modules that have something to say — bookings and reviews so far —
-  // and the count for the stream's opening `sync`.
+  // `notify` for the modules that have something to say — bookings and reviews so far.
   exports: [NotificationService],
 })
 export class NotificationModule {}

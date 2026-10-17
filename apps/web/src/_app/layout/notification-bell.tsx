@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BellIcon } from "lucide-react";
@@ -15,13 +15,10 @@ import { toast } from "@repo/ui/components/sonner";
 import { describeNotification, NotificationItem } from "#entities/notification";
 import { notificationsApi } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { useServerEvents } from "#shared/lib";
+import { badgeCount, useLatestCount, useServerEvents } from "#shared/lib";
 
 /** What the popup shows; the rest is the feed's own page. */
 const LATEST = 8;
-
-/** The badge stops counting here — a number is a nudge, not a ledger. */
-const BADGE_CEILING = 99;
 
 /**
  * The bell in the header: the unread count, kept live by the account's event stream, and
@@ -35,42 +32,68 @@ const BADGE_CEILING = 99;
  * a second source for one number, and the two would disagree for as long as a cached page
  * outlived a read. The answers to this tab's own reads carry the count too, and the two
  * roads do not keep each other's order — so whichever was counted last wins, by its
- * revision, rather than whichever arrived last.
+ * revision, rather than whichever arrived last (`useLatestCount`).
  *
  * **The list is read when the popup opens**, not kept warm: what is in it is only worth
  * the request when somebody looks. A notice that arrives while it is open is put on top of
- * it — unless the read that filled it already had it — and a read elsewhere — another tab, the feed page — invalidates it, so the next
- * opening asks again rather than showing stale bold rows.
+ * it — unless the read that filled it already had it — and a read elsewhere — another tab,
+ * the feed page — invalidates it, so the next opening asks again rather than showing stale
+ * bold rows. A notice that arrives while a read is in flight is kept aside and merged into
+ * its answer: the server may have read the page before the row existed, and the answer
+ * would otherwise replace the list without it. Only the newest read is applied.
  */
 export const NotificationBell = () => {
   const router = useRouter();
-  const [unread, setUnread] = useState<UnreadCount | null>(null);
+  const unread = useLatestCount((event) => event.unreadNotifications);
   const [open, setOpen] = useState(false);
   const [latest, setLatest] = useState<Notification[] | null>(null);
   const [failed, setFailed] = useState(false);
+  const arriving = useRef<Notification[] | null>(null);
 
   const load = useCallback(() => {
+    const arrived: Notification[] = [];
+
+    arriving.current = arrived;
     setFailed(false);
     notificationsApi
       .page({ limit: LATEST }, { cache: "no-store" })
-      .then((page) => setLatest(page.items))
-      .catch(() => setFailed(true));
+      .then((page) => {
+        if (arriving.current !== arrived) return;
+        arriving.current = null;
+
+        const read = new Set(page.items.map((item) => item.id));
+
+        setLatest(
+          [
+            ...arrived.filter((item) => !read.has(item.id)),
+            ...page.items,
+          ].slice(0, LATEST),
+        );
+      })
+      .catch(() => {
+        if (arriving.current !== arrived) return;
+        arriving.current = null;
+        setFailed(true);
+      });
   }, []);
 
-  const countUnread = useCallback((next: UnreadCount) => {
-    setUnread((current) =>
-      current === null || next.revision >= current.revision ? next : current,
-    );
-  }, []);
+  const { offer } = unread;
+  const countUnread = useCallback(
+    (next: UnreadCount) => {
+      offer(next.unread, next.revision);
+    },
+    [offer],
+  );
 
   useServerEvents((event: ServerEvent) => {
-    countUnread({
-      unread: event.unreadNotifications,
-      revision: event.unreadRevision,
-    });
-
     switch (event.type) {
       case "notification.created": {
+        const arrived = arriving.current;
+
+        if (arrived?.every((item) => item.id !== event.notification.id)) {
+          arrived.unshift(event.notification);
+        }
+
         setLatest((items) =>
           items === null ||
           items.some((item) => item.id === event.notification.id)
@@ -92,8 +115,13 @@ export const NotificationBell = () => {
       case "sync":
         // Something may have changed while nobody was looking — a reconnect is a gap, and
         // a read elsewhere is news the rows here do not carry.
-        if (open) load();
-        else setLatest(null);
+        if (open) {
+          load();
+        } else {
+          // A read still in flight was answered before this news and would bring it back.
+          arriving.current = null;
+          setLatest(null);
+        }
         break;
     }
   });
@@ -122,7 +150,7 @@ export const NotificationBell = () => {
       });
   };
 
-  const count = unread?.unread ?? 0;
+  const count = unread.count ?? 0;
   const label =
     count === 0 ? "Notifications" : `Notifications, ${String(count)} unread`;
 
@@ -144,7 +172,7 @@ export const NotificationBell = () => {
             aria-hidden
             className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-none font-medium text-primary-foreground tabular-nums"
           >
-            {count > BADGE_CEILING ? `${String(BADGE_CEILING)}+` : count}
+            {badgeCount(count)}
           </span>
         )}
       </PopoverTrigger>

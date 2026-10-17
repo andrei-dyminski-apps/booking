@@ -62,6 +62,7 @@ apps/web/
       layout/session-recovery.tsx  # the one rotation a server-rendered header cannot run
       layout/theme-toggle.tsx
       layout/notification-bell.tsx  # the unread count off the event stream, the latest in a popup
+      layout/unread-conversations-badge.tsx  # the unread threads beside Messages, and the dot on the menu button
       layout/global-error.tsx # the document a failed shell render is replaced with
       layout/index.ts
       providers/providers.tsx # theme + toaster, the only client boundary around the tree
@@ -85,7 +86,7 @@ apps/web/
       register/api/register-action.ts
       register/index.ts
       profile/ui/profile-page.tsx
-      profile/api/has-reviews-of.ts       # whether hosts said anything — the link to them, or none
+      profile/api/read-review-summary-of.ts # what hosts said, in sum — the figure, the link, or none
       profile/index.ts
       catalogue/ui/catalogue-page.tsx     # the filtered, cursor-paged list of listings
       catalogue/ui/catalogue-toolbar.tsx  # one row: the filters, the ordering, the chips
@@ -116,6 +117,7 @@ apps/web/
       bookings/ui/booking-status-badge.tsx
       bookings/ui/cancel-booking-button.tsx
       bookings/ui/review-booking-button.tsx  # one half of a finished stay, in a dialog
+      bookings/ui/rating-field.tsx        # …its rating, picked as stars: a radio per star
       bookings/ui/bookings-skeleton.tsx
       bookings/api/read-bookings-page.ts  # the personal read, and the cursor it refuses
       bookings/api/cancel-booking-action.ts
@@ -128,8 +130,9 @@ apps/web/
       messages/ui/messages-skeleton.tsx
       messages/index.ts
       conversation/ui/conversation-page.tsx  # a thread read from its end, `?cursor=` for earlier
-      conversation/ui/send-message-form.tsx  # remounted by the page when the thread grows
-      conversation/ui/mark-read.tsx       # the browser's POST /read, up to the newest message drawn
+      conversation/ui/send-message-form.tsx  # empties itself on a send that landed, and on nothing else
+      conversation/ui/live-thread.tsx     # a re-render on a message of this thread not drawn yet
+      conversation/ui/mark-read.tsx       # the browser's POST /read, up to the newest message drawn, once it is scrolled to, while the tab is visible
       conversation/ui/conversation-skeleton.tsx
       conversation/api/send-message-action.ts
       conversation/index.ts
@@ -179,7 +182,6 @@ apps/web/
       guest-reviews/api/read-guest-reviews.ts  # `no-store`, a 404 outside the API's scope
       guest-reviews/index.ts
       notifications/ui/notifications-page.tsx  # the feed, paged; "Mark all as read"
-      notifications/ui/live-refresh.tsx        # router.refresh() on an event, first page only
       notifications/ui/mark-all-read-button.tsx
       notifications/ui/notifications-skeleton.tsx
       notifications/api/read-notifications.ts  # `no-store`, a stale cursor onto null
@@ -243,7 +245,10 @@ apps/web/
       lib/not-found.ts        # a 404 from the API, and an id a URL cannot carry
       lib/plural.ts           # a count and the noun it counts, made to agree
       lib/lookup-option.ts    # a picked row as one line: the name, and the hint beside it
-      lib/use-server-events.ts  # useServerEvents(listener) — a subscription per component
+      lib/server-events/use-server-events.ts  # useServerEvents(listener) — a subscription per component
+      lib/server-events/use-latest-count.ts   # one unread count off the stream, the newest revision winning
+      lib/server-events/use-refresh-on-events.ts  # router.refresh() on the events a screen names, never piled up
+      lib/badge-count.ts        # the number a badge draws, and the ceiling past which it stops
       lib/index.ts
       ui/back-link.tsx        # the way up from a detail screen to its list
       ui/button-link.tsx      # a <Link> wearing the button classes, spelled once
@@ -258,6 +263,7 @@ apps/web/
       ui/page-heading.tsx     # a list screen's title and the line under it
       ui/pager.tsx            # forwards-only keyset paging: next, and back to the first
       ui/stale-page-notice.tsx  # what a list shows for a cursor the API will not read
+      ui/live-refresh.tsx     # router.refresh() on the event types a list names: the feed, the threads
       ui/refused-search-notice.tsx  # …and for a search the contract refuses
       ui/no-matches-notice.tsx  # …and for an answer the filters emptied
       ui/index.ts
@@ -804,9 +810,9 @@ characters` reaches the box either way. The number is read off the schema
 - **Every rule a person can break is worded by the contract, not by the screen.** A form
   validating in the browser makes zod's own wording the first thing a visitor reads, and
   `Too small: expected string to have >=3 characters` names the type system rather than the
-  thing being asked for. So each of those rules carries a `message` where it is written —
-  the spelling `passwordSchema` has always used — and the two codes a plain `message`
-  cannot reach take a callback beside them instead: `numberMessage` in `listing.ts` and
+  thing being asked for. So each of those rules carries an `error` where it is written —
+  zod 4's spelling, which replaced the deprecated `message` — and the two codes a plain
+  string cannot reach take a callback beside them instead: `numberMessage` in `listing.ts` and
   `dayMessage` in `booking.ts`, which is what tells a box left empty from text nothing could
   read. A form does not restate any of it, and the API answers with the same words.
 - **A rule about a pair of fields waits until it has the pair.** `createBookingSchema`
@@ -1023,12 +1029,15 @@ stream.
   others over a `BroadcastChannel`; the others queue for the lock and the next one takes
   over when the leader quits or closes. A browser holds six connections per origin over
   HTTP/1.1 for all its tabs together, so a stream per tab would queue the whole site behind
-  six tabs. A feature that wants live data — the messages between users are the next — adds
-  a listener and a member to `serverEventSchema`, never a second stream.
+  six tabs. A feature that wants live data adds a listener and a member to
+  `serverEventSchema`, never a second stream — the messages between users did exactly that.
 - **Every listener starts with a `sync`.** The connection's own, or one built from the
-  latest count the tab knows of for a listener that arrives later — so a first `sync` means
-  "the state now" and a later one "there was a gap" (`LiveRefresh` on the feed redraws on
-  the second kind).
+  latest count the tab knows of for a listener that arrives later — or, for a joining tab
+  whose first news from the leader is an ordinary event that overtook the `welcome`, from
+  that event's counts — so a first `sync` means "the state now" and a later one "there
+  was a gap" (`useRefreshOnEvents`, behind `LiveRefresh` on the feed and the threads and
+  `LiveThread` on an open thread, redraws on the second kind). A burst of events while a
+  render is in flight asks for one more render after it rather than one per event.
 - **The browser reconnects by itself after a drop, and gives up on a non-`200`** without
   saying which. The API closes every stream after five minutes so the reconnect passes its
   guard again, and by then the access token may have lapsed. A stream the browser gave up on
@@ -1036,12 +1045,18 @@ stream.
   the session through the transport if it gets a `401` and does nothing else otherwise —
   and a reconnect that waits twice as long with every failure in a row, up to five minutes,
   until a connection opens. Refreshing blindly would rotate the session every two seconds
-  against a route that answers `404` or `500`.
-- **Counts are absolute, not deltas, and ordered by revision.** Every event carries the
-  unread count and every connection opens with a `sync`, so the bell takes the number it is
-  given and never counts for itself. The count also arrives in the answers to this tab's own
-  reads, and two roads do not keep each other's order: each count carries its
-  `unreadRevision`, and the bell keeps the highest.
+  against a route that answers `404` or `500`. Each delay is drawn from the upper half of
+  its range, so browsers refused together by a restarting API do not return together, and
+  the window's `online` event drops the delay and reconnects at once.
+- **Counts are absolute, not deltas, and ordered by revision.** Every event carries both
+  unread counts — `unreadNotifications` and `unreadConversations` — and every connection
+  opens with a `sync`, so the bell and the badge beside Messages take the number they are
+  given and never count for themselves. The bell's count also arrives in the answers to this
+  tab's own reads, and two roads do not keep each other's order: each count carries its
+  `unreadRevision` — one sequence for both counts — and each of them keeps the highest. That
+  rule is written once, in `useLatestCount`, and so is the badge's ceiling (`badgeCount`).
+  Below `lg` the badge is behind the closed sheet, so the menu button carries a dot of its
+  own and says the count in its name.
 - **The BFF streams this one answer.** Everything else is buffered and cut off after nine
   seconds; a `text/event-stream` is handed on as it arrives, the deadline covers its
   headers only, and the browser leaving is what aborts the upstream request.
@@ -1054,6 +1069,19 @@ stream.
   draw a notice, and `describeNotification` is an exhaustive switch over the contract's
   types, so a new kind stops compiling there. Steiger cannot see the shell as its second
   consumer — the `features/logout` case — and its `insignificant-slice` is off for it.
+- **A message is not a notification.** It reaches the stream as `message.created` (to both
+  sides of the thread) and `conversation.read` (to the reader's other tabs), never as a row
+  on the bell. The list of threads redraws on either, an open thread on a message of its
+  own it has not drawn yet — the one this tab just sent is already there. The reply box is
+  not keyed by anything the page drew: it empties itself through `useActionForm`'s
+  `onSuccess` when the action answers `NO_FORM_ERRORS`, so no re-render — a live reply, a
+  message from another tab, a turn to an earlier page — can wipe a draft.
+- **An open thread is marked read only once its end is on the screen, and only while its
+  tab is visible** (`mark-read.tsx`). The page opens at its top, so the newest message of a
+  long page sits below the fold: an empty mark after the list waits for an
+  `IntersectionObserver`. The thread re-renders on every message, in a background tab too,
+  and a mark from there would put the badge out for a message nobody saw; a hidden tab
+  waits for `visibilitychange`.
 - **Marking one read is a browser call**, made on the click of the link, because the click
   is a navigation and must not wait for an action; marking all read on the feed page is a
   Server Action plus `refresh()`. Either way the API publishes the new count, and every tab

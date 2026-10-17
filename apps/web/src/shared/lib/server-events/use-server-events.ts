@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { subscribeToServerEvents, type ServerEventListener } from "../api";
+import { subscribeToServerEvents, type ServerEventListener } from "../../api";
 
 /**
  * Listens to the account's event stream for as long as the component is mounted. The

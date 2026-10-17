@@ -118,6 +118,10 @@ export const notificationPageSchema = z.object({
  * its own write, the event stream, another tab — and not necessarily in the order they
  * were taken. A client keeps the count with the highest revision it has seen and ignores
  * an older one arriving late.
+ *
+ * The unread threads are counted under the same lock and read the same clock, so one
+ * revision orders every count an account has — this one and the event stream's
+ * `unreadConversations` alike.
  */
 export const unreadRevisionSchema = z.int().min(0);
 

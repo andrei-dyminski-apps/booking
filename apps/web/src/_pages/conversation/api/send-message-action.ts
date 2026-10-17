@@ -1,11 +1,14 @@
 "use server";
 
 import { refresh } from "next/cache";
-import { redirect } from "next/navigation";
 import { sendMessageSchema, type SendMessageInput } from "@repo/contracts";
 import { conversationsApi } from "#shared/api";
-import { ROUTES } from "#shared/config";
-import { toFieldErrors, toFormErrors, type FormErrors } from "#shared/lib";
+import {
+  NO_FORM_ERRORS,
+  toFieldErrors,
+  toFormErrors,
+  type FormErrors,
+} from "#shared/lib";
 
 /**
  * One reply. The thread is bound by the page rather than taken from the payload, and
@@ -30,8 +33,10 @@ export async function sendMessageAction(
   }
 
   // Every read of a thread is `no-store`, so there is no tag to name: what this clears is
-  // the router cache of the browser that sent it. The redirect lands on the newest page,
-  // where the message just written is — a reply sent from an earlier page included.
+  // the router cache of the browser that sent it. No redirect: a success is what tells the
+  // form to empty itself, and a redirect would take the place of the answer that says so —
+  // the form goes to the newest page itself when it was sent from an earlier one.
   refresh();
-  redirect(ROUTES.conversation(conversationId));
+
+  return NO_FORM_ERRORS;
 }

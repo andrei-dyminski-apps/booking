@@ -28,9 +28,9 @@ export const lookupQuerySchema = z.object({
     .string()
     .trim()
     .min(LOOKUP_MIN_LENGTH, {
-      message: `Type at least ${LOOKUP_MIN_LENGTH} characters`,
+      error: `Type at least ${LOOKUP_MIN_LENGTH} characters`,
     })
-    .max(254, { message: "A search is never longer than 254 characters" }),
+    .max(254, { error: "A search is never longer than 254 characters" }),
   ...PAGING,
 });
 

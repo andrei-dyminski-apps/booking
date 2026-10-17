@@ -3,9 +3,8 @@ import { NotificationItem } from "#entities/notification";
 import { notificationsApi, requireUser } from "#shared/api";
 import { ROUTES } from "#shared/config";
 import { singleParam } from "#shared/lib";
-import { PageHeading, Pager, StalePageNotice } from "#shared/ui";
+import { LiveRefresh, PageHeading, Pager, StalePageNotice } from "#shared/ui";
 import { readNotifications } from "../api/read-notifications";
-import { LiveRefresh } from "./live-refresh";
 import { MarkAllReadButton } from "./mark-all-read-button";
 
 const PAGE_SIZE = 20;
@@ -36,7 +35,9 @@ export const NotificationsPage = async ({
         description="Booking requests, cancellations and reviews that concern you."
       />
 
-      {cursor === undefined && <LiveRefresh />}
+      {cursor === undefined && (
+        <LiveRefresh on={["notification.created", "notifications.read"]} />
+      )}
 
       {page === null ? (
         <StalePageNotice firstPageHref={first} />

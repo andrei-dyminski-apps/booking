@@ -4,7 +4,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { User } from "@repo/contracts";
 import { cn } from "@repo/ui/lib/utils";
+import { ROUTES } from "#shared/config";
 import { navigationFor } from "./navigation";
+import { UnreadConversationsBadge } from "./unread-conversations-badge";
 
 /**
  * The links of the shell, with the one thing a server render cannot know about itself:
@@ -66,6 +68,7 @@ export const NavLinks = ({
                 {hint}
               </span>
             </span>
+            {href === ROUTES.messages && <UnreadConversationsBadge />}
           </Link>
         );
       })}

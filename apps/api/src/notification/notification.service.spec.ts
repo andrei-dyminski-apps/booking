@@ -8,10 +8,10 @@ import {
   type NotificationContent,
   type NotificationQuery,
   type ServerEvent,
-  type UnreadCount,
 } from "@repo/contracts";
 import type { Page } from "../common/paging";
 import { RealtimeService } from "../realtime/realtime.service";
+import type { UnreadCounts } from "../unread/unread.types";
 import type { NotificationCursor } from "./notification-cursor";
 import { NotificationRepository } from "./notification.repository";
 import { NotificationService } from "./notification.service";
@@ -54,7 +54,7 @@ class FakeNotificationRepository implements PublicOf<NotificationRepository> {
   create(
     userId: string,
     content: NotificationContent,
-  ): Promise<{ notification: Notification; count: UnreadCount }> {
+  ): Promise<{ notification: Notification; count: UnreadCounts }> {
     if (this.broken) return Promise.reject(new Error("connection refused"));
 
     const notification: Notification = {
@@ -87,14 +87,14 @@ class FakeNotificationRepository implements PublicOf<NotificationRepository> {
     });
   }
 
-  countUnread(userId: string): Promise<UnreadCount> {
+  countUnread(userId: string): Promise<UnreadCounts> {
     return Promise.resolve(this.countOf(userId));
   }
 
   markRead(
     userId: string,
     id: string,
-  ): Promise<{ changed: boolean; count: UnreadCount } | null> {
+  ): Promise<{ changed: boolean; count: UnreadCounts } | null> {
     const row = this.ownedBy(userId).find((row) => row.id === id);
 
     if (row === undefined) return Promise.resolve(null);
@@ -108,7 +108,7 @@ class FakeNotificationRepository implements PublicOf<NotificationRepository> {
 
   markAllRead(
     userId: string,
-  ): Promise<{ changed: number; count: UnreadCount }> {
+  ): Promise<{ changed: number; count: UnreadCounts }> {
     const unread = this.ownedBy(userId).filter((row) => row.readAt === null);
 
     for (const row of unread) row.readAt = new Date().toISOString();
@@ -119,11 +119,14 @@ class FakeNotificationRepository implements PublicOf<NotificationRepository> {
     });
   }
 
-  private countOf(userId: string): UnreadCount {
+  /** No threads here: what they add to the counts is `ConversationService`'s to test. */
+  private countOf(userId: string): UnreadCounts {
     this.revision += 1;
 
     return {
-      unread: this.ownedBy(userId).filter((row) => row.readAt === null).length,
+      notifications: this.ownedBy(userId).filter((row) => row.readAt === null)
+        .length,
+      conversations: 0,
       revision: this.revision,
     };
   }
@@ -182,6 +185,7 @@ describe("NotificationService", () => {
           readAt: null,
         }) as Notification,
         unreadNotifications: 2,
+        unreadConversations: 0,
         unreadRevision: expect.any(Number) as number,
       },
     });
@@ -242,6 +246,7 @@ describe("NotificationService", () => {
       event: {
         type: "notifications.read",
         unreadNotifications: 1,
+        unreadConversations: 0,
         unreadRevision: left.revision,
       },
     });

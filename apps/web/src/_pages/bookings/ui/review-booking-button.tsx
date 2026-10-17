@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  createReviewSchema,
-  MAX_RATING,
-  MIN_RATING,
-  type CreateReviewInput,
-} from "@repo/contracts";
+import { createReviewSchema, type CreateReviewInput } from "@repo/contracts";
 import { Button } from "@repo/ui/components/button";
 import {
   Dialog,
@@ -17,11 +12,11 @@ import {
   DialogTrigger,
 } from "@repo/ui/components/dialog";
 import { FieldError, FieldGroup } from "@repo/ui/components/field";
-import { Input } from "@repo/ui/components/input";
 import { Textarea } from "@repo/ui/components/textarea";
 import { useActionForm } from "#shared/lib";
 import { FormField } from "#shared/ui";
 import { reviewBookingAction } from "../api/review-booking-action";
+import { RatingField } from "./rating-field";
 
 /**
  * What each side of a stay is asked, in its own words: the guest about the place, the
@@ -89,26 +84,7 @@ export const ReviewBookingButton = ({
           </DialogHeader>
 
           <FieldGroup>
-            <FormField
-              form={form}
-              name="rating"
-              label="Rating"
-              description={`From ${String(MIN_RATING)} to ${String(MAX_RATING)} stars.`}
-              options={{ setValueAs: toRating }}
-            >
-              {(control) => (
-                <Input
-                  {...control}
-                  type="number"
-                  inputMode="numeric"
-                  min={MIN_RATING}
-                  max={MAX_RATING}
-                  step={1}
-                  size="lg"
-                  disabled={pending}
-                />
-              )}
-            </FormField>
+            <RatingField control={form.control} disabled={pending} />
 
             <FormField
               form={form}
@@ -134,14 +110,3 @@ export const ReviewBookingButton = ({
     </Dialog>
   );
 };
-
-/**
- * Text onto the number the contract wants, with an empty box as `undefined` rather than
- * `0` — the reason `toNumber` in `features/save-listing/lib/to-number.ts` gives: the
- * schema then says a rating is required, which is what happened.
- */
-function toRating(value: string | number | undefined): number | undefined {
-  if (typeof value === "number" || value === undefined) return value;
-
-  return value.trim() === "" ? undefined : Number(value);
-}

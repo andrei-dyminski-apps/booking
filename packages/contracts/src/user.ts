@@ -68,16 +68,16 @@ export const userQuerySchema = z.object({
     z
       .string()
       .trim()
-      .min(1, { message: "Type at least one character of the name" })
-      .max(100, { message: "A name is never longer than 100 characters" })
+      .min(1, { error: "Type at least one character of the name" })
+      .max(100, { error: "A name is never longer than 100 characters" })
       .optional(),
   ),
   email: blank(
     z
       .string()
       .trim()
-      .min(1, { message: "Type at least one character of the address" })
-      .max(254, { message: "An address is never longer than 254 characters" })
+      .min(1, { error: "Type at least one character of the address" })
+      .max(254, { error: "An address is never longer than 254 characters" })
       .toLowerCase()
       .optional(),
   ),
@@ -112,7 +112,7 @@ export const updateUserSchema = z
     blocked: z.boolean().optional(),
   })
   .refine((input) => input.role !== undefined || input.blocked !== undefined, {
-    message: "Change the role, the block, or both",
+    error: "Change the role, the block, or both",
   });
 
 export type ManagedUser = z.infer<typeof managedUserSchema>;

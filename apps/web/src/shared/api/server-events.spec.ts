@@ -105,6 +105,7 @@ class FakeLocks {
 const sync = (unread: number, revision: number): ServerEvent => ({
   type: "sync",
   unreadNotifications: unread,
+  unreadConversations: 0,
   unreadRevision: revision,
 });
 
@@ -148,12 +149,16 @@ afterEach(() => {
   for (const leave of leaves.splice(0)) leave();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("a tab on its own", () => {
   beforeEach(() => {
     // No Web Locks: every tab holds its own stream, which is the path these tests drive.
     vi.stubGlobal("navigator", {});
+    // As close to the top of the range every retry is drawn from as `Math.random` gets, so
+    // each delay is a hair under its ceiling and the timings below hold.
+    vi.spyOn(Math, "random").mockReturnValue(1 - Number.EPSILON);
   });
 
   it("shares one stream among its listeners and closes it with the last", async () => {
@@ -231,6 +236,56 @@ describe("a tab on its own", () => {
     expect(FakeEventSource.instances).toHaveLength(3);
   });
 
+  it("draws a retry from the upper half of its range", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    vi.mocked(Math.random).mockReturnValue(0);
+
+    listen(await openTab());
+
+    FakeEventSource.instances.at(-1)?.refuse();
+    await settle();
+    vi.advanceTimersByTime(999);
+    expect(FakeEventSource.instances).toHaveLength(1);
+
+    vi.advanceTimersByTime(1);
+    expect(FakeEventSource.instances).toHaveLength(2);
+  });
+
+  it("reconnects at once when the network comes back, and starts the delay over", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+
+    const browser = new EventTarget();
+
+    vi.stubGlobal("window", browser);
+    listen(await openTab());
+
+    for (let failure = 0; failure < 3; failure += 1) {
+      FakeEventSource.instances.at(-1)?.refuse();
+      await settle();
+      vi.runOnlyPendingTimers();
+    }
+
+    // Four refused in a row: the next retry is sixteen seconds away.
+    FakeEventSource.instances.at(-1)?.refuse();
+    await settle();
+    expect(FakeEventSource.instances).toHaveLength(4);
+
+    browser.dispatchEvent(new Event("online"));
+    expect(FakeEventSource.live).toHaveLength(1);
+    expect(FakeEventSource.instances).toHaveLength(5);
+
+    // The timer that was waiting is gone, and the next failure waits the first delay.
+    FakeEventSource.instances.at(-1)?.refuse();
+    await settle();
+    vi.advanceTimersByTime(2_000);
+    expect(FakeEventSource.instances).toHaveLength(6);
+
+    // Past the moment the old timer was due: it opens nothing beside the live stream.
+    vi.advanceTimersByTime(16_000);
+    expect(FakeEventSource.live).toHaveLength(1);
+    expect(FakeEventSource.instances).toHaveLength(6);
+  });
+
   it("does not come back for a tab whose listeners left while it waited", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
 
@@ -305,5 +360,27 @@ describe("several tabs", () => {
     expect(secondHeard).toEqual([sync(4, 7)]);
     expect(leaderHeard).toEqual([sync(4, 7)]);
     expect(FakeEventSource.instances).toHaveLength(1);
+  });
+
+  it("starts a joining tab with a sync even when an event overtakes the welcome", async () => {
+    const leader = await openTab();
+
+    listen(leader);
+
+    const [stream] = FakeEventSource.instances;
+
+    stream?.emit(sync(4, 7));
+
+    const follower = await openTab();
+    const followerHeard: ServerEvent[] = [];
+
+    listen(follower, followerHeard);
+    // Sent before the `hello` reaches the leader, so it lands ahead of the `welcome`.
+    const read: ServerEvent = { ...sync(2, 8), type: "notifications.read" };
+
+    stream?.emit(read);
+    await settle();
+
+    expect(followerHeard).toEqual([sync(2, 8), read]);
   });
 });

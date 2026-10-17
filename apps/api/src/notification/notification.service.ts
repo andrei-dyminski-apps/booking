@@ -7,6 +7,7 @@ import type {
 } from "@repo/contracts";
 import { readCursor } from "../common/paging";
 import { RealtimeService } from "../realtime/realtime.service";
+import { unreadFieldsOf, type UnreadCounts } from "../unread/unread.types";
 import { decodeCursor, encodeCursor } from "./notification-cursor";
 import { NotificationRepository } from "./notification.repository";
 
@@ -20,9 +21,13 @@ const SORT = "newest";
  * the event loses nothing but its timing — the next `sync` of the stream restates the
  * count, and the feed is read from the table.
  *
- * Other modules reach it through `notify` alone, and that is the seam the messages between
- * users will use as well: a message is a row of its own, and the notice that one arrived
- * is a notification like any other.
+ * Other modules reach it through `notify` alone. The messages between users do not: a
+ * message is a row of its own with an unread state of its own, and a notice per message
+ * would bury everything else on the bell — `ConversationService` publishes its events
+ * itself.
+ *
+ * The routes answer the bell's half of the counts — `{ unread, revision }` — and the events
+ * carry both halves; the revision is one sequence across them.
  */
 @Injectable()
 export class NotificationService {
@@ -50,8 +55,7 @@ export class NotificationService {
       await this.realtimeService.publish(userId, {
         type: "notification.created",
         notification,
-        unreadNotifications: count.unread,
-        unreadRevision: count.revision,
+        ...unreadFieldsOf(count),
       });
     } catch (error) {
       this.logger.error(
@@ -79,8 +83,8 @@ export class NotificationService {
     };
   }
 
-  unreadCount(userId: string): Promise<UnreadCount> {
-    return this.notificationRepository.countUnread(userId);
+  async unreadCount(userId: string): Promise<UnreadCount> {
+    return bellOf(await this.notificationRepository.countUnread(userId));
   }
 
   /**
@@ -115,16 +119,20 @@ export class NotificationService {
   private async announceRead(
     userId: string,
     changed: boolean,
-    count: UnreadCount,
+    count: UnreadCounts,
   ): Promise<UnreadCount> {
     if (changed) {
       await this.realtimeService.publish(userId, {
         type: "notifications.read",
-        unreadNotifications: count.unread,
-        unreadRevision: count.revision,
+        ...unreadFieldsOf(count),
       });
     }
 
-    return count;
+    return bellOf(count);
   }
+}
+
+/** The half of the counts the notification routes answer with. */
+function bellOf(counts: UnreadCounts): UnreadCount {
+  return { unread: counts.notifications, revision: counts.revision };
 }

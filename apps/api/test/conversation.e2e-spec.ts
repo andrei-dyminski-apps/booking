@@ -15,6 +15,7 @@ import {
 import { AppModule } from "./../src/app.module";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
+import { EventStream } from "./event-stream";
 import { resetQueue } from "./queue";
 import { credentialsFor, signInAs, type Agent } from "./session";
 
@@ -256,6 +257,53 @@ describe("ConversationController (e2e)", () => {
       .send({ upTo: reply.createdAt })
       .expect(204);
     expect((await threads(guest))[0]?.unread).toBe(false);
+  });
+
+  it("pushes a message to the other side's stream with the unread threads, and the read after it", async () => {
+    const stream = await EventStream.openAs(app, credentialsFor.OWNER);
+
+    try {
+      await expect(stream.next()).resolves.toMatchObject({
+        type: "sync",
+        unreadConversations: 0,
+      });
+
+      const started = await start(guest);
+
+      await expect(stream.next()).resolves.toMatchObject({
+        type: "message.created",
+        message: {
+          conversationId: started.id,
+          sender: ConversationSide.GUEST,
+        },
+        unreadConversations: 1,
+      });
+
+      await owner
+        .post(`/conversations/${started.id}/read`)
+        .send({ upTo: started.lastMessage.createdAt })
+        .expect(204);
+
+      await expect(stream.next()).resolves.toMatchObject({
+        type: "conversation.read",
+        conversationId: started.id,
+        unreadConversations: 0,
+      });
+
+      // The host's own reply reaches their stream too — their other tabs redraw the thread.
+      await owner
+        .post(`/conversations/${started.id}/messages`)
+        .send({ body: "From noon." })
+        .expect(201);
+
+      await expect(stream.next()).resolves.toMatchObject({
+        type: "message.created",
+        message: { sender: ConversationSide.HOST },
+        unreadConversations: 0,
+      });
+    } finally {
+      stream.close();
+    }
   });
 
   it("marks read only up to the message the screen showed", async () => {

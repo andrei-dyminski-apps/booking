@@ -19,8 +19,10 @@ import { notificationsApi } from "./notifications";
  *
  * **Every listener starts with a `sync`.** The stream's own opens a connection; a listener
  * that arrives later — a tab joining a leader, a component mounting in a tab already
- * listening — is handed one built from the latest count this tab knows of. So a listener can
- * read its first `sync` as "the state now" and any later one as "there was a gap".
+ * listening — is handed one built from the latest count this tab knows of. A joining tab
+ * whose first news from the leader is an ordinary event, sent before its `hello` got there,
+ * makes that `sync` out of the event's own counts. So a listener can read its first `sync`
+ * as "the state now" and any later one as "there was a gap".
  *
  * It goes through the BFF like every other call, so the session is the first-party cookie
  * and nothing about it is handled here — except the one thing `EventSource` cannot do for
@@ -31,6 +33,8 @@ import { notificationsApi } from "./notifications";
  * is answered with one ordinary request — which, if the session needs it, refreshes it the
  * way any request does — and a reconnect after a delay that grows with every failure in a
  * row, whatever the reason: an answer that is not a `401` would never be cured by a refresh.
+ * The delay is spread over the upper half of its range, so browsers refused together — an
+ * API restarting — do not come back together; and the network coming back cuts it short.
  *
  * Browser-only by nature; nothing on the server imports a live stream.
  */
@@ -44,7 +48,10 @@ const LEADER_LOCK = "booking:server-events";
 
 const BROADCAST_CHANNEL = "booking:server-events";
 
-/** The first retry after the browser gave up, doubled per failure in a row up to the ceiling. */
+/**
+ * The first retry after the browser gave up, doubled per failure in a row up to the ceiling.
+ * Both are the top of the range a retry is drawn from; the bottom is half of it.
+ */
 const FIRST_RETRY_MS = 2_000;
 
 /**
@@ -62,7 +69,10 @@ type Broadcast =
   | { kind: "welcome"; to: string; event: ServerEvent };
 
 /** The count part of an event, which is all a `sync` replayed to a newcomer can carry. */
-type Count = Pick<ServerEvent, "unreadNotifications" | "unreadRevision">;
+type Count = Pick<
+  ServerEvent,
+  "unreadNotifications" | "unreadConversations" | "unreadRevision"
+>;
 
 /**
  * Tells a `welcome` for this tab from one for another. Not `crypto.randomUUID`, which an
@@ -107,6 +117,8 @@ export function subscribeToServerEvents(
 }
 
 function join(): void {
+  globalThis.window?.addEventListener("online", onOnline);
+
   const locks = globalThis.navigator?.locks;
 
   if (locks === undefined || typeof BroadcastChannel === "undefined") {
@@ -144,6 +156,7 @@ function join(): void {
 }
 
 function quit(): void {
+  globalThis.window?.removeEventListener("online", onOnline);
   membership?.abort();
   membership = null;
   channel?.close();
@@ -170,7 +183,8 @@ function onBroadcast(message: Broadcast): void {
       if (!leading) deliver(message.event);
       break;
     case "welcome":
-      // Late, when the leader's own `sync` crossed the `hello` and got here first.
+      // Late, when the leader's own `sync` — or any event, see `deliver` — crossed the
+      // `hello` and got here first.
       if (message.to === tabId && known === null) deliver(message.event);
       break;
     case "hello":
@@ -233,21 +247,43 @@ async function recover(): Promise<void> {
 
   if (!leading || source !== null || retry !== null) return;
 
-  retry = setTimeout(
-    open,
-    Math.min(FIRST_RETRY_MS * 2 ** (failures - 1), MAX_RETRY_MS),
-  );
+  const ceiling = Math.min(FIRST_RETRY_MS * 2 ** (failures - 1), MAX_RETRY_MS);
+
+  retry = setTimeout(open, ceiling / 2 + (Math.random() * ceiling) / 2);
+}
+
+/**
+ * Whatever the stream failed on while the network was gone says nothing about the stream,
+ * so the delay it built up is dropped and the reconnect is now.
+ */
+function onOnline(): void {
+  if (!leading || source !== null) return;
+
+  if (retry !== null) clearTimeout(retry);
+
+  failures = 0;
+  open();
 }
 
 function deliver(event: ServerEvent): void {
+  // Only a joining tab can hear an ordinary event first — the leader's, sent before the
+  // `hello` reached it; the `welcome` behind it is then dropped. Every event carries the
+  // counts, which is all a `sync` is.
+  if (known === null && event.type !== "sync") deliver(syncOf(countOf(event)));
+
   if (known === null || event.unreadRevision >= known.unreadRevision) {
-    known = {
-      unreadNotifications: event.unreadNotifications,
-      unreadRevision: event.unreadRevision,
-    };
+    known = countOf(event);
   }
 
   for (const listener of listeners) listener(event);
+}
+
+function countOf(event: ServerEvent): Count {
+  return {
+    unreadNotifications: event.unreadNotifications,
+    unreadConversations: event.unreadConversations,
+    unreadRevision: event.unreadRevision,
+  };
 }
 
 function syncOf(count: Count): ServerEvent {
