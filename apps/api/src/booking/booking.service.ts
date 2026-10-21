@@ -25,6 +25,8 @@ import {
   GuestNotFoundError,
   ListingNotFoundError,
   type BookingWithListingOwner,
+  type CreatedBooking,
+  type ReleasedHold,
 } from "./booking.repository";
 import {
   decodeCursor,
@@ -122,10 +124,11 @@ export class BookingService {
    * repeatable sweep behind the queue releases a hold whose job never got written.
    *
    * The owner of the listing is told last, and that cannot fail the request either — see
-   * `NotificationService.notify`.
+   * `NotificationService.notify`. Just before them, the two sides of any lapsed hold on the
+   * same listing the transaction released on the way in are told about it.
    */
   async create(guestId: string, input: CreateBookingInput): Promise<Booking> {
-    let created: BookingWithListingOwner;
+    let created: CreatedBooking;
 
     try {
       created = await this.bookingRepository.create(guestId, input);
@@ -151,7 +154,7 @@ export class BookingService {
       throw error;
     }
 
-    const { booking, listingOwnerId } = created;
+    const { booking, listingOwnerId, released } = created;
 
     if (booking.expiresAt !== null) {
       await this.bookingExpiryQueue.scheduleExpiry(
@@ -160,9 +163,30 @@ export class BookingService {
       );
     }
 
+    // The release came first inside the transaction, so its notices do too: the feed is
+    // ordered by when a notice was written, and a host should read that the nights came
+    // free before reading who took them.
+    await this.notifyExpiry(released);
     await this.notifyOwnerOf(booking, listingOwnerId);
 
     return booking;
+  }
+
+  /**
+   * The job scheduled for one hold's deadline. A hold that is no longer pending — paid,
+   * cancelled, already released by the sweep — releases nothing and tells nobody.
+   */
+  async releaseHold(id: string): Promise<void> {
+    await this.notifyExpiry(await this.bookingRepository.expireHold(id));
+  }
+
+  /** The repeatable sweep; the count is what the processor logs. */
+  async releaseLapsedHolds(): Promise<number> {
+    const released = await this.bookingRepository.expireLapsedHolds();
+
+    await this.notifyExpiry(released);
+
+    return released.length;
   }
 
   /**
@@ -234,6 +258,34 @@ export class BookingService {
   }
 
   /**
+   * Both sides of a lapsed hold hear about it, because nobody let it go on purpose: the
+   * guest learns the nights are no longer theirs, the host that they are back on the
+   * calendar. An owner holding their own listing hears once, the guest's half. The holds
+   * are told about one after another rather than all at once — the sweep can release a
+   * backlog, and every notice is a transaction of its own.
+   */
+  private async notifyExpiry(holds: ReleasedHold[]): Promise<void> {
+    for (const { stay, guestId, listingOwnerId } of holds) {
+      const parties = [
+        { userId: guestId, recipient: StayParty.GUEST },
+        { userId: listingOwnerId, recipient: StayParty.HOST },
+      ].filter(
+        ({ userId, recipient }) =>
+          recipient === StayParty.GUEST || userId !== guestId,
+      );
+
+      await Promise.all(
+        parties.map(({ userId, recipient }) =>
+          this.notificationService.notify(userId, {
+            type: NotificationType.BOOKING_EXPIRED,
+            data: { ...stay, recipient },
+          }),
+        ),
+      );
+    }
+  }
+
+  /**
    * 404 rather than 403 for a booking the caller may not read, and unlike the listing
    * catalogue that is not a formality: nothing lets a stranger list bookings, so a 403
    * here would be the one way to learn that an id exists at all. What the caller may not
@@ -267,7 +319,7 @@ export class BookingService {
 }
 
 /** What a notice about a stay copies off it — see `stayNoticeSchema` in the contract. */
-function stayNoticeOf(booking: Booking): StayNotice {
+export function stayNoticeOf(booking: Booking): StayNotice {
   return {
     bookingId: booking.id,
     listingId: booking.listingId,

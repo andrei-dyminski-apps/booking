@@ -46,6 +46,18 @@ export function describeNotification(
         href: asGuest ? ROUTES.bookings : listingStays(data.listingId),
       };
     }
+    case NotificationType.BOOKING_EXPIRED: {
+      const { data } = notification;
+      const asGuest = data.recipient === StayParty.GUEST;
+
+      return {
+        title: asGuest
+          ? "Your booking request lapsed"
+          : "A booking request lapsed",
+        detail: `${data.listingTitle} · ${stayDates(data)}`,
+        href: asGuest ? ROUTES.bookings : listingStays(data.listingId),
+      };
+    }
     case NotificationType.REVIEW_RECEIVED: {
       const { data } = notification;
       const ofListing = data.kind === ReviewKind.LISTING;

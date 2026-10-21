@@ -14,7 +14,7 @@ import {
 @Module({
   imports: [
     PrismaModule,
-    // The host hears about a hold and both sides about a cancellation.
+    // The host hears about a hold, both sides about a cancellation and a lapsed hold.
     NotificationModule,
     BullModule.registerQueue({ name: BOOKING_EXPIRY_QUEUE }),
   ],

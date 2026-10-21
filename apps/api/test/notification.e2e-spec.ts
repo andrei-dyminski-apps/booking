@@ -11,11 +11,13 @@ import {
   type CreateListingInput,
 } from "@repo/contracts";
 import { AppModule } from "./../src/app.module";
+import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
 import { EventStream } from "./event-stream";
 import { resetQueue } from "./queue";
 import { credentialsFor, signInAs, type Agent } from "./session";
+import { waitUntil } from "./wait-until";
 
 const listingInput: CreateListingInput = {
   title: "Loft above the harbour",
@@ -119,6 +121,77 @@ describe("Notifications (e2e)", () => {
       data: { recipient: StayParty.HOST },
     });
     await expect(feedOf(admin)).resolves.toMatchObject({ items: [] });
+  });
+
+  describe("a lapsed hold", () => {
+    const expiryNoticesOf = async (agent: Agent) =>
+      (await feedOf(agent)).items.filter(
+        (item) => item.type === NotificationType.BOOKING_EXPIRED,
+      );
+
+    /** The deadline pushed into the past by hand rather than waited out. */
+    const lapse = async (bookingId: string): Promise<void> => {
+      await app.get(PrismaService).booking.update({
+        where: { id: bookingId },
+        data: { expiresAt: new Date(Date.now() - 1000) },
+      });
+    };
+
+    /**
+     * The lazy path, the one a request reaches: a booking of the same listing releases the
+     * lapsed hold inside its transaction. The job and the sweep are
+     * `booking-expiry.e2e-spec.ts`'s. Waited for rather than read once: the sweep of this
+     * same application may get to the hold first, and then the notices come from the
+     * worker, after the `201`.
+     */
+    it("tells both sides, each as the side they are", async () => {
+      const bookingId = await book();
+      await lapse(bookingId);
+
+      await guest
+        .post("/bookings")
+        .send({ listingId, from: inDays(10), to: inDays(12) })
+        .expect(201);
+
+      await waitUntil(async () => (await expiryNoticesOf(owner)).length > 0);
+      await waitUntil(async () => (await expiryNoticesOf(guest)).length > 0);
+
+      await expect(expiryNoticesOf(guest)).resolves.toMatchObject([
+        { data: { bookingId, recipient: StayParty.GUEST } },
+      ]);
+      await expect(expiryNoticesOf(owner)).resolves.toMatchObject([
+        { data: { bookingId, recipient: StayParty.HOST } },
+      ]);
+    });
+
+    /**
+     * The release is the first write of the transaction that refuses the booking, so the
+     * refusal takes it back: the hold is still pending, and nobody hears it lapsed. The new
+     * request overlaps both the lapsed hold and a live one, so it gets as far as the
+     * release before it is refused. The live one is booked before the deadline moves,
+     * or booking it would be the release.
+     */
+    it("tells nobody when the booking that would release it is refused", async () => {
+      const bookingId = await book();
+
+      await guest
+        .post("/bookings")
+        .send({ listingId, from: inDays(20), to: inDays(22) })
+        .expect(201);
+      await lapse(bookingId);
+      await guest
+        .post("/bookings")
+        .send({ listingId, from: inDays(11), to: inDays(21) })
+        .expect(409);
+
+      const { status } = await app
+        .get(PrismaService)
+        .booking.findUniqueOrThrow({ where: { id: bookingId } });
+
+      expect(status).toBe("PENDING_PAYMENT");
+      await expect(expiryNoticesOf(guest)).resolves.toEqual([]);
+      await expect(expiryNoticesOf(owner)).resolves.toEqual([]);
+    });
   });
 
   it("marks one read, refuses somebody else's, and marks all read", async () => {

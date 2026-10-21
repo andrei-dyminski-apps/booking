@@ -32,9 +32,11 @@ import {
   GuestNotFoundError,
   ListingNotFoundError,
   type BookingWithListingOwner,
+  type CreatedBooking,
+  type ReleasedHold,
 } from "./booking.repository";
 import type { BookingCursor } from "./booking-cursor";
-import { BookingService } from "./booking.service";
+import { BookingService, stayNoticeOf } from "./booking.service";
 import { BookingExpiryQueue } from "./booking-expiry.queue";
 import { ACTIVE_STATUSES, holdExpiry } from "./domain/booking-status";
 
@@ -146,6 +148,12 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
   /** Set to have `create` fail on the other key: the account behind the token is gone. */
   vanishingGuest = false;
 
+  /**
+   * The holds whose deadline has passed. The fake keeps no clock: a spec names the holds it
+   * wants lapsed, and the three expiry paths release exactly those that are still pending.
+   */
+  readonly lapsed = new Set<string>();
+
   findPageForEveryone(
     query: BookingQuery,
     cursor: BookingCursor | null,
@@ -199,7 +207,7 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
   create(
     guestId: string,
     booking: CreateBookingInput,
-  ): Promise<BookingWithListingOwner> {
+  ): Promise<CreatedBooking> {
     if (this.vanishingListing) {
       return Promise.reject(new ListingNotFoundError(booking.listingId));
     }
@@ -207,6 +215,12 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
     if (this.vanishingGuest) {
       return Promise.reject(new GuestNotFoundError(guestId));
     }
+
+    // Released before the overlap check, as the transaction does; a refusal below would
+    // roll that back with it, which this fake does not model — no spec refuses after one.
+    const released = this.release(
+      (found) => found.booking.listingId === booking.listingId,
+    );
 
     const overlaps = this.allBookings()
       .filter(isActive)
@@ -244,7 +258,7 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
 
     this.rows.set(stored.id, created);
 
-    return Promise.resolve(created);
+    return Promise.resolve({ ...created, released });
   }
 
   cancel(id: string): Promise<boolean> {
@@ -259,18 +273,34 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
     return Promise.resolve(true);
   }
 
-  expireHold(id: string): Promise<void> {
-    const found = this.rows.get(id);
-
-    if (found?.booking.status === BookingStatus.PENDING_PAYMENT) {
-      found.booking.status = BookingStatus.EXPIRED;
-    }
-
-    return Promise.resolve();
+  expireHold(id: string): Promise<ReleasedHold[]> {
+    return Promise.resolve(this.release((found) => found.booking.id === id));
   }
 
-  expireLapsedHolds(): Promise<number> {
-    return Promise.resolve(0);
+  expireLapsedHolds(): Promise<ReleasedHold[]> {
+    return Promise.resolve(this.release(() => true));
+  }
+
+  /** The lapsed, still pending holds among those `which` picks, flipped to `EXPIRED`. */
+  private release(
+    which: (found: BookingWithListingOwner) => boolean,
+  ): ReleasedHold[] {
+    return [...this.rows.values()]
+      .filter(
+        (found) =>
+          which(found) &&
+          this.lapsed.has(found.booking.id) &&
+          found.booking.status === BookingStatus.PENDING_PAYMENT,
+      )
+      .map(({ booking, listingOwnerId }) => {
+        booking.status = BookingStatus.EXPIRED;
+
+        return {
+          stay: stayNoticeOf(booking),
+          guestId: booking.guestId,
+          listingOwnerId,
+        };
+      });
   }
 
   /** Read by `ListingService`, never by this one — see `listing.service.spec.ts`. */
@@ -661,6 +691,100 @@ describe("BookingService", () => {
       { userId: GUEST_ID, recipient: StayParty.GUEST },
       { userId: OWNER_ID, recipient: StayParty.HOST },
     ]);
+  });
+
+  describe("a lapsed hold", () => {
+    /** Who heard about an expiry, and as which side of the stay. */
+    const expiryNotices = (): { userId: string; recipient: string }[] =>
+      notificationService.notices.flatMap(({ userId, content }) =>
+        content.type === NotificationType.BOOKING_EXPIRED
+          ? [{ userId, recipient: content.data.recipient }]
+          : [],
+      );
+
+    const lapsedHold = async (): Promise<string> => {
+      const id = await bookedByGuest();
+
+      bookingRepository.lapsed.add(id);
+      notificationService.notices.length = 0;
+
+      return id;
+    };
+
+    const bothSides = [
+      { userId: GUEST_ID, recipient: StayParty.GUEST },
+      { userId: OWNER_ID, recipient: StayParty.HOST },
+    ];
+
+    it("tells both sides when its own job releases it", async () => {
+      const id = await lapsedHold();
+
+      await service.releaseHold(id);
+
+      expect(expiryNotices()).toEqual(bothSides);
+      expect(notificationService.notices[0]?.content.data).toMatchObject({
+        bookingId: id,
+        listingId: LISTING_ID,
+        listingTitle: listing.title,
+        from: input.from,
+        to: input.to,
+      });
+    });
+
+    it("tells both sides when the sweep releases it, and counts it", async () => {
+      await lapsedHold();
+
+      await expect(service.releaseLapsedHolds()).resolves.toBe(1);
+      expect(expiryNotices()).toEqual(bothSides);
+    });
+
+    it("tells both sides when a booking of the same listing releases it", async () => {
+      await lapsedHold();
+
+      await service.create(GUEST_ID, input);
+
+      expect(expiryNotices()).toEqual(bothSides);
+      // The release happened first, so the host reads it before the request that followed.
+      expect(
+        notificationService.notices
+          .filter(({ userId }) => userId === OWNER_ID)
+          .map(({ content }) => content.type),
+      ).toEqual([
+        NotificationType.BOOKING_EXPIRED,
+        NotificationType.BOOKING_REQUESTED,
+      ]);
+    });
+
+    it("tells nobody when the job lands on a hold no longer pending", async () => {
+      const id = await lapsedHold();
+
+      await service.remove(id, guest);
+      notificationService.notices.length = 0;
+
+      await service.releaseHold(id);
+      await expect(service.releaseLapsedHolds()).resolves.toBe(0);
+      expect(notificationService.notices).toEqual([]);
+    });
+
+    it("tells nobody twice when the job and the sweep both reach it", async () => {
+      const id = await lapsedHold();
+
+      await service.releaseHold(id);
+      await service.releaseLapsedHolds();
+
+      expect(expiryNotices()).toEqual(bothSides);
+    });
+
+    it("tells an owner holding their own listing once, as the guest", async () => {
+      bookingRepository.listingOwnerId = GUEST_ID;
+      const id = await lapsedHold();
+
+      await service.releaseHold(id);
+
+      expect(expiryNotices()).toEqual([
+        { userId: GUEST_ID, recipient: StayParty.GUEST },
+      ]);
+    });
   });
 
   it("tells nobody about a cancellation it refused", async () => {

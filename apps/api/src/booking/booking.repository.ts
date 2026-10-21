@@ -7,6 +7,7 @@ import {
   type BookingQuery,
   type BookingSort,
   type CreateBookingInput,
+  type StayNotice,
 } from "@repo/contracts";
 import { format } from "date-fns";
 import { z } from "zod";
@@ -80,6 +81,27 @@ export type BookingWithListingOwner = {
   listingOwnerId: string;
 };
 
+/**
+ * A hold one of the three expiry paths let go of, with the two people it concerned. Not a
+ * `Booking`: the row is read back by the `UPDATE` that released it, and what is said about
+ * it afterwards is a notice — so it carries what a notice copies and nothing a response
+ * body would want.
+ */
+export type ReleasedHold = {
+  stay: StayNotice;
+  guestId: string;
+  listingOwnerId: string;
+};
+
+/**
+ * What `create` hands back: the new hold, and the lapsed holds of the same listing its
+ * transaction released on the way — those are only released if the hold is taken, because
+ * a refusal rolls the release back with it.
+ */
+export type CreatedBooking = BookingWithListingOwner & {
+  released: ReleasedHold[];
+};
+
 /** One row of the `FOR UPDATE` read — raw SQL, so the column keeps its stored name. */
 type LockedListing = {
   id: string;
@@ -114,6 +136,15 @@ const BOOKING_INCLUDE = {
   ...LISTING_SUMMARY,
   ...REVIEW_KINDS,
 } satisfies Prisma.BookingInclude;
+
+/**
+ * What a released hold is read back with: the listing's title for the notice and its owner
+ * for the recipient. `updateManyAndReturn` loads to-one relations only, which is all this
+ * needs — the reviews `toBooking` reads are not wanted here.
+ */
+const RELEASED_HOLD_INCLUDE = {
+  listing: { select: { title: true, ownerId: true } },
+} satisfies Prisma.BookingIncludeUpdateManyAndReturn;
 
 /**
  * A stored booking with the listing columns the contract's `listing` is built from. Taken
@@ -269,7 +300,7 @@ export class BookingRepository {
   async create(
     guestId: string,
     input: CreateBookingInput,
-  ): Promise<BookingWithListingOwner> {
+  ): Promise<CreatedBooking> {
     // One reading of the clock for the whole transaction: the sweep below, the overlap
     // check and the deadline of the hold are three halves of one decision, and a second
     // `new Date()` between them would let a hold expire in the middle of it.
@@ -286,9 +317,10 @@ export class BookingRepository {
         throw new ListingNotFoundError(input.listingId);
       }
 
-      await tx.booking.updateMany({
+      const released = await tx.booking.updateManyAndReturn({
         where: { listingId: input.listingId, ...lapsedHolds(now) },
         data: { status: BookingStatus.EXPIRED },
+        include: RELEASED_HOLD_INCLUDE,
       });
 
       const overlap = await tx.booking.findFirst({
@@ -317,7 +349,11 @@ export class BookingRepository {
           include: BOOKING_INCLUDE,
         });
 
-        return { booking: toBooking(row), listingOwnerId: listing.owner_id };
+        return {
+          booking: toBooking(row),
+          listingOwnerId: listing.owner_id,
+          released: released.map(toReleasedHold),
+        };
       } catch (error) {
         if (isExclusionViolation(error)) {
           throw new DatesUnavailableError(input);
@@ -360,29 +396,35 @@ export class BookingRepository {
   /**
    * What the job scheduled for one hold's deadline does. Idempotent and safe to run late —
    * a hold already confirmed, cancelled or expired matches the `where` on nothing, and the
-   * job is a no-op.
+   * job is a no-op. The answer is the hold it released, at most one: the `UPDATE` reads the
+   * row back itself, so of two runs racing over one hold only the one that flipped it hears
+   * about it, and the notice cannot go out twice.
    */
-  async expireHold(id: string): Promise<void> {
-    await this.prismaService.booking.updateMany({
+  async expireHold(id: string): Promise<ReleasedHold[]> {
+    const released = await this.prismaService.booking.updateManyAndReturn({
       where: { id, ...lapsedHolds(new Date()) },
       data: { status: BookingStatus.EXPIRED },
+      include: RELEASED_HOLD_INCLUDE,
     });
+
+    return released.map(toReleasedHold);
   }
 
   /**
    * The same thing asked of every listing at once, and what the repeatable sweep runs.
    * It exists because the per-hold jobs live in Redis and the lazy check inside `create`
    * only ever looks at the listing being booked: without it, a hold whose job was lost on
-   * a listing nobody books again would hold its slot forever. The count is what the
-   * processor logs.
+   * a listing nobody books again would hold its slot forever. The holds it released are
+   * what the processor logs and what their two sides are told about.
    */
-  async expireLapsedHolds(): Promise<number> {
-    const { count } = await this.prismaService.booking.updateMany({
+  async expireLapsedHolds(): Promise<ReleasedHold[]> {
+    const released = await this.prismaService.booking.updateManyAndReturn({
       where: lapsedHolds(new Date()),
       data: { status: BookingStatus.EXPIRED },
+      include: RELEASED_HOLD_INCLUDE,
     });
 
-    return count;
+    return released.map(toReleasedHold);
   }
 
   /**
@@ -611,5 +653,21 @@ function toBooking(row: BookingRowWithListing): Booking {
       byGuest: row.reviews.some((review) => review.kind === ReviewKind.LISTING),
       byOwner: row.reviews.some((review) => review.kind === ReviewKind.GUEST),
     },
+  };
+}
+
+function toReleasedHold(
+  row: BookingRow & { listing: Pick<ListingRow, "title" | "ownerId"> },
+): ReleasedHold {
+  return {
+    stay: {
+      bookingId: row.id,
+      listingId: row.listingId,
+      listingTitle: row.listing.title,
+      from: toIsoDate(row.from),
+      to: toIsoDate(row.to),
+    },
+    guestId: row.guestId,
+    listingOwnerId: row.listing.ownerId,
   };
 }

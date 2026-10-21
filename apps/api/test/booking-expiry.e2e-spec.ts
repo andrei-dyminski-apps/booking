@@ -12,6 +12,7 @@ import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
 import { bookingExpiryQueue, resetQueue } from "./queue";
+import { waitUntil } from "./wait-until";
 
 /**
  * The proactive half of hold expiry, which the other specs cannot reach: they go through
@@ -33,6 +34,7 @@ describe("Booking hold expiry (e2e)", () => {
   let bookingRepository: BookingRepository;
   let expiryQueue: BookingExpiryQueue;
   let guestId: string;
+  let ownerId: string;
   let listingId: string;
 
   const dates = { from: inDays(30), to: inDays(34) };
@@ -78,6 +80,7 @@ describe("Booking hold expiry (e2e)", () => {
     });
 
     guestId = guest.id;
+    ownerId = owner.id;
     listingId = listing.id;
   });
 
@@ -100,6 +103,18 @@ describe("Booking hold expiry (e2e)", () => {
     return booking.id;
   };
 
+  /** Who has been told this hold lapsed — the notice is written after the flip, by the worker. */
+  const toldOfExpiry = async (bookingId: string): Promise<string[]> =>
+    (
+      await prismaService.notification.findMany({
+        where: {
+          type: "BOOKING_EXPIRED",
+          data: { path: ["bookingId"], equals: bookingId },
+        },
+        orderBy: { userId: "asc" },
+      })
+    ).map((notice) => notice.userId);
+
   const statusOf = async (id: string): Promise<string> =>
     (await prismaService.booking.findUniqueOrThrow({ where: { id } })).status;
 
@@ -117,6 +132,10 @@ describe("Booking hold expiry (e2e)", () => {
 
     expect(released.expiresAt).not.toBeNull();
 
+    // Both sides hear about it, once each.
+    await waitUntil(async () => (await toldOfExpiry(id)).length === 2);
+    expect(await toldOfExpiry(id)).toEqual([guestId, ownerId].sort());
+
     // The slot is free, which is the whole point of releasing a hold.
     await expect(
       bookingRepository.create(guestId, { listingId, ...dates }),
@@ -130,6 +149,7 @@ describe("Booking hold expiry (e2e)", () => {
     // listing being booked, and by assumption nobody books this listing again.
     await bookingExpiryQueue(app).add(SWEEP_LAPSED_HOLDS_JOB, {});
     await waitUntil(async () => (await statusOf(id)) === "EXPIRED");
+    await waitUntil(async () => (await toldOfExpiry(id)).length === 2);
   });
 
   it("leaves a hold that still has time on it", async () => {
@@ -138,7 +158,7 @@ describe("Booking hold expiry (e2e)", () => {
       ...dates,
     });
 
-    expect(await bookingRepository.expireLapsedHolds()).toBe(0);
+    expect(await bookingRepository.expireLapsedHolds()).toEqual([]);
     expect(await statusOf(booking.id)).toBe("PENDING_PAYMENT");
   });
 
@@ -151,12 +171,15 @@ describe("Booking hold expiry (e2e)", () => {
     const cancelled = await lapsedHold();
     await bookingRepository.cancel(cancelled);
 
-    await bookingRepository.expireHold(cancelled);
+    await expect(bookingRepository.expireHold(cancelled)).resolves.toEqual([]);
     expect(await statusOf(cancelled)).toBe("CANCELLED");
 
     const expired = await lapsedHold();
-    await bookingRepository.expireHold(expired);
-    await bookingRepository.expireHold(expired);
+    // Only the run that flipped the row hands it back, so only that one is told about.
+    await expect(bookingRepository.expireHold(expired)).resolves.toHaveLength(
+      1,
+    );
+    await expect(bookingRepository.expireHold(expired)).resolves.toEqual([]);
     expect(await statusOf(expired)).toBe("EXPIRED");
   });
 
@@ -169,19 +192,3 @@ describe("Booking hold expiry (e2e)", () => {
     await waitUntil(async () => (await statusOf(id)) === "EXPIRED");
   });
 });
-
-/** Polls rather than sleeps: what is being waited for is a worker in another loop. */
-async function waitUntil(
-  condition: () => Promise<boolean>,
-  timeoutMs = 10_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-
-  while (Date.now() < deadline) {
-    if (await condition()) return;
-
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-
-  throw new Error(`Condition was not met within ${String(timeoutMs)}ms`);
-}

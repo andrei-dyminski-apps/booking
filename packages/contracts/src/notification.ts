@@ -11,6 +11,8 @@ import { PAGING } from "./query.js";
  * - `BOOKING_REQUESTED` — a guest took a hold on one of the recipient's listings.
  * - `BOOKING_CANCELLED` — a stay the recipient is one side of was cancelled by the other
  *   side or by an admin; `recipient` says which side they are.
+ * - `BOOKING_EXPIRED` — a hold the recipient is one side of lapsed unpaid and let its
+ *   nights go; nobody did it, so both sides hear, and `recipient` says which one this is.
  * - `REVIEW_RECEIVED` — the other side of a finished stay reviewed the recipient: a guest
  *   reviewed their listing (`kind: LISTING`) or a host reviewed them (`kind: GUEST`).
  *
@@ -21,6 +23,7 @@ import { PAGING } from "./query.js";
 export const notificationTypeSchema = z.enum([
   "BOOKING_REQUESTED",
   "BOOKING_CANCELLED",
+  "BOOKING_EXPIRED",
   "REVIEW_RECEIVED",
 ]);
 
@@ -54,6 +57,11 @@ const bookingCancelledSchema = z.object({
   data: stayNoticeSchema.extend({ recipient: stayPartySchema }),
 });
 
+const bookingExpiredSchema = z.object({
+  type: z.literal(NotificationType.BOOKING_EXPIRED),
+  data: stayNoticeSchema.extend({ recipient: stayPartySchema }),
+});
+
 const reviewReceivedSchema = z.object({
   type: z.literal(NotificationType.REVIEW_RECEIVED),
   data: z.object({
@@ -76,6 +84,7 @@ const reviewReceivedSchema = z.object({
 export const notificationContentSchema = z.discriminatedUnion("type", [
   bookingRequestedSchema,
   bookingCancelledSchema,
+  bookingExpiredSchema,
   reviewReceivedSchema,
 ]);
 
@@ -92,6 +101,7 @@ const stored = {
 export const notificationSchema = z.discriminatedUnion("type", [
   bookingRequestedSchema.extend(stored),
   bookingCancelledSchema.extend(stored),
+  bookingExpiredSchema.extend(stored),
   reviewReceivedSchema.extend(stored),
 ]);
 

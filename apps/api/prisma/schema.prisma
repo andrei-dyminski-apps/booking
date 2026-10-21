@@ -373,6 +373,7 @@ enum ConversationSide {
 enum NotificationType {
   BOOKING_REQUESTED
   BOOKING_CANCELLED
+  BOOKING_EXPIRED
   REVIEW_RECEIVED
 }
 
