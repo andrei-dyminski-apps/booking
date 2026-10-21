@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { CalendarSearchIcon } from "lucide-react";
-import { LookupKind, Role, type Role as RoleName } from "@repo/contracts";
+import { LookupKind, Role, StayParty } from "@repo/contracts";
 import {
   Empty,
   EmptyContent,
@@ -25,43 +25,49 @@ import {
   activeFilters,
   bookingsHref,
   readBookingsSearch,
+  sideOf,
 } from "../lib/bookings-search";
 import { BookingCard } from "./booking-card";
 import { BookingsToolbar } from "./bookings-toolbar";
+import { SideTabs } from "./side-tabs";
 
 /**
- * One page, three scopes. `GET /bookings` narrows what it returns by the caller's role
- * rather than by a parameter — a guest sees the stays they took, an owner the stays taken
- * against their listings, an admin every one of them — so this page has no scope to get
- * wrong, and the only thing the role decides here is what to call the list and whether the
- * guest box is worth offering.
+ * One page, three scopes. `GET /bookings` narrows what it returns by the caller's session
+ * rather than by a parameter that could reach past it — a user sees the stays they took or
+ * the stays taken against their listings, an admin every one of them. Hosting is not a
+ * role, so which half a user is looking at is `?side=HOST`, drawn as the "Trips" and
+ * "Hosting" tabs: it picks between two scopes of the caller's own and never widens either.
+ * The side decides what to call the list and whether the guest box is worth offering; an
+ * admin's scope has no halves and no tabs.
  *
- * What the URL does carry is the filters, the ordering and the cursor of the previous
+ * What the URL also carries is the filters, the ordering and the cursor of the previous
  * page, exactly as the catalogue's does: the list is a keyset page because one of those
- * three scopes has no ceiling on it — an admin's is every stay on the site.
+ * scopes has no ceiling on it — an admin's is every stay on the site.
  *
  * The read is personal, so it is `no-store` and carries no tag: the Data Cache is keyed by
  * URL and shared between visitors, and a tag would only make it easier to serve one
  * person's stays to the next.
  */
-const SCOPE: Record<RoleName, { title: string; empty: string; lead: string }> =
-  {
-    [Role.USER]: {
-      title: "Your stays",
-      lead: "Every booking you have taken, with the state the API keeps it in. The filters live in the address bar, so a search is a link you can send.",
-      empty: "Nothing booked yet. The catalogue is where a stay starts.",
-    },
-    [Role.OWNER]: {
-      title: "Bookings",
-      lead: "Every stay taken against your listings. Cancelling one is the guest's to do, not yours.",
-      empty: "Nobody has booked your listings yet.",
-    },
-    [Role.ADMIN]: {
-      title: "All bookings",
-      lead: "Every stay on the site, in the state the API keeps it in — a page at a time, newest first.",
-      empty: "There are no bookings at all yet.",
-    },
-  };
+type Scope = { title: string; empty: string; lead: string };
+
+const SCOPE: Record<StayParty, Scope> = {
+  [StayParty.GUEST]: {
+    title: "Your trips",
+    lead: "Every booking you have taken, with the state the API keeps it in. The filters live in the address bar, so a search is a link you can send.",
+    empty: "Nothing booked yet. The catalogue is where a stay starts.",
+  },
+  [StayParty.HOST]: {
+    title: "Hosting",
+    lead: "Every stay taken against your listings. Cancelling one is the guest's to do, not yours.",
+    empty: "Nobody has booked your listings yet — or you have none on offer.",
+  },
+};
+
+const ADMIN_SCOPE: Scope = {
+  title: "All bookings",
+  lead: "Every stay on the site, in the state the API keeps it in — a page at a time, newest first.",
+  empty: "There are no bookings at all yet.",
+};
 
 export const BookingsPage = async ({
   searchParams,
@@ -83,7 +89,9 @@ export const BookingsPage = async ({
   // and which addresses this one collapses is a decision of this slice.
   if (canonical !== null) redirect(canonical);
 
-  const byGuest = viewer.role !== Role.USER;
+  // The API ignores `side` for an admin, so the page does too.
+  const side = viewer.role === Role.ADMIN ? null : sideOf(values);
+  const byGuest = side !== StayParty.GUEST;
   // Computed here and handed down rather than read by each card — see `shared/lib/dates.ts`.
   const day = today();
   // A question the contract refuses is not put to the API at all: the messages are under
@@ -93,13 +101,13 @@ export const BookingsPage = async ({
   // nobody to look up, so their `?guestId=` stays an id.
   const [page, listing, guest] = await Promise.all([
     query === null ? null : readBookingsPage(query),
-    lookupsApi.optionOf(LookupKind.listings, values.listingId),
+    lookupsApi.optionOf(LookupKind.listings, values.listingId, side),
     byGuest
       ? lookupsApi.optionOf(LookupKind.guests, values.guestId)
       : undefined,
   ]);
   const staleCursor = query !== null && page === null;
-  const scope = SCOPE[viewer.role];
+  const scope = side === null ? ADMIN_SCOPE : SCOPE[side];
   // One read of what is on: the toolbar draws the same list as chips and counts it on the
   // button that opens the dialog, and the empty state asks whether there was a filter to
   // blame for it.
@@ -113,10 +121,13 @@ export const BookingsPage = async ({
     <div className="flex flex-col gap-6">
       <PageHeading title={scope.title} description={scope.lead} />
 
+      {side !== null && <SideTabs values={values} />}
+
       <BookingsToolbar
         values={values}
         errors={errors}
         filters={filters}
+        side={side}
         byGuest={byGuest}
         listing={listing}
         guest={guest}
@@ -140,7 +151,7 @@ export const BookingsPage = async ({
                 <EmptyTitle>Nothing here yet</EmptyTitle>
                 <EmptyDescription>{scope.empty}</EmptyDescription>
               </EmptyHeader>
-              {viewer.role === Role.USER && (
+              {side === StayParty.GUEST && (
                 <EmptyContent>
                   <ButtonLink href={ROUTES.catalogue}>
                     Browse the stays
@@ -153,7 +164,12 @@ export const BookingsPage = async ({
           <ul role="list" className="flex flex-col gap-4">
             {page.items.map((booking) => (
               <li key={booking.id}>
-                <BookingCard booking={booking} viewer={viewer} today={day} />
+                <BookingCard
+                  booking={booking}
+                  viewer={viewer}
+                  side={side}
+                  today={day}
+                />
               </li>
             ))}
           </ul>

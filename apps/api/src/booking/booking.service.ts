@@ -24,6 +24,7 @@ import {
   DatesUnavailableError,
   GuestNotFoundError,
   ListingNotFoundError,
+  OwnListingError,
   type BookingWithListingOwner,
   type CreatedBooking,
   type ReleasedHold,
@@ -67,23 +68,26 @@ export class BookingService {
   }
 
   /**
-   * Not a filter the client may pass, but the scope its role gives it: a guest sees the
-   * stays they booked, an owner the stays booked against their listings, an admin all of
-   * them. A `?guestId=` parameter in its place would leave the same rule to be re-checked
+   * Not a filter the client may pass, but the scope its role gives it: a user sees the
+   * stays they booked or the stays booked against their listings, an admin all of them.
+   * A `?guestId=` parameter in its place would leave the same rule to be re-checked
    * on every call — this way the query cannot return a row the caller may not see, and the
    * `guestId` the contract does offer narrows that scope instead of replacing it (the
    * repository `AND`s the two rather than spreading them, which is what makes that true).
    *
-   * A role picks one of three named queries rather than assembling a `where`, so there is
+   * A role picks one of the named queries rather than assembling a `where`, so there is
    * no shape an unhandled role could fall through to. The switch is exhaustive on purpose
-   * — a fourth role added to the contract stops compiling here — and its `default` assigns
+   * — a third role added to the contract stops compiling here — and its `default` assigns
    * the role to `never` and throws, because the type is not the whole guarantee: the role
    * arrives in a signed access token that `JwtStrategy` does not parse against the
-   * contract, so one minted before a role was renamed still carries the old name for as
+   * contract, so one minted before a role was retired still carries the old name for as
    * long as `JWT_ACCESS_TTL`.
    *
-   * An owner sees the stays against their listings and not the ones they took as a guest —
-   * a role is one persona here, and `@Roles(Role.USER)` on `create` keeps it that way.
+   * One account is both sides of its stays — hosting is owning a listing, not a role — so
+   * the scope is one of two and the query names which: `side` picks the stays they took or
+   * the stays against their listings. It chooses between two scopes of the caller's own and
+   * never reaches past them, which is why it may come from the client when the scope as a
+   * whole may not.
    */
   private pageFor(
     user: AuthenticatedUser,
@@ -93,14 +97,14 @@ export class BookingService {
     switch (user.role) {
       case Role.ADMIN:
         return this.bookingRepository.findPageForEveryone(query, cursor);
-      case Role.OWNER:
-        return this.bookingRepository.findPageForListingOwner(
-          user.id,
-          query,
-          cursor,
-        );
       case Role.USER:
-        return this.bookingRepository.findPageForGuest(user.id, query, cursor);
+        return query.side === StayParty.HOST
+          ? this.bookingRepository.findPageForListingOwner(
+              user.id,
+              query,
+              cursor,
+            )
+          : this.bookingRepository.findPageForGuest(user.id, query, cursor);
       default: {
         const unknownRole: never = user.role;
 
@@ -117,7 +121,7 @@ export class BookingService {
 
   /**
    * The atomicity lives one layer down: `BookingRepository.create` locks the listing row
-   * and settles overlaps inside a transaction, and this method only translates the three
+   * and settles overlaps inside a transaction, and this method only translates the four
    * failures it can raise. On success it schedules the hold's expiry, and that call cannot
    * fail this request: the booking is committed by then, so a Redis that is down would
    * otherwise answer an existing booking with a 500 and never hand the caller its id. The
@@ -136,6 +140,11 @@ export class BookingService {
       // A hard delete of the listing from outside the API — retiring one leaves the row.
       if (error instanceof ListingNotFoundError) {
         throw new NotFoundException(error.message);
+      }
+
+      // A host does not book their own nights — the answer `POST /conversations` gives.
+      if (error instanceof OwnListingError) {
+        throw new ForbiddenException("You cannot book your own listing");
       }
 
       // The guest is gone: nothing checks that row beforehand, because the token names it
@@ -217,15 +226,12 @@ export class BookingService {
   /**
    * The host hears about a hold the moment it is taken, not when it is paid: the nights are
    * off the calendar from now on, and a hold is the earliest a host can know a stay is
-   * coming. An owner booking their own listing is not told about it — the same rule as a
-   * cancellation, nobody hears about what they did themselves.
+   * coming.
    */
   private async notifyOwnerOf(
     booking: Booking,
     listingOwnerId: string,
   ): Promise<void> {
-    if (listingOwnerId === booking.guestId) return;
-
     await this.notificationService.notify(listingOwnerId, {
       type: NotificationType.BOOKING_REQUESTED,
       data: stayNoticeOf(booking),
@@ -260,19 +266,15 @@ export class BookingService {
   /**
    * Both sides of a lapsed hold hear about it, because nobody let it go on purpose: the
    * guest learns the nights are no longer theirs, the host that they are back on the
-   * calendar. An owner holding their own listing hears once, the guest's half. The holds
-   * are told about one after another rather than all at once — the sweep can release a
-   * backlog, and every notice is a transaction of its own.
+   * calendar. The holds are told about one after another rather than all at once — the
+   * sweep can release a backlog, and every notice is a transaction of its own.
    */
   private async notifyExpiry(holds: ReleasedHold[]): Promise<void> {
     for (const { stay, guestId, listingOwnerId } of holds) {
       const parties = [
         { userId: guestId, recipient: StayParty.GUEST },
         { userId: listingOwnerId, recipient: StayParty.HOST },
-      ].filter(
-        ({ userId, recipient }) =>
-          recipient === StayParty.GUEST || userId !== guestId,
-      );
+      ];
 
       await Promise.all(
         parties.map(({ userId, recipient }) =>

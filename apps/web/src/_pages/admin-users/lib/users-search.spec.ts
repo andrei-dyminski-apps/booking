@@ -21,7 +21,7 @@ describe("readUsersSearch", () => {
 
   it("carries the filters the contract takes, the address lower-cased and the name as typed", () => {
     const { query } = readUsersSearch({
-      role: "OWNER",
+      role: "ADMIN",
       status: "BLOCKED",
       name: " Anna ",
       email: "Smith@",
@@ -30,7 +30,7 @@ describe("readUsersSearch", () => {
 
     expect(query).toEqual({
       limit: 20,
-      role: "OWNER",
+      role: "ADMIN",
       status: "BLOCKED",
       name: "Anna",
       email: "smith@",
@@ -90,7 +90,7 @@ describe("readUsersSearch", () => {
 describe("activeFilters", () => {
   it("takes each filter off on its own and keeps the ordering", () => {
     const values = {
-      role: "OWNER",
+      role: "ADMIN",
       status: "ACTIVE",
       name: "Anna",
       email: "smith",
@@ -100,23 +100,23 @@ describe("activeFilters", () => {
     expect(activeFilters(values)).toEqual([
       {
         key: "role",
-        label: "Owner",
+        label: "Administrator",
         href: "/admin/users?status=ACTIVE&name=Anna&email=smith&sort=oldest",
       },
       {
         key: "status",
         label: "Active",
-        href: "/admin/users?role=OWNER&name=Anna&email=smith&sort=oldest",
+        href: "/admin/users?role=ADMIN&name=Anna&email=smith&sort=oldest",
       },
       {
         key: "name",
         label: "Name has “Anna”",
-        href: "/admin/users?role=OWNER&status=ACTIVE&email=smith&sort=oldest",
+        href: "/admin/users?role=ADMIN&status=ACTIVE&email=smith&sort=oldest",
       },
       {
         key: "email",
         label: "Address has “smith”",
-        href: "/admin/users?role=OWNER&status=ACTIVE&name=Anna&sort=oldest",
+        href: "/admin/users?role=ADMIN&status=ACTIVE&name=Anna&sort=oldest",
       },
     ]);
     expect(clearedFiltersHref(values)).toBe("/admin/users?sort=oldest");

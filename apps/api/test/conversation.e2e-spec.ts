@@ -13,11 +13,16 @@ import {
   type CreateListingInput,
 } from "@repo/contracts";
 import { AppModule } from "./../src/app.module";
-import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
 import { EventStream } from "./event-stream";
 import { resetQueue } from "./queue";
-import { credentialsFor, signInAs, type Agent } from "./session";
+import {
+  credentialsFor,
+  hostCredentials,
+  signIn,
+  signInAs,
+  type Agent,
+} from "./session";
 
 const listingInput: CreateListingInput = {
   title: "Loft above the harbour",
@@ -53,8 +58,8 @@ describe("ConversationController (e2e)", () => {
       email: "e2e-guest-2@example.com",
       password: "password123",
     });
-    owner = await signInAs(app, Role.OWNER);
-    otherOwner = await signInAs(app, Role.OWNER, {
+    owner = await signIn(app, hostCredentials);
+    otherOwner = await signIn(app, {
       name: "E2E Second Owner",
       email: "e2e-owner-2@example.com",
       password: "password123",
@@ -114,7 +119,7 @@ describe("ConversationController (e2e)", () => {
     const started = await start(guest);
     const names = {
       guest: { name: credentialsFor.USER.name },
-      host: { name: credentialsFor.OWNER.name },
+      host: { name: hostCredentials.name },
     };
 
     expect(started).toMatchObject(names);
@@ -125,7 +130,7 @@ describe("ConversationController (e2e)", () => {
     expect(JSON.stringify(asHost.body)).not.toContain(
       credentialsFor.USER.email,
     );
-    expect(JSON.stringify(started)).not.toContain(credentialsFor.OWNER.email);
+    expect(JSON.stringify(started)).not.toContain(hostCredentials.email);
   });
 
   it("continues the guest's thread rather than opening a second one", async () => {
@@ -177,13 +182,7 @@ describe("ConversationController (e2e)", () => {
     const asGuestOld = await write(guest, listingId, "First");
     const asGuestNew = await write(guest, await listingAt(owner), "Second");
 
-    // The guest becomes a host: the row is promoted and a new token says so.
-    await app.get(PrismaService).user.update({
-      where: { email: credentialsFor.USER.email },
-      data: { role: Role.OWNER },
-    });
-    await guest.post("/auth/login").send(credentialsFor.USER).expect(200);
-
+    // The guest becomes a host by publishing a listing — no role changes.
     const asHostOld = await write(otherGuest, await listingAt(guest), "Third");
     const asHostNew = await write(otherGuest, await listingAt(guest), "Fourth");
 
@@ -260,7 +259,7 @@ describe("ConversationController (e2e)", () => {
   });
 
   it("pushes a message to the other side's stream with the unread threads, and the read after it", async () => {
-    const stream = await EventStream.openAs(app, credentialsFor.OWNER);
+    const stream = await EventStream.openAs(app, hostCredentials);
 
     try {
       await expect(stream.next()).resolves.toMatchObject({

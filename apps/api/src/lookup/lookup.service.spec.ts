@@ -1,8 +1,9 @@
-import { BadRequestException, ForbiddenException } from "@nestjs/common";
+import { BadRequestException } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import {
   LookupKind,
   Role,
+  StayParty,
   type LookupOption,
   type LookupQuery,
 } from "@repo/contracts";
@@ -24,7 +25,7 @@ const admin: AuthenticatedUser = {
 const owner: AuthenticatedUser = {
   id: OWNER_ID,
   email: "owner@example.com",
-  role: Role.OWNER,
+  role: Role.USER,
 };
 
 const guest: AuthenticatedUser = {
@@ -35,6 +36,7 @@ const guest: AuthenticatedUser = {
 
 const query = (over: Partial<LookupQuery> = {}): LookupQuery => ({
   q: "exa",
+  side: StayParty.GUEST,
   limit: 20,
   ...over,
 });
@@ -185,7 +187,10 @@ describe("LookupService", () => {
 
     it("offers an owner the guests and the listings of their own stays only", async () => {
       const guests = await service.guests(owner, query());
-      const listings = await service.listings(owner, query());
+      const listings = await service.listings(
+        owner,
+        query({ side: StayParty.HOST }),
+      );
 
       expect(guests.items.map((item) => item.label)).toEqual([
         "mine@example.com",
@@ -201,13 +206,36 @@ describe("LookupService", () => {
       expect(listings.items).toHaveLength(2);
     });
 
-    it("offers a guest the listings they stayed in, and nobody to look up", async () => {
+    it("offers a guest the listings they stayed in, and an empty page of guests", async () => {
       const listings = await service.listings(guest, query());
+      const guests = await service.guests(guest, query());
 
       expect(listings.items.map((item) => item.label)).toEqual(["Their flat"]);
-      await expect(service.guests(guest, query())).rejects.toBeInstanceOf(
-        ForbiddenException,
-      );
+      expect(guests).toEqual({ items: [], nextCursor: null });
+    });
+
+    it("offers an account that also hosts the listings of the side it asks for", async () => {
+      repository.guests.push({
+        option: option("visitor@example.com"),
+        stayOwners: [guest.id],
+        guests: [],
+      });
+      repository.listings.push({
+        option: option("Spare room"),
+        stayOwners: [guest.id],
+        guests: [],
+      });
+
+      const labels = async (side: StayParty): Promise<string[]> =>
+        (await service.listings(guest, query({ side }))).items.map(
+          (item) => item.label,
+        );
+
+      await expect(labels(StayParty.GUEST)).resolves.toEqual(["Their flat"]);
+      await expect(labels(StayParty.HOST)).resolves.toEqual(["Spare room"]);
+      expect(
+        (await service.guests(guest, query())).items.map((item) => item.label),
+      ).toEqual(["visitor@example.com"]);
     });
   });
 

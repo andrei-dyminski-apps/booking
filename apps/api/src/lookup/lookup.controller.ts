@@ -35,9 +35,11 @@ export class LookupController {
     return this.lookupService.owners(query);
   }
 
-  /** The guests of the stays the caller may read: `?guestId=` on `/bookings`. */
+  /**
+   * The guests of the stays the caller may read: `?guestId=` on `/bookings`. Open to every
+   * role, because any account may host — one with no listings is answered an empty page.
+   */
   @Get("guests")
-  @Roles(Role.OWNER, Role.ADMIN)
   @ApiOkResponse({ type: LookupPageDto })
   @ApiBadRequestResponse({
     description:

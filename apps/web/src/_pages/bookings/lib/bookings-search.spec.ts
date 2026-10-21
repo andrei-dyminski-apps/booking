@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { StayParty } from "@repo/contracts";
 import {
   activeFilters,
   bookingsHref,
   clearedFiltersHref,
   listingStaysHref,
   readBookingsSearch,
+  sideTabs,
   sortOptions,
 } from "./bookings-search";
 
@@ -12,6 +14,7 @@ const LISTING_ID = "6d0f2c1e-1a2b-4c3d-8e5f-9a0b1c2d3e4f";
 const GUEST_ID = "7e1a3d2f-2b3c-4d5e-9f6a-0b1c2d3e4f50";
 
 const NO_FILTERS = {
+  side: "",
   status: "",
   listingId: "",
   guestId: "",
@@ -24,7 +27,7 @@ describe("readBookingsSearch", () => {
   it("asks the unfiltered question when the URL carries nothing", () => {
     const { query, errors, values } = readBookingsSearch({});
 
-    expect(query).toEqual({ limit: 20, sort: "newest" });
+    expect(query).toEqual({ limit: 20, sort: "newest", side: "GUEST" });
     expect(errors).toEqual({});
     expect(values).toEqual(NO_FILTERS);
   });
@@ -38,7 +41,7 @@ describe("readBookingsSearch", () => {
       to: "",
     });
 
-    expect(query).toEqual({ limit: 20, sort: "newest" });
+    expect(query).toEqual({ limit: 20, sort: "newest", side: "GUEST" });
   });
 
   it("carries the filters the contract takes", () => {
@@ -53,6 +56,7 @@ describe("readBookingsSearch", () => {
     expect(query).toEqual({
       limit: 20,
       sort: "newest",
+      side: "GUEST",
       status: "CANCELLED",
       listingId: LISTING_ID,
       guestId: GUEST_ID,
@@ -97,20 +101,26 @@ describe("readBookingsSearch", () => {
       status: ["CONFIRMED", "CANCELLED"],
     });
 
-    expect(query).toEqual({ limit: 20, sort: "newest" });
+    expect(query).toEqual({ limit: 20, sort: "newest", side: "GUEST" });
     expect(values.status).toBe("");
   });
 
   it("carries the cursor through untouched — only the API can read it", () => {
     const { query } = readBookingsSearch({ cursor: "b3BhcXVl" });
 
-    expect(query).toEqual({ limit: 20, sort: "newest", cursor: "b3BhcXVl" });
+    expect(query).toEqual({
+      limit: 20,
+      sort: "newest",
+      side: "GUEST",
+      cursor: "b3BhcXVl",
+    });
   });
 
   it("reads the ordering the URL asks for, and refuses one nobody offers", () => {
     expect(readBookingsSearch({ sort: "checkInAsc" }).query).toEqual({
       limit: 20,
       sort: "checkInAsc",
+      side: "GUEST",
     });
 
     // It is one of four names or it is nothing: the API indexes exactly those pairs, so
@@ -203,6 +213,7 @@ describe("readBookingsSearch, the address it belongs at", () => {
     // The three kinds of link on the screen — a chip, an ordering and the next page — all
     // land at an address the page has to serve rather than redirect again.
     const values = {
+      side: "HOST",
       status: "CONFIRMED",
       listingId: LISTING_ID,
       guestId: GUEST_ID,
@@ -215,7 +226,8 @@ describe("readBookingsSearch, the address it belongs at", () => {
       ...activeFilters(values).map((filter) => filter.href),
       ...sortOptions(values).map((option) => option.href),
       clearedFiltersHref(values),
-      listingStaysHref(LISTING_ID),
+      listingStaysHref(LISTING_ID, StayParty.HOST),
+      ...sideTabs(values).map((tab) => tab.href),
       bookingsHref(values, "b3BhcXVl"),
     ];
 
@@ -282,6 +294,7 @@ describe("bookingsHref", () => {
 
   it("round-trips: the link it writes parses back to the same question", () => {
     const values = {
+      side: "HOST",
       status: "CONFIRMED",
       listingId: LISTING_ID,
       guestId: GUEST_ID,
@@ -309,9 +322,54 @@ describe("clearedFiltersHref and listingStaysHref", () => {
   });
 
   it("starts a fresh search from a card, filtered by that listing alone", () => {
-    expect(listingStaysHref(LISTING_ID)).toBe(
+    expect(listingStaysHref(LISTING_ID, StayParty.GUEST)).toBe(
       `/bookings?listingId=${LISTING_ID}`,
     );
+  });
+
+  it("keeps the side the card was drawn on", () => {
+    expect(listingStaysHref(LISTING_ID, StayParty.HOST)).toBe(
+      `/bookings?side=HOST&listingId=${LISTING_ID}`,
+    );
+  });
+});
+
+describe("sideTabs", () => {
+  it("links each side with the filters off and the ordering kept", () => {
+    const tabs = sideTabs({
+      ...NO_FILTERS,
+      listingId: LISTING_ID,
+      sort: "checkInAsc",
+    });
+
+    expect(tabs).toEqual([
+      {
+        side: StayParty.GUEST,
+        label: "Trips",
+        href: "/bookings?sort=checkInAsc",
+        current: true,
+      },
+      {
+        side: StayParty.HOST,
+        label: "Hosting",
+        href: "/bookings?side=HOST&sort=checkInAsc",
+        current: false,
+      },
+    ]);
+  });
+
+  it("reads the host's side off the URL, and anything else as the guest's", () => {
+    expect(readBookingsSearch({ side: "HOST" }).query).toMatchObject({
+      side: StayParty.HOST,
+    });
+    expect(
+      sideTabs({ ...NO_FILTERS, side: "HOST" }).find((tab) => tab.current)
+        ?.side,
+    ).toBe(StayParty.HOST);
+    expect(
+      sideTabs({ ...NO_FILTERS, side: "nonsense" }).find((tab) => tab.current)
+        ?.side,
+    ).toBe(StayParty.GUEST);
   });
 });
 

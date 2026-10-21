@@ -112,7 +112,7 @@ const nightPrice = (subject: string) =>
     .check(...MONEY);
 
 /**
- * A place to stay, owned by exactly one OWNER.
+ * A place to stay, owned by exactly one account.
  *
  * `pricePerNight` is an amount of the currency itself — 120.50 is a hundred and twenty
  * fifty — and it is exact to the cent: `MONEY` above refuses a third decimal instead of

@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, type UIEvent } from "react";
-import { LOOKUP_MIN_LENGTH, type LookupKind } from "@repo/contracts";
+import {
+  LOOKUP_MIN_LENGTH,
+  type LookupKind,
+  type StayParty,
+} from "@repo/contracts";
 import { lookupsApi } from "../../api";
 import {
   firstPage,
@@ -25,9 +29,10 @@ const LOAD_MORE_MARGIN_PX = 48;
  * included — and the list paged as it is scrolled, with the cursor the API handed back.
  *
  * `current` is the answer to `term` and nothing else: `null` while it is being asked for,
- * and never the answer to a term the box no longer holds.
+ * and never the answer to a term the box no longer holds. `side` is handed through to the
+ * API, which reads it for the listings: the half of a user's stays the box filters.
  */
-export function useLookupSearch(kind: LookupKind) {
+export function useLookupSearch(kind: LookupKind, side?: StayParty) {
   const [term, setTerm] = useState("");
   const [search, setSearch] = useState<LookupSearch | null>(null);
 
@@ -44,7 +49,7 @@ export function useLookupSearch(kind: LookupKind) {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       lookupsApi
-        .page(kind, { q: term, limit: PAGE_SIZE }, controller.signal)
+        .page(kind, { q: term, limit: PAGE_SIZE, side }, controller.signal)
         .then((page) => setSearch(firstPage(term, page)))
         .catch(() => {
           if (!controller.signal.aborted) setSearch({ term, status: "failed" });
@@ -58,7 +63,7 @@ export function useLookupSearch(kind: LookupKind) {
       pageRef.current?.abort();
       pageRef.current = null;
     };
-  }, [kind, term]);
+  }, [kind, side, term]);
 
   const current = search !== null && search.term === term ? search : null;
 
@@ -78,7 +83,11 @@ export function useLookupSearch(kind: LookupKind) {
     setSearch({ ...current, loadingMore: true });
 
     lookupsApi
-      .page(kind, { q: term, limit: PAGE_SIZE, cursor }, controller.signal)
+      .page(
+        kind,
+        { q: term, limit: PAGE_SIZE, cursor, side },
+        controller.signal,
+      )
       .then((page) =>
         setSearch((previous) => withNextPage(previous, term, cursor, page)),
       )

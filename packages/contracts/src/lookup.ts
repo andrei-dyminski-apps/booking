@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { PAGING } from "./query.js";
+import { stayPartySchema } from "./booking.js";
+import { blank, PAGING } from "./query.js";
 
 /**
  * The shortest search a lookup answers. Fewer characters match too much of a table to be a
@@ -22,6 +23,12 @@ export const LOOKUP_MIN_LENGTH = 3;
  * Paged like every other list here, because the answer has no ceiling: three letters of a
  * name can be half of the site's accounts. The box asks for the next page as the list is
  * scrolled to its end, with the `nextCursor` of the one before.
+ *
+ * `side` is the one `GET /bookings` takes, so the box beside a list of stays offers what
+ * that list can match: the listings of an account's trips, or of the stays against its
+ * own. Only the lookup of listings has two sides to pick from — the guests of an account
+ * are always the guests of its listings, and the owners are an admin's — so the others
+ * ignore it, as an admin's scope does.
  */
 export const lookupQuerySchema = z.object({
   q: z
@@ -31,6 +38,7 @@ export const lookupQuerySchema = z.object({
       error: `Type at least ${LOOKUP_MIN_LENGTH} characters`,
     })
     .max(254, { error: "A search is never longer than 254 characters" }),
+  side: blank(stayPartySchema.default("GUEST")),
   ...PAGING,
 });
 

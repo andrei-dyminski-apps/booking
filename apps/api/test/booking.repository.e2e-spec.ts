@@ -63,7 +63,6 @@ describe("BookingRepository foreign keys (e2e)", () => {
         name: "Keys Owner",
         email: "keys-owner@example.com",
         passwordHash: "hash",
-        role: "OWNER",
       },
     });
     const listing = await prismaService.listing.create({

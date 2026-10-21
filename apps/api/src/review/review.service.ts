@@ -189,12 +189,11 @@ export class ReviewService {
   /**
    * The guest themselves, an admin, or a host the guest is asking or has stayed with.
    * Themselves comes first and whatever the role: an admin can change an account's role,
-   * and a guest who became a host is still the subject of what was said about their stays.
-   * The host case is a read of the bookings, and it is made only for an owner: a guest has
-   * no reason to read another guest, and asking the database on their behalf would be a
-   * query whose answer is already known.
+   * and a guest who also hosts is still the subject of what was said about their stays.
+   * For any other user the answer is a read of the bookings — hosting is owning a listing,
+   * not a role, so only the rows can say whether the caller hosted this guest.
    *
-   * The switch is exhaustive for the reason `BookingService.pageFor` gives — a fourth role
+   * The switch is exhaustive for the reason `BookingService.pageFor` gives — a third role
    * stops compiling here instead of falling through to whichever answer is nearest.
    */
   private async mayReadGuest(
@@ -207,8 +206,6 @@ export class ReviewService {
       case Role.ADMIN:
         return true;
       case Role.USER:
-        return false;
-      case Role.OWNER:
         return this.bookingRepository.hasStayedWith(guestId, user.id);
       default: {
         const unknownRole: never = user.role;
@@ -242,11 +239,10 @@ export class ReviewService {
 
 /**
  * Which half of this stay the caller would be writing, or `null` when they are neither
- * side of it. The guest half goes by the id alone: the role is the account's now, not the
- * one it booked under, and a guest an admin has since made a host still took that stay.
- * The host half reads the role as well, because owning the listing is what being a host
- * means. An admin — who may read every stay — writes neither, which `@Roles` on the route
- * already says.
+ * side of it. Both halves go by the ids alone: the guest is whoever booked, and the host
+ * whoever owns the listing — owning it is what being a host means, whatever the role. An
+ * admin — who may read every stay — writes neither, which `@Roles` on the route already
+ * says.
  */
 function kindWrittenBy(
   user: AuthenticatedUser,
@@ -254,9 +250,7 @@ function kindWrittenBy(
 ): ReviewKind | null {
   if (user.id === booking.guestId) return ReviewKind.LISTING;
 
-  if (user.role === Role.OWNER && user.id === listingOwnerId) {
-    return ReviewKind.GUEST;
-  }
+  if (user.id === listingOwnerId) return ReviewKind.GUEST;
 
   return null;
 }

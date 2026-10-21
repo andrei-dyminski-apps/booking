@@ -66,7 +66,6 @@ describe("Booking hold expiry (e2e)", () => {
         name: "Expiry Owner",
         email: "expiry-owner@example.com",
         passwordHash: "hash",
-        role: "OWNER",
       },
     });
     const listing = await prismaService.listing.create({

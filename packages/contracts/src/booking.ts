@@ -127,15 +127,28 @@ export const bookingSortSchema = z.enum([
 ]);
 
 /**
+ * Which side of a stay an account is on: the guest who took it or the host of the listing
+ * it takes. One account can be both — on different stays, never on one — so a notice says
+ * which side its recipient is, and a list of stays is asked for one side at a time.
+ */
+export const stayPartySchema = z.enum(["GUEST", "HOST"]);
+
+export const StayParty = stayPartySchema.enum;
+
+/**
  * The query of `GET /bookings`, as it arrives in the URL — `searchParams` on the frontend
  * and a query string here, so every value is text until it is coerced.
  *
- * **None of it is a scope.** What a caller may see is decided by their role inside the
- * `where` of the query — a guest sees the stays they took, an owner the stays taken
- * against their listings, an admin all of them — and every filter below narrows that
- * further rather than widening it. `guestId` is therefore not a way to read another
- * person's stays: for a guest it can only ever name themselves, and naming anybody else
- * answers with the empty list it truthfully is.
+ * **None of the filters is a scope.** What a caller may see is decided inside the
+ * `where` of the query — an account sees the stays it took or the stays taken against its
+ * listings, an admin all of them — and every filter below narrows that further rather
+ * than widening it. `guestId` is therefore not a way to read another person's stays: on
+ * the guest's side it can only ever name the caller, and naming anybody else answers with
+ * the empty list it truthfully is.
+ *
+ * `side` picks which of the two scopes of an account is asked for — the stays it took or
+ * the ones against its listings. It cannot reach past them, and an admin's scope has no
+ * sides, so theirs ignores it.
  *
  * `from`/`to` are a window a stay has to overlap, not a pair of bounds on the check-in:
  * "the stays that touch these dates" is the question a person asks of a list of bookings,
@@ -149,6 +162,7 @@ export const bookingQuerySchema = z
     status: blank(bookingStatusSchema.optional()),
     listingId: blank(z.uuid().optional()),
     guestId: blank(z.uuid().optional()),
+    side: blank(stayPartySchema.default("GUEST")),
     from: blank(z.iso.date().optional()),
     to: blank(z.iso.date().optional()),
     sort: blank(bookingSortSchema.default("newest")),
@@ -183,6 +197,7 @@ export const bookingPageSchema = z.object({
   nextCursor: z.string().nullable(),
 });
 
+export type StayParty = z.infer<typeof stayPartySchema>;
 export type BookingStatus = z.infer<typeof bookingStatusSchema>;
 export type BookingSort = z.infer<typeof bookingSortSchema>;
 export type BookingQuery = z.infer<typeof bookingQuerySchema>;

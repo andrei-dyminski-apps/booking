@@ -1,6 +1,6 @@
 "use client";
 
-import { LookupKind, type LookupOption } from "@repo/contracts";
+import { LookupKind, type LookupOption, type StayParty } from "@repo/contracts";
 import { ROUTES } from "#shared/config";
 import type { FieldErrors } from "#shared/lib";
 import {
@@ -30,6 +30,7 @@ export const BookingsFiltersDialog = ({
   values,
   errors,
   count,
+  side,
   byGuest,
   listing,
   guest,
@@ -39,11 +40,17 @@ export const BookingsFiltersDialog = ({
   /** How many filters are on, for the badge on the button that opens this. */
   count: number;
   /**
-   * Whether to offer the guest box. A guest's own scope is one person, so the filter can
-   * only ever name themselves — it is the two roles that see other people's stays that
-   * have a use for it. The box is what is withheld, not the filter: a `?guestId=` in the
-   * URL is still parsed, still shown as a chip and still answered, because withholding
-   * that would be a rule in the wrong place.
+   * The half of a user's stays being filtered, or `null` for an admin. It is carried by a
+   * hidden box like the ordering — submitting the dialog stays on the tab it opened from —
+   * and it scopes the listing box's suggestions to the same half.
+   */
+  side: StayParty | null;
+  /**
+   * Whether to offer the guest box. On the guest's side the scope is one person, so the
+   * filter can only ever name themselves — it is a host and an admin, who see other
+   * people's stays, that have a use for it. The box is what is withheld, not the filter:
+   * a `?guestId=` in the URL is still parsed, still shown as a chip and still answered,
+   * because withholding that would be a rule in the wrong place.
    */
   byGuest: boolean;
   /** The listing being filtered by, where the page resolved it. */
@@ -57,6 +64,7 @@ export const BookingsFiltersDialog = ({
     action={ROUTES.bookings}
     href={(fields) =>
       bookingsHref({
+        side: fields.side ?? "",
         status: fields.status ?? "",
         listingId: fields.listingId ?? "",
         guestId: fields.guestId ?? "",
@@ -79,10 +87,15 @@ export const BookingsFiltersDialog = ({
       error={errors.status}
     />
 
+    {values.side !== "" && (
+      <input type="hidden" name="side" defaultValue={values.side} />
+    )}
+
     <LookupField
       name="listingId"
       label="Listing"
       kind={LookupKind.listings}
+      side={side ?? undefined}
       value={values.listingId}
       valueOption={listing}
       error={errors.listingId}

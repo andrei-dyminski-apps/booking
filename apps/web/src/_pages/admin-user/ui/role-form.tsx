@@ -17,7 +17,7 @@ import { changeRoleAction } from "../api/update-user-actions";
 
 /**
  * The role of one account, as a box and a button. A plain `action={submit}` form rather
- * than `react-hook-form`: there is nothing to type, the box can only hold one of three
+ * than `react-hook-form`: there is nothing to type, the box can only hold one of two
  * values, and the action parses what arrives against the contract anyway — a client-side
  * validation would have nothing to refuse.
  *

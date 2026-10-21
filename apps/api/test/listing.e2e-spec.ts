@@ -18,7 +18,7 @@ import { AppModule } from "./../src/app.module";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
-import { signInAs, type Agent } from "./session";
+import { hostCredentials, signIn, signInAs, type Agent } from "./session";
 
 const input: CreateListingInput = {
   title: "Loft above the harbour",
@@ -72,8 +72,8 @@ describe("ListingController (e2e)", () => {
     await resetDatabase(app);
 
     guest = await signInAs(app, Role.USER);
-    owner = await signInAs(app, Role.OWNER);
-    otherOwner = await signInAs(app, Role.OWNER, {
+    owner = await signIn(app, hostCredentials);
+    otherOwner = await signIn(app, {
       name: "E2E Second Owner",
       email: "e2e-owner-2@example.com",
       password: "password123",
@@ -106,10 +106,9 @@ describe("ListingController (e2e)", () => {
     expect(listingSchema.parse(response.body).ownerId).not.toBe(impostor);
   });
 
-  it("refuses creation to a guest and to an admin — the role check, before any row", async () => {
-    for (const agent of [guest, admin]) {
-      await agent.post("/listings").send(input).expect(403);
-    }
+  it("lets any user publish and refuses an admin — the role check, before any row", async () => {
+    await guest.post("/listings").send(input).expect(201);
+    await admin.post("/listings").send(input).expect(403);
   });
 
   it("opens the catalogue, a listing and its calendar to a visitor with no session", async () => {
@@ -432,8 +431,11 @@ describe("ListingController (e2e)", () => {
     });
   });
 
-  it("keeps /listings/mine to owners — a guest has none to list", async () => {
-    await guest.get("/listings/mine").expect(403);
+  it("answers /listings/mine with nothing for a user who has published nothing", async () => {
+    const mine = await guest.get("/listings/mine").expect(200);
+
+    expect(listingListSchema.parse(mine.body)).toEqual([]);
+    await admin.get("/listings/mine").expect(403);
   });
 
   it("lets the owner edit their listing", async () => {
@@ -476,7 +478,7 @@ describe("ListingController (e2e)", () => {
 
     // ...and the stay taken against it still has its record, still readable by the owner
     // of the listing it names. That is the whole reason the row outlives the offer.
-    const stays = await owner.get("/bookings").expect(200);
+    const stays = await owner.get("/bookings?side=HOST").expect(200);
     expect(bookingPageSchema.parse(stays.body).items).toHaveLength(1);
   });
 

@@ -14,14 +14,20 @@ export const testCredentials = {
 /** What registration takes; login reads the address and the password and ignores the name. */
 export type Credentials = typeof testCredentials;
 
+/**
+ * The account that publishes the listings a spec books. Hosting is not a role, so it is a
+ * plain `USER` registered under another address — `signIn(app, hostCredentials)` — and
+ * what makes it the host is the listing it creates.
+ */
+export const hostCredentials: Credentials = {
+  name: "E2E Owner",
+  email: "e2e-owner@example.com",
+  password: "password123",
+};
+
 /** One address per role, so a spec can hold several agents at once. */
 export const credentialsFor: Record<Role, Credentials> = {
   USER: testCredentials,
-  OWNER: {
-    name: "E2E Owner",
-    email: "e2e-owner@example.com",
-    password: "password123",
-  },
   ADMIN: {
     name: "E2E Admin",
     email: "e2e-admin@example.com",
@@ -47,7 +53,7 @@ export async function signIn(
 }
 
 /**
- * The same, for a role registration cannot produce: `/auth/register` always writes a USER,
+ * The same, for the role registration cannot produce: `/auth/register` always writes a USER,
  * which is the only safe default for a public endpoint. So the row is promoted directly
  * and the agent logs in again — the access token minted at registration still carries the
  * old role, and JwtStrategy reads no database, which is exactly the lag RolesGuard would

@@ -14,14 +14,16 @@ import { ButtonLink, PageHeading } from "#shared/ui";
 import { ListingCard } from "./listing-card";
 
 /**
- * The owner's own section: what `GET /listings/mine` returns is decided by the session
- * rather than by a parameter, so this page has no filter to get wrong.
+ * A user's listings: what `GET /listings/mine` returns is decided by the session rather
+ * than by a parameter, so this page has no filter to get wrong. Hosting is not a role, so
+ * every user reaches it — it is where the first listing is published from — and an admin,
+ * who has no listings of their own, does not.
  *
  * The read is personal and therefore `no-store` — the Data Cache is keyed by URL and
  * shared between visitors, and one owner's listings must never be served to the next.
  */
 export const DashboardPage = async () => {
-  await requireRole(Role.OWNER, ROUTES.dashboard);
+  await requireRole(Role.USER, ROUTES.dashboard);
 
   const listings = await listingsApi.mine({ cache: "no-store" });
 

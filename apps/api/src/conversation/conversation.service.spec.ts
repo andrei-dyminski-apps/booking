@@ -51,8 +51,8 @@ const userWith = (id: string, role: Role): AuthenticatedUser => ({
 
 const guest = userWith(GUEST_ID, Role.USER);
 const otherGuest = userWith(OTHER_GUEST_ID, Role.USER);
-const owner = userWith(OWNER_ID, Role.OWNER);
-const otherOwner = userWith(OTHER_OWNER_ID, Role.OWNER);
+const owner = userWith(OWNER_ID, Role.USER);
+const otherOwner = userWith(OTHER_OWNER_ID, Role.USER);
 const stranger = userWith(STRANGER_ID, Role.USER);
 const admin = userWith(STRANGER_ID, Role.ADMIN);
 
@@ -441,9 +441,9 @@ describe("ConversationService", () => {
       expect(await ids(otherOwner)).toEqual([elsewhere.id]);
     });
 
-    it("keeps the threads an account started as a guest after it became a host", async () => {
+    it("lists an account's threads as a guest beside its threads as a host", async () => {
       const asHost = await service.start(GUEST_ID, about(LISTING_ID));
-      // The owner of one listing writing about another — a guest promoted since.
+      // The owner of one listing writing about another, as its guest.
       const asGuest = await service.start(OWNER_ID, about(OTHER_LISTING_ID));
 
       const page = await service.findPage(owner, threadsFor());

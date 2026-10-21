@@ -3,6 +3,7 @@ import {
   bookingSortSchema,
   bookingStatusSchema,
   BookingStatus,
+  StayParty,
   type BookingQuery,
   type BookingSort,
 } from "@repo/contracts";
@@ -22,8 +23,12 @@ import type { SortOption } from "#shared/ui";
  *
  * `sort` travels with them although it is not a filter: it is a value of the same URL, so
  * every link this file writes has to carry it or a chip would silently reorder the list.
+ * `side` is the same kind of value — which half of their stays a user is looking at, the
+ * ones they took or the ones taken against their listings — and is first, so the tab a
+ * link opens is the first thing its address says.
  */
 export type FilterValues = {
+  side: string;
   status: string;
   listingId: string;
   guestId: string;
@@ -66,9 +71,10 @@ export type BookingsSearch = {
  * refuses is shown under the box it belongs to.
  *
  * None of it is a scope. What this visitor may see is decided by the session on the API
- * side — a guest sees their own stays, an owner the ones taken against their listings, an
- * admin all of them — and every value below narrows that further. `guestId` in particular
- * is not a way around it: for a guest it can only ever name themselves.
+ * side — a user their own stays or the ones taken against their listings, an admin all of
+ * them — and every value below narrows that further. `side` only picks which of a user's
+ * two halves it is, and `guestId` is not a way around it: on the guest's side it can only
+ * ever name themselves.
  *
  * An empty box is not a filter, and the contract is what says so: `bookingQuerySchema`
  * reads each blank as the absence it means, so a search is answered the same however many
@@ -79,6 +85,7 @@ export function readBookingsSearch(
   params: Record<string, string | string[] | undefined>,
 ): BookingsSearch {
   const values: FilterValues = {
+    side: singleParam(params.side),
     status: singleParam(params.status),
     listingId: singleParam(params.listingId),
     guestId: singleParam(params.guestId),
@@ -180,10 +187,11 @@ export function sortOptions(values: FilterValues): SortOption[] {
 /**
  * The same ordering with nothing filtered, for the "Clear all" of the chips and of the
  * dialog. An ordering is not a filter — there is no unordered list to fall back to — so
- * clearing the filters leaves it where the visitor put it.
+ * clearing the filters leaves it where the visitor put it, and the side with it.
  */
 export function clearedFiltersHref(values: FilterValues): string {
   return bookingsHref({
+    side: values.side,
     status: "",
     listingId: "",
     guestId: "",
@@ -195,12 +203,14 @@ export function clearedFiltersHref(values: FilterValues): string {
 
 /**
  * This same screen showing one listing's stays and nothing else — the link a card offers
- * an owner or an admin. It is a filter like any other: it lands in the address bar, the
+ * a host or an admin. It is a filter like any other: it lands in the address bar, the
  * chip beside it takes it off again, and everything else about the search starts fresh,
- * because a card is not the middle of a search somebody was already running.
+ * because a card is not the middle of a search somebody was already running. The side
+ * the card was drawn on is kept: a host's listing filtered on the guest's side is empty.
  */
-export function listingStaysHref(listingId: string): string {
+export function listingStaysHref(listingId: string, side: StayParty): string {
   return bookingsHref({
+    side: sideParam(side),
     status: "",
     listingId,
     guestId: "",
@@ -208,6 +218,42 @@ export function listingStaysHref(listingId: string): string {
     to: "",
     sort: "",
   });
+}
+
+/**
+ * Which half of their stays a user is looking at. Anything but `HOST` is the guest's, the
+ * contract's default — a value it refuses has already refused the search, and the tab it
+ * falls back to is the one an empty `?side=` would land on.
+ */
+export function sideOf(values: FilterValues): StayParty {
+  return values.side === StayParty.HOST ? StayParty.HOST : StayParty.GUEST;
+}
+
+/**
+ * The two halves as tabs: each a link to that side with nothing filtered — a listing or a
+ * guest picked on one side names nothing on the other — and the ordering kept.
+ */
+export function sideTabs(
+  values: FilterValues,
+): Array<{ side: StayParty; label: string; href: string; current: boolean }> {
+  const current = sideOf(values);
+
+  return [StayParty.GUEST, StayParty.HOST].map((side) => ({
+    side,
+    label: SIDE_LABELS[side],
+    href: clearedFiltersHref({ ...values, side: sideParam(side) }),
+    current: side === current,
+  }));
+}
+
+const SIDE_LABELS: Record<StayParty, string> = {
+  [StayParty.GUEST]: "Trips",
+  [StayParty.HOST]: "Hosting",
+};
+
+/** The guest's side is the default and leaves no trace in the URL, like the ordering's. */
+function sideParam(side: StayParty): string {
+  return side === StayParty.GUEST ? "" : side;
 }
 
 /**

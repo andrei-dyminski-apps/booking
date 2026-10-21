@@ -17,7 +17,13 @@ import { resetDatabase } from "./database";
 import { inDays } from "./dates";
 import { HOLD_TTL_MS } from "./../src/booking/domain/booking-status";
 import { resetQueue } from "./queue";
-import { credentialsFor, signInAs, type Agent } from "./session";
+import {
+  credentialsFor,
+  hostCredentials,
+  signIn,
+  signInAs,
+  type Agent,
+} from "./session";
 
 const listingInput: CreateListingInput = {
   title: "Loft above the harbour",
@@ -56,7 +62,7 @@ describe("BookingController (e2e)", () => {
       email: "e2e-guest-2@example.com",
       password: "password123",
     });
-    owner = await signInAs(app, Role.OWNER);
+    owner = await signIn(app, hostCredentials);
     admin = await signInAs(app, Role.ADMIN);
 
     const listing = await owner
@@ -131,10 +137,22 @@ describe("BookingController (e2e)", () => {
     );
   });
 
-  it("books for guests only — an owner rents out, an admin moderates", async () => {
-    for (const agent of [owner, admin]) {
-      await agent.post("/bookings").send(input).expect(403);
-    }
+  it("books for users only — an admin moderates", async () => {
+    await admin.post("/bookings").send(input).expect(403);
+  });
+
+  /**
+   * No role gate stops a host booking their own nights: hosting is owning a listing, and
+   * the owner is a `USER` like any guest. The refusal is read off the listing row instead,
+   * under the same lock as the booking.
+   */
+  it("answers 403 to an account booking its own listing", async () => {
+    const response = await owner.post("/bookings").send(input).expect(403);
+
+    expect(apiErrorSchema.parse(response.body).message).toBe(
+      "You cannot book your own listing",
+    );
+    expect(await stays(admin)).toEqual([]);
   });
 
   it("rejects a body that does not pass the schema", async () => {
@@ -228,12 +246,38 @@ describe("BookingController (e2e)", () => {
       .send({ ...input, from: inDays(19), to: inDays(21) })
       .expect(201);
 
-    // A guest sees only their own; the owner of the listing sees both stays booked
-    // against it; an admin sees everything there is.
+    // A guest sees only their own; the owner of the listing, on the host side, sees both
+    // stays booked against it; an admin sees everything there is.
     expect(await stays(guest)).toHaveLength(1);
     expect(await stays(otherGuest)).toHaveLength(1);
-    expect(await stays(owner)).toHaveLength(2);
+    expect(await stays(owner, { side: "HOST" })).toHaveLength(2);
     expect(await stays(admin)).toHaveLength(2);
+  });
+
+  it("hands a USER who hosts the side of their stays they ask for", async () => {
+    await guest.post("/bookings").send(input).expect(201);
+
+    expect(await stays(owner)).toEqual([]);
+    expect(await stays(owner, { side: "HOST" })).toHaveLength(1);
+    expect(await stays(guest, { side: "HOST" })).toEqual([]);
+    expect(await stays(admin, { side: "HOST" })).toHaveLength(1);
+  });
+
+  it("lets one account book someone else's listing and host its own", async () => {
+    const own = await guest.post("/listings").send(listingInput).expect(201);
+    const ownListingId = (own.body as { id: string }).id;
+
+    await guest.post("/bookings").send(input).expect(201);
+    await owner
+      .post("/bookings")
+      .send({ ...input, listingId: ownListingId })
+      .expect(201);
+
+    const [trip] = await stays(guest);
+    const [hosted] = await stays(guest, { side: "HOST" });
+
+    expect(trip?.listingId).toBe(input.listingId);
+    expect(hosted?.listingId).toBe(ownListingId);
   });
 
   /**

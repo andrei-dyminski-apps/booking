@@ -114,7 +114,8 @@ apps/web/
       listing/lib/months.ts               # the booked ranges laid out as month grids
       listing/lib/months.spec.ts
       listing/index.ts
-      bookings/ui/bookings-page.tsx       # one page, three scopes — the role picks one
+      bookings/ui/bookings-page.tsx       # one page: a user's Trips and Hosting, an admin's everything
+      bookings/ui/side-tabs.tsx           # …the two halves of a user's stays, as links over `?side=HOST`
       bookings/ui/bookings-toolbar.tsx    # one row: the filters, the ordering, the chips
       bookings/ui/bookings-filters-dialog.tsx  # every filter, in a modal
       bookings/ui/booking-card.tsx
@@ -129,7 +130,7 @@ apps/web/
       bookings/lib/bookings-search.ts     # searchParams onto the contract's query
       bookings/lib/bookings-search.spec.ts
       bookings/index.ts
-      messages/ui/messages-page.tsx       # the threads the account is a side of, either role
+      messages/ui/messages-page.tsx       # the threads the account is a side of, as a guest and as a host
       messages/ui/conversation-card.tsx
       messages/ui/messages-skeleton.tsx
       messages/index.ts
@@ -140,7 +141,7 @@ apps/web/
       conversation/ui/conversation-skeleton.tsx
       conversation/api/send-message-action.ts
       conversation/index.ts
-      dashboard/ui/dashboard-page.tsx     # the owner's listings, read by the session
+      dashboard/ui/dashboard-page.tsx     # a user's own listings, read by the session
       dashboard/ui/listing-card.tsx
       dashboard/ui/dashboard-skeleton.tsx
       dashboard/index.ts
@@ -652,26 +653,37 @@ this side decided.
   followed by a comparison at the top of each page. It is `requireUser` plus one
   comparison, and the argument is the same "where to come back to" a server render is
   never told about itself.
-- **A wrong role answers `notFound()`.** The dashboard is the owner's own section; to
-  everybody else it is a URL with nothing behind it, and a message explaining what they
-  are missing would state that an owner's section exists and that they are not one.
+- **Two roles, and hosting is not one of them.** `USER` and `ADMIN`: whoever owns a listing
+  hosts it, so every user is offered the dashboard, Messages and both halves of the stays,
+  and what the screen draws for a host is read off the rows — `viewer.id` against
+  `listing.ownerId` on the listing page ("This is your listing" and an edit link instead of
+  the booking form; the API refuses a booking of one's own listing), the side of the stays
+  page on a card. The account panel calls a user a "Member", not a guest or a host.
+- **A wrong role answers `notFound()`.** The dashboard is a user's own section; to an admin
+  it is a URL with nothing behind it.
 - **Membership of a set, not a hierarchy**, exactly as the guard reads it in `apps/api`:
-  an admin does not reach an owner's dashboard by being senior to an owner. `/listings/mine`
-  is scoped to the caller, and an admin has no listings of their own to put on it.
+  an admin does not reach a user's dashboard by being senior to one. `/listings/mine` is
+  scoped to the caller, and an admin has no listings of their own to put on it.
 - **The proxy cannot help.** It sees an httpOnly cookie it cannot open, so the gate in
   front of `/dashboard` is the same "is there an access token" it performs for `/profile`.
   A new protected route is still a line in the matcher of `proxy.ts`.
 - **The header offers, it does not permit** (`_app/layout/header.tsx`). The link is
   rendered for the role that has a use for it; the section behind it answers the same way
   whether or not the link was there. So does a button inside a page: the "Cancel" on a
-  stay is drawn for the guest who took it and for an admin, and an owner who may read that
+  stay is drawn for the guest who took it and for an admin, and a host who may read that
   stay is not offered it — the API refuses them either way, and what is being decided here
   is what to put on the screen.
-- **A page can have one scope per role rather than one page per role**, and `/bookings` is
-  that case: `GET /bookings` narrows what it returns by the caller's role — a guest sees
-  the stays they took, an owner the stays taken against their listings, an admin all of
-  them — so the page has no filter to get wrong and the role only decides what to call the
-  list. A `?guestId=` in its place would be a rule to re-check on every request.
+- **A page can have one scope per side rather than one page per role**, and `/bookings` is
+  that case: `GET /bookings` narrows what it returns by the caller — a user sees the stays
+  they took or the stays taken against their listings, an admin all of them — so the page
+  has no scope to get wrong. Which half a user sees is `?side=HOST`, drawn as the "Trips"
+  and "Hosting" tabs (`side-tabs.tsx`): a value of the URL like the ordering, carried by
+  every link of the slice and by a hidden box of the dialog, never a chip, and kept by
+  "Clear all"; switching tabs drops the filters, since a listing or a guest of one half
+  names nothing on the other. The side decides what to call the list, whether the guest
+  box is offered, which half of a review a card offers, and the `side` of the listing
+  box's lookup. A `?guestId=` in place of the scope would be a rule to re-check on every
+  request.
 - **The admin's section is `/admin`**, two screens: every listing on offer, each one
   edited and retired through the same `save-listing` and `delete-listing` features the
   owner runs, and `/admin/users`, the accounts, each leading to `/admin/users/[id]` — where
@@ -837,7 +849,7 @@ characters` reaches the box either way. The number is read off the schema
 action (`delete-listing-button.tsx`, `cancel-booking-button.tsx`, `block-button.tsx`) submit a bound id and
 nothing else, so they stay a plain `action={submit}` with nothing to validate. So does a
 form whose only box is a closed choice — `role-form.tsx` on the admin's page of an account:
-a select of the three roles cannot hold a value the contract refuses, so a browser-side
+a select of the two roles cannot hold a value the contract refuses, so a browser-side
 parse would have nothing to say, and the action still parses what arrives with
 `updateUserSchema`. A form that gains a box somebody types into stops being this case.
 So do the `GET` forms of the filter dialogs, which navigate rather than mutate; those are
@@ -1227,7 +1239,7 @@ already moving.
   arrives.
 - **`not-found.tsx` is reached far more often than by a mistyped URL.** Every id that
   cannot name a row arrives there (`requireId`, `orNotFound`), so does a retired listing,
-  and so does an owner's section opened by somebody who is not one.
+  and so does a user's section opened by an admin.
 - **Two error boundaries, because they catch different things.** `error.tsx` catches what
   a page throws; it cannot catch what the layout above it throws, and this shell reads the
   session before it renders anything — so an API that cannot be reached at all fails

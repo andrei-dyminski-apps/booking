@@ -1,4 +1,4 @@
-import type { LookupOption } from "@repo/contracts";
+import type { LookupOption, StayParty } from "@repo/contracts";
 import { FieldError } from "@repo/ui/components/field";
 import { fieldMessages, messagesExcept, type FieldErrors } from "#shared/lib";
 import { FilterChips, SortSelect } from "#shared/ui";
@@ -22,6 +22,7 @@ export const BookingsToolbar = ({
   values,
   errors,
   filters,
+  side,
   byGuest,
   listing,
   guest,
@@ -36,7 +37,9 @@ export const BookingsToolbar = ({
    * something a visitor can only recognise, a name is something they can read.
    */
   filters: ActiveFilter[];
-  /** Whether this role has a use for the guest box — see the dialog. */
+  /** The half of a user's stays on screen, or `null` for an admin — see the dialog. */
+  side: StayParty | null;
+  /** Whether this side of the stays has a use for the guest box — see the dialog. */
   byGuest: boolean;
   /** The listing being filtered by, for the box that names it. */
   listing: LookupOption | undefined;
@@ -54,6 +57,7 @@ export const BookingsToolbar = ({
           values={values}
           errors={errors}
           count={filters.length}
+          side={side}
           byGuest={byGuest}
           listing={listing}
           guest={guest}

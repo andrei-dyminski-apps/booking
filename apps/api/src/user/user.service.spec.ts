@@ -177,11 +177,11 @@ describe("UserService", () => {
     const guest = userRepository.add();
 
     const updated = await service.update(admin, guest.id, {
-      role: Role.OWNER,
+      role: Role.ADMIN,
     });
 
-    expect(updated.role).toBe(Role.OWNER);
-    expect(userRepository.rows[1]?.role).toBe(Role.OWNER);
+    expect(updated.role).toBe(Role.ADMIN);
+    expect(userRepository.rows[1]?.role).toBe(Role.ADMIN);
   });
 
   it("blocks and unblocks another account", async () => {

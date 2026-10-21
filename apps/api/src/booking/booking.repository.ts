@@ -57,6 +57,18 @@ export class GuestNotFoundError extends Error {
 }
 
 /**
+ * The guest owns the listing they asked to book. Read off the same locked row as the
+ * existence check, so it costs no query of its own; the service answers it the way
+ * starting a conversation about one's own listing is answered.
+ */
+export class OwnListingError extends Error {
+  constructor(listingId: string) {
+    super(`Listing ${listingId} is your own`);
+    this.name = "OwnListingError";
+  }
+}
+
+/**
  * The dates asked for overlap an active stay on that listing. Raised from inside the
  * locking transaction — either by the explicit overlap check or, if a bug slips past it,
  * by the `EXCLUDE` constraint. The service turns both into one `409`.
@@ -287,7 +299,8 @@ export class BookingRepository {
    *
    *  1. `SELECT ... FOR UPDATE` on the listing row — two creates for the same listing
    *     serialise here instead of racing. `deleted_at` is read under the lock, the check
-   *     the database stopped making when listings became soft-deletable.
+   *     the database stopped making when listings became soft-deletable, and `owner_id`
+   *     beside it, which refuses a guest booking their own listing.
    *  2. flip this listing's lapsed holds to `EXPIRED`, so a stale `PENDING_PAYMENT` row
    *     neither blocks the slot nor trips the `EXCLUDE` constraint on the insert below.
    *  3. refuse an overlap with an active stay — the informative `409`.
@@ -315,6 +328,10 @@ export class BookingRepository {
 
       if (listing === undefined || listing.deleted_at !== null) {
         throw new ListingNotFoundError(input.listingId);
+      }
+
+      if (listing.owner_id === guestId) {
+        throw new OwnListingError(input.listingId);
       }
 
       const released = await tx.booking.updateManyAndReturn({

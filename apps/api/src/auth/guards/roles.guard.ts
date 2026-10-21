@@ -20,11 +20,12 @@ import { ROLES_KEY } from "../decorators/roles.decorator";
  * decided before the row is read; it lives in the services, next to the read, and is
  * spelled out in `../ownership.ts`.
  *
- * Membership of a set, not a hierarchy: ADMIN does not pass an `@Roles(Role.OWNER)` check
- * by being senior to an owner. A route that admins may use names ADMIN, so what a role can
+ * Membership of a set, not a hierarchy: ADMIN does not pass an `@Roles(Role.USER)` check
+ * by being senior to a user. A route that admins may use names ADMIN, so what a role can
  * reach is readable where the route is written rather than hidden in a comparison here —
  * and `@Roles(Role.USER)` on "create a booking" keeps meaning what it says instead of
- * quietly admitting the two roles above it.
+ * quietly admitting the role above it. Being a host is not a role at all: it is owning a
+ * listing, which only the row can tell.
  *
  * Registered globally in app.module.ts after JwtAuthGuard: guards run in registration
  * order, and this one reads what that one put on the request.

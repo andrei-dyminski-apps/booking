@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Role, type User } from "@repo/contracts";
+import { type User } from "@repo/contracts";
+import { ROLE_LABELS } from "#entities/user";
 import { LogoutButton } from "#features/logout";
 import { ROUTES } from "#shared/config";
 import { ButtonLink } from "#shared/ui";
@@ -39,7 +40,7 @@ export const AccountPanel = ({ user }: { user: User | null }) => {
         <span className="flex min-w-0 flex-col">
           <span className="truncate text-sm">{user.name}</span>
           <span className="text-xs text-muted-foreground">
-            {ROLE_LABEL[user.role]}
+            {ROLE_LABELS[user.role]}
           </span>
         </span>
       </Link>
@@ -47,16 +48,6 @@ export const AccountPanel = ({ user }: { user: User | null }) => {
       <LogoutButton variant="ghost" />
     </div>
   );
-};
-
-/**
- * The three roles as a person reads them. Keyed by the contract's own enum rather than
- * switched over, so a fourth role stops compiling here instead of rendering as a blank.
- */
-const ROLE_LABEL: Record<Role, string> = {
-  [Role.USER]: "Guest",
-  [Role.OWNER]: "Host",
-  [Role.ADMIN]: "Administrator",
 };
 
 /**

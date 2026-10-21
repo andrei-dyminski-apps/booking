@@ -18,11 +18,14 @@ class TestController {
   // `this: void` on each: the handlers are read off the instance and handed to the guard
   // as plain values, which is what Nest does with them too — the annotation says so and
   // keeps @typescript-eslint/unbound-method from reading it as a lost binding.
-  @Roles(Role.OWNER)
-  ownerOnly(this: void): void {}
+  @Roles(Role.USER)
+  userOnly(this: void): void {}
 
-  @Roles(Role.OWNER, Role.ADMIN)
-  ownerOrAdmin(this: void): void {}
+  @Roles(Role.USER, Role.ADMIN)
+  userOrAdmin(this: void): void {}
+
+  @Roles(Role.ADMIN)
+  adminOnly(this: void): void {}
 
   unrestricted(this: void): void {}
 }
@@ -48,7 +51,7 @@ describe("RolesGuard", () => {
   const controller = new TestController();
 
   it("lets a route without @Roles through, whatever the role", () => {
-    for (const role of [Role.USER, Role.OWNER, Role.ADMIN]) {
+    for (const role of [Role.USER, Role.ADMIN]) {
       expect(
         guard.canActivate(contextFor(controller.unrestricted, userWith(role))),
       ).toBe(true);
@@ -57,33 +60,33 @@ describe("RolesGuard", () => {
 
   it("admits the role the route names", () => {
     expect(
-      guard.canActivate(contextFor(controller.ownerOnly, userWith(Role.OWNER))),
+      guard.canActivate(contextFor(controller.userOnly, userWith(Role.USER))),
     ).toBe(true);
   });
 
   it("admits any of several named roles", () => {
-    for (const role of [Role.OWNER, Role.ADMIN]) {
+    for (const role of [Role.USER, Role.ADMIN]) {
       expect(
-        guard.canActivate(contextFor(controller.ownerOrAdmin, userWith(role))),
+        guard.canActivate(contextFor(controller.userOrAdmin, userWith(role))),
       ).toBe(true);
     }
   });
 
-  it("is set membership rather than a hierarchy — an admin fails an owner-only route", () => {
+  it("is set membership rather than a hierarchy — an admin fails a user-only route", () => {
     expect(() =>
-      guard.canActivate(contextFor(controller.ownerOnly, userWith(Role.ADMIN))),
+      guard.canActivate(contextFor(controller.userOnly, userWith(Role.ADMIN))),
     ).toThrow(ForbiddenException);
   });
 
   it("refuses a role the route does not name", () => {
     expect(() =>
-      guard.canActivate(contextFor(controller.ownerOnly, userWith(Role.USER))),
+      guard.canActivate(contextFor(controller.adminOnly, userWith(Role.USER))),
     ).toThrow(ForbiddenException);
   });
 
   it("answers 401 when @Roles guards a route nobody authenticated for", () => {
     expect(() =>
-      guard.canActivate(contextFor(controller.ownerOnly, undefined)),
+      guard.canActivate(contextFor(controller.userOnly, undefined)),
     ).toThrow(UnauthorizedException);
   });
 });

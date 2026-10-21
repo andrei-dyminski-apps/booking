@@ -31,6 +31,7 @@ import {
   DatesUnavailableError,
   GuestNotFoundError,
   ListingNotFoundError,
+  OwnListingError,
   type BookingWithListingOwner,
   type CreatedBooking,
   type ReleasedHold,
@@ -81,7 +82,7 @@ const userWith = (id: string, role: Role): AuthenticatedUser => ({
 });
 
 const guest = userWith(GUEST_ID, Role.USER);
-const owner = userWith(OWNER_ID, Role.OWNER);
+const owner = userWith(OWNER_ID, Role.USER);
 const stranger = userWith(STRANGER_ID, Role.USER);
 const admin = userWith(STRANGER_ID, Role.ADMIN);
 
@@ -214,6 +215,10 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
 
     if (this.vanishingGuest) {
       return Promise.reject(new GuestNotFoundError(guestId));
+    }
+
+    if (this.listingOwnerId === guestId) {
+      return Promise.reject(new OwnListingError(booking.listingId));
     }
 
     // Released before the overlap check, as the transaction does; a refusal below would
@@ -479,6 +484,17 @@ describe("BookingService", () => {
     );
   });
 
+  it("answers 403 to a host booking their own listing, and stores nothing", async () => {
+    bookingRepository.listingOwnerId = GUEST_ID;
+
+    await expect(service.create(GUEST_ID, input)).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(bookingRepository.rows.size).toBe(0);
+    expect(bookingExpiryQueue.scheduled).toEqual([]);
+    expect(notificationService.notices).toEqual([]);
+  });
+
   it("turns an overlap raised by the repository into a 409", async () => {
     await bookedByGuest();
 
@@ -490,15 +506,41 @@ describe("BookingService", () => {
 
   it("narrows the list to what the role of the caller may see", async () => {
     await bookedByGuest();
-    bookingRepository.listingOwnerId = STRANGER_ID;
+    bookingRepository.listingOwnerId = GUEST_ID;
     await service.create(STRANGER_ID, {
       ...input,
       listingId: OTHER_LISTING_ID,
     });
 
     await expect(seenBy(guest)).resolves.toHaveLength(1);
-    await expect(seenBy(owner)).resolves.toHaveLength(1);
+    await expect(seenBy(owner, { side: StayParty.HOST })).resolves.toHaveLength(
+      1,
+    );
     await expect(seenBy(admin)).resolves.toHaveLength(2);
+  });
+
+  /**
+   * An account is both sides of its stays at once, so `side` picks which half of them a
+   * list is — and nothing else: either half is still the caller's own, and an admin's
+   * scope has no halves.
+   */
+  it("hands an account that also hosts the side of its stays it asks for", async () => {
+    const trip = await bookedByGuest();
+    bookingRepository.listingOwnerId = GUEST_ID;
+    const hosted = await service.create(STRANGER_ID, {
+      ...input,
+      listingId: OTHER_LISTING_ID,
+    });
+
+    const ids = async (
+      user: AuthenticatedUser,
+      side: StayParty,
+    ): Promise<string[]> =>
+      (await seenBy(user, { side })).map((booking) => booking.id);
+
+    await expect(ids(guest, StayParty.GUEST)).resolves.toEqual([trip]);
+    await expect(ids(guest, StayParty.HOST)).resolves.toEqual([hosted.id]);
+    await expect(ids(admin, StayParty.GUEST)).resolves.toHaveLength(2);
   });
 
   /**
@@ -659,13 +701,6 @@ describe("BookingService", () => {
     ]);
   });
 
-  it("does not tell an owner about a hold they took on their own listing", async () => {
-    bookingRepository.listingOwnerId = GUEST_ID;
-    await service.create(GUEST_ID, input);
-
-    expect(notificationService.notices).toEqual([]);
-  });
-
   it("tells the host when the guest cancels, and both sides when an admin does", async () => {
     const recipientsOfCancelling = async (
       canceller: AuthenticatedUser,
@@ -773,17 +808,6 @@ describe("BookingService", () => {
       await service.releaseLapsedHolds();
 
       expect(expiryNotices()).toEqual(bothSides);
-    });
-
-    it("tells an owner holding their own listing once, as the guest", async () => {
-      bookingRepository.listingOwnerId = GUEST_ID;
-      const id = await lapsedHold();
-
-      await service.releaseHold(id);
-
-      expect(expiryNotices()).toEqual([
-        { userId: GUEST_ID, recipient: StayParty.GUEST },
-      ]);
     });
   });
 

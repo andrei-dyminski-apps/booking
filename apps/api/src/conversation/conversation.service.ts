@@ -75,11 +75,10 @@ export class ConversationService {
   }
 
   /**
-   * A guest and a host read the same scope — every thread their account is a side of —
-   * unlike the stays, where a role is one persona. A thread's two people are fixed by its
-   * rows, which is how `sideOf` decides them too, so the list and the thread cannot
-   * disagree: an account promoted to `OWNER` keeps the threads it started as a guest in its
-   * list as well as at their address. The switch is exhaustive for the reason
+   * A user reads one scope — every thread their account is a side of, as a guest and as a
+   * host — unlike the stays, where `side` picks one half. A thread's two people are fixed
+   * by its rows, which is how `sideOf` decides them too, so the list and the thread cannot
+   * disagree. The switch is exhaustive for the reason
    * `BookingService.pageFor` gives; an admin is refused by `@Roles` before reaching it, and
    * refused again here rather than handed a scope nobody wrote down: a thread is a private
    * exchange between two people, and no third role reads it.
@@ -91,7 +90,6 @@ export class ConversationService {
   ): Promise<Page<Conversation>> {
     switch (user.role) {
       case Role.USER:
-      case Role.OWNER:
         return this.conversationRepository.findPageFor(user.id, query, cursor);
       case Role.ADMIN:
         throw new ForbiddenException("Conversations are read by their sides");

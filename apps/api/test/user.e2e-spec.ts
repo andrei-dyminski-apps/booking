@@ -13,7 +13,13 @@ import { AppModule } from "./../src/app.module";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
-import { credentialsFor, signInAs, type Agent } from "./session";
+import {
+  credentialsFor,
+  hostCredentials,
+  signIn,
+  signInAs,
+  type Agent,
+} from "./session";
 
 describe("UserController (e2e)", () => {
   let app: INestApplication<App>;
@@ -48,7 +54,7 @@ describe("UserController (e2e)", () => {
     await resetDatabase(app);
 
     guest = await signInAs(app, Role.USER);
-    owner = await signInAs(app, Role.OWNER);
+    owner = await signIn(app, hostCredentials);
     admin = await signInAs(app, Role.ADMIN);
   });
 
@@ -93,14 +99,14 @@ describe("UserController (e2e)", () => {
       })
       .expect(201);
 
-    const ownerId = await idOf(credentialsFor.OWNER.email);
+    const ownerId = await idOf(hostCredentials.email);
     const guestId = await idOf(credentialsFor.USER.email);
 
     expect(
       managedUserDetailSchema.parse(
         (await admin.get(`/users/${ownerId}`).expect(200)).body,
       ),
-    ).toMatchObject({ role: Role.OWNER, bookingCount: 0, listingCount: 1 });
+    ).toMatchObject({ role: Role.USER, bookingCount: 0, listingCount: 1 });
     expect(
       managedUserDetailSchema.parse(
         (await admin.get(`/users/${guestId}`).expect(200)).body,
@@ -118,7 +124,7 @@ describe("UserController (e2e)", () => {
 
     expect(emails(first)).toEqual([
       credentialsFor.ADMIN.email,
-      credentialsFor.OWNER.email,
+      hostCredentials.email,
     ]);
     expect(first.nextCursor).not.toBeNull();
 
@@ -131,25 +137,25 @@ describe("UserController (e2e)", () => {
 
     expect(emails(await page("?sort=oldest"))).toEqual([
       credentialsFor.USER.email,
-      credentialsFor.OWNER.email,
+      hostCredentials.email,
       credentialsFor.ADMIN.email,
     ]);
   });
 
   it("filters by role, by a part of the name or the address, and by whether the account is blocked", async () => {
-    expect(emails(await page("?role=OWNER"))).toEqual([
-      credentialsFor.OWNER.email,
+    expect(emails(await page("?role=ADMIN"))).toEqual([
+      credentialsFor.ADMIN.email,
     ]);
     // Any part of it, in any case: what an admin remembers of an address.
     expect(emails(await page("?email=E2E-OWN"))).toEqual([
-      credentialsFor.OWNER.email,
+      hostCredentials.email,
     ]);
     // Taken as written: `LIKE` would read these two as wildcards and match every address.
     expect(emails(await page("?email=%25"))).toEqual([]);
     expect(emails(await page("?email=e2e_"))).toEqual([]);
     // A name is stored as typed, so it is the match that ignores the case.
     expect(emails(await page("?name=e2e%20own"))).toEqual([
-      credentialsFor.OWNER.email,
+      hostCredentials.email,
     ]);
     expect(emails(await page("?name=%25"))).toEqual([]);
 
@@ -175,17 +181,29 @@ describe("UserController (e2e)", () => {
   it("changes a role, which the account carries from its next sign-in", async () => {
     const guestId = await idOf(credentialsFor.USER.email);
 
-    const response = await admin
+    const promoted = await admin
       .patch(`/users/${guestId}`)
-      .send({ role: Role.OWNER })
+      .send({ role: Role.ADMIN })
       .expect(200);
 
-    expect(managedUserSchema.parse(response.body).role).toBe(Role.OWNER);
+    expect(managedUserSchema.parse(promoted.body).role).toBe(Role.ADMIN);
 
     // The access token in the agent still says USER: `JwtStrategy` reads no database.
+    await guest.get("/users").expect(403);
+    await guest.post("/auth/login").send(credentialsFor.USER).expect(200);
+    await guest.get("/users").expect(200);
     await guest.get("/listings/mine").expect(403);
+
+    const demoted = await admin
+      .patch(`/users/${guestId}`)
+      .send({ role: Role.USER })
+      .expect(200);
+
+    expect(managedUserSchema.parse(demoted.body).role).toBe(Role.USER);
+
     await guest.post("/auth/login").send(credentialsFor.USER).expect(200);
     await guest.get("/listings/mine").expect(200);
+    await guest.get("/users").expect(403);
   });
 
   it("blocks an account: no refresh, no new sign-in, and `/auth/me` reads it as signed out", async () => {

@@ -16,7 +16,7 @@ import { resetDatabase } from "./database";
 import { inDays } from "./dates";
 import { EventStream } from "./event-stream";
 import { resetQueue } from "./queue";
-import { credentialsFor, signInAs, type Agent } from "./session";
+import { hostCredentials, signIn, signInAs, type Agent } from "./session";
 import { waitUntil } from "./wait-until";
 
 const listingInput: CreateListingInput = {
@@ -45,7 +45,7 @@ describe("Notifications (e2e)", () => {
     await resetQueue(app);
 
     guest = await signInAs(app, Role.USER);
-    owner = await signInAs(app, Role.OWNER);
+    owner = await signIn(app, hostCredentials);
     admin = await signInAs(app, Role.ADMIN);
 
     const listing = await owner
@@ -230,7 +230,7 @@ describe("Notifications (e2e)", () => {
   it("opens the stream with the count, then pushes what happens while it is open", async () => {
     await book();
 
-    const stream = await EventStream.openAs(app, credentialsFor.OWNER);
+    const stream = await EventStream.openAs(app, hostCredentials);
 
     try {
       await expect(stream.next()).resolves.toMatchObject({

@@ -47,19 +47,10 @@ export const AskHostSkeleton = () => (
  * of one filtered by it answers whether it exists; the page never renders this for the
  * listing's owner, whose threads about it are all a host's. The read is `no-store`, and it
  * is made only for a signed-in visitor: the cached reads of this page stay as public as
- * they were.
- *
- * Only a guest may open a thread (`POST /conversations` is `@Roles(Role.USER)`), so
- * `canStart` decides whether a visitor without one is offered the box or nothing at all —
- * an owner who wrote here before their promotion still gets the way back.
+ * they were. The page renders it for a `USER` only — `POST /conversations` is
+ * `@Roles(Role.USER)`, and an admin is a side of no thread.
  */
-export const AskHost = async ({
-  listingId,
-  canStart,
-}: {
-  listingId: string;
-  canStart: boolean;
-}) => {
+export const AskHost = async ({ listingId }: { listingId: string }) => {
   const existing = await existingThread(listingId);
 
   if (existing !== undefined) {
@@ -78,8 +69,6 @@ export const AskHost = async ({
       </AskHostCard>
     );
   }
-
-  if (!canStart) return null;
 
   return (
     <AskHostCard>

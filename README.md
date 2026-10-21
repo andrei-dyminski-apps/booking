@@ -2,7 +2,7 @@
 
 A booking service monorepo: a Next.js frontend and a NestJS backend in one repository, managed by Turborepo and pnpm workspaces.
 
-> Status: the API is a working vertical slice — owners publish listings, guests book them and the dates are checked for overlaps. Storage is PostgreSQL via Prisma 7, and the API is behind hand-written authentication: argon2, a JWT pair in httpOnly cookies, refresh-token rotation, and role-based authorization on top. The frontend has the session half of it — sign up, sign in, a guarded profile page rendered on the server as the visitor, and a session that survives an expired access token — plus the owner's dashboard, where a listing is published, edited and taken down, and the catalogue: a filtered, cursor-paged list of stays whose filters live in the URL, a listing page with an availability calendar and the form that takes a hold, and a "my bookings" screen that shows every role its own scope, filtered and paged out of the URL like the catalogue. What a hold cannot do yet is turn into a paid stay; that is the next phase. The rest are in [docs/plan.md](docs/plan.md).
+> Status: the API is a working vertical slice — any account publishes listings and books other people's and the dates are checked for overlaps. Storage is PostgreSQL via Prisma 7, and the API is behind hand-written authentication: argon2, a JWT pair in httpOnly cookies, refresh-token rotation, and role-based authorization on top. The frontend has the session half of it — sign up, sign in, a guarded profile page rendered on the server as the visitor, and a session that survives an expired access token — plus the dashboard, where a listing is published, edited and taken down, and the catalogue: a filtered, cursor-paged list of stays whose filters live in the URL, a listing page with an availability calendar and the form that takes a hold, and a bookings screen with a "Trips" and a "Hosting" side for every user and everything for an admin, filtered and paged out of the URL like the catalogue. What a hold cannot do yet is turn into a paid stay; that is the next phase. The rest are in [docs/plan.md](docs/plan.md).
 
 ## Requirements
 
@@ -25,7 +25,7 @@ pnpm dev
 - API — http://localhost:3001
 - OpenAPI — http://localhost:3001/docs (not published when `NODE_ENV=production`)
 
-The seed also creates three demo logins, one per role: `guest@example.com`, `owner@example.com`, `admin@example.com` — password `password123`. A few more accounts (`ines@example.com`, a second host; `alex.morgan@example.com`, `amorgan@example.com`, `sam@example.com`, guests) share that password and exist so the filter boxes have names to suggest.
+The seed also creates three demo logins: `guest@example.com` (books stays), `owner@example.com` (hosts most of the catalogue) — both plain users, since hosting is owning a listing rather than a role — and `admin@example.com` — password `password123`. A few more accounts (`ines@example.com`, a second host who also books one of the owner's stays; `alex.morgan@example.com`, `amorgan@example.com`, `sam@example.com`, guests) share that password and exist so the filter boxes have names to suggest.
 
 ## Layout
 
@@ -110,21 +110,21 @@ Routing belongs to Next.js and everything else to Feature-Sliced Design, so each
 | `/`                                | the landing, one link into the catalogue                              | everyone    |
 | `/listings`                        | the catalogue: filters in the URL, keyset pages, cached and tagged    | everyone    |
 | `/listings/:id`                    | one listing, its availability calendar and the form that takes a hold | everyone    |
-| `/bookings`                        | stays in the caller's scope: filters in the URL, keyset pages         | signed in   |
+| `/bookings`                        | Trips and Hosting (`?side=HOST`): filters in the URL, keyset pages    | signed in   |
 | `/guests/:id/reviews`              | what hosts said about one guest, for the guest and their hosts        | signed in   |
-| `/messages`                        | the caller's conversations, the most recent first                     | USER, OWNER |
+| `/messages`                        | the caller's conversations, the most recent first                     | USER        |
 | `/messages/:id`                    | one thread, paged back from its end, and the reply box                | its 2 sides |
 | `/notifications`                   | the caller's notifications, newest first, kept live by the stream     | signed in   |
 | `/login`, `/register`              | the session forms, submitted to Server Actions                        | everyone    |
 | `/profile`                         | the session as the API sees it, and "Sign out"                        | signed in   |
-| `/dashboard`                       | the owner's own listings                                              | OWNER       |
-| `/dashboard/listings/new`, `…/:id` | publishing, editing and retiring a listing                            | OWNER       |
+| `/dashboard`                       | the caller's own listings                                             | USER        |
+| `/dashboard/listings/new`, `…/:id` | publishing, editing and retiring a listing                            | USER        |
 
 Every screen sits inside one shell (`apps/web/src/_app/layout`): a sidebar from `lg` up, the same list in a sheet behind the menu button below it, and a header with the theme and the two calls to action a stranger has. The shell reads `/auth/me` once for all three, and `currentUser()` is memoized for the render so the page under it does not ask again. A route that reads the API has a `loading.tsx` skeleton beside it, `notFound()` has a screen of its own, and there are two error boundaries — one under the shell and one that replaces the document when the shell itself cannot render.
 
 On the catalogue the filters are the URL. Every one of them lives behind a "Filters" modal — a plain `GET` form, so submitting it is the browser navigating to the search it spells rather than an action keeping state in step — the ordering beside it is a box over the same four links, and what is applied is spelled out as chips, each of them a link to the same search without that filter. The price of the compact toolbar is that asking a question of your own needs JavaScript: without it the catalogue still reads, and a chip still takes a filter off a search somebody sent.
 
-The stays screen is the same toolbar over a different list, and the two share what they can: the boxes, the chips and the ordering box live in `src/shared/ui`, while what is being filtered — the labels, the links, the parse of `searchParams` — stays in the slice of each screen. A card there carries one more link than the catalogue's does: "Stays here" is the `listingId` filter, which is how an owner or an admin reaches it without typing a uuid into a box.
+The stays screen is the same toolbar over a different list, and the two share what they can: the boxes, the chips and the ordering box live in `src/shared/ui`, while what is being filtered — the labels, the links, the parse of `searchParams` — stays in the slice of each screen. A card there carries one more link than the catalogue's does: "Stays here" is the `listingId` filter, which is how a host or an admin reaches it without typing a uuid into a box. A user sees their stays in two halves — "Trips", the ones they took, and "Hosting", the ones taken against their listings — as two links over `?side=HOST`.
 
 The three catalogue routes are the first cached reads in the application: `GET /listings`, one listing and its availability are public and identical for every visitor, so they are stored under their URL and tagged, and a mutation of a listing or a booking invalidates the tags it actually changed. Everything personal — the session, a visitor's stays, an owner's own listings — is read `no-store` and never tagged, because the Data Cache is keyed by URL and shared with whoever asks next.
 
@@ -133,45 +133,45 @@ The three catalogue routes are the first cached reads in the application: `GET /
 Every route below except `/`, the four public `/auth/*` ones, the three reading routes
 of the catalogue and a listing's reviews is behind the global `JwtAuthGuard` and answers `401` without a session.
 
-| Method   | Path                          | What it does                                                                                   |
-| -------- | ----------------------------- | ---------------------------------------------------------------------------------------------- |
-| `POST`   | `/auth/register`              | register and open a session; `400` — failed the schema, `409` — email is taken                 |
-| `POST`   | `/auth/login`                 | log in; `401` — wrong email or password, `403` — the account is blocked                        |
-| `POST`   | `/auth/refresh`               | rotate the token pair; `401` — missing, spent or forged token, cookies cleared                 |
-| `POST`   | `/auth/logout`                | end the session, `204`; answers the same without one                                           |
-| `GET`    | `/auth/me`                    | the current user; `401` — no session, the user is gone or blocked                              |
-| `GET`    | `/listings`                   | the catalogue: filters (`ownerId` among them), an ordering and a cursor; public                |
-| `GET`    | `/listings/mine`              | the caller's own listings; OWNER only                                                          |
-| `GET`    | `/listings/:id`               | a single listing, `404` if missing or retired; public                                          |
-| `GET`    | `/listings/:id/availability`  | the nights already taken, for a `from`/`to` window; public                                     |
-| `POST`   | `/listings`                   | create, the owner taken from the session; OWNER only                                           |
-| `PATCH`  | `/listings/:id`               | edit; OWNER (their own) or ADMIN, `403` otherwise                                              |
-| `DELETE` | `/listings/:id`               | retire, `204`; out of the catalogue, booked stays keep their record                            |
-| `GET`    | `/bookings`                   | one page of the stays the caller may see: filters, an ordering and a cursor                    |
-| `GET`    | `/bookings/:id`               | a single booking; the guest, the owner of the listing or an admin                              |
-| `POST`   | `/bookings`                   | create a 15-minute hold; USER only, `404` — no such listing, `409` — dates are taken           |
-| `DELETE` | `/bookings/:id`               | cancel, `204`; the guest or an admin. The row stays, with `status: CANCELLED`                  |
-| `GET`    | `/conversations`              | every thread the caller is a side of, newest message first; `listingId`, a cursor; USER, OWNER |
-| `POST`   | `/conversations`              | a guest's message about a listing: opens the thread or continues it; USER only                 |
-| `GET`    | `/conversations/:id`          | one thread as the caller's side reads it; `404` for anybody but its two sides                  |
-| `GET`    | `/conversations/:id/messages` | one page of the thread, the newest message first, a cursor                                     |
-| `POST`   | `/conversations/:id/messages` | a reply from either side; a retired listing does not close the thread                          |
-| `POST`   | `/conversations/:id/read`     | the caller's side has seen the thread up to `upTo`, the newest message shown; `204`            |
-| `GET`    | `/users`                      | one page of accounts: role, status, name and address filters, a cursor; ADMIN only             |
-| `GET`    | `/users/:id`                  | one account with its stay and listing counts; ADMIN only                                       |
-| `PATCH`  | `/users/:id`                  | change the role and/or block; ADMIN only, `403` on the caller's own account                    |
-| `GET`    | `/lookups/owners`             | accounts with a listing on offer, by `q` — a part of the address or a whole id; ADMIN          |
-| `GET`    | `/lookups/guests`             | the guests of the caller's stays, by `q`; OWNER (their listings') or ADMIN                     |
-| `GET`    | `/lookups/listings`           | the listings of the caller's stays, retired included, by `q` — a part of the title             |
-| `GET`    | `/listings/:id/reviews`       | the guests' reviews of a listing, a page and a summary; `404` if retired; public               |
-| `GET`    | `/guests/:id/reviews`         | the hosts' reviews of a guest; the guest, a host they booked with or ADMIN, else `404`         |
-| `POST`   | `/bookings/:id/reviews`       | review a confirmed stay that is over; the guest or the owner, `409` — not yet or twice         |
-| `DELETE` | `/reviews/:id`                | remove a review, `204`; ADMIN only                                                             |
-| `GET`    | `/notifications`              | one page of the caller's notifications, newest first, with a cursor                            |
-| `GET`    | `/notifications/unread-count` | how many of them are unread                                                                    |
-| `POST`   | `/notifications/:id/read`     | mark one read, answers the unread count; `404` — not one of the caller's                       |
-| `POST`   | `/notifications/read`         | mark all read, answers the unread count                                                        |
-| `GET`    | `/events`                     | the caller's event stream (Server-Sent Events): a `sync`, then whatever happens                |
+| Method   | Path                          | What it does                                                                                 |
+| -------- | ----------------------------- | -------------------------------------------------------------------------------------------- |
+| `POST`   | `/auth/register`              | register and open a session; `400` — failed the schema, `409` — email is taken               |
+| `POST`   | `/auth/login`                 | log in; `401` — wrong email or password, `403` — the account is blocked                      |
+| `POST`   | `/auth/refresh`               | rotate the token pair; `401` — missing, spent or forged token, cookies cleared               |
+| `POST`   | `/auth/logout`                | end the session, `204`; answers the same without one                                         |
+| `GET`    | `/auth/me`                    | the current user; `401` — no session, the user is gone or blocked                            |
+| `GET`    | `/listings`                   | the catalogue: filters (`ownerId` among them), an ordering and a cursor; public              |
+| `GET`    | `/listings/mine`              | the caller's own listings; USER only                                                         |
+| `GET`    | `/listings/:id`               | a single listing, `404` if missing or retired; public                                        |
+| `GET`    | `/listings/:id/availability`  | the nights already taken, for a `from`/`to` window; public                                   |
+| `POST`   | `/listings`                   | create, the owner taken from the session; USER only                                          |
+| `PATCH`  | `/listings/:id`               | edit; the owner or ADMIN, `403` otherwise                                                    |
+| `DELETE` | `/listings/:id`               | retire, `204`; out of the catalogue, booked stays keep their record                          |
+| `GET`    | `/bookings`                   | one page of the stays the caller may see: `side`, filters, an ordering and a cursor          |
+| `GET`    | `/bookings/:id`               | a single booking; the guest, the owner of the listing or an admin                            |
+| `POST`   | `/bookings`                   | a 15-minute hold; USER only, `403` — own listing, `404` — no listing, `409` — dates taken    |
+| `DELETE` | `/bookings/:id`               | cancel, `204`; the guest or an admin. The row stays, with `status: CANCELLED`                |
+| `GET`    | `/conversations`              | every thread the caller is a side of, newest message first; `listingId`, a cursor; USER only |
+| `POST`   | `/conversations`              | a guest's message about a listing: opens the thread or continues it; USER only               |
+| `GET`    | `/conversations/:id`          | one thread as the caller's side reads it; `404` for anybody but its two sides                |
+| `GET`    | `/conversations/:id/messages` | one page of the thread, the newest message first, a cursor                                   |
+| `POST`   | `/conversations/:id/messages` | a reply from either side; a retired listing does not close the thread                        |
+| `POST`   | `/conversations/:id/read`     | the caller's side has seen the thread up to `upTo`, the newest message shown; `204`          |
+| `GET`    | `/users`                      | one page of accounts: role, status, name and address filters, a cursor; ADMIN only           |
+| `GET`    | `/users/:id`                  | one account with its stay and listing counts; ADMIN only                                     |
+| `PATCH`  | `/users/:id`                  | change the role and/or block; ADMIN only, `403` on the caller's own account                  |
+| `GET`    | `/lookups/owners`             | accounts with a listing on offer, by `q` — a part of the address or a whole id; ADMIN        |
+| `GET`    | `/lookups/guests`             | the guests of the caller's stays, by `q`; USER (their listings') or ADMIN                    |
+| `GET`    | `/lookups/listings`           | the listings of the caller's stays on `side`, retired included, by `q` — a part of the title |
+| `GET`    | `/listings/:id/reviews`       | the guests' reviews of a listing, a page and a summary; `404` if retired; public             |
+| `GET`    | `/guests/:id/reviews`         | the hosts' reviews of a guest; the guest, a host they booked with or ADMIN, else `404`       |
+| `POST`   | `/bookings/:id/reviews`       | review a confirmed stay that is over; the guest or the owner, `409` — not yet or twice       |
+| `DELETE` | `/reviews/:id`                | remove a review, `204`; ADMIN only                                                           |
+| `GET`    | `/notifications`              | one page of the caller's notifications, newest first, with a cursor                          |
+| `GET`    | `/notifications/unread-count` | how many of them are unread                                                                  |
+| `POST`   | `/notifications/:id/read`     | mark one read, answers the unread count; `404` — not one of the caller's                     |
+| `POST`   | `/notifications/read`         | mark all read, answers the unread count                                                      |
+| `GET`    | `/events`                     | the caller's event stream (Server-Sent Events): a `sync`, then whatever happens              |
 
 The three lookups fill in the id filters of the admin's listings and of the stays: `q` is at
 least three characters, matched anywhere in the name regardless of case — or, when it is a
@@ -277,12 +277,13 @@ The answer is `{ items, nextCursor }`, and `nextCursor` is `null` on the last pa
 ### The stays list
 
 `GET /bookings` is the second search of this API, and it is paged for a reason the
-catalogue does not have: one of its three scopes has no ceiling on it. A guest's own
-history stays small by itself, an owner's is bounded by their listings, and an admin's is
-every stay on the site.
+catalogue does not have: one of its scopes has no ceiling on it. A user's trips stay small
+by themselves, their hosting is bounded by their listings, and an admin's scope is every
+stay on the site.
 
 | Parameter         | What it narrows                                                      |
 | ----------------- | -------------------------------------------------------------------- |
+| `side`            | a user's half: `GUEST` (the default, their trips) or `HOST`; admin — |
 | `status`          | one of `PENDING_PAYMENT`, `CONFIRMED`, `CANCELLED`, `EXPIRED`        |
 | `listingId`       | the stays taken against one listing                                  |
 | `guestId`         | the stays one guest took                                             |
@@ -295,9 +296,9 @@ catalogue issues, and it is refused the same way: one this API did not write, or
 back under another `sort`, is a `400` rather than a silent first page.
 
 - **A filter narrows the scope; it never reaches around it.** What a caller may see is
-  decided by their role inside the `where` — a guest's own stays, an owner's listings',
-  everything for an admin — and `guestId` is a filter on top of that rather than a way past
-  it: for a guest it can only ever name themselves, and naming anybody else answers with
+  decided by their role inside the `where` — a user's own stays or the ones against their
+  listings, as `side` picks, everything for an admin — and `guestId` is a filter on top of
+  that rather than a way past it: on the guest's side it can only ever name themselves, and naming anybody else answers with
   the empty list it truthfully is. The repository `AND`s the scope with the filters instead
   of spreading them into one object, which is what makes that true of the one parameter
   that names the same column the scope does.
@@ -363,7 +364,7 @@ Implemented by hand rather than taken from Auth.js or Clerk — the parts an int
 
 The secrets have no fallback in the code: an unset `JWT_ACCESS_SECRET` stops the process at boot instead of shipping a key that is in a public repository. `.env.example` carries development values — replace them anywhere else, `openssl rand -hex 32` generates one.
 
-`pnpm --filter @repo/api db:seed` creates three demo logins, one per role — `guest@example.com`, `owner@example.com` and `admin@example.com`, all with the password `password123` — plus a second host and three more guests, two of whom share the name "Alex Morgan" so a lookup has two rows of one name to tell apart; eight listings, six owned by the owner and two by the second host, and ten bookings ahead spread over the guests — enough for the catalogue's filters to have something to keep as well as something to drop — plus three stays of the demo guest that are already over, reviewed by both sides, by the guest alone and by nobody, so the demo guest and the demo owner each have a review left to write — and two conversations between the guest and the owner, one of them unread by the owner — so every rule below has something to act on from the first request. The stays are dated from the day the seed runs, so the data never ages into a puzzle. The bookings ahead are ones the API itself would accept; the three that are over are the exception it cannot write — the contract refuses a check-in in the past — which is why only the seed can give a review something to be about.
+`pnpm --filter @repo/api db:seed` creates three demo logins — `guest@example.com` and `owner@example.com`, both plain users (one books, the other hosts), and `admin@example.com`, all with the password `password123` — plus a second host who also books a stay at the owner's, so one account has both a Trips and a Hosting side, and three more guests, two of whom share the name "Alex Morgan" so a lookup has two rows of one name to tell apart; eight listings, six owned by the owner and two by the second host, and eleven bookings ahead spread over the guests — enough for the catalogue's filters to have something to keep as well as something to drop — plus three stays of the demo guest that are already over, reviewed by both sides, by the guest alone and by nobody, so the demo guest and the demo owner each have a review left to write — and two conversations between the guest and the owner, one of them unread by the owner — so every rule below has something to act on from the first request. The stays are dated from the day the seed runs, so the data never ages into a puzzle. The bookings ahead are ones the API itself would accept; the three that are over are the exception it cannot write — the contract refuses a check-in in the past — which is why only the seed can give a review something to be about.
 
 ### The same session on the frontend
 
@@ -378,29 +379,31 @@ The two cookie scopes are what shape the browser half of it, so it is worth read
 
 Authorization is two checks, and they are deliberately not the same check.
 
-- **The role check** is `RolesGuard`, registered globally right after `JwtAuthGuard` so that it reads the user that one put on the request. It answers "may this kind of user call this endpoint at all" from the access token alone — no query, no row — which is why it fits a guard. `@Roles(Role.OWNER)` is what turns it on; a route without the decorator is open to every signed-in role.
+- **The role check** is `RolesGuard`, registered globally right after `JwtAuthGuard` so that it reads the user that one put on the request. It answers "may this kind of user call this endpoint at all" from the access token alone — no query, no row — which is why it fits a guard. `@Roles(Role.USER)` is what turns it on; a route without the decorator is open to every signed-in role.
 - **The ownership check** lives in the service, next to the read, because it cannot be answered before the row is there: whether _this_ listing belongs to _this_ owner is a property of the row, and a guard that decided it would have to fetch the row the handler is about to fetch anyway. A `403` from the guard means "not your kind of endpoint", a `403` from the service means "not your row".
 
-The guard is membership of a set, not a hierarchy: an ADMIN does not pass an `@Roles(Role.OWNER)` check by being senior to an owner. A route admins may use names `ADMIN` itself, so what each role can reach is readable where the route is written rather than hidden in a comparison inside the guard — and `@Roles(Role.USER)` on "create a booking" keeps meaning what it says instead of quietly admitting the two roles above it. The one place a hierarchy exists is the ownership check, where an admin passes without owning anything, and that is a rule about rows.
+There are two roles, `USER` and `ADMIN`. Being a host is not one of them: whoever owns a listing hosts it, and whoever booked a stay is its guest, so one account is a guest of some stays and the host of others — the way a marketplace of this kind works, where a guest becoming a host keeps their history and their reviews. An account cannot book its own listing (`403`), and any user may publish one.
 
-|                         | USER      | OWNER                  | ADMIN             |
-| ----------------------- | --------- | ---------------------- | ----------------- |
-| read the catalogue      | ✅        | ✅                     | ✅                |
-| create a listing        | —         | ✅                     | —                 |
-| edit / delete a listing | —         | their own              | any               |
-| create a booking        | ✅        | —                      | —                 |
-| read bookings           | their own | against their listings | all               |
-| cancel a booking        | their own | —                      | any               |
-| review a finished stay  | the place | the guest              | —                 |
-| read guest reviews      | their own | of guests who booked   | all               |
-| remove a review         | —         | —                      | any               |
-| manage users            | —         | —                      | any but their own |
+The guard is membership of a set, not a hierarchy: an ADMIN does not pass an `@Roles(Role.USER)` check by being senior to a user. A route admins may use names `ADMIN` itself, so what each role can reach is readable where the route is written rather than hidden in a comparison inside the guard — and `@Roles(Role.USER)` on "create a booking" keeps meaning what it says instead of quietly admitting the role above it. The one place a hierarchy exists is the ownership check, where an admin passes without owning anything, and that is a rule about rows.
 
-Reading and writing are separate rules over the same row: an owner sees the stays booked against their listing and cannot cancel one out from under a guest. `GET /bookings` narrows by the role of the caller inside the `where` rather than through a query parameter, so the query cannot return a row the caller may not see.
+|                         | USER, as a guest      | USER, as a host        | ADMIN             |
+| ----------------------- | --------------------- | ---------------------- | ----------------- |
+| read the catalogue      | ✅                    | ✅                     | ✅                |
+| create a listing        | ✅                    | ✅                     | —                 |
+| edit / delete a listing | —                     | their own              | any               |
+| create a booking        | not their own listing | —                      | —                 |
+| read bookings           | their own             | against their listings | all               |
+| cancel a booking        | their own             | —                      | any               |
+| review a finished stay  | the place             | the guest              | —                 |
+| read guest reviews      | their own             | of guests who booked   | all               |
+| remove a review         | —                     | —                      | any               |
+| manage users            | —                     | —                      | any but their own |
+
+Reading and writing are separate rules over the same row: an owner sees the stays booked against their listing and cannot cancel one out from under a guest. `GET /bookings` narrows by the caller inside the `where` rather than through a query parameter that could widen it — `side` only picks which of a user's two scopes it is — so the query cannot return a row the caller may not see.
 
 Whether a refusal is a `403` or a `404` follows from what the caller could have found anyway. A listing that belongs to another owner answers `403` — the catalogue is readable by everyone signed in, so "exists, but not yours" says nothing new. A booking answers `404`, because nothing lets a stranger list bookings and a `403` would be the one way to learn that an id exists. The `403` on cancelling is the exception that proves it: it goes to the owner of the listing, who may already read that booking, and refuses them the second right rather than the first.
 
-Registration always writes a `USER` — the only safe default for a public endpoint. The other two roles are given by an admin (`PATCH /users/:id`, the `/admin/users` screen; the seed sets them for the demo logins), and since `JwtStrategy` reads no database, a change of role takes effect at the next refresh: `JWT_ACCESS_TTL` is the upper bound on that lag.
+Registration always writes a `USER` — the only safe default for a public endpoint, and the whole of what a guest or a host needs. `ADMIN` is given by an admin (`PATCH /users/:id`, the `/admin/users` screen; the seed sets it for the demo admin), and since `JwtStrategy` reads no database, a change of role takes effect at the next refresh: `JWT_ACCESS_TTL` is the upper bound on that lag.
 
 An admin manages accounts instead of deleting them. **Blocking** stamps `users.blocked_at` and deletes every refresh token of the account in the same transaction, so no session can be refreshed; login answers `403` once the password is right, `/auth/me` answers `401`, and the access token left in a browser lapses within `JWT_ACCESS_TTL`. A delete was left out on purpose: bookings cascade from a user and listings restrict, so it would either erase somebody's stay history or be refused for any owner who ever listed. An admin cannot change their own role or block themselves — a site must not be able to lose its last admin by one click — so another admin does it.
 

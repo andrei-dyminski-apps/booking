@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { stayPartySchema } from "./booking.js";
 import { reviewKindSchema, reviewSchema } from "./review.js";
 import { PAGING } from "./query.js";
 
@@ -41,11 +42,6 @@ const stayNoticeSchema = z.object({
   from: z.iso.date(),
   to: z.iso.date(),
 });
-
-/** Which side of the stay the recipient is — a guest and a host are told different things. */
-export const stayPartySchema = z.enum(["GUEST", "HOST"]);
-
-export const StayParty = stayPartySchema.enum;
 
 const bookingRequestedSchema = z.object({
   type: z.literal(NotificationType.BOOKING_REQUESTED),
@@ -142,7 +138,6 @@ export const unreadCountSchema = z.object({
 });
 
 export type NotificationType = z.infer<typeof notificationTypeSchema>;
-export type StayParty = z.infer<typeof stayPartySchema>;
 export type StayNotice = z.infer<typeof stayNoticeSchema>;
 export type NotificationContent = z.infer<typeof notificationContentSchema>;
 export type Notification = z.infer<typeof notificationSchema>;

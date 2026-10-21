@@ -78,12 +78,19 @@ export class BookingController {
     return this.bookingService.findOne(id, user);
   }
 
-  /** Guests book. An owner rents their listings out, an admin moderates — neither books. */
+  /**
+   * Any user books — a host too, though not their own listing (`403`). An admin moderates
+   * and does not book.
+   */
   @Post()
   @Roles(Role.USER)
   @ApiCreatedResponse({ type: BookingDto })
   @ApiNotFoundResponse({
     description: "The listing does not exist",
+    type: ApiErrorDto,
+  })
+  @ApiForbiddenResponse({
+    description: "The listing is the caller's own",
     type: ApiErrorDto,
   })
   @ApiConflictResponse({

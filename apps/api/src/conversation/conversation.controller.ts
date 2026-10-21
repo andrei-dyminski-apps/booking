@@ -54,17 +54,17 @@ const MALFORMED_CURSOR = {
 };
 
 /**
- * The messages between a guest and the host of a listing. Every route is the two sides'
- * — a guest (`USER`) and a host (`OWNER`) — and which threads a caller reaches is decided
- * by the rows rather than here: the scope of the list, and the `404` for anybody who is
- * not one of a thread's two people.
+ * The messages between a guest and the host of a listing. Every route is a `USER`'s — one
+ * account is a guest of some listings and the host of others — and which threads a caller
+ * reaches is decided by the rows rather than here: the scope of the list, and the `404`
+ * for anybody who is not one of a thread's two people.
  */
 @Controller("conversations")
 export class ConversationController {
   constructor(private readonly conversationService: ConversationService) {}
 
   @Get()
-  @Roles(Role.USER, Role.OWNER)
+  @Roles(Role.USER)
   @ApiOkResponse({ type: ConversationPageDto })
   @ApiBadRequestResponse(MALFORMED_CURSOR)
   findPage(
@@ -98,7 +98,7 @@ export class ConversationController {
   }
 
   @Get(":id")
-  @Roles(Role.USER, Role.OWNER)
+  @Roles(Role.USER)
   @ApiOkResponse({ type: ConversationDto })
   @ApiNotFoundResponse(NOT_A_SIDE)
   findOne(
@@ -110,7 +110,7 @@ export class ConversationController {
 
   /** The thread, the newest message first — it is read from its end. */
   @Get(":id/messages")
-  @Roles(Role.USER, Role.OWNER)
+  @Roles(Role.USER)
   @ApiOkResponse({ type: MessagePageDto })
   @ApiBadRequestResponse(MALFORMED_CURSOR)
   @ApiNotFoundResponse(NOT_A_SIDE)
@@ -123,7 +123,7 @@ export class ConversationController {
   }
 
   @Post(":id/messages")
-  @Roles(Role.USER, Role.OWNER)
+  @Roles(Role.USER)
   @ApiCreatedResponse({ type: MessageDto })
   @ApiNotFoundResponse(NOT_A_SIDE)
   send(
@@ -140,7 +140,7 @@ export class ConversationController {
    * what the other list says would be marked read by a prefetch nobody looked at.
    */
   @Post(":id/read")
-  @Roles(Role.USER, Role.OWNER)
+  @Roles(Role.USER)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse()
   @ApiNotFoundResponse(NOT_A_SIDE)

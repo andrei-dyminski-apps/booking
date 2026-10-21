@@ -5,6 +5,7 @@ import {
   LOOKUP_MIN_LENGTH,
   type LookupKind,
   type LookupOption,
+  type StayParty,
 } from "@repo/contracts";
 import {
   Combobox,
@@ -47,6 +48,7 @@ export const LookupField = ({
   name,
   label,
   kind,
+  side,
   value,
   valueOption,
   error,
@@ -56,6 +58,8 @@ export const LookupField = ({
   name: string;
   label: string;
   kind: LookupKind;
+  /** The half of a user's stays the suggestions come from, where the kind reads one. */
+  side?: StayParty | undefined;
   /** The id the URL carries, or the text it carries where the contract refused it. */
   value: string;
   /**
@@ -77,7 +81,7 @@ export const LookupField = ({
       : (valueOption ?? { id: value, label: value, hint: null }),
   );
   const [inputValue, setInputValue] = useState(selected?.label ?? "");
-  const { term, setTerm, current, onScroll } = useLookupSearch(kind);
+  const { term, setTerm, current, onScroll } = useLookupSearch(kind, side);
 
   /** What was picked, while the box still shows its name rather than text typed over it. */
   const picked =

@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { UsersIcon } from "lucide-react";
-import { Role, weekdaySchema, type Role as RoleName } from "@repo/contracts";
+import { Role, weekdaySchema } from "@repo/contracts";
 import { Badge } from "@repo/ui/components/badge";
 import {
   Card,
@@ -48,17 +48,6 @@ const CALENDAR_DAYS = 92;
 
 /** How many reviews the listing's screen draws under the summary of all of them. */
 const REVIEWS_SHOWN = 10;
-
-/**
- * Why an account that is not a guest has no form. Keyed by the two roles that reach it
- * rather than written as one sentence about owners: an admin is not renting anything out,
- * and being told they are is a screen describing somebody else. A fourth role stops
- * compiling here instead of picking up whichever of the two it was nearest to.
- */
-const NOT_A_GUEST: Record<Exclude<RoleName, typeof Role.USER>, string> = {
-  [Role.OWNER]: "This account rents listings out instead.",
-  [Role.ADMIN]: "This account moderates the site instead.",
-};
 
 export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
   const id = requireId((await params).id);
@@ -193,27 +182,42 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
               >
                 Sign in to book
               </ButtonLink>
-            ) : viewer.role === Role.USER ? (
+            ) : viewer.role === Role.ADMIN ? (
+              // The API says the same thing with `@Roles(Role.USER)` on the route: an
+              // admin moderating the site is not also a guest.
+              <p className="text-sm text-muted-foreground">
+                Stays are booked by guests. This account moderates the site
+                instead.
+              </p>
+            ) : viewer.id === listing.ownerId ? (
+              // Any user may book and host, but not both on one listing: the API answers
+              // a booking of one's own listing with a `403`.
+              <div className="flex flex-col gap-3">
+                <p className="text-sm text-muted-foreground">
+                  This is your listing. Guests book it here; its stays are under
+                  Hosting.
+                </p>
+                <ButtonLink
+                  href={ROUTES.editListing(listing.id)}
+                  variant="outline"
+                  className="w-full"
+                >
+                  Edit the listing
+                </ButtonLink>
+              </div>
+            ) : (
               <BookingForm
                 listingId={listing.id}
                 prices={listing}
                 earliest={from}
               />
-            ) : (
-              // The API says the same thing with `@Roles(Role.USER)` on the route: a role
-              // is one persona here, and neither an owner renting places out nor an admin
-              // moderating them is also a guest.
-              <p className="text-sm text-muted-foreground">
-                Stays are booked by guests. {NOT_A_GUEST[viewer.role]}
-              </p>
             )}
           </CardContent>
         </Card>
 
         {/* Only a guest writes first — `POST /conversations` is `@Roles(Role.USER)` — so
-            nobody else is offered a box the API would refuse; an owner still gets the way
-            back to a thread they started as a guest. The listing's own owner is every
-            thread's host here, and an admin is a side of none. */}
+            nobody else is offered a box the API would refuse. The listing's own owner is
+            every thread's host here, and an admin is a side of none. */}
         {viewer === null ? (
           <AskHostCard>
             <ButtonLink
@@ -227,13 +231,8 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
         ) : (
           viewer.role !== Role.ADMIN &&
           viewer.id !== listing.ownerId && (
-            <Suspense
-              fallback={viewer.role === Role.USER ? <AskHostSkeleton /> : null}
-            >
-              <AskHost
-                listingId={listing.id}
-                canStart={viewer.role === Role.USER}
-              />
+            <Suspense fallback={<AskHostSkeleton />}>
+              <AskHost listingId={listing.id} />
             </Suspense>
           )
         )}

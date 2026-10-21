@@ -132,10 +132,10 @@ export async function requireUser(next: string): Promise<User> {
  * so every request the page makes is refused on its own merits regardless of what happens
  * here. What this decides is what the visitor is shown instead of a screen full of 403s.
  *
- * A wrong role answers `notFound()` rather than a message: the dashboard is the owner's
- * own section, and to everybody else it is a URL with nothing behind it. Membership of a
- * set rather than a hierarchy, exactly as `RolesGuard` reads it — an admin does not reach
- * an owner's screen by being senior to an owner.
+ * A wrong role answers `notFound()` rather than a message: the dashboard is a user's own
+ * section, and to an admin it is a URL with nothing behind it. Membership of a set rather
+ * than a hierarchy, exactly as `RolesGuard` reads it — an admin does not reach a user's
+ * screen by being senior to one.
  */
 export async function requireRole(role: Role, next: string): Promise<User> {
   const user = await requireUser(next);

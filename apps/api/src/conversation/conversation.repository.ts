@@ -33,9 +33,8 @@ export class ListingNotFoundError extends Error {
 }
 
 /**
- * The guest would be writing to themselves. Only a `USER` may start a thread, and only an
- * `OWNER` may create a listing — but a role changes and the listings stay, so a demoted
- * owner still owns what they published.
+ * The guest would be writing to themselves: any `USER` may both start a thread and publish
+ * a listing, so the row is what tells the two apart.
  */
 export class OwnListingError extends Error {
   constructor(listingId: string) {
@@ -120,9 +119,8 @@ export class ConversationRepository {
   /**
    * Every thread this account is a side of: the ones it started as a guest and the ones
    * about its listings, retired listings included — a guest who wrote before the listing
-   * was withdrawn is still owed an answer. Both halves whatever the role, because the
-   * sides are fixed by the rows: an account promoted to `OWNER` keeps the threads it
-   * started as a guest, and one demoted to `USER` still owns its listings.
+   * was withdrawn is still owed an answer. Both halves always, because the sides are fixed
+   * by the rows: one account is a guest of some threads and the host of others.
    *
    * The two halves are read apart and merged here, not as one `guest_id = $1 OR
    * listings.owner_id = $1`: Postgres seeks no index through an `OR` whose second branch

@@ -50,8 +50,8 @@ const userWith = (id: string, role: Role): AuthenticatedUser => ({
 });
 
 const guest = userWith(GUEST_ID, Role.USER);
-const owner = userWith(OWNER_ID, Role.OWNER);
-const otherOwner = userWith(OTHER_OWNER_ID, Role.OWNER);
+const owner = userWith(OWNER_ID, Role.USER);
+const otherOwner = userWith(OTHER_OWNER_ID, Role.USER);
 const stranger = userWith(STRANGER_ID, Role.USER);
 const admin = userWith(STRANGER_ID, Role.ADMIN);
 
@@ -533,17 +533,22 @@ describe("ReviewService", () => {
     ).rejects.toThrow(NotFoundException);
   });
 
-  it("keeps a guest made a host the subject and the author of their own stays", async () => {
-    const promoted = userWith(GUEST_ID, Role.OWNER);
-    const bookingId = bookingRepository.add(stay());
+  it("lets one account review as the guest of one stay and the host of another", async () => {
+    const asGuest = bookingRepository.add(stay());
+    const asHost = bookingRepository.add({
+      ...stay({ guestId: OWNER_ID }),
+      listingOwnerId: GUEST_ID,
+    });
 
-    await service.create(bookingId, owner, input);
-
+    await expect(service.create(asGuest, guest, input)).resolves.toMatchObject({
+      kind: ReviewKind.LISTING,
+    });
+    await expect(service.create(asHost, guest, input)).resolves.toMatchObject({
+      kind: ReviewKind.GUEST,
+    });
+    // The host side is read off the rows: the guest hosted this account, so may read it.
     await expect(
-      service.create(bookingId, promoted, input),
-    ).resolves.toMatchObject({ kind: ReviewKind.LISTING });
-    await expect(
-      service.findGuestPage(GUEST_ID, promoted, query()),
+      service.findGuestPage(OWNER_ID, guest, query()),
     ).resolves.toMatchObject({ summary: { count: 1 } });
   });
 

@@ -235,7 +235,6 @@ model ListingDatePrice {
 
 enum Role {
   USER
-  OWNER
   ADMIN
 }
 
@@ -267,7 +266,7 @@ model User {
   /// `GET /users` is a keyset page ordered by `created_at` with `id` behind it — the pair
   /// `user-cursor.ts` encodes. One index serves both directions, the same arithmetic as the
   /// bookings': the tiebreaker follows the key, so `oldest` is this btree read backwards.
-  /// `role` and the status get none: they have three and two values.
+  /// `role` and the status get none: they have two values each.
   @@index([createdAt(sort: Desc), id(sort: Desc)])
   /// `email` is a substring match no btree can seek — the `email` filter of `GET /users`
   /// and the account lookups of the filter boxes (`GET /lookups/owners`, `/lookups/guests`)

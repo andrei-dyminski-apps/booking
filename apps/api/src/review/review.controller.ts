@@ -85,7 +85,7 @@ export class ReviewController {
 
   /** The guest reviews the listing, its owner reviews the guest — an admin writes neither. */
   @Post("bookings/:id/reviews")
-  @Roles(Role.USER, Role.OWNER)
+  @Roles(Role.USER)
   @ApiCreatedResponse({ type: ReviewDto })
   @ApiNotFoundResponse({
     description:

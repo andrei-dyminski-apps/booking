@@ -25,10 +25,12 @@ const prisma = new PrismaClient({
 const DEMO_PASSWORD = "password123";
 
 /**
- * One login per role, plus the accounts that give the filter boxes something to suggest:
- * a second host, so the admin's owner filter has a choice, and three more guests, two of
- * them with the same name — what the address beside a name exists to tell apart for an
- * admin, and what a host sees only by the id.
+ * A guest, a host and an admin to sign in as, plus the accounts that give the filter
+ * boxes something to suggest: a second host, so the admin's owner filter has a choice, and
+ * three more guests, two of them with the same name — what the address beside a name
+ * exists to tell apart for an admin, and what a host sees only by the id. Hosting is not a
+ * role: the hosts are users who own listings, and the second one books a stay of the
+ * first's as well, so one account has both a Trips and a Hosting side.
  */
 const users = {
   guest: {
@@ -36,9 +38,9 @@ const users = {
     email: "guest@example.com",
     role: Role.USER,
   },
-  owner: { name: "Tomas Berg", email: "owner@example.com", role: Role.OWNER },
+  owner: { name: "Tomas Berg", email: "owner@example.com", role: Role.USER },
   admin: { name: "Nora Hale", email: "admin@example.com", role: Role.ADMIN },
-  host: { name: "Ines Duarte", email: "ines@example.com", role: Role.OWNER },
+  host: { name: "Ines Duarte", email: "ines@example.com", role: Role.USER },
   alex: {
     name: "Alex Morgan",
     email: "alex.morgan@example.com",
@@ -180,6 +182,7 @@ const bookings: Array<{
   { guest: "otherAlex", listing: 2, from: inDays(8), to: inDays(11) },
   { guest: "sam", listing: 3, from: inDays(15), to: inDays(18) },
   { guest: "sam", listing: 7, from: inDays(25), to: inDays(28) },
+  { guest: "host", listing: 2, from: inDays(25), to: inDays(29) },
 ];
 
 /**

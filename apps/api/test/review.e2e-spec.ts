@@ -18,7 +18,13 @@ import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
 import { resetQueue } from "./queue";
-import { credentialsFor, signInAs, type Agent } from "./session";
+import {
+  credentialsFor,
+  hostCredentials,
+  signIn,
+  signInAs,
+  type Agent,
+} from "./session";
 
 const listingInput: CreateListingInput = {
   title: "Loft above the harbour",
@@ -59,8 +65,8 @@ describe("ReviewController (e2e)", () => {
       email: "e2e-guest-2@example.com",
       password: "password123",
     });
-    owner = await signInAs(app, Role.OWNER);
-    otherOwner = await signInAs(app, Role.OWNER, {
+    owner = await signIn(app, hostCredentials);
+    otherOwner = await signIn(app, {
       name: "E2E Second Owner",
       email: "e2e-owner-2@example.com",
       password: "password123",

@@ -84,7 +84,11 @@ function stayDates({ from, to }: { from: string; to: string }): string {
   return `${formatDay(from)} – ${formatDay(to)}`;
 }
 
-/** The stays screen narrowed to one listing — the link a host's card offers there too. */
+/**
+ * The host's side of the stays screen narrowed to one listing — the link a host's card
+ * offers there too. The side has to be named: the guest's is the default, and a host's
+ * own listing names nothing among their trips.
+ */
 function listingStays(listingId: string): string {
-  return filtersHref(ROUTES.bookings, { listingId });
+  return filtersHref(ROUTES.bookings, { side: StayParty.HOST, listingId });
 }

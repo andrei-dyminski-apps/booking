@@ -48,9 +48,9 @@ export function navigationFor(user: User | null): NavItem[] {
 
   if (user === null) return items;
 
-  // Every signed-in role has a scope on `GET /bookings` — a guest sees the stays they
-  // took, an owner the stays taken against their listings, an admin all of them — so
-  // every one of them has a use for the link, and the page says which of the three it is.
+  // Every signed-in role has a scope on `GET /bookings` — a user the stays they took and
+  // the stays taken against their listings, an admin all of them — so every one of them
+  // has a use for the link, and the page says which it is showing.
   items.push({
     href: ROUTES.bookings,
     label: "Bookings",
@@ -59,26 +59,25 @@ export function navigationFor(user: User | null): NavItem[] {
   });
 
   // A thread has two sides, a guest and the host of a listing, and nobody else reads it —
-  // the API refuses an admin the route, so the shell does not offer it.
-  if (user.role === Role.USER || user.role === Role.OWNER) {
-    items.push({
-      href: ROUTES.messages,
-      label: "Messages",
-      hint: user.role === Role.USER ? "Your hosts" : "Guests and hosts",
-      icon: MessagesSquareIcon,
-    });
-  }
-
-  // Membership of a set rather than a hierarchy, the way `RolesGuard` reads it: an admin
-  // does not reach an owner's dashboard by being senior to one. `GET /listings/mine` is
-  // scoped to the caller, and an admin has no listings of their own to put on it.
-  if (user.role === Role.OWNER) {
-    items.push({
-      href: ROUTES.dashboard,
-      label: "Dashboard",
-      hint: "Your listings",
-      icon: LayoutDashboardIcon,
-    });
+  // the API refuses an admin the route, so the shell does not offer it. Hosting is owning
+  // a listing rather than a role, so every user gets the dashboard too: it is where the
+  // first listing is published from. Membership of a set rather than a hierarchy, the way
+  // `RolesGuard` reads it: an admin does not reach a user's screens by being senior to one.
+  if (user.role === Role.USER) {
+    items.push(
+      {
+        href: ROUTES.messages,
+        label: "Messages",
+        hint: "Guests and hosts",
+        icon: MessagesSquareIcon,
+      },
+      {
+        href: ROUTES.dashboard,
+        label: "Dashboard",
+        hint: "Your listings",
+        icon: LayoutDashboardIcon,
+      },
+    );
   }
 
   // The admin's section is two screens rather than one, because they answer two different

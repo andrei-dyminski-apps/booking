@@ -4,6 +4,7 @@ import {
   BookingStatus,
   isReviewable,
   Role,
+  StayParty,
   type Booking,
   type User,
 } from "@repo/contracts";
@@ -42,15 +43,24 @@ import { ReviewBookingButton } from "./review-booking-button";
 export const BookingCard = ({
   booking,
   viewer,
+  side,
   today,
 }: {
   booking: Booking;
   viewer: User;
+  /**
+   * The half of a user's stays the page is drawing — on the host's side every stay is
+   * against the viewer's own listing — or `null` for an admin, whose scope has no halves.
+   */
+  side: StayParty | null;
   /** Today in UTC, from the server — the day `isReviewable` compares the check-out to. */
   today: string;
 }) => {
   const nights = nightsBetween(booking.from, booking.to);
-  const review = reviewHalf(booking, viewer, today);
+  const review = reviewHalf(booking, viewer, side, today);
+  // A host and an admin see other people's stays; on the guest's side the list is one
+  // person's, the viewer's own.
+  const ofOthers = side !== StayParty.GUEST;
 
   return (
     <Card>
@@ -86,14 +96,17 @@ export const BookingCard = ({
         </CardDescription>
         <CardAction className="flex items-center gap-2">
           {/*
-            The stays against one listing, for the two roles that see more than their own.
-            It is how the `listingId` filter is reached in practice — the id is in the URL
-            it writes rather than typed into the box behind the dialog — and a guest is not
-            offered it because their own list is already one person's.
+            The stays against one listing, for a host and an admin, who see more than their
+            own. It is how the `listingId` filter is reached in practice — the id is in the
+            URL it writes rather than typed into the box behind the dialog — and the guest's
+            side is not offered it because that list is already one person's.
           */}
-          {viewer.role !== Role.USER && (
+          {ofOthers && (
             <ButtonLink
-              href={listingStaysHref(booking.listingId)}
+              href={listingStaysHref(
+                booking.listingId,
+                side ?? StayParty.GUEST,
+              )}
               variant="ghost"
               size="sm"
             >
@@ -101,11 +114,11 @@ export const BookingCard = ({
             </ButtonLink>
           )}
           {/*
-            What other hosts said about this guest, for the two roles the API lets read it
-            from here: the host the guest asked to stay with, and an admin. A guest reads
-            their own from the profile.
+            What other hosts said about this guest, for the two the API lets read it from
+            here: the host the guest asked to stay with, and an admin. A guest reads their
+            own from the profile.
           */}
-          {viewer.role !== Role.USER && (
+          {ofOthers && (
             <ButtonLink
               href={ROUTES.guestReviews(booking.guestId)}
               variant="ghost"
@@ -156,20 +169,21 @@ export const BookingCard = ({
 /**
  * Which half of the stay this viewer could write, if any — `written` once they have. The
  * guest writes about the listing and the host about the guest, which is the same rule the
- * API reads off the session: the guest by the id alone, whatever role the account has
- * since been given, and the host by the role. An admin reads every stay and writes
- * neither half, so they are offered nothing. Like the "Cancel" below, it offers rather
+ * API reads off the rows: the guest by the id, and the host by owning the listing — which
+ * every stay on the host's side of the page is against. An admin reads every stay and
+ * writes neither half, so they are offered nothing. Like the "Cancel" below, it offers rather
  * than permits: the API refuses a review of somebody else's stay whatever was drawn here.
  */
 function reviewHalf(
   booking: Booking,
   viewer: User,
+  side: StayParty | null,
   today: string,
 ): "listing" | "guest" | "written" | null {
   const half =
     viewer.role !== Role.ADMIN && viewer.id === booking.guestId
       ? { kind: "listing" as const, done: booking.reviewed.byGuest }
-      : viewer.role === Role.OWNER
+      : side === StayParty.HOST
         ? { kind: "guest" as const, done: booking.reviewed.byOwner }
         : null;
 

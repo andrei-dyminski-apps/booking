@@ -61,9 +61,10 @@ const NOT_YOUR_LISTING =
  * uncached or be served to the next visitor along with it. Nothing personal is in them;
  * what a listing shows is the same for everybody.
  *
- * Writing to the catalogue is the owner's business, and an admin's. The two
- * `@Roles(Role.OWNER, Role.ADMIN)` routes carry a second check inside the service — the
- * role says an owner may edit listings, only the row says which ones.
+ * Writing to the catalogue is the owner's business, and an admin's. Any user may publish a
+ * listing — hosting is not a role, it is owning a row — so the two
+ * `@Roles(Role.USER, Role.ADMIN)` routes carry a second check inside the service: the role
+ * says the caller may edit listings, only the row says which ones.
  */
 @Controller("listings")
 export class ListingController {
@@ -89,7 +90,7 @@ export class ListingController {
 
   /** Declared before `:id`: Nest matches routes in declaration order. */
   @Get("mine")
-  @Roles(Role.OWNER)
+  @Roles(Role.USER)
   @ApiOkResponse({ type: ListingDto, isArray: true })
   findMine(@CurrentUser() user: AuthenticatedUser): Promise<Listing[]> {
     return this.listingService.findByOwner(user.id);
@@ -129,7 +130,7 @@ export class ListingController {
   }
 
   @Post()
-  @Roles(Role.OWNER)
+  @Roles(Role.USER)
   @ApiCreatedResponse({ type: ListingDto })
   create(
     @CurrentUser() user: AuthenticatedUser,
@@ -139,7 +140,7 @@ export class ListingController {
   }
 
   @Patch(":id")
-  @Roles(Role.OWNER, Role.ADMIN)
+  @Roles(Role.USER, Role.ADMIN)
   @ApiOkResponse({ type: ListingDto })
   @ApiNotFoundResponse({
     description: "The listing does not exist",
@@ -158,7 +159,7 @@ export class ListingController {
   }
 
   @Delete(":id")
-  @Roles(Role.OWNER, Role.ADMIN)
+  @Roles(Role.USER, Role.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse({
     description:

@@ -14,8 +14,8 @@ apps/web  (Next.js 16)  ──HTTP──▶  apps/api (NestJS 11)  ──▶  Po
 
 The domain model (grown phase by phase):
 
-- **User** — `id, email, passwordHash, role (USER | OWNER | ADMIN)` — phases 2–3
-- **Listing** (a place to stay) — belongs to an OWNER, has a nightly price — phase 3
+- **User** — `id, email, passwordHash, role (USER | ADMIN)` — phases 2–3; hosting is owning a listing, not a role (see the end of phase 3)
+- **Listing** (a place to stay) — belongs to one user, its host, has a nightly price — phase 3
 - **Booking** — `status: PENDING_PAYMENT | CONFIRMED | CANCELLED | EXPIRED`, `expiresAt`, `paymentIntentId`, a date range — phases 1 → 4 → 5
 - **Review** — optional, phase 7
 
@@ -194,6 +194,13 @@ management on the way.
       token lapses within `JWT_ACCESS_TTL`. No account deletion — bookings cascade and
       listings restrict, so a block is the reversible answer. An admin cannot change or
       block their own account. On the frontend that is `/admin/users`.
+- [x] One account instead of one persona: `OWNER` retired, `Role { USER, ADMIN }`. Who
+      hosts is `listing.ownerId` and who is a guest `booking.guestId`, so any user publishes
+      listings and books other people's — never their own (`403`). The lists of stays and
+      the lookups take `side: GUEST | HOST`, drawn as the "Trips" and "Hosting" tabs of
+      `/bookings`. The migration turns every `OWNER` row into a `USER` before it recasts the
+      enum. The plan it followed is `docs/single-account-migration.md`; the items above are
+      the history of the three-role model.
 
 ## Phase 4 — Concurrent booking (the centrepiece)
 

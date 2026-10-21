@@ -157,7 +157,7 @@ describe("OpenAPI document (e2e)", () => {
       const { description } = operation(path, method).responses?.["403"] ?? {};
 
       expect(description).toContain("belongs to another owner");
-      expect(description).toContain("Requires the role OWNER or ADMIN");
+      expect(description).toContain("Requires the role USER or ADMIN");
     }
   });
 

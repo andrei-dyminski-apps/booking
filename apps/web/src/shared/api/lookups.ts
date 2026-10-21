@@ -5,8 +5,16 @@ import {
   type LookupOption,
   type LookupPage,
   type LookupQuery,
+  type StayParty,
 } from "@repo/contracts";
 import { apiRequest, queryString } from "./http-client";
+
+/**
+ * The query as a box sends it: `side` is optional on the wire, because the API defaults it
+ * to the guest's and only the lookup of listings reads it.
+ */
+type LookupRequest = Omit<LookupQuery, "side"> &
+  Partial<Pick<LookupQuery, "side">>;
 
 /**
  * What a filter box that takes an id suggests while somebody types into it — one route per
@@ -21,7 +29,7 @@ import { apiRequest, queryString } from "./http-client";
  */
 const page = (
   kind: LookupKind,
-  query: LookupQuery,
+  query: LookupRequest,
   signal?: AbortSignal,
 ): Promise<LookupPage> =>
   apiRequest({
@@ -40,18 +48,20 @@ export const lookupsApi = {
    * beside the name is what tells two rows of one name apart on a chip and under the box.
    * `undefined` for anything else — not an id, nobody this session may look up, an API
    * that did not answer — because a name is only what a chip and a box read instead of the
-   * id, and the id is still the filter.
+   * id, and the id is still the filter. `side` is the half of the stays the page draws,
+   * for the listings: a listing named on the host's side is not among the guest's.
    */
   optionOf: async (
     kind: LookupKind,
     id: string,
+    side?: StayParty | null,
   ): Promise<LookupOption | undefined> => {
     if (!lookupOptionSchema.shape.id.safeParse(id).success) return undefined;
 
     try {
       const {
         items: [found],
-      } = await page(kind, { q: id, limit: 1 });
+      } = await page(kind, { q: id, limit: 1, side: side ?? undefined });
 
       return found;
     } catch {

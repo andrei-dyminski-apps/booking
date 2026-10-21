@@ -17,7 +17,7 @@ export const EditListingPage = async ({
   params,
 }: PageProps<"/dashboard/listings/[id]">) => {
   const id = requireId((await params).id);
-  const owner = await requireRole(Role.OWNER, ROUTES.editListing(id));
+  const owner = await requireRole(Role.USER, ROUTES.editListing(id));
   const listing = await ownListing(owner.id, id);
 
   return (

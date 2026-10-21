@@ -12,7 +12,7 @@ import { ROUTES } from "#shared/config";
 import { today } from "#shared/lib";
 
 export const NewListingPage = async () => {
-  await requireRole(Role.OWNER, ROUTES.newListing);
+  await requireRole(Role.USER, ROUTES.newListing);
 
   return (
     <Card className="mx-auto w-full max-w-xl">

@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable } from "@nestjs/common";
 import {
   LookupKind,
   Role,
+  StayParty,
   type LookupOption,
   type LookupPage,
   type LookupQuery,
@@ -18,9 +19,9 @@ import { LookupRepository } from "./lookup.repository";
 
 /**
  * What a filter box suggests. The guard has already said which roles may ask; what is left
- * here is the scope of the two lookups over stays, which follows the role exactly as
- * `GET /bookings` does — a guest is offered what their own stays name, an owner what the
- * stays against their listings name, an admin what everybody's do.
+ * here is the scope of the two lookups over stays, which follows `GET /bookings` exactly —
+ * an account is offered what its own stays name on the side it asks for, an admin what
+ * everybody's do.
  */
 @Injectable()
 export class LookupService {
@@ -34,25 +35,21 @@ export class LookupService {
   }
 
   /**
-   * A guest's scope is themselves, so there is nobody for them to look up: `@Roles`
-   * refuses them before this, and the switch refuses them again rather than falling
-   * through to a query — exhaustive, `default` included, for the reason
-   * `BookingService.pageFor` gives.
+   * The guests of the caller's listings. A `USER` with none is answered an empty page
+   * rather than a `403`: hosting is not a role, so nothing tells this route beforehand
+   * whether the caller has stays against their listings to filter. Exhaustive, `default`
+   * included, for the reason `BookingService.pageFor` gives.
    */
   guests(user: AuthenticatedUser, query: LookupQuery): Promise<LookupPage> {
     return this.page(LookupKind.guests, query, (cursor) => {
       switch (user.role) {
         case Role.ADMIN:
           return this.lookupRepository.findGuestsOfEveryone(query, cursor);
-        case Role.OWNER:
+        case Role.USER:
           return this.lookupRepository.findGuestsOfListingOwner(
             user.id,
             query,
             cursor,
-          );
-        case Role.USER:
-          throw new ForbiddenException(
-            "A guest has nobody else's stays to filter",
           );
         default: {
           const unknownRole: never = user.role;
@@ -67,7 +64,8 @@ export class LookupService {
 
   /**
    * The one lookup every role may ask, because every role has a list of stays to filter
-   * by listing: a guest is offered the listings they stayed in, which is their scope of
+   * by listing: a `USER` is offered the listings of the side they ask for — the ones they
+   * stayed in, or their own with a stay against them — which is their scope of
    * `GET /bookings` too.
    */
   listings(user: AuthenticatedUser, query: LookupQuery): Promise<LookupPage> {
@@ -75,18 +73,14 @@ export class LookupService {
       switch (user.role) {
         case Role.ADMIN:
           return this.lookupRepository.findListingsOfEveryone(query, cursor);
-        case Role.OWNER:
-          return this.lookupRepository.findListingsOfListingOwner(
-            user.id,
-            query,
-            cursor,
-          );
         case Role.USER:
-          return this.lookupRepository.findListingsOfGuest(
-            user.id,
-            query,
-            cursor,
-          );
+          return query.side === StayParty.HOST
+            ? this.lookupRepository.findListingsOfListingOwner(
+                user.id,
+                query,
+                cursor,
+              )
+            : this.lookupRepository.findListingsOfGuest(user.id, query, cursor);
         default: {
           const unknownRole: never = user.role;
 

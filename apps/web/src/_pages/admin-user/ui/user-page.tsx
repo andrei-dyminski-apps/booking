@@ -111,14 +111,14 @@ const AccessCard = ({
 );
 
 /**
- * What the account has behind it, as far as its role reaches: stays for a user, listings
- * for an owner. A row outside the role is still drawn while it has something in it — a
- * role changed later leaves the stays and the listings where they were. With neither row
- * there is no card.
+ * What the account has behind it: the stays it took and the listings it offers. A user
+ * may do both, so a user gets both rows, an empty one included; an admin gets a row only
+ * while it has something in it — a role changed later leaves the stays and the listings
+ * where they were. With neither row there is no card.
  */
 const ActivityCard = ({ user }: { user: ManagedUserDetail }) => {
   const stays = user.role === Role.USER || user.bookingCount > 0;
-  const listings = user.role === Role.OWNER || user.listingCount > 0;
+  const listings = user.role === Role.USER || user.listingCount > 0;
   if (!stays && !listings) return null;
 
   return (

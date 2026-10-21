@@ -11,7 +11,7 @@ import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
 import { resetQueue } from "./queue";
-import { signInAs, type Agent } from "./session";
+import { hostCredentials, signIn, signInAs, type Agent } from "./session";
 
 const listingInput: CreateListingInput = {
   title: "Loft above the harbour",
@@ -46,7 +46,7 @@ describe("Concurrent booking (e2e)", () => {
     await resetQueue(app);
 
     guest = await signInAs(app, Role.USER);
-    owner = await signInAs(app, Role.OWNER);
+    owner = await signIn(app, hostCredentials);
 
     const listing = await owner
       .post("/listings")

@@ -1,9 +1,14 @@
-import { LookupKind, Role } from "@repo/contracts";
+import { LookupKind, Role, StayParty } from "@repo/contracts";
 import { ReviewCard, ReviewSummary } from "#entities/review";
 import { DeleteReviewButton } from "#features/delete-review";
 import { lookupsApi, requireUser } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { lookupOptionText, requireId, singleParam } from "#shared/lib";
+import {
+  filtersHref,
+  lookupOptionText,
+  requireId,
+  singleParam,
+} from "#shared/lib";
 import { BackLink, PageHeading, Pager, StalePageNotice } from "#shared/ui";
 import { readGuestReviews } from "../api/read-guest-reviews";
 
@@ -39,13 +44,18 @@ export const GuestReviewsPage = async ({
   const name = option === undefined ? undefined : lookupOptionText(option);
 
   const first = ROUTES.guestReviews(id);
+  // Somebody else's reviews are reached from a stay: a user's on the host's side of the
+  // list, an admin's from the one list they have.
+  const back = self
+    ? ROUTES.profile
+    : viewer.role === Role.ADMIN
+      ? ROUTES.bookings
+      : filtersHref(ROUTES.bookings, { side: StayParty.HOST });
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4">
-        <BackLink href={self ? ROUTES.profile : ROUTES.bookings}>
-          {self ? "Profile" : "Stays"}
-        </BackLink>
+        <BackLink href={back}>{self ? "Profile" : "Stays"}</BackLink>
         <PageHeading
           title={self ? "Reviews of you" : `Reviews of ${name ?? "this guest"}`}
           description="What hosts said after a stay. Only the guest, the hosts they ask to stay with and the site's admins can read these."

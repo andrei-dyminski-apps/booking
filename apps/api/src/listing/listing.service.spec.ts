@@ -53,8 +53,8 @@ const userWith = (id: string, role: Role): AuthenticatedUser => ({
   role,
 });
 
-const owner = userWith(OWNER_ID, Role.OWNER);
-const otherOwner = userWith(OTHER_OWNER_ID, Role.OWNER);
+const owner = userWith(OWNER_ID, Role.USER);
+const otherOwner = userWith(OTHER_OWNER_ID, Role.USER);
 const admin = userWith(OTHER_OWNER_ID, Role.ADMIN);
 
 /** See `auth.service.spec.ts` for what this mapped type does and does not catch. */

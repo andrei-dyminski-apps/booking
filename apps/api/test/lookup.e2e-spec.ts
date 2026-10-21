@@ -6,7 +6,13 @@ import { Role, lookupPageSchema, type LookupPage } from "@repo/contracts";
 import { AppModule } from "./../src/app.module";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
-import { credentialsFor, signIn, signInAs, type Agent } from "./session";
+import {
+  credentialsFor,
+  hostCredentials,
+  signIn,
+  signInAs,
+  type Agent,
+} from "./session";
 
 const LISTING = {
   description: "Two rooms under the roof and a wall of glass.",
@@ -29,6 +35,9 @@ describe("LookupController (e2e)", () => {
   let admin: Agent;
   let loftId: string;
   let retiredId: string;
+
+  /** The host's side of the listings lookup; a `USER` is offered the guest's by default. */
+  const HOST = "&side=HOST";
 
   const lookup = async (
     agent: Agent,
@@ -67,8 +76,8 @@ describe("LookupController (e2e)", () => {
     await resetDatabase(app);
 
     guest = await signInAs(app, Role.USER);
-    owner = await signInAs(app, Role.OWNER);
-    other = await signInAs(app, Role.OWNER, otherOwner);
+    owner = await signIn(app, hostCredentials);
+    other = await signIn(app, otherOwner);
     admin = await signInAs(app, Role.ADMIN);
 
     loftId = await publish(owner, "Loft by the river");
@@ -95,7 +104,9 @@ describe("LookupController (e2e)", () => {
   it("opens each lookup to the roles whose filter it fills in", async () => {
     await request(app.getHttpServer()).get("/lookups/owners?q=e2e").expect(401);
     await owner.get("/lookups/owners?q=e2e").expect(403);
-    await guest.get("/lookups/guests?q=e2e").expect(403);
+    // Any account may host, so the guests of its listings are its to ask for — an account
+    // with no stays against them is answered an empty page, not a refusal.
+    expect((await lookup(guest, "guests", "e2e")).items).toEqual([]);
   });
 
   it("refuses a search shorter than three characters", async () => {
@@ -108,7 +119,7 @@ describe("LookupController (e2e)", () => {
 
     expect(owners.items.map(({ label, hint }) => [label, hint])).toEqual([
       [otherOwner.name, otherOwner.email],
-      [credentialsFor.OWNER.name, credentialsFor.OWNER.email],
+      [hostCredentials.name, hostCredentials.email],
     ]);
     // An admin may look an account up by its address as well.
     expect(labels(await lookup(admin, "owners", "other-owner@"))).toEqual([
@@ -119,27 +130,29 @@ describe("LookupController (e2e)", () => {
   });
 
   it("matches an id whole, and never a part of one", async () => {
-    expect(labels(await lookup(owner, "listings", loftId))).toEqual([
+    expect(labels(await lookup(owner, "listings", loftId, HOST))).toEqual([
       "Loft by the river",
     ]);
-    expect(labels(await lookup(owner, "listings", loftId.slice(0, 8)))).toEqual(
-      [],
-    );
+    expect(
+      labels(await lookup(owner, "listings", loftId.slice(0, 8), HOST)),
+    ).toEqual([]);
   });
 
   it("offers the listings of the caller's stays, retired ones included", async () => {
-    expect(labels(await lookup(owner, "listings", "RIVER"))).toEqual([
+    expect(labels(await lookup(owner, "listings", "RIVER", HOST))).toEqual([
       "Loft by the river",
       "Riverside cabin",
     ]);
     // Their own listing has no stays, and somebody else's are not theirs to filter by.
-    expect(labels(await lookup(other, "listings", "river"))).toEqual([]);
+    expect(labels(await lookup(other, "listings", "river", HOST))).toEqual([]);
     expect(labels(await lookup(admin, "listings", "river"))).toHaveLength(2);
     // A guest is offered the listings they stayed in, and nothing else of the catalogue.
     expect(labels(await lookup(guest, "listings", "river"))).toEqual([
       "Loft by the river",
       "Riverside cabin",
     ]);
+    // Asked for the host's side, the same account has no stays against listings of its own.
+    expect(labels(await lookup(guest, "listings", "river", HOST))).toEqual([]);
   });
 
   it("offers the guests of the caller's stays", async () => {
@@ -175,7 +188,7 @@ describe("LookupController (e2e)", () => {
   });
 
   it("pages through the matches in the order of their names", async () => {
-    const first = await lookup(owner, "listings", "river", "&limit=1");
+    const first = await lookup(owner, "listings", "river", `${HOST}&limit=1`);
 
     expect(labels(first)).toEqual(["Loft by the river"]);
     expect(first.nextCursor).not.toBeNull();
@@ -184,7 +197,7 @@ describe("LookupController (e2e)", () => {
       owner,
       "listings",
       "river",
-      `&limit=1&cursor=${first.nextCursor ?? ""}`,
+      `${HOST}&limit=1&cursor=${first.nextCursor ?? ""}`,
     );
 
     expect(labels(second)).toEqual(["Riverside cabin"]);
