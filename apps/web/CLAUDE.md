@@ -65,6 +65,7 @@ apps/web/
       layout/notification-toasts.tsx  # a toast per notice off the stream, beside the bell
       layout/use-latest-notifications.ts  # the bell's popup: its list read on opening, kept in step with the stream
       layout/unread-conversations-badge.tsx  # the unread threads beside Messages, and the dot on the menu button
+      layout/count-badge.tsx  # the pill both unread counts are drawn in
       layout/global-error.tsx # the document a failed shell render is replaced with
       layout/index.ts
       providers/providers.tsx # theme + toaster, the only client boundary around the tree
@@ -102,6 +103,7 @@ apps/web/
       listing/ui/listing-page.tsx         # one listing: the calendar and the form
       listing/ui/availability-calendar.tsx  # the nights already taken, drawn
       listing/ui/booking-form.tsx         # the only thing here that creates a booking
+      listing/ui/stay-quote.tsx           # …what its dates cost, night by night, redrawn on its own
       listing/ui/listing-reviews.tsx      # the guests' reviews: the summary and the newest page
       listing/ui/listing-skeleton.tsx
       listing/ui/ask-host.tsx             # a guest's question, or the way back to their thread; streamed, degrades
@@ -263,6 +265,7 @@ apps/web/
       ui/form-field.tsx       # one box of a form that submits, and the aria that ties it
       ui/hint-label.tsx       # the label of a box or a group, its description a hint beside it
       ui/filter-form.tsx      # the `GET` form of a dialog, sent to the canonical URL
+      ui/filters-dialog.tsx   # …and the popup around it: the trigger, the count, the two ways out
       ui/filter-chips.tsx     # what is applied, each chip a link that drops it
       ui/sort-select.tsx      # the orderings of a list, as one box
       ui/page-heading.tsx     # a list screen's title and the line under it
@@ -922,13 +925,15 @@ know the box changed.
   screen — and the dialog it lives in already needs JavaScript, so it costs nothing that
   compact toolbar had not already spent.
 
-- **Every filter is a modal** (`catalogue-filters-dialog.tsx`), and the toolbar above the
-  list is two controls: the button that opens it, with a count of what is applied, and the
-  ordering. The screen is the chips and the stays, not a panel of boxes.
-- **The form inside it is a `GET` form** (`shared/ui/filter-form.tsx`, drawn by both
-  dialogs). Submitting it writes the filters into the URL and the browser goes there, so
-  the dialog needs no action and nothing to keep in step with the boxes: the values come
-  back out of the address the server rendered from.
+- **Every filter is a modal** (`shared/ui/filters-dialog.tsx`, which each list's
+  `*-filters-dialog.tsx` fills with its own boxes, route and link builder), and the
+  toolbar above the list is two controls: the button that opens it, with a count of what
+  is applied, and the ordering. The screen is the chips and the stays, not a panel of
+  boxes.
+- **The form inside it is a `GET` form** (`shared/ui/filter-form.tsx`, inside
+  `FiltersDialog`). Submitting it writes the filters into the URL and the browser goes
+  there, so the dialog needs no action and nothing to keep in step with the boxes: the
+  values come back out of the address the server rendered from.
 - **Where there is JavaScript, that form navigates to the canonical address itself.** A
   `GET` form submits every box it has, so the address it lands on is the long one below
   and the page replaces it a round trip later — which the address bar shows, and a
@@ -1246,15 +1251,20 @@ rather than in `src/shared`.
 component that knows this application's `FieldErrors`, or one whose whole job is to
 navigate with `useRouter`. The test is the dependency, not the size — anything that would
 have to import from `#shared/*` or from `next/*` is not a primitive and does not go into
-the package. Thirteen live there: `PageHeading` — the title and the line under it at the top of
-a list screen —, `BackLink` — the ghost arrow link above a detail
-screen's heading, back to the list it was opened from —, `ButtonLink` — a `<Link>` wearing the button classes, the
-one spelling of "a link that looks like a button" (see below) —, `FormField`, the one box
-every form that submits is made of, and `FilterField`, `LookupField`,
-`FilterForm`, `FilterChips`, `SortSelect`, `Pager`, `StalePageNotice`,
-`RefusedSearchNotice` and `NoMatchesNotice`, the parts the
-catalogue and the stays screen search and page with. A component only one screen uses
-stays in that screen's slice, exactly as "pages first" says.
+the package. Seventeen are exported from there: `PageHeading` — the title and the line
+under it at the top of a list screen —, `BackLink` — the ghost arrow link above a detail
+screen's heading, back to the list it was opened from —, `ButtonLink` — a `<Link>`
+wearing the button classes, the one spelling of "a link that looks like a button" (see
+below) —, `FormField`, the one box every form that submits is made of, `HintFieldSet`, a
+group of boxes labelled the way a single box is, `LiveRefresh`, which re-renders a
+personal list when the event stream says it changed, and `FilterField`, `FilterSelect`,
+`LookupField`, `FilterForm`, `FiltersDialog`, `FilterChips`, `SortSelect`, `Pager`,
+`StalePageNotice`, `RefusedSearchNotice` and `NoMatchesNotice`, the parts every list
+screen — the catalogue, the stays and the admin's listings and users — searches and pages
+with. Two more are internal to the boxes and not exported: `HintLabel`, the label with its
+description as a hint beside it, and `CharacterCount`, the room left in a bounded
+`FormField`. A component only one screen uses stays in that screen's slice, exactly as
+"pages first" says.
 
 - The design tokens live in `packages/ui/src/styles/globals.css`;
   `src/_app/styles/globals.css` is a single `@import "@repo/ui/globals.css"`. Colours,

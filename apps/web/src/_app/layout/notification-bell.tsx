@@ -14,7 +14,8 @@ import { toast } from "@repo/ui/components/sonner";
 import { NotificationItem } from "#entities/notification";
 import { notificationsApi } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { badgeCount, useLatestCount } from "#shared/lib";
+import { useLatestCount } from "#shared/lib";
+import { CountBadge } from "./count-badge";
 import { useLatestNotifications } from "./use-latest-notifications";
 
 /**
@@ -74,12 +75,11 @@ export const NotificationBell = () => {
       >
         <BellIcon />
         {count > 0 && (
-          <span
-            aria-hidden
-            className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-none font-medium text-primary-foreground tabular-nums"
-          >
-            {badgeCount(count)}
-          </span>
+          <CountBadge
+            count={count}
+            size="sm"
+            className="absolute -top-0.5 -right-0.5"
+          />
         )}
       </PopoverTrigger>
 

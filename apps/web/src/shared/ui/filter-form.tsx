@@ -21,6 +21,13 @@ import type { ReactNode } from "react";
  * path over it, not a replacement — which is also why the form keeps its `method` and its
  * `action`: without a script it is exactly the form it was.
  *
+ * It carries `noValidate` like every other form here, and for a sharper reason: the
+ * boxes state `min` and `step` so that a keypad offers the right thing, and the browser
+ * would otherwise refuse a submit over them in its own words, before the query schema has
+ * said anything. A search arrives out of a URL, so a value the contract refuses reaches the
+ * dialog already filled in — and a submit the browser blocked would leave a visitor with a
+ * box they cannot correct by pressing the only button in front of them.
+ *
  * Navigating is the whole of what it does, like `SortSelect` beside it, so it is a
  * `shared/ui` component rather than a primitive of the design system.
  */

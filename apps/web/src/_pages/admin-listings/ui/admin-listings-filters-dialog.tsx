@@ -1,23 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import { SlidersHorizontalIcon } from "lucide-react";
 import { LookupKind, type LookupOption } from "@repo/contracts";
-import { Badge } from "@repo/ui/components/badge";
-import { Button } from "@repo/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@repo/ui/components/dialog";
 import { ListingFilterFields } from "#features/listing-search";
 import { ROUTES } from "#shared/config";
 import type { FieldErrors } from "#shared/lib";
-import { ButtonLink, FilterForm, LookupField } from "#shared/ui";
+import { FiltersDialog, LookupField } from "#shared/ui";
 import {
   adminListingsHref,
   clearedFiltersHref,
@@ -25,9 +12,8 @@ import {
 } from "../lib/admin-listings-search";
 
 /**
- * Every filter of the admin's listings, in a popup — the catalogue's boxes plus the owner,
- * and the shape every other filter dialog has: a `GET` form that writes the search into
- * the URL, navigating to the canonical address itself where there is JavaScript.
+ * Every filter of the admin's listings, in the popup every list's filters are drawn in —
+ * the catalogue's boxes plus the owner.
  */
 export const AdminListingsFiltersDialog = ({
   values,
@@ -44,78 +30,36 @@ export const AdminListingsFiltersDialog = ({
   count: number;
   /** The owner, where the page resolved `ownerId` to an account. */
   owner: LookupOption | undefined;
-}) => {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button variant="outline" size="sm" />}>
-        <SlidersHorizontalIcon />
-        Filters
-        {count > 0 && (
-          <Badge variant="default" className="ml-1">
-            {count}
-          </Badge>
-        )}
-      </DialogTrigger>
-
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Filter the listings</DialogTitle>
-          <DialogDescription>
-            A search is a link: whatever is applied here ends up in the address
-            bar.
-          </DialogDescription>
-        </DialogHeader>
-
-        <FilterForm
-          action={ROUTES.admin}
-          href={(fields) =>
-            adminListingsHref({
-              ownerId: fields.ownerId ?? "",
-              from: fields.from ?? "",
-              to: fields.to ?? "",
-              minPrice: fields.minPrice ?? "",
-              maxPrice: fields.maxPrice ?? "",
-              guests: fields.guests ?? "",
-              sort: fields.sort ?? "",
-            })
-          }
-          onNavigate={() => setOpen(false)}
-        >
-          <div className="grid gap-4">
-            <LookupField
-              name="ownerId"
-              label="Owner"
-              kind={LookupKind.owners}
-              value={values.ownerId}
-              valueOption={owner}
-              error={errors.ownerId}
-              placeholder="A name or an address, or an account's id"
-              description="Any part of the owner's name or email, or the whole id from the address of their page."
-            />
-            <ListingFilterFields
-              values={values}
-              errors={errors}
-              earliest={earliest}
-            />
-          </div>
-
-          {/* The ordering is the toolbar's control, and this form still has to carry it. */}
-          <input type="hidden" name="sort" defaultValue={values.sort} />
-
-          <DialogFooter>
-            <ButtonLink
-              href={clearedFiltersHref(values)}
-              variant="ghost"
-              onClick={() => setOpen(false)}
-            >
-              Clear all
-            </ButtonLink>
-            <Button type="submit">Show listings</Button>
-          </DialogFooter>
-        </FilterForm>
-      </DialogContent>
-    </Dialog>
-  );
-};
+}) => (
+  <FiltersDialog
+    title="Filter the listings"
+    action={ROUTES.admin}
+    href={(fields) =>
+      adminListingsHref({
+        ownerId: fields.ownerId ?? "",
+        from: fields.from ?? "",
+        to: fields.to ?? "",
+        minPrice: fields.minPrice ?? "",
+        maxPrice: fields.maxPrice ?? "",
+        guests: fields.guests ?? "",
+        sort: fields.sort ?? "",
+      })
+    }
+    sort={values.sort}
+    clearHref={clearedFiltersHref(values)}
+    submitLabel="Show listings"
+    count={count}
+  >
+    <LookupField
+      name="ownerId"
+      label="Owner"
+      kind={LookupKind.owners}
+      value={values.ownerId}
+      valueOption={owner}
+      error={errors.ownerId}
+      placeholder="A name or an address, or an account's id"
+      description="Any part of the owner's name or email, or the whole id from the address of their page."
+    />
+    <ListingFilterFields values={values} errors={errors} earliest={earliest} />
+  </FiltersDialog>
+);

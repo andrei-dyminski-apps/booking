@@ -2,11 +2,8 @@
 
 import {
   createBookingSchema,
-  pricedNights,
-  stayTotal,
   type CreateBookingInput,
   type PricedListing,
-  type PricedNight,
 } from "@repo/contracts";
 import { Button } from "@repo/ui/components/button";
 import {
@@ -15,26 +12,19 @@ import {
   FieldGroup,
 } from "@repo/ui/components/field";
 import { Input } from "@repo/ui/components/input";
-import {
-  countOf,
-  formatMoney,
-  isDay,
-  nightsBetween,
-  useActionForm,
-} from "#shared/lib";
+import { isDay, useActionForm } from "#shared/lib";
 import { FormField } from "#shared/ui";
 import { createBookingAction } from "../api/create-booking-action";
+import { StayQuote } from "./stay-quote";
 
 /**
  * The form phase 4's locking transaction has been waiting for: this is the only thing on
  * this site that creates a booking, and until the payment step exists the hold it takes
  * lives out its fifteen minutes and lapses.
  *
- * The price is worked out here as the dates change, night by night — a weekend or a date
- * priced on its own costs what the owner set for it (`nightlyPrice` in the contract, the
- * rule the payment of phase 6 charges by too). This number is what the guest is told, not
- * what they are charged. Nothing about it is sent: the API reads the prices off the
- * listing, which is why `createBookingSchema` has no amount on it at all.
+ * The price is worked out beside the submit as the dates change (`StayQuote`), by the rule
+ * the payment of phase 6 charges by too. Nothing about it is sent: the API reads the
+ * prices off the listing, which is why `createBookingSchema` has no amount on it at all.
  *
  * `createBookingSchema` is also what refuses a check-out before the check-in and a stay in
  * the past, here as well as in the action. `listingId` is one of its fields, so the form
@@ -59,12 +49,9 @@ export const BookingForm = ({
     bound: { listingId },
   });
 
+  // The check-out box starts where the check-in does, so the form redraws on this one date;
+  // the quote watches both on its own.
   const from = form.watch("from");
-  const to = form.watch("to");
-
-  const length = isDay(from) && isDay(to) ? nightsBetween(from, to) : 0;
-  const nights =
-    length > 0 && length <= QUOTED_NIGHTS ? pricedNights(prices, from, to) : [];
 
   return (
     // `method` is what a page with no scripts falls back to — see `register-form.tsx`.
@@ -107,20 +94,7 @@ export const BookingForm = ({
               Hold these dates
             </Button>
 
-            {nights.length > 0 && (
-              <p className="text-sm">
-                {byPrice(nights)
-                  .map(
-                    ({ price, count }) =>
-                      `${countOf(count, "night")} × ${formatMoney(price)}`,
-                  )
-                  .join(" + ")}{" "}
-                ={" "}
-                <span className="font-semibold">
-                  {formatMoney(stayTotal(nights))}
-                </span>
-              </p>
-            )}
+            <StayQuote control={form.control} prices={prices} />
           </div>
         </div>
 
@@ -134,29 +108,3 @@ export const BookingForm = ({
     </form>
   );
 };
-
-/**
- * The longest stay the form quotes as the dates are typed. A year typed a digit at a time
- * passes through 0002 on its way to 2026, and a quote of every night between would be
- * thousands of entries on a keystroke; the API refuses nothing of the kind on its own, so
- * the bound is the screen's, and a stay longer than a year gets no line rather than a slow
- * one.
- */
-const QUOTED_NIGHTS = 366;
-
-/**
- * The nights of a stay grouped by what they cost, in the order the prices first appear —
- * `2 nights × 120.00 + 1 night × 150.00` reads as a sum, where one line per night would be
- * a list as long as the stay.
- */
-function byPrice(
-  nights: readonly PricedNight[],
-): { price: number; count: number }[] {
-  const counts = new Map<number, number>();
-
-  for (const { price } of nights) {
-    counts.set(price, (counts.get(price) ?? 0) + 1);
-  }
-
-  return [...counts].map(([price, count]) => ({ price, count }));
-}

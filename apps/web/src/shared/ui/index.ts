@@ -4,6 +4,7 @@ export { FilterChips, type FilterChip } from "./filter-chips";
 export { FilterField } from "./filter-field";
 export { FilterForm } from "./filter-form";
 export { FilterSelect } from "./filter-select";
+export { FiltersDialog } from "./filters-dialog";
 export { FormField, type FormControl } from "./form-field";
 export { HintFieldSet } from "./hint-label";
 export { LiveRefresh } from "./live-refresh";

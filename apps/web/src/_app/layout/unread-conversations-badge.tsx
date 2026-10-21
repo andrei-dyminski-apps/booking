@@ -1,6 +1,7 @@
 "use client";
 
-import { badgeCount, useLatestCount } from "#shared/lib";
+import { useLatestCount } from "#shared/lib";
+import { CountBadge } from "./count-badge";
 
 /**
  * How many threads have news in them, off the account's event stream alone, for the reason
@@ -19,10 +20,9 @@ export const UnreadConversationsBadge = () => {
   if (count === 0) return null;
 
   return (
-    <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] leading-none font-medium text-primary-foreground tabular-nums">
-      <span aria-hidden>{badgeCount(count)}</span>
+    <CountBadge count={count} size="md" className="ml-auto shrink-0">
       <span className="sr-only">{`, ${String(count)} unread`}</span>
-    </span>
+    </CountBadge>
   );
 };
 

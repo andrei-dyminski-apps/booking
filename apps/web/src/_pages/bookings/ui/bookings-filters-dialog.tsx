@@ -1,25 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { SlidersHorizontalIcon } from "lucide-react";
 import { LookupKind, type LookupOption } from "@repo/contracts";
-import { Badge } from "@repo/ui/components/badge";
-import { Button } from "@repo/ui/components/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@repo/ui/components/dialog";
 import { ROUTES } from "#shared/config";
 import type { FieldErrors } from "#shared/lib";
 import {
-  ButtonLink,
   FilterField,
-  FilterForm,
+  FiltersDialog,
   FilterSelect,
   LookupField,
 } from "#shared/ui";
@@ -31,21 +17,9 @@ import {
 } from "../lib/bookings-search";
 
 /**
- * Every filter the stays screen takes, in a popup — the same shape the catalogue's filters
- * have, and for the same reasons. The form inside it is a `GET` form: submitting it writes
- * the filters into the URL and the browser goes there, so the popup needs no action and
- * nothing to keep in step with the boxes.
- *
- * Where there is JavaScript, `FilterForm` navigates to the canonical address itself rather
- * than submitting every box and letting the page redirect — the long form of the search
- * would otherwise show in the address bar and be replaced a round trip later. The dialog
- * closes itself along with it, which a document navigation used to do by taking the page
- * away.
- *
- * `noValidate` lives in `FilterForm`, for the reason every other form here carries it: a
- * value the contract refuses arrives out of a URL already filled in, and a submit the
- * browser blocked in its own words would leave a visitor with a box they cannot correct by
- * pressing the only button in front of them.
+ * Every filter the stays screen takes, in the popup every list's filters are drawn in
+ * (`FiltersDialog`). A guest has no `guestId` box, so a submit leaves that filter behind
+ * exactly as the browser would have.
  *
  * The two id boxes are filled in by name (`LookupField`): a part of a title or a name
  * is looked up among the listings and the guests of the stays this session may read, and
@@ -76,127 +50,76 @@ export const BookingsFiltersDialog = ({
   listing: LookupOption | undefined;
   /** The guest being filtered by, where the page resolved them. */
   guest: LookupOption | undefined;
-}) => {
-  const [open, setOpen] = useState(false);
+}) => (
+  <FiltersDialog
+    title="Filter the stays"
+    description="A search is a link: whatever is applied here ends up in the address bar and can be sent to somebody else."
+    action={ROUTES.bookings}
+    href={(fields) =>
+      bookingsHref({
+        status: fields.status ?? "",
+        listingId: fields.listingId ?? "",
+        guestId: fields.guestId ?? "",
+        from: fields.from ?? "",
+        to: fields.to ?? "",
+        sort: fields.sort ?? "",
+      })
+    }
+    sort={values.sort}
+    clearHref={clearedFiltersHref(values)}
+    submitLabel="Show stays"
+    count={count}
+  >
+    <FilterSelect
+      name="status"
+      label="Status"
+      anyLabel="Any status"
+      options={statusOptions}
+      value={values.status}
+      error={errors.status}
+    />
 
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button variant="outline" size="sm" />}>
-        <SlidersHorizontalIcon />
-        Filters
-        {count > 0 && (
-          <Badge variant="default" className="ml-1">
-            {count}
-          </Badge>
-        )}
-      </DialogTrigger>
+    <LookupField
+      name="listingId"
+      label="Listing"
+      kind={LookupKind.listings}
+      value={values.listingId}
+      valueOption={listing}
+      error={errors.listingId}
+      placeholder="A title, or a listing's id"
+      description="Any part of the title of a listing these stays were taken in, or its whole id."
+    />
 
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Filter the stays</DialogTitle>
-          <DialogDescription>
-            A search is a link: whatever is applied here ends up in the address
-            bar and can be sent to somebody else.
-          </DialogDescription>
-        </DialogHeader>
+    {/*
+      A window a stay has to touch rather than a bound on the check-in: both dates
+      or neither, which is what the contract refuses half of.
+    */}
+    <FilterField
+      name="from"
+      label="Stays after"
+      type="date"
+      value={values.from}
+      error={errors.from}
+    />
+    <FilterField
+      name="to"
+      label="Stays before"
+      type="date"
+      value={values.to}
+      error={errors.to}
+    />
 
-        {/*
-          The fields are read as they were submitted rather than merged into the search on
-          the screen, which is what a document submit did: a guest has no `guestId` box, so
-          this form leaves that filter behind exactly as the browser would have.
-        */}
-        <FilterForm
-          action={ROUTES.bookings}
-          href={(fields) =>
-            bookingsHref({
-              status: fields.status ?? "",
-              listingId: fields.listingId ?? "",
-              guestId: fields.guestId ?? "",
-              from: fields.from ?? "",
-              to: fields.to ?? "",
-              sort: fields.sort ?? "",
-            })
-          }
-          onNavigate={() => setOpen(false)}
-        >
-          <div className="grid gap-4">
-            <FilterSelect
-              name="status"
-              label="Status"
-              anyLabel="Any status"
-              options={statusOptions}
-              value={values.status}
-              error={errors.status}
-            />
-
-            <LookupField
-              name="listingId"
-              label="Listing"
-              kind={LookupKind.listings}
-              value={values.listingId}
-              valueOption={listing}
-              error={errors.listingId}
-              placeholder="A title, or a listing's id"
-              description="Any part of the title of a listing these stays were taken in, or its whole id."
-            />
-
-            {/*
-              A window a stay has to touch rather than a bound on the check-in: both dates
-              or neither, which is what the contract refuses half of.
-            */}
-            <FilterField
-              name="from"
-              label="Stays after"
-              type="date"
-              value={values.from}
-              error={errors.from}
-            />
-            <FilterField
-              name="to"
-              label="Stays before"
-              type="date"
-              value={values.to}
-              error={errors.to}
-            />
-
-            {byGuest && (
-              <LookupField
-                name="guestId"
-                label="Guest"
-                kind={LookupKind.guests}
-                value={values.guestId}
-                valueOption={guest}
-                error={errors.guestId}
-                placeholder="A name, or an account's id"
-                description="Any part of the name of the guest who took the stay, or their whole id."
-              />
-            )}
-          </div>
-
-          {/*
-            The ordering is not one of the boxes — it is the select in the toolbar — but
-            this form still has to carry it: a form submits every field it has, and without
-            this one showing the stays would put them back in the order they were taken.
-          */}
-          <input type="hidden" name="sort" defaultValue={values.sort} />
-
-          <DialogFooter>
-            {/*
-              It closes the dialog like the submit beside it: the boxes are uncontrolled,
-              so a soft navigation that left the popup standing would leave them holding
-              the filters this link has just taken off.
-            */}
-            <ButtonLink
-              href={clearedFiltersHref(values)}
-              variant="ghost"
-              onClick={() => setOpen(false)}
-            >
-              Clear all
-            </ButtonLink>
-            <Button type="submit">Show stays</Button>
-          </DialogFooter>
-        </FilterForm>
-      </DialogContent>
-    </Dialog>
-  );
-};
+    {byGuest && (
+      <LookupField
+        name="guestId"
+        label="Guest"
+        kind={LookupKind.guests}
+        value={values.guestId}
+        valueOption={guest}
+        error={errors.guestId}
+        placeholder="A name, or an account's id"
+        description="Any part of the name of the guest who took the stay, or their whole id."
+      />
+    )}
+  </FiltersDialog>
+);
