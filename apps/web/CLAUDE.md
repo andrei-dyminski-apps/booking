@@ -62,6 +62,8 @@ apps/web/
       layout/session-recovery.tsx  # the one rotation a server-rendered header cannot run
       layout/theme-toggle.tsx
       layout/notification-bell.tsx  # the unread count off the event stream, the latest in a popup
+      layout/notification-toasts.tsx  # a toast per notice off the stream, beside the bell
+      layout/use-latest-notifications.ts  # the bell's popup: its list read on opening, kept in step with the stream
       layout/unread-conversations-badge.tsx  # the unread threads beside Messages, and the dot on the menu button
       layout/global-error.tsx # the document a failed shell render is replaced with
       layout/index.ts
@@ -253,7 +255,10 @@ apps/web/
       ui/back-link.tsx        # the way up from a detail screen to its list
       ui/button-link.tsx      # a <Link> wearing the button classes, spelled once
       ui/filter-field.tsx     # one box of a search form, spelled once
-      ui/lookup-field.tsx     # an id box filled in by name: suggestions paged as they scroll
+      ui/lookup-field/lookup-field.tsx       # an id box filled in by name: suggestions paged as they scroll
+      ui/lookup-field/use-lookup-search.ts   # …its suggestions: debounced, aborted, paged as they scroll
+      ui/lookup-field/lookup-search.ts       # …and the pure steps of it: which answer still lands
+      ui/lookup-field/lookup-search.spec.ts
       ui/filter-select.tsx    # …and one that picks out of a closed set
       ui/form-field.tsx       # one box of a form that submits, and the aria that ties it
       ui/hint-label.tsx       # the label of a box or a group, its description a hint beside it
@@ -884,7 +889,7 @@ The rules below are written about the catalogue and hold for both, with two diff
 worth naming: the stays are personal, so that read is `no-store` and carries no tag; and
 `listingId` is also reached by a link on a card, which fills the box in through the URL.
 
-**An id filter is filled in by name** (`shared/ui/lookup-field.tsx`) — `ownerId` on the
+**An id filter is filled in by name** (`shared/ui/lookup-field/`) — `ownerId` on the
 admin's listings, `listingId` and `guestId` on the stays. Nobody remembers a uuid, so the
 box is a combobox over `/lookups/*`: three characters of a name or a title are a
 search, a whole uuid is the one row it names, and what is picked travels in a hidden input
@@ -901,7 +906,9 @@ know the box changed.
 - **The list pages as it scrolls**: twenty at a time, the next page asked for with the
   cursor the API handed back when the list nears its end — three letters can be half the
   site's accounts. One page at a time: a ref guards the request, because two scroll events
-  can arrive before the render that shows it.
+  can arrive before the render that shows it. The requests live in `use-lookup-search.ts`
+  beside the box, and which answer may still land on the list in `lookup-search.ts`, pure
+  and covered by a spec.
 - **A row the URL names only by id is named by the page, on the server** (`valueOption`):
   `lookupsApi.optionOf` asks the same lookup by the whole id once per render, beside the
   list, and the chip reads the same name. Not the box — the dialog mounts it anew each time
@@ -1062,9 +1069,14 @@ stream.
   headers only, and the browser leaving is what aborts the upstream request.
 - **The bell is the shell's** (`_app/layout/notification-bell.tsx`) and renders for a
   session only. Its count comes from the stream rather than the server render — one number
-  should have one source — and its list is read when the popup opens. A new notice is
-  announced with a toast (`toast` is re-exported by `@repo/ui/components/sonner`, beside
-  the `Toaster` that draws it).
+  should have one source — and its list is read when the popup opens
+  (`use-latest-notifications.ts`, which owns the popup's `open` for that reason); a re-read
+  that fails while it is open keeps the rows already shown, and the next opening asks
+  again. A new notice is
+  announced with a toast by its neighbour, `notification-toasts.tsx`, rather than by the
+  bell: the announcement does not depend on the popup, and a second listener on the
+  stream costs a subscription, not a connection (`toast` is re-exported by
+  `@repo/ui/components/sonner`, beside the `Toaster` that draws it).
 - **The wording is `entities/notification`**: the bell, the toast and `/notifications` all
   draw a notice, and `describeNotification` is an exhaustive switch over the contract's
   types, so a new kind stops compiling there. Steiger cannot see the shell as its second
@@ -1382,7 +1394,9 @@ component:
   retry-one-401-once rule in `shared/api/http-client.ts`, and the event stream's protocol in
   `shared/api/server-events.ts` (one stream per browser and its handover between tabs, the
   growing delay before a refused stream is tried again, the `sync` every listener starts
-  with): each has a real way to be wrong (a second rotation spent on an already-refreshed
+  with), and `shared/ui/lookup-field/lookup-search.ts` (a next page of suggestions lands
+  only on the search that still ends at its cursor — appended to a fresh first page of the
+  same term it would repeat or skip rows): each has a real way to be wrong (a second rotation spent on an already-refreshed
   session, a retry loop) that only shows up under a race or a specific server answer, not
   by reading the function.
 - A mapping with more than one rule to keep straight — `shared/lib/form-errors.ts` (a zod

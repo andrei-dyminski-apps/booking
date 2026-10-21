@@ -5,6 +5,7 @@ import { ROUTES } from "#shared/config";
 import { ButtonLink } from "#shared/ui";
 import { MobileNav } from "./mobile-nav";
 import { NotificationBell } from "./notification-bell";
+import { NotificationToasts } from "./notification-toasts";
 import { SessionRecovery } from "./session-recovery";
 import { ThemeToggle } from "./theme-toggle";
 
@@ -62,8 +63,13 @@ export const Header = ({ user }: { user: User | null }) => (
           </>
         )}
 
-        {/* Only for a session: the stream behind it is the account's own. */}
-        {user !== null && <NotificationBell />}
+        {/* Only for a session: the stream behind both is the account's own. */}
+        {user !== null && (
+          <>
+            <NotificationBell />
+            <NotificationToasts />
+          </>
+        )}
 
         <ThemeToggle />
       </div>

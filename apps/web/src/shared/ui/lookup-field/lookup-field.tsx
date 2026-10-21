@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type UIEvent } from "react";
+import { useState } from "react";
 import {
   LOOKUP_MIN_LENGTH,
   type LookupKind,
@@ -14,29 +14,10 @@ import {
   ComboboxList,
 } from "@repo/ui/components/combobox";
 import { Field, FieldError } from "@repo/ui/components/field";
-import { lookupsApi } from "../api";
-import { fieldMessages } from "../lib";
-import { HintLabel, hintOf } from "./hint-label";
-
-/** How long typing has to pause before the box asks — one request per word, not per letter. */
-const DEBOUNCE_MS = 300;
-
-/** A page of suggestions: more than the popup shows at once, so it can scroll before the next. */
-const PAGE_SIZE = 20;
-
-/** How close to the end of the list scrolling has to come before the next page is asked for. */
-const LOAD_MORE_MARGIN_PX = 48;
-
-/** The answer to one search, tagged with what was searched so a stale one is never shown. */
-type Search =
-  | { term: string; status: "failed" }
-  | {
-      term: string;
-      status: "done";
-      items: LookupOption[];
-      nextCursor: string | null;
-      loadingMore: boolean;
-    };
+import { fieldMessages } from "../../lib";
+import { HintLabel, hintOf } from "../hint-label";
+import { type LookupSearch } from "./lookup-search";
+import { useLookupSearch } from "./use-lookup-search";
 
 /**
  * A box of a filter dialog that takes an id, filled in by name: three characters of a
@@ -96,108 +77,11 @@ export const LookupField = ({
       : (valueOption ?? { id: value, label: value, hint: null }),
   );
   const [inputValue, setInputValue] = useState(selected?.label ?? "");
-  const [term, setTerm] = useState("");
-  const [search, setSearch] = useState<Search | null>(null);
+  const { term, setTerm, current, onScroll } = useLookupSearch(kind);
 
-  /** The search in flight: a keystroke aborts it. */
-  const searchRef = useRef<AbortController | null>(null);
-  /**
-   * The next page in flight, and the guard against asking for it twice: two scroll events
-   * can arrive before the render that would show `loadingMore`, and a ref is set at once.
-   */
-  const pageRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    if (term.length < LOOKUP_MIN_LENGTH) return;
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      searchRef.current?.abort();
-      searchRef.current = controller;
-
-      lookupsApi
-        .page(kind, { q: term, limit: PAGE_SIZE }, controller.signal)
-        .then(({ items, nextCursor }) =>
-          setSearch({
-            term,
-            status: "done",
-            items,
-            nextCursor,
-            loadingMore: false,
-          }),
-        )
-        .catch(() => {
-          if (!controller.signal.aborted) setSearch({ term, status: "failed" });
-        });
-    }, DEBOUNCE_MS);
-
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-      // The next page of the old search is as worthless as the search itself.
-      pageRef.current?.abort();
-      pageRef.current = null;
-    };
-  }, [kind, term]);
-
-  const current = search !== null && search.term === term ? search : null;
-
-  const loadMore = () => {
-    if (
-      current?.status !== "done" ||
-      current.nextCursor === null ||
-      pageRef.current !== null
-    ) {
-      return;
-    }
-
-    const cursor = current.nextCursor;
-    const controller = new AbortController();
-
-    pageRef.current = controller;
-    setSearch({ ...current, loadingMore: true });
-
-    // Both answers land on whatever the search is by then, and only while it still ends
-    // at this cursor: a fresh first page of the same term may have replaced it meanwhile.
-    lookupsApi
-      .page(kind, { q: term, limit: PAGE_SIZE, cursor }, controller.signal)
-      .then(({ items, nextCursor }) =>
-        setSearch((previous) =>
-          previous?.status === "done" &&
-          previous.term === term &&
-          previous.nextCursor === cursor
-            ? {
-                ...previous,
-                items: [...previous.items, ...items],
-                nextCursor,
-                loadingMore: false,
-              }
-            : previous,
-        ),
-      )
-      .catch(() =>
-        // Leaves the cursor where it was, so scrolling again asks again — aborted or failed.
-        setSearch((previous) =>
-          previous?.status === "done" && previous.term === term
-            ? { ...previous, loadingMore: false }
-            : previous,
-        ),
-      )
-      .finally(() => {
-        if (pageRef.current === controller) pageRef.current = null;
-      });
-  };
-
-  const onScroll = (event: UIEvent<HTMLDivElement>) => {
-    const list = event.currentTarget;
-
-    if (
-      list.scrollHeight - list.scrollTop - list.clientHeight <
-      LOAD_MORE_MARGIN_PX
-    ) {
-      loadMore();
-    }
-  };
+  /** What was picked, while the box still shows its name rather than text typed over it. */
+  const picked =
+    selected !== null && inputValue === selected.label ? selected : null;
 
   const items =
     current?.status === "done"
@@ -275,23 +159,15 @@ export const LookupField = ({
 
       {/* The box holds one line, so the hint of what was picked goes under it: a name alone
           would not say which of two people called the same the filter is about. */}
-      {selected !== null &&
-        selected.hint !== null &&
-        inputValue === selected.label && (
-          <p className="truncate text-xs text-muted-foreground">
-            {selected.hint}
-          </p>
-        )}
+      {picked !== null && picked.hint !== null && (
+        <p className="truncate text-xs text-muted-foreground">{picked.hint}</p>
+      )}
 
       {/* What the filter means, as opposed to what the box shows — see above. */}
       <input
         type="hidden"
         name={name}
-        value={
-          selected !== null && inputValue === selected.label
-            ? selected.id
-            : inputValue.trim()
-        }
+        value={picked !== null ? picked.id : inputValue.trim()}
       />
 
       <FieldError errors={fieldMessages(error)} />
@@ -304,7 +180,7 @@ export const LookupField = ({
  * `role="status"`, so a screen reader hears a search run out or come back empty without
  * leaving the box.
  */
-function statusOf(term: string, current: Search | null): string | null {
+function statusOf(term: string, current: LookupSearch | null): string | null {
   if (term === "") return null;
 
   if (term.length < LOOKUP_MIN_LENGTH) {
