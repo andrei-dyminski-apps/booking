@@ -2,6 +2,7 @@ import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
 import { NotificationModule } from "../notification/notification.module";
 import { PrismaModule } from "../prisma/prisma.module";
+import { WaitlistModule } from "../waitlist/waitlist.module";
 import { BookingController } from "./booking.controller";
 import { BookingRepository } from "./booking.repository";
 import { BookingService } from "./booking.service";
@@ -16,6 +17,8 @@ import {
     PrismaModule,
     // The host hears about a hold, both sides about a cancellation and a lapsed hold.
     NotificationModule,
+    // Whoever waits for nights a cancellation or a lapsed hold let go of hears about it.
+    WaitlistModule,
     BullModule.registerQueue({ name: BOOKING_EXPIRY_QUEUE }),
   ],
   controllers: [BookingController],

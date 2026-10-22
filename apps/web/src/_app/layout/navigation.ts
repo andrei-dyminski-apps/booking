@@ -2,6 +2,7 @@ import {
   BuildingIcon,
   CalendarCheckIcon,
   HomeIcon,
+  HourglassIcon,
   LayoutDashboardIcon,
   MessagesSquareIcon,
   ShieldIcon,
@@ -56,6 +57,15 @@ export function navigationFor(user: User | null): NavItem[] {
     label: "Bookings",
     hint: "Stays and holds",
     icon: CalendarCheckIcon,
+  });
+
+  // The waitlist has a side for every signed-in role as well: a user the ranges they wait
+  // for and the ones waited for on their listings, an admin every one of them.
+  items.push({
+    href: ROUTES.waitlist,
+    label: "Waitlist",
+    hint: "Nights somebody waits for",
+    icon: HourglassIcon,
   });
 
   // A thread has two sides, a guest and the host of a listing, and nobody else reads it —

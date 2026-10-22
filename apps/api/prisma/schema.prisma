@@ -159,6 +159,7 @@ model Listing {
   owner         User           @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   bookings      Booking[]
   conversations Conversation[]
+  waitlist      WaitlistEntry[]
 
   /// The exceptions to `price_per_night`, which stays the default: a price for a day of
   /// the week and a price for one date. Which of the three a night costs is decided by
@@ -262,6 +263,7 @@ model User {
   bookings      Booking[]
   conversations Conversation[]
   notifications Notification[]
+  waitlist      WaitlistEntry[]
 
   /// `GET /users` is a keyset page ordered by `created_at` with `id` behind it — the pair
   /// `user-cursor.ts` encodes. One index serves both directions, the same arithmetic as the
@@ -374,6 +376,7 @@ enum NotificationType {
   BOOKING_CANCELLED
   BOOKING_EXPIRED
   REVIEW_RECEIVED
+  WAITLIST_AVAILABLE
 }
 
 /// Something that happened which one account should hear about. `type` and `data` are one
@@ -403,4 +406,40 @@ model Notification {
   /// (partial on `read_at IS NULL`), in the raw SQL of the migration that made the table.
   @@index([userId, createdAt(sort: Desc), id(sort: Desc)])
   @@map("notifications")
+}
+
+/// Nights somebody else holds, which one account wants to hear about when they come free.
+/// A wish rather than a claim: nothing here holds a slot, so neither the overlap check nor
+/// the `EXCLUDE` constraint of `bookings` reads this table. When a stay is cancelled or a
+/// hold lapses, every entry its nights overlap whose whole range is now free is deleted and
+/// its owner told — all of them at once, and the first to book takes the nights. The
+/// delete is what makes the notice at most once: of two releases racing over one entry,
+/// only the one whose `DELETE` matched it tells anybody.
+model WaitlistEntry {
+  id        String   @id @default(uuid()) @db.Uuid
+  listingId String   @map("listing_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  /// The same half-open pair a booking stores, check-out exclusive.
+  from      DateTime @map("from_date") @db.Date
+  to        DateTime @map("to_date") @db.Date
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// Cascade on both sides, unlike a booking: an entry is its owner's wish about one
+  /// listing and is no record of anything, so it goes with either. Nothing in the API
+  /// hard-deletes a listing — a retired one keeps its entries, and they are never told,
+  /// because what frees nights is read narrowed to the listings still offered.
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Waiting twice for the same nights is waiting once: joining again answers the entry
+  /// already there.
+  @@unique([userId, listingId, from, to])
+  /// What a release asks: who is waiting on this listing for nights that overlap these.
+  @@index([listingId, from, to])
+  /// The two orderings of `GET /waitlist/demand`, the tiebreaker following the key. They
+  /// serve the admin's scope, the one with no ceiling; a host's narrows through
+  /// `listings.owner_id` and is bounded by their listings, the trade the stays make.
+  @@index([from, id])
+  @@index([createdAt(sort: Desc), id(sort: Desc)])
+  @@map("waitlist_entries")
 }

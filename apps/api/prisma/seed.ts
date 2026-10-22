@@ -186,6 +186,26 @@ const bookings: Array<{
 ];
 
 /**
+ * Ranges waited for, each over nights a stay above already holds — the API refuses an
+ * entry for free nights, and one on the waiter's own listing. Three are the demo guest's,
+ * one matching a stay exactly and one only overlapping it, so "Trips" opens with the
+ * section filled. Sam waits for nights of the demo guest's, so cancelling that trip is
+ * what sends the `WAITLIST_AVAILABLE` notice.
+ */
+const waitlist: Array<{
+  user: UserKey;
+  listing: number;
+  from: Date;
+  to: Date;
+}> = [
+  { user: "guest", listing: 1, from: inDays(20), to: inDays(23) },
+  { user: "guest", listing: 3, from: inDays(14), to: inDays(17) },
+  { user: "guest", listing: 7, from: inDays(25), to: inDays(28) },
+  { user: "sam", listing: 0, from: inDays(10), to: inDays(14) },
+  { user: "alex", listing: 6, from: inDays(32), to: inDays(35) },
+];
+
+/**
  * Stays of the demo guest that are over, so the reviews have something to be about — the API books nothing
  * in the past, which is why only the seed can write these. Each says which halves were
  * reviewed: one is reviewed by both sides, one by the guest alone and one by nobody, so
@@ -346,6 +366,23 @@ async function main(): Promise<void> {
     }),
   });
 
+  await prisma.waitlistEntry.createMany({
+    data: waitlist.map((entry) => {
+      const listing = rooms[entry.listing];
+
+      if (listing === undefined) {
+        throw new Error(`No demo listing at index ${entry.listing}`);
+      }
+
+      return {
+        listingId: listing.id,
+        userId: idOf(entry.user),
+        from: entry.from,
+        to: entry.to,
+      };
+    }),
+  });
+
   for (const past of pastStays) {
     const listing = rooms[past.listing];
 
@@ -427,7 +464,7 @@ async function main(): Promise<void> {
       .join(", ")} — password "${DEMO_PASSWORD}"`,
   );
   console.log(
-    `Seeded listings: ${listings.length}, bookings: ${bookings.length + pastStays.length} (${pastStays.length} of them over, some reviewed), conversations: ${conversations.length}`,
+    `Seeded listings: ${listings.length}, bookings: ${bookings.length + pastStays.length} (${pastStays.length} of them over, some reviewed), conversations: ${conversations.length}, waitlist entries: ${waitlist.length}`,
   );
 }
 

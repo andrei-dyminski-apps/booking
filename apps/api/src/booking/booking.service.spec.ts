@@ -26,6 +26,8 @@ import {
 import type { AuthenticatedUser } from "../auth/auth.types";
 import type { Page } from "../common/paging";
 import { NotificationService } from "../notification/notification.service";
+import { WaitlistService } from "../waitlist/waitlist.service";
+import type { FreedNights } from "../waitlist/waitlist.types";
 import {
   BookingRepository,
   DatesUnavailableError,
@@ -412,11 +414,28 @@ class FakeNotificationService implements Pick<NotificationService, "notify"> {
   }
 }
 
+/**
+ * Only `announceFreed`: what is asserted here is which nights were handed over and when.
+ * Who among the waiting is told is `waitlist.service.spec.ts`'s.
+ */
+class FakeWaitlistService implements Pick<WaitlistService, "announceFreed"> {
+  readonly freed: FreedNights[] = [];
+
+  announceFreed(freed: FreedNights[]): Promise<void> {
+    this.freed.push(
+      ...freed.map(({ listingId, from, to }) => ({ listingId, from, to })),
+    );
+
+    return Promise.resolve();
+  }
+}
+
 describe("BookingService", () => {
   let service: BookingService;
   let bookingRepository: FakeBookingRepository;
   let bookingExpiryQueue: FakeBookingExpiryQueue;
   let notificationService: FakeNotificationService;
+  let waitlistService: FakeWaitlistService;
 
   /** A booking `guest` took against a listing `owner` owns — the row every rule acts on. */
   const bookedByGuest = async (): Promise<string> =>
@@ -433,6 +452,7 @@ describe("BookingService", () => {
     bookingRepository = new FakeBookingRepository();
     bookingExpiryQueue = new FakeBookingExpiryQueue();
     notificationService = new FakeNotificationService();
+    waitlistService = new FakeWaitlistService();
 
     const moduleRef = await Test.createTestingModule({
       providers: [
@@ -440,6 +460,7 @@ describe("BookingService", () => {
         { provide: BookingRepository, useValue: bookingRepository },
         { provide: BookingExpiryQueue, useValue: bookingExpiryQueue },
         { provide: NotificationService, useValue: notificationService },
+        { provide: WaitlistService, useValue: waitlistService },
       ],
     }).compile();
 
@@ -726,6 +747,51 @@ describe("BookingService", () => {
       { userId: GUEST_ID, recipient: StayParty.GUEST },
       { userId: OWNER_ID, recipient: StayParty.HOST },
     ]);
+  });
+
+  describe("the waitlist", () => {
+    const nights = { listingId: LISTING_ID, from: input.from, to: input.to };
+
+    it("hands it the nights a cancellation let go of", async () => {
+      const id = await bookedByGuest();
+
+      await service.remove(id, guest);
+
+      expect(waitlistService.freed).toEqual([nights]);
+    });
+
+    it("hands it nothing for a cancellation it refused", async () => {
+      const id = await bookedByGuest();
+
+      await expect(service.remove(id, owner)).rejects.toThrow(
+        ForbiddenException,
+      );
+
+      expect(waitlistService.freed).toEqual([]);
+    });
+
+    it("hands it the nights of a lapsed hold, on every path that releases one", async () => {
+      const byJob = await bookedByGuest();
+
+      bookingRepository.lapsed.add(byJob);
+      await service.releaseHold(byJob);
+      expect(waitlistService.freed).toEqual([nights]);
+
+      bookingRepository.lapsed.add(await bookedByGuest());
+      await service.releaseLapsedHolds();
+      expect(waitlistService.freed).toEqual([nights, nights]);
+
+      bookingRepository.lapsed.add(await bookedByGuest());
+      await service.create(GUEST_ID, input);
+      expect(waitlistService.freed).toEqual([nights, nights, nights]);
+    });
+
+    it("hands it nothing when nothing was released", async () => {
+      await bookedByGuest();
+      await service.releaseLapsedHolds();
+
+      expect(waitlistService.freed).toEqual([]);
+    });
   });
 
   describe("a lapsed hold", () => {

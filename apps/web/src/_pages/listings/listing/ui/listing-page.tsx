@@ -210,6 +210,7 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
                 listingId={listing.id}
                 prices={listing}
                 earliest={from}
+                booked={availability.booked}
               />
             )}
           </CardContent>

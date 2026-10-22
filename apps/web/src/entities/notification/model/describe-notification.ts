@@ -72,6 +72,15 @@ export function describeNotification(
           : ROUTES.guestReviews(data.guestId),
       };
     }
+    case NotificationType.WAITLIST_AVAILABLE: {
+      const { data } = notification;
+
+      return {
+        title: "Nights you waited for are free",
+        detail: `${data.listingTitle} · ${stayDates(data)} · first to book takes them`,
+        href: ROUTES.listing(data.listingId),
+      };
+    }
     default: {
       const unknown: never = notification;
 

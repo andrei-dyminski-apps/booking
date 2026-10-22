@@ -1,4 +1,3 @@
-import { tz } from "@date-fns/tz";
 import { Injectable } from "@nestjs/common";
 import {
   BookingStatus,
@@ -9,7 +8,6 @@ import {
   type CreateBookingInput,
   type StayNotice,
 } from "@repo/contracts";
-import { format } from "date-fns";
 import { z } from "zod";
 import {
   type Prisma,
@@ -25,6 +23,7 @@ import {
   violatedConstraint,
 } from "../prisma/prisma.errors";
 import { afterCreatedAt, CREATED_AT_ORDER, type Page } from "../common/paging";
+import { toIsoDate } from "../prisma/iso-date";
 import { PrismaService } from "../prisma/prisma.service";
 import type { BookingCursor } from "./booking-cursor";
 import { ACTIVE_STATUSES, holdExpiry } from "./domain/booking-status";
@@ -642,11 +641,6 @@ function violatedForeignKey(
   error: Prisma.PrismaClientKnownRequestError,
 ): string | null {
   return violatedConstraint(error, foreignKeyConstraintSchema)?.index ?? null;
-}
-
-/** @db.Date columns arrive as a Date at UTC midnight, so formatting in UTC is exact. */
-function toIsoDate(date: Date): string {
-  return format(date, "yyyy-MM-dd", { in: tz("UTC") });
 }
 
 function toBooking(row: BookingRowWithListing): Booking {

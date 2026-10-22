@@ -3,9 +3,15 @@
 import { refresh, revalidateTag, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { createBookingSchema, type CreateBookingInput } from "@repo/contracts";
-import { bookingsApi } from "#shared/api";
-import { availabilityTag, CATALOGUE_TAG, ROUTES } from "#shared/config";
+import { ApiResponseError, bookingsApi } from "#shared/api";
+import {
+  availabilityTag,
+  CATALOGUE_TAG,
+  HTTP_STATUS,
+  ROUTES,
+} from "#shared/config";
 import { toFieldErrors, toFormErrors, type FormErrors } from "#shared/lib";
+import type { ReservationErrors } from "../model/reservation-errors";
 
 /**
  * Taking a hold. The listing is bound by the page rather than taken from the payload —
@@ -20,23 +26,40 @@ import { toFieldErrors, toFormErrors, type FormErrors } from "#shared/lib";
  * endpoint of its own. What it cannot answer either time is whether the nights are free:
  * that is a question about other rows, and the only place it can be settled without a
  * race is inside the transaction that locks the listing. Its answer arrives here as a
- * `409` and is shown the way every other refusal is.
+ * `409` and is shown the way every other refusal is, with `stale` set: the form remembers
+ * these nights as taken even when they lie past the window its calendar draws.
  */
 export async function createBookingAction(
   listingId: string,
   _state: FormErrors,
   values: CreateBookingInput,
-): Promise<FormErrors> {
+): Promise<ReservationErrors> {
   const parsed = createBookingSchema.safeParse({ ...values, listingId });
 
   if (!parsed.success) {
-    return { message: null, fields: toFieldErrors(parsed.error.issues) };
+    return {
+      message: null,
+      fields: toFieldErrors(parsed.error.issues),
+      stale: false,
+    };
   }
 
   try {
     await bookingsApi.create(parsed.data);
   } catch (error) {
-    return toFormErrors(error);
+    // Somebody else holds some of these nights, and the calendar the visitor chose them
+    // from did not know: it is read again, so the taken nights are drawn and the form
+    // offers the waitlist for them in place of a hold.
+    const stale =
+      error instanceof ApiResponseError &&
+      error.status === HTTP_STATUS.CONFLICT;
+
+    if (stale) {
+      updateTag(availabilityTag(listingId));
+      refresh();
+    }
+
+    return { ...toFormErrors(error), stale };
   }
 
   // Two caches, and the difference between them is who has to see the change at once.

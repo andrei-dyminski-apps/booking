@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildMonths } from "./months";
+import { buildMonths, callsForWaitlist, overlapsBooked } from "./months";
 
 const TODAY = "2030-09-10";
 
@@ -85,5 +85,40 @@ describe("buildMonths", () => {
       taken: false,
       past: false,
     });
+  });
+});
+
+describe("overlapsBooked", () => {
+  const booked = [{ from: "2030-09-12", to: "2030-09-15" }];
+
+  it("finds a stay that shares a night with a taken range", () => {
+    expect(overlapsBooked("2030-09-10", "2030-09-13", booked)).toBe(true);
+    expect(overlapsBooked("2030-09-14", "2030-09-20", booked)).toBe(true);
+    expect(overlapsBooked("2030-09-01", "2030-09-30", booked)).toBe(true);
+  });
+
+  it("lets a stay end on the check-in day and start on the check-out day", () => {
+    expect(overlapsBooked("2030-09-10", "2030-09-12", booked)).toBe(false);
+    expect(overlapsBooked("2030-09-15", "2030-09-18", booked)).toBe(false);
+  });
+});
+
+describe("callsForWaitlist", () => {
+  const booked = [{ from: "2030-09-12", to: "2030-09-15" }];
+  const refused = { from: "2031-01-10", to: "2031-01-14" };
+
+  it("waits for nights the calendar draws as taken", () => {
+    expect(callsForWaitlist("2030-09-10", "2030-09-13", booked, null)).toBe(
+      true,
+    );
+  });
+
+  it("waits for exactly the nights a hold was refused for, past the window", () => {
+    expect(callsForWaitlist(refused.from, refused.to, booked, refused)).toBe(
+      true,
+    );
+    expect(callsForWaitlist(refused.from, "2031-01-13", booked, refused)).toBe(
+      false,
+    );
   });
 });

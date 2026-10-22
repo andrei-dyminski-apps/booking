@@ -105,20 +105,21 @@ The import is per file — `@repo/ui/components/dialog`; inside the package the 
 
 Routing belongs to Next.js and everything else to Feature-Sliced Design, so each file under `apps/web/app` is a one-line re-export of a slice in `apps/web/src/_pages` — the rules are in [`apps/web/CLAUDE.md`](apps/web/CLAUDE.md).
 
-| Route                              | What it is                                                            | Who sees it |
-| ---------------------------------- | --------------------------------------------------------------------- | ----------- |
-| `/`                                | the landing, one link into the catalogue                              | everyone    |
-| `/listings`                        | the catalogue: filters in the URL, keyset pages, cached and tagged    | everyone    |
-| `/listings/:id`                    | one listing, its availability calendar and the form that takes a hold | everyone    |
-| `/bookings`                        | Trips and Hosting (`?side=HOST`): filters in the URL, keyset pages    | signed in   |
-| `/guests/:id/reviews`              | what hosts said about one guest, for the guest and their hosts        | signed in   |
-| `/messages`                        | the caller's conversations, the most recent first                     | USER        |
-| `/messages/:id`                    | one thread, paged back from its end, and the reply box                | its 2 sides |
-| `/notifications`                   | the caller's notifications, newest first, kept live by the stream     | signed in   |
-| `/login`, `/register`              | the session forms, submitted to Server Actions                        | everyone    |
-| `/profile`                         | the session as the API sees it, and "Sign out"                        | signed in   |
-| `/dashboard`                       | the caller's own listings                                             | USER        |
-| `/dashboard/listings/new`, `…/:id` | publishing, editing and retiring a listing                            | USER        |
+| Route                              | What it is                                                                                                | Who sees it |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------- |
+| `/`                                | the landing, one link into the catalogue                                                                  | everyone    |
+| `/listings`                        | the catalogue: filters in the URL, keyset pages, cached and tagged                                        | everyone    |
+| `/listings/:id`                    | one listing, its calendar and the form that takes a hold or waits                                         | everyone    |
+| `/bookings`                        | Trips and Hosting (`?side=HOST`), keyset pages                                                            | signed in   |
+| `/waitlist`                        | the ranges a user waits for, and those waited for on their listings (`?side=HOST`); an admin's, every one | signed in   |
+| `/guests/:id/reviews`              | what hosts said about one guest, for the guest and their hosts                                            | signed in   |
+| `/messages`                        | the caller's conversations, the most recent first                                                         | USER        |
+| `/messages/:id`                    | one thread, paged back from its end, and the reply box                                                    | its 2 sides |
+| `/notifications`                   | the caller's notifications, newest first, kept live by the stream                                         | signed in   |
+| `/login`, `/register`              | the session forms, submitted to Server Actions                                                            | everyone    |
+| `/profile`                         | the session as the API sees it, and "Sign out"                                                            | signed in   |
+| `/dashboard`                       | the caller's own listings                                                                                 | USER        |
+| `/dashboard/listings/new`, `…/:id` | publishing, editing and retiring a listing                                                                | USER        |
 
 Every screen sits inside one shell (`apps/web/src/_app/layout`): a sidebar from `lg` up, the same list in a sheet behind the menu button below it, and a header with the theme and the two calls to action a stranger has. The shell reads `/auth/me` once for all three, and `currentUser()` is memoized for the render so the page under it does not ask again. A route that reads the API has a `loading.tsx` skeleton beside it, `notFound()` has a screen of its own, and there are two error boundaries — one under the shell and one that replaces the document when the shell itself cannot render.
 
@@ -133,45 +134,49 @@ The three catalogue routes are the first cached reads in the application: `GET /
 Every route below except `/`, the four public `/auth/*` ones, the three reading routes
 of the catalogue and a listing's reviews is behind the global `JwtAuthGuard` and answers `401` without a session.
 
-| Method   | Path                          | What it does                                                                                 |
-| -------- | ----------------------------- | -------------------------------------------------------------------------------------------- |
-| `POST`   | `/auth/register`              | register and open a session; `400` — failed the schema, `409` — email is taken               |
-| `POST`   | `/auth/login`                 | log in; `401` — wrong email or password, `403` — the account is blocked                      |
-| `POST`   | `/auth/refresh`               | rotate the token pair; `401` — missing, spent or forged token, cookies cleared               |
-| `POST`   | `/auth/logout`                | end the session, `204`; answers the same without one                                         |
-| `GET`    | `/auth/me`                    | the current user; `401` — no session, the user is gone or blocked                            |
-| `GET`    | `/listings`                   | the catalogue: filters (`ownerId` among them), an ordering and a cursor; public              |
-| `GET`    | `/listings/mine`              | the caller's own listings; USER only                                                         |
-| `GET`    | `/listings/:id`               | a single listing, `404` if missing or retired; public                                        |
-| `GET`    | `/listings/:id/availability`  | the nights already taken, for a `from`/`to` window; public                                   |
-| `POST`   | `/listings`                   | create, the owner taken from the session; USER only                                          |
-| `PATCH`  | `/listings/:id`               | edit; the owner or ADMIN, `403` otherwise                                                    |
-| `DELETE` | `/listings/:id`               | retire, `204`; out of the catalogue, booked stays keep their record                          |
-| `GET`    | `/bookings`                   | one page of the stays the caller may see: `side`, filters, an ordering and a cursor          |
-| `GET`    | `/bookings/:id`               | a single booking; the guest, the owner of the listing or an admin                            |
-| `POST`   | `/bookings`                   | a 15-minute hold; USER only, `403` — own listing, `404` — no listing, `409` — dates taken    |
-| `DELETE` | `/bookings/:id`               | cancel, `204`; the guest or an admin. The row stays, with `status: CANCELLED`                |
-| `GET`    | `/conversations`              | every thread the caller is a side of, newest message first; `listingId`, a cursor; USER only |
-| `POST`   | `/conversations`              | a guest's message about a listing: opens the thread or continues it; USER only               |
-| `GET`    | `/conversations/:id`          | one thread as the caller's side reads it; `404` for anybody but its two sides                |
-| `GET`    | `/conversations/:id/messages` | one page of the thread, the newest message first, a cursor                                   |
-| `POST`   | `/conversations/:id/messages` | a reply from either side; a retired listing does not close the thread                        |
-| `POST`   | `/conversations/:id/read`     | the caller's side has seen the thread up to `upTo`, the newest message shown; `204`          |
-| `GET`    | `/users`                      | one page of accounts: role, status, name and address filters, a cursor; ADMIN only           |
-| `GET`    | `/users/:id`                  | one account with its stay and listing counts; ADMIN only                                     |
-| `PATCH`  | `/users/:id`                  | change the role and/or block; ADMIN only, `403` on the caller's own account                  |
-| `GET`    | `/lookups/owners`             | accounts with a listing on offer, by `q` — a part of the address or a whole id; ADMIN        |
-| `GET`    | `/lookups/guests`             | the guests of the caller's stays, by `q`; USER (their listings') or ADMIN                    |
-| `GET`    | `/lookups/listings`           | the listings of the caller's stays on `side`, retired included, by `q` — a part of the title |
-| `GET`    | `/listings/:id/reviews`       | the guests' reviews of a listing, a page and a summary; `404` if retired; public             |
-| `GET`    | `/guests/:id/reviews`         | the hosts' reviews of a guest; the guest, a host they booked with or ADMIN, else `404`       |
-| `POST`   | `/bookings/:id/reviews`       | review a confirmed stay that is over; the guest or the owner, `409` — not yet or twice       |
-| `DELETE` | `/reviews/:id`                | remove a review, `204`; ADMIN only                                                           |
-| `GET`    | `/notifications`              | one page of the caller's notifications, newest first, with a cursor                          |
-| `GET`    | `/notifications/unread-count` | how many of them are unread                                                                  |
-| `POST`   | `/notifications/:id/read`     | mark one read, answers the unread count; `404` — not one of the caller's                     |
-| `POST`   | `/notifications/read`         | mark all read, answers the unread count                                                      |
-| `GET`    | `/events`                     | the caller's event stream (Server-Sent Events): a `sync`, then whatever happens              |
+| Method   | Path                          | What it does                                                                                          |
+| -------- | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `POST`   | `/auth/register`              | register and open a session; `400` — failed the schema, `409` — email is taken                        |
+| `POST`   | `/auth/login`                 | log in; `401` — wrong email or password, `403` — the account is blocked                               |
+| `POST`   | `/auth/refresh`               | rotate the token pair; `401` — missing, spent or forged token, cookies cleared                        |
+| `POST`   | `/auth/logout`                | end the session, `204`; answers the same without one                                                  |
+| `GET`    | `/auth/me`                    | the current user; `401` — no session, the user is gone or blocked                                     |
+| `GET`    | `/listings`                   | the catalogue: filters (`ownerId` among them), an ordering and a cursor; public                       |
+| `GET`    | `/listings/mine`              | the caller's own listings; USER only                                                                  |
+| `GET`    | `/listings/:id`               | a single listing, `404` if missing or retired; public                                                 |
+| `GET`    | `/listings/:id/availability`  | the nights already taken, for a `from`/`to` window; public                                            |
+| `POST`   | `/listings`                   | create, the owner taken from the session; USER only                                                   |
+| `PATCH`  | `/listings/:id`               | edit; the owner or ADMIN, `403` otherwise                                                             |
+| `DELETE` | `/listings/:id`               | retire, `204`; out of the catalogue, booked stays keep their record                                   |
+| `GET`    | `/bookings`                   | one page of the stays the caller may see: `side`, filters, an ordering and a cursor                   |
+| `GET`    | `/bookings/:id`               | a single booking; the guest, the owner of the listing or an admin                                     |
+| `POST`   | `/bookings`                   | a 15-minute hold; USER only, `403` — own listing, `404` — no listing, `409` — dates taken             |
+| `DELETE` | `/bookings/:id`               | cancel, `204`; the guest or an admin. The row stays, with `status: CANCELLED`                         |
+| `GET`    | `/waitlist`                   | the date ranges the caller waits for, check-in still ahead, earliest first; USER only                 |
+| `POST`   | `/waitlist`                   | wait for held nights; `409` — the nights are free, `403` — own listing, own stay or a full list       |
+| `GET`    | `/waitlist/demand`            | ranges waited for on the caller's listings — or every one, with who waits, for an admin; keyset pages |
+| `DELETE` | `/waitlist/:id`               | leave, `204`; `404` — not the caller's, or already told the nights came free                          |
+| `GET`    | `/conversations`              | every thread the caller is a side of, newest message first; `listingId`, a cursor; USER only          |
+| `POST`   | `/conversations`              | a guest's message about a listing: opens the thread or continues it; USER only                        |
+| `GET`    | `/conversations/:id`          | one thread as the caller's side reads it; `404` for anybody but its two sides                         |
+| `GET`    | `/conversations/:id/messages` | one page of the thread, the newest message first, a cursor                                            |
+| `POST`   | `/conversations/:id/messages` | a reply from either side; a retired listing does not close the thread                                 |
+| `POST`   | `/conversations/:id/read`     | the caller's side has seen the thread up to `upTo`, the newest message shown; `204`                   |
+| `GET`    | `/users`                      | one page of accounts: role, status, name and address filters, a cursor; ADMIN only                    |
+| `GET`    | `/users/:id`                  | one account with its stay and listing counts; ADMIN only                                              |
+| `PATCH`  | `/users/:id`                  | change the role and/or block; ADMIN only, `403` on the caller's own account                           |
+| `GET`    | `/lookups/owners`             | accounts with a listing on offer, by `q` — a part of the address or a whole id; ADMIN                 |
+| `GET`    | `/lookups/guests`             | the guests of the caller's stays, by `q`; USER (their listings') or ADMIN                             |
+| `GET`    | `/lookups/listings`           | the listings of the caller's stays on `side`, retired included, by `q` — a part of the title          |
+| `GET`    | `/listings/:id/reviews`       | the guests' reviews of a listing, a page and a summary; `404` if retired; public                      |
+| `GET`    | `/guests/:id/reviews`         | the hosts' reviews of a guest; the guest, a host they booked with or ADMIN, else `404`                |
+| `POST`   | `/bookings/:id/reviews`       | review a confirmed stay that is over; the guest or the owner, `409` — not yet or twice                |
+| `DELETE` | `/reviews/:id`                | remove a review, `204`; ADMIN only                                                                    |
+| `GET`    | `/notifications`              | one page of the caller's notifications, newest first, with a cursor                                   |
+| `GET`    | `/notifications/unread-count` | how many of them are unread                                                                           |
+| `POST`   | `/notifications/:id/read`     | mark one read, answers the unread count; `404` — not one of the caller's                              |
+| `POST`   | `/notifications/read`         | mark all read, answers the unread count                                                               |
+| `GET`    | `/events`                     | the caller's event stream (Server-Sent Events): a `sync`, then whatever happens                       |
 
 The three lookups fill in the id filters of the admin's listings and of the stays: `q` is at
 least three characters, matched anywhere in the name regardless of case — or, when it is a
@@ -214,6 +219,20 @@ users are meant to arrive as new members of the same union, not as a second conn
 
 On the frontend a bell in the header shows the count and the latest notices, a new one is
 announced with a toast, and `/notifications` is the whole feed.
+
+### The waitlist
+
+Nights somebody else holds can be waited for: the booking form offers "Notify me when free"
+instead of a hold when the dates overlap what the calendar draws as taken. When a stay is
+cancelled or a hold lapses unpaid, everybody waiting for nights that are now free as a whole
+gets a `WAITLIST_AVAILABLE` notification at once, and their entry is taken off the list —
+whoever books first takes the nights, through the same transaction as anybody else. The API
+does not book on a waiter's behalf: a booking is a 15-minute hold that has to be paid, and
+taken for somebody who is not looking it would lapse and block the nights for everybody.
+An account waits for at most 20 ranges at a time, listed on `/waitlist`. The same page shows
+a host the ranges waited for on their listings — the dates, not who waits: a waiter has
+taken nothing from them yet — and an admin every range on the site with the waiter's name
+(`GET /waitlist/demand`, paged, scoped by the session like `GET /bookings`).
 
 Overlapping dates on the same listing are rejected; back-to-back bookings (check-out on the day the next guest checks in) are allowed.
 
@@ -364,7 +383,7 @@ Implemented by hand rather than taken from Auth.js or Clerk — the parts an int
 
 The secrets have no fallback in the code: an unset `JWT_ACCESS_SECRET` stops the process at boot instead of shipping a key that is in a public repository. `.env.example` carries development values — replace them anywhere else, `openssl rand -hex 32` generates one.
 
-`pnpm --filter @repo/api db:seed` creates three demo logins — `guest@example.com` and `owner@example.com`, both plain users (one books, the other hosts), and `admin@example.com`, all with the password `password123` — plus a second host who also books a stay at the owner's, so one account has both a Trips and a Hosting side, and three more guests, two of whom share the name "Alex Morgan" so a lookup has two rows of one name to tell apart; eight listings, six owned by the owner and two by the second host, and eleven bookings ahead spread over the guests — enough for the catalogue's filters to have something to keep as well as something to drop — plus three stays of the demo guest that are already over, reviewed by both sides, by the guest alone and by nobody, so the demo guest and the demo owner each have a review left to write — and two conversations between the guest and the owner, one of them unread by the owner — so every rule below has something to act on from the first request. The stays are dated from the day the seed runs, so the data never ages into a puzzle. The bookings ahead are ones the API itself would accept; the three that are over are the exception it cannot write — the contract refuses a check-in in the past — which is why only the seed can give a review something to be about.
+`pnpm --filter @repo/api db:seed` creates three demo logins — `guest@example.com` and `owner@example.com`, both plain users (one books, the other hosts), and `admin@example.com`, all with the password `password123` — plus a second host who also books a stay at the owner's, so one account has both a Trips and a Hosting side, and three more guests, two of whom share the name "Alex Morgan" so a lookup has two rows of one name to tell apart; eight listings, six owned by the owner and two by the second host, and eleven bookings ahead spread over the guests — enough for the catalogue's filters to have something to keep as well as something to drop — plus three stays of the demo guest that are already over, reviewed by both sides, by the guest alone and by nobody, so the demo guest and the demo owner each have a review left to write — and two conversations between the guest and the owner, one of them unread by the owner — and five waitlist entries over nights already taken, three of them the demo guest's, so `/waitlist` has something to show on each of its sides, and one a guest's wait for a stay of the demo guest's, so cancelling it sends the notice — so every rule below has something to act on from the first request. The stays are dated from the day the seed runs, so the data never ages into a puzzle. The bookings ahead are ones the API itself would accept; the three that are over are the exception it cannot write — the contract refuses a check-in in the past — which is why only the seed can give a review something to be about.
 
 ### The same session on the frontend
 

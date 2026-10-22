@@ -85,3 +85,35 @@ const monthLabel = new Intl.DateTimeFormat("en-GB", {
 function isTaken(day: string, booked: readonly BookedRange[]): boolean {
   return booked.some((range) => range.from <= day && day < range.to);
 }
+
+/**
+ * Whether a stay from `from` to `to` would take a night the calendar draws as taken — the
+ * same half-open comparison, so a stay starting on another's check-out day is not one. It
+ * is what the booking form offers the waitlist on rather than a hold, and it is a guess
+ * about the window the page read: outside it, or a moment later, the API decides.
+ */
+export function overlapsBooked(
+  from: string,
+  to: string,
+  booked: readonly BookedRange[],
+): boolean {
+  return booked.some((range) => range.from < to && from < range.to);
+}
+
+/**
+ * Whether the booking form offers the waitlist for a stay rather than a hold: the calendar
+ * draws one of its nights as taken, or the API refused a hold of exactly these nights. The
+ * second is all the form can know about nights past the window the calendar reads — the
+ * refresh after that `409` redraws the window and nothing beyond it.
+ */
+export function callsForWaitlist(
+  from: string,
+  to: string,
+  booked: readonly BookedRange[],
+  refused: BookedRange | null,
+): boolean {
+  return (
+    (refused?.from === from && refused.to === to) ||
+    overlapsBooked(from, to, booked)
+  );
+}

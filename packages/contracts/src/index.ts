@@ -171,6 +171,24 @@ export {
 } from "./notification.js";
 
 export {
+  MAX_WAITLIST_ENTRIES,
+  joinWaitlistSchema,
+  waitlistEntrySchema,
+  waitlistSchema,
+  waitlistSortSchema,
+  waitlistDemandQuerySchema,
+  waitlistDemandEntrySchema,
+  waitlistDemandPageSchema,
+  waiterSchema,
+  type JoinWaitlistInput,
+  type WaitlistEntry,
+  type WaitlistSort,
+  type WaitlistDemandQuery,
+  type WaitlistDemandEntry,
+  type WaitlistDemandPage,
+} from "./waitlist.js";
+
+export {
   serverEventSchema,
   type ServerEvent,
   type ServerEventType,

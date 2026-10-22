@@ -12,6 +12,7 @@ export { lookupsApi } from "./lookups";
 export { notificationsApi } from "./notifications";
 export { reviewsApi } from "./reviews";
 export { usersApi } from "./users";
+export { waitlistApi } from "./waitlist";
 export {
   ApiResponseError,
   ApiUnreachableError,

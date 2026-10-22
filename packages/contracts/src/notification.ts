@@ -16,6 +16,9 @@ import { PAGING } from "./query.js";
  *   nights go; nobody did it, so both sides hear, and `recipient` says which one this is.
  * - `REVIEW_RECEIVED` — the other side of a finished stay reviewed the recipient: a guest
  *   reviewed their listing (`kind: LISTING`) or a host reviewed them (`kind: GUEST`).
+ * - `WAITLIST_AVAILABLE` — nights the recipient was waiting for came free. Nothing is held
+ *   for them: everybody waiting for those nights hears at once, and the first to book
+ *   takes them.
  *
  * A new kind is a new member of the union below and nothing else on this side: the API
  * stores `data` as it is given, and every switch over `type` on the frontend is exhaustive,
@@ -26,6 +29,7 @@ export const notificationTypeSchema = z.enum([
   "BOOKING_CANCELLED",
   "BOOKING_EXPIRED",
   "REVIEW_RECEIVED",
+  "WAITLIST_AVAILABLE",
 ]);
 
 export const NotificationType = notificationTypeSchema.enum;
@@ -73,6 +77,15 @@ const reviewReceivedSchema = z.object({
 });
 
 /**
+ * The nights a waitlist entry asked for, copied the way a stay is. No booking to name: the
+ * nights belong to nobody yet, which is the news.
+ */
+const waitlistAvailableSchema = z.object({
+  type: z.literal(NotificationType.WAITLIST_AVAILABLE),
+  data: stayNoticeSchema.omit({ bookingId: true }),
+});
+
+/**
  * The type and its data as one value, which is what a writer hands the API and what the
  * column stores. Discriminated on `type`, so a reader that has checked the type has the
  * data of that type and no other.
@@ -82,6 +95,7 @@ export const notificationContentSchema = z.discriminatedUnion("type", [
   bookingCancelledSchema,
   bookingExpiredSchema,
   reviewReceivedSchema,
+  waitlistAvailableSchema,
 ]);
 
 /**
@@ -99,6 +113,7 @@ export const notificationSchema = z.discriminatedUnion("type", [
   bookingCancelledSchema.extend(stored),
   bookingExpiredSchema.extend(stored),
   reviewReceivedSchema.extend(stored),
+  waitlistAvailableSchema.extend(stored),
 ]);
 
 /**

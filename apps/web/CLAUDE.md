@@ -23,6 +23,8 @@ apps/web/
     listings/[id]/loading.tsx
     bookings/page.tsx
     bookings/loading.tsx
+    waitlist/page.tsx         # one's own ranges, those on one's listings; an admin's, all of them
+    waitlist/loading.tsx
     messages/page.tsx         # the caller's threads; a guest's and a host's, never an admin's
     messages/loading.tsx
     messages/[id]/page.tsx    # one thread and the reply box
@@ -106,16 +108,19 @@ apps/web/
         overview/index.ts
         listing/ui/listing-page.tsx       # one listing: the calendar and the form
         listing/ui/availability-calendar.tsx # the nights already taken, drawn
-        listing/ui/booking-form.tsx       # the only thing here that creates a booking
+        listing/ui/booking-form.tsx       # the only thing here that creates a booking — or joins the waitlist for taken nights
+        listing/ui/booking-submit.tsx     # …its button, worded by which of the two the dates call for
         listing/ui/stay-quote.tsx         # …what its dates cost, night by night, redrawn on its own
         listing/ui/listing-reviews.tsx    # the guests' reviews: the summary and the newest page
         listing/ui/listing-skeleton.tsx
         listing/ui/ask-host.tsx           # a guest's question, or the way back to their thread; streamed, degrades
         listing/ui/ask-host-form.tsx
-        listing/api/create-booking-action.ts
+        listing/api/create-booking-action.ts # a `409` reads the calendar again, so the form offers the waitlist
+        listing/api/join-waitlist-action.ts # …and the reverse: a `409` for free nights reads it again too
+        listing/model/reservation-errors.ts # what both answer: the refusal, and whether the calendar was stale
         listing/api/read-listing-reviews.ts # the cached page, or null — the screen draws without it
         listing/api/start-conversation-action.ts # opens the thread, redirects into it
-        listing/lib/months.ts             # the booked ranges laid out as month grids
+        listing/lib/months.ts             # the booked ranges laid out as month grids; whether a stay calls for the waitlist
         listing/lib/months.spec.ts
         listing/index.ts
       bookings/ui/bookings-page.tsx       # one page: a user's Trips and Hosting, an admin's everything
@@ -134,6 +139,18 @@ apps/web/
       bookings/lib/bookings-search.ts     # searchParams onto the contract's query
       bookings/lib/bookings-search.spec.ts
       bookings/index.ts
+      waitlist/ui/waitlist-page.tsx       # one page: a user's own ranges and the ones on their listings, an admin's everything
+      waitlist/ui/side-tabs.tsx           # …the two halves of a user's waitlist, as links over `?side=HOST`
+      waitlist/ui/own-entries.tsx         # the ranges the caller waits for, answered whole
+      waitlist/ui/demand-entries.tsx      # the ranges waited for on listings; the waiter named for an admin only
+      waitlist/ui/entry-card.tsx          # one range, with a slot for what the side may do or know
+      waitlist/ui/leave-waitlist-button.tsx  # no confirmation: joining again undoes it
+      waitlist/ui/waitlist-skeleton.tsx
+      waitlist/api/read-demand-page.ts    # the personal read, and the cursor it refuses
+      waitlist/api/leave-waitlist-action.ts
+      waitlist/lib/waitlist-search.ts     # searchParams onto the side and the ordering
+      waitlist/lib/waitlist-search.spec.ts
+      waitlist/index.ts
       messages/                         # a group, not a slice: the /messages routes
         overview/ui/conversations-page.tsx # the threads the account is a side of, as a guest and as a host
         overview/ui/conversation-card.tsx
@@ -249,6 +266,7 @@ apps/web/
       api/reviews.ts          # reviewsApi — a listing's (public), a guest's (scoped), write, remove
       api/keyset-page.ts      # a stale cursor onto null, the one both paged reads share
       api/notifications.ts    # notificationsApi — the caller's feed and its two marks
+      api/waitlist.ts         # waitlistApi — the caller's own, read whole, join and leave; the demand, paged
       api/server-events.ts    # the tab's one EventSource on /api/events, shared by listeners
       api/index.ts
       config/api-url.ts       # apiOrigin() and BFF_BASE_PATH
@@ -739,6 +757,23 @@ this side decided.
   box is offered, which half of a review a card offers, and the `side` of the listing
   box's lookup. A `?guestId=` in place of the scope would be a rule to re-check on every
   request.
+- **The waitlist is a screen of its own, `/waitlist`, with the sides of `/bookings`** (`_pages/waitlist`).
+  A user sees the ranges they wait for — answered whole, capped at `MAX_WAITLIST_ENTRIES`, with
+  "Leave" on each — and, under `?side=HOST`, the ranges waited for on their listings; an admin,
+  who waits for nothing, sees every range with no tabs. The second list is a keyset page
+  (`GET /waitlist/demand`) and the first is not, which is why each side is its own component
+  of the page. A host is shown the dates and not who waits — the API answers `waiter: null`
+  for them, and a booking is what introduces a guest — while an admin's card links the
+  waiter's account. A page rather than a section of "Trips" because three roles read it and
+  the paged side does not fit inside another paged list; a slice rather than a group, because
+  `/waitlist` shares no route segment with anything. Joining starts on the listing: the
+  booking form compares its dates with the calendar's taken ranges (`callsForWaitlist`) and
+  submits to `joinWaitlistAction` instead of a hold when they overlap. Both actions read the
+  calendar again on a `409` and answer `stale`, so a stale one flips the form the right way
+  rather than repeating the refusal. The calendar is a window, so the form also remembers
+  the range a hold was last refused for — nights past the window could otherwise never
+  reach the waitlist. Only free nights are a `409` from the waitlist; a full list is a
+  `403`, which leaves the shared availability cache alone.
 - **The admin's section is `/admin`**, two screens: every listing on offer, each one
   edited and retired through the same `save-listing` and `delete-listing` features the
   owner runs, and `/admin/users`, the accounts, each leading to `/admin/users/[id]` — where

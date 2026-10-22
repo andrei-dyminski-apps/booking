@@ -19,6 +19,7 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { ownsOrIsAdmin } from "../auth/ownership";
 import { readCursor, type Page } from "../common/paging";
 import { NotificationService } from "../notification/notification.service";
+import { WaitlistService } from "../waitlist/waitlist.service";
 import {
   BookingRepository,
   DatesUnavailableError,
@@ -42,6 +43,7 @@ export class BookingService {
     private readonly bookingRepository: BookingRepository,
     private readonly bookingExpiryQueue: BookingExpiryQueue,
     private readonly notificationService: NotificationService,
+    private readonly waitlistService: WaitlistService,
   ) {}
 
   /**
@@ -177,6 +179,9 @@ export class BookingService {
     // free before reading who took them.
     await this.notifyExpiry(released);
     await this.notifyOwnerOf(booking, listingOwnerId);
+    // After the commit, so the new hold is one of the stays the waitlist checks against:
+    // nights it took back are not news to anybody waiting for them.
+    await this.waitlistService.announceFreed(released.map(({ stay }) => stay));
 
     return booking;
   }
@@ -186,14 +191,14 @@ export class BookingService {
    * cancelled, already released by the sweep — releases nothing and tells nobody.
    */
   async releaseHold(id: string): Promise<void> {
-    await this.notifyExpiry(await this.bookingRepository.expireHold(id));
+    await this.announceReleased(await this.bookingRepository.expireHold(id));
   }
 
   /** The repeatable sweep; the count is what the processor logs. */
   async releaseLapsedHolds(): Promise<number> {
     const released = await this.bookingRepository.expireLapsedHolds();
 
-    await this.notifyExpiry(released);
+    await this.announceReleased(released);
 
     return released.length;
   }
@@ -221,6 +226,17 @@ export class BookingService {
     // fails silently for the same reason scheduling one does.
     await this.bookingExpiryQueue.cancelExpiry(id);
     await this.notifyCancellation(booking, listingOwnerId, user);
+    await this.waitlistService.announceFreed([booking]);
+  }
+
+  /**
+   * Two of the three expiry paths: the two sides of each hold first, then whoever was
+   * waiting for its nights. The third, inside `create`, tells the waitlist only after the
+   * new hold is in.
+   */
+  private async announceReleased(released: ReleasedHold[]): Promise<void> {
+    await this.notifyExpiry(released);
+    await this.waitlistService.announceFreed(released.map(({ stay }) => stay));
   }
 
   /**

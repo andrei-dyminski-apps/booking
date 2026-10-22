@@ -17,6 +17,7 @@ import { LookupModule } from "./lookup/lookup.module";
 import { NotificationModule } from "./notification/notification.module";
 import { ReviewModule } from "./review/review.module";
 import { UserModule } from "./user/user.module";
+import { WaitlistModule } from "./waitlist/waitlist.module";
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { UserModule } from "./user/user.module";
     NotificationModule,
     ReviewModule,
     UserModule,
+    WaitlistModule,
   ],
   controllers: [AppController],
   providers: [

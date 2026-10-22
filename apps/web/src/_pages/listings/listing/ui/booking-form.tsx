@@ -1,11 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import {
   createBookingSchema,
+  type BookedRange,
   type CreateBookingInput,
   type PricedListing,
 } from "@repo/contracts";
-import { Button } from "@repo/ui/components/button";
 import {
   FieldDescription,
   FieldError,
@@ -15,6 +16,9 @@ import { Input } from "@repo/ui/components/input";
 import { isDay, useActionForm } from "#shared/lib";
 import { FormField } from "#shared/ui";
 import { createBookingAction } from "../api/create-booking-action";
+import { joinWaitlistAction } from "../api/join-waitlist-action";
+import { callsForWaitlist } from "../lib/months";
+import { BookingSubmit } from "./booking-submit";
 import { StayQuote } from "./stay-quote";
 
 /**
@@ -30,20 +34,43 @@ import { StayQuote } from "./stay-quote";
  * the past, here as well as in the action. `listingId` is one of its fields, so the form
  * is handed it as a bound value rather than as a box — it is what the schema needs to parse
  * at all, and the action ignores what arrives and uses the id the page bound to it.
+ *
+ * Dates the calendar draws as taken are not refused here: the form offers the waitlist for
+ * them instead of a hold, and submits to that action. Which of the two is decided off the
+ * values being sent, so the button and the submit cannot disagree. The calendar is a
+ * moment old, and both actions read it again on a `409` — the form then flips to whichever
+ * of the two the nights now call for. The calendar covers a window, so a refused hold is
+ * also remembered here: nights past the window would otherwise be offered as a hold again
+ * and again, and never the waitlist.
  */
 export const BookingForm = ({
   listingId,
   prices,
   earliest,
+  booked,
 }: {
   listingId: string;
   /** The default price and the exceptions to it, off the listing being booked. */
   prices: PricedListing;
   /** Today in UTC, from the server — see `shared/lib/dates.ts`. */
   earliest: string;
+  /** The nights the calendar draws as taken — what decides between a hold and the waitlist. */
+  booked: readonly BookedRange[];
 }) => {
+  const [refused, setRefused] = useState<BookedRange | null>(null);
   const { form, submit, pending, message } = useActionForm<CreateBookingInput>({
-    action: createBookingAction.bind(null, listingId),
+    action: async (state, values) => {
+      const waits = callsForWaitlist(values.from, values.to, booked, refused);
+      const answer = waits
+        ? await joinWaitlistAction(listingId, state, values)
+        : await createBookingAction(listingId, state, values);
+
+      if (answer.stale) {
+        setRefused(waits ? null : { from: values.from, to: values.to });
+      }
+
+      return answer;
+    },
     schema: createBookingSchema,
     defaultValues: { from: "", to: "" },
     bound: { listingId },
@@ -90,9 +117,12 @@ export const BookingForm = ({
           </FormField>
 
           <div className="flex flex-col gap-4 lg:pt-6.5">
-            <Button type="submit" size="lg" loading={pending}>
-              Hold these dates
-            </Button>
+            <BookingSubmit
+              control={form.control}
+              booked={booked}
+              refused={refused}
+              pending={pending}
+            />
 
             <StayQuote control={form.control} prices={prices} />
           </div>
@@ -103,6 +133,8 @@ export const BookingForm = ({
         <FieldDescription>
           A hold keeps the nights for fifteen minutes. There is nothing to pay
           with yet, so it lapses on its own and the nights go back on offer.
+          Nights somebody else holds can be waited for instead: you are told
+          when they come free, and the first to book takes them.
         </FieldDescription>
       </FieldGroup>
     </form>
