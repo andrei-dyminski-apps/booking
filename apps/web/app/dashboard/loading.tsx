@@ -1,1 +1,1 @@
-export { DashboardSkeleton as default } from "#_pages/dashboard";
+export { ListingsSkeleton as default } from "#_pages/dashboard/overview";

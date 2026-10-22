@@ -30,7 +30,9 @@ apps/web/
     dashboard/page.tsx
     dashboard/loading.tsx
     dashboard/listings/new/page.tsx
+    dashboard/listings/new/loading.tsx  # the form's skeleton, not the dashboard's grid
     dashboard/listings/[id]/page.tsx
+    dashboard/listings/[id]/loading.tsx
     admin/page.tsx            # every listing on offer, editable — the admin's section
     admin/loading.tsx
     admin/listings/[id]/page.tsx
@@ -76,44 +78,46 @@ apps/web/
       bff/index.ts
       styles/globals.css      # a single @import "@repo/ui/globals.css"
       fonts/                  # the faces loaded by next/font
-    _pages/                   # one slice per route: everything that route needs
+    _pages/                   # a slice per screen, everything it needs; a folder groups slices
       home/ui/home-page.tsx
       home/index.ts
-      login/ui/login-page.tsx
-      login/ui/login-form.tsx
-      login/api/login-action.ts           # the Server Action the form submits to
-      login/model/use-session-resume.ts   # the silent refresh beside the form
-      login/index.ts
-      register/ui/register-page.tsx
-      register/ui/register-form.tsx
-      register/api/register-action.ts
-      register/index.ts
+      auth/                             # a group, not a slice: the screens before a session
+        login/ui/login-page.tsx
+        login/ui/login-form.tsx
+        login/api/login-action.ts         # the Server Action the form submits to
+        login/model/use-session-resume.ts # the silent refresh beside the form
+        login/index.ts
+        register/ui/register-page.tsx
+        register/ui/register-form.tsx
+        register/api/register-action.ts
+        register/index.ts
       profile/ui/profile-page.tsx
       profile/api/read-review-summary-of.ts # what hosts said, in sum — the figure, the link, or none
       profile/index.ts
-      catalogue/ui/catalogue-page.tsx     # the filtered, cursor-paged list of listings
-      catalogue/ui/catalogue-toolbar.tsx  # one row: the filters, the ordering, the chips
-      catalogue/ui/catalogue-filters-dialog.tsx  # every filter, in a modal
-      catalogue/ui/catalogue-card.tsx
-      catalogue/ui/catalogue-skeleton.tsx
-      catalogue/api/read-catalogue-page.ts  # the cached read, and the cursor it refuses
-      catalogue/lib/catalogue-search.ts   # searchParams onto the contract's query
-      catalogue/lib/catalogue-search.spec.ts
-      catalogue/index.ts
-      listing/ui/listing-page.tsx         # one listing: the calendar and the form
-      listing/ui/availability-calendar.tsx  # the nights already taken, drawn
-      listing/ui/booking-form.tsx         # the only thing here that creates a booking
-      listing/ui/stay-quote.tsx           # …what its dates cost, night by night, redrawn on its own
-      listing/ui/listing-reviews.tsx      # the guests' reviews: the summary and the newest page
-      listing/ui/listing-skeleton.tsx
-      listing/ui/ask-host.tsx             # a guest's question, or the way back to their thread; streamed, degrades
-      listing/ui/ask-host-form.tsx
-      listing/api/create-booking-action.ts
-      listing/api/read-listing-reviews.ts # the cached page, or null — the screen draws without it
-      listing/api/start-conversation-action.ts  # opens the thread, redirects into it
-      listing/lib/months.ts               # the booked ranges laid out as month grids
-      listing/lib/months.spec.ts
-      listing/index.ts
+      listings/                         # a group, not a slice: the /listings routes
+        overview/ui/catalogue-page.tsx    # the filtered, cursor-paged list of listings
+        overview/ui/catalogue-toolbar.tsx # one row: the filters, the ordering, the chips
+        overview/ui/catalogue-filters-dialog.tsx # every filter, in a modal
+        overview/ui/catalogue-card.tsx
+        overview/ui/catalogue-skeleton.tsx
+        overview/api/read-catalogue-page.ts # the cached read, and the cursor it refuses
+        overview/lib/catalogue-search.ts  # searchParams onto the contract's query
+        overview/lib/catalogue-search.spec.ts
+        overview/index.ts
+        listing/ui/listing-page.tsx       # one listing: the calendar and the form
+        listing/ui/availability-calendar.tsx # the nights already taken, drawn
+        listing/ui/booking-form.tsx       # the only thing here that creates a booking
+        listing/ui/stay-quote.tsx         # …what its dates cost, night by night, redrawn on its own
+        listing/ui/listing-reviews.tsx    # the guests' reviews: the summary and the newest page
+        listing/ui/listing-skeleton.tsx
+        listing/ui/ask-host.tsx           # a guest's question, or the way back to their thread; streamed, degrades
+        listing/ui/ask-host-form.tsx
+        listing/api/create-booking-action.ts
+        listing/api/read-listing-reviews.ts # the cached page, or null — the screen draws without it
+        listing/api/start-conversation-action.ts # opens the thread, redirects into it
+        listing/lib/months.ts             # the booked ranges laid out as month grids
+        listing/lib/months.spec.ts
+        listing/index.ts
       bookings/ui/bookings-page.tsx       # one page: a user's Trips and Hosting, an admin's everything
       bookings/ui/side-tabs.tsx           # …the two halves of a user's stays, as links over `?side=HOST`
       bookings/ui/bookings-toolbar.tsx    # one row: the filters, the ordering, the chips
@@ -130,58 +134,65 @@ apps/web/
       bookings/lib/bookings-search.ts     # searchParams onto the contract's query
       bookings/lib/bookings-search.spec.ts
       bookings/index.ts
-      messages/ui/messages-page.tsx       # the threads the account is a side of, as a guest and as a host
-      messages/ui/conversation-card.tsx
-      messages/ui/messages-skeleton.tsx
-      messages/index.ts
-      conversation/ui/conversation-page.tsx  # a thread read from its end, `?cursor=` for earlier
-      conversation/ui/send-message-form.tsx  # empties itself on a send that landed, and on nothing else
-      conversation/ui/live-thread.tsx     # a re-render on a message of this thread not drawn yet
-      conversation/ui/mark-read.tsx       # the browser's POST /read, up to the newest message drawn, once it is scrolled to, while the tab is visible
-      conversation/ui/conversation-skeleton.tsx
-      conversation/api/send-message-action.ts
-      conversation/index.ts
-      dashboard/ui/dashboard-page.tsx     # a user's own listings, read by the session
-      dashboard/ui/listing-card.tsx
-      dashboard/ui/dashboard-skeleton.tsx
-      dashboard/index.ts
-      not-found/ui/not-found-page.tsx     # the screen behind every notFound()
-      not-found/index.ts
-      error/ui/error-page.tsx             # the screen both error boundaries render
-      error/index.ts
-      listing-new/ui/new-listing-page.tsx
-      listing-new/index.ts
-      listing-edit/ui/edit-listing-page.tsx
-      listing-edit/api/own-listing.ts     # the row of this screen, or a 404
-      listing-edit/index.ts
-      admin-listings/ui/admin-listings-page.tsx  # every offered listing, filtered in the URL
-      admin-listings/ui/admin-listings-toolbar.tsx
-      admin-listings/ui/admin-listings-filters-dialog.tsx
-      admin-listings/ui/admin-listing-card.tsx
-      admin-listings/ui/admin-listings-skeleton.tsx
-      admin-listings/api/read-listings-page.ts   # the catalogue's read, `no-store`
-      admin-listings/lib/admin-listings-search.ts  # the catalogue's filters plus `ownerId`
-      admin-listings/lib/admin-listings-search.spec.ts
-      admin-listings/index.ts
-      admin-listing-edit/ui/admin-edit-listing-page.tsx
-      admin-listing-edit/ui/admin-edit-listing-skeleton.tsx
-      admin-listing-edit/api/any-listing.ts      # the row, whoever owns it
-      admin-listing-edit/index.ts
-      admin-users/ui/users-page.tsx       # the accounts, filtered in the URL
-      admin-users/ui/users-toolbar.tsx
-      admin-users/ui/users-filters-dialog.tsx
-      admin-users/ui/user-card.tsx        # an account, and the link to its page
-      admin-users/ui/users-skeleton.tsx
-      admin-users/api/read-users-page.ts
-      admin-users/lib/users-search.ts     # searchParams onto the contract's query
-      admin-users/lib/users-search.spec.ts
-      admin-users/index.ts
-      admin-user/ui/user-page.tsx         # one account: access, and links to its activity
-      admin-user/ui/role-form.tsx         # a box and a button, no confirmation
-      admin-user/ui/block-button.tsx      # asks before blocking, not before reopening
-      admin-user/ui/user-skeleton.tsx
-      admin-user/api/update-user-actions.ts
-      admin-user/index.ts
+      messages/                         # a group, not a slice: the /messages routes
+        overview/ui/conversations-page.tsx # the threads the account is a side of, as a guest and as a host
+        overview/ui/conversation-card.tsx
+        overview/ui/conversations-skeleton.tsx
+        overview/index.ts
+        conversation/ui/conversation-page.tsx # a thread read from its end, `?cursor=` for earlier
+        conversation/ui/send-message-form.tsx # empties itself on a send that landed, and on nothing else
+        conversation/ui/live-thread.tsx   # a re-render on a message of this thread not drawn yet
+        conversation/ui/mark-read.tsx     # the browser's POST /read, up to the newest message drawn, once it is scrolled to, while the tab is visible
+        conversation/ui/conversation-skeleton.tsx
+        conversation/api/send-message-action.ts
+        conversation/index.ts
+      dashboard/                        # a group, not a slice: the /dashboard routes
+        overview/ui/listings-page.tsx     # a user's own listings, read by the session
+        overview/ui/listings-skeleton.tsx
+        overview/index.ts
+        listing-new/ui/new-listing-page.tsx
+        listing-new/ui/new-listing-card.tsx  # the screen's frame: the page and its wait both draw it
+        listing-new/ui/new-listing-skeleton.tsx
+        listing-new/index.ts
+        listing-edit/ui/edit-listing-page.tsx
+        listing-edit/ui/edit-listing-card.tsx
+        listing-edit/ui/edit-listing-skeleton.tsx
+        listing-edit/api/own-listing.ts   # the row of this screen, or a 404
+        listing-edit/index.ts
+      admin/                            # a group, not a slice: the /admin routes
+        overview/ui/listings-page.tsx     # every offered listing, filtered in the URL
+        overview/ui/listings-toolbar.tsx
+        overview/ui/listings-filters-dialog.tsx
+        overview/ui/listings-skeleton.tsx
+        overview/api/read-listings-page.ts  # the catalogue's read, `no-store`
+        overview/lib/listings-search.ts   # the catalogue's filters plus `ownerId`
+        overview/lib/listings-search.spec.ts
+        overview/index.ts
+        listing-edit/ui/edit-listing-page.tsx
+        listing-edit/ui/edit-listing-card.tsx
+        listing-edit/ui/edit-listing-skeleton.tsx
+        listing-edit/api/any-listing.ts   # the row, whoever owns it
+        listing-edit/index.ts
+        users/ui/users-page.tsx           # the accounts, filtered in the URL
+        users/ui/users-toolbar.tsx
+        users/ui/users-filters-dialog.tsx
+        users/ui/user-card.tsx            # an account, and the link to its page
+        users/ui/users-skeleton.tsx
+        users/api/read-users-page.ts
+        users/lib/users-search.ts         # searchParams onto the contract's query
+        users/lib/users-search.spec.ts
+        users/index.ts
+        user/ui/user-page.tsx             # one account: access, and links to its activity
+        user/ui/role-form.tsx             # a box and a button, no confirmation
+        user/ui/block-button.tsx          # asks before blocking, not before reopening
+        user/ui/user-skeleton.tsx
+        user/api/update-user-actions.ts
+        user/index.ts
+      fallback/                         # a group, not a slice: the screens drawn instead of a page
+        not-found/ui/not-found-page.tsx   # the screen behind every notFound()
+        not-found/index.ts
+        error/ui/error-page.tsx           # the screen both error boundaries render
+        error/index.ts
       guest-reviews/ui/guest-reviews-page.tsx  # the hosts' half, paged; reached from a stay or the profile
       guest-reviews/ui/guest-reviews-skeleton.tsx
       guest-reviews/api/read-guest-reviews.ts  # `no-store`, a 404 outside the API's scope
@@ -195,6 +206,8 @@ apps/web/
     features/                 # a user action a second page also runs
       save-listing/ui/listing-form.tsx    # the one form the new and the edit screen run
       save-listing/ui/pricing-fields.tsx  # …its weekday and date prices, saved with the row
+      save-listing/ui/listing-form-skeleton.tsx  # its wait, box for box; each screen frames it
+      save-listing/ui/listing-form-card.tsx  # …the card both are drawn in; the title and line are the screen's
       save-listing/lib/to-number.ts       # a number box's text onto the contract's number
       save-listing/api/save-listing-action.ts
       save-listing/index.ts
@@ -210,6 +223,8 @@ apps/web/
       listing-search/ui/listing-filter-fields.tsx  # …and its boxes: both listings dialogs
       listing-search/index.ts
     entities/                 # a domain model a second page also needs
+      listing/ui/listing-card.tsx  # a listing to whoever may edit it: the dashboard and the admin's
+      listing/index.ts
       user/model/roles.ts     # the roles named for a person: both admin screens read them
       user/api/any-user.ts    # the account with its counts, or a 404: its page and `?ownerId=`
       user/index.ts
@@ -286,9 +301,40 @@ The rules of the methodology, as they apply here:
   Steiger, which runs inside `pnpm lint`, so a violation fails the check rather than
   review.
 - **A slice is reached through its public API** — the `index.ts` at its root. The `imports`
-  map of `package.json` resolves `#_pages/home` straight to `./src/_pages/home/index.ts`,
-  which makes a deep import into another slice impossible to spell rather than merely
-  discouraged.
+  map of `package.json` resolves `#_pages/home` straight to `./src/_pages/home/index.ts`
+  and nowhere else. Since the groups, the `*` of that mask also matches a path with a
+  slash in it, so `#_pages/admin/overview/lib` would land on a segment's own `index.ts` —
+  which is why each sliced layer maps its five segment names to `null`
+  (`"#_pages/*/lib": null`). The more specific key wins, and `tsc`, Node and Turbopack all
+  refuse the import as a module that does not exist. A key holds one `*`, so the map closes
+  the path that ends in a segment and not one that goes past it
+  (`#_pages/admin/overview/lib/foo`); that, and every relative walk into a sibling, is
+  Steiger's to refuse (`no-public-api-sidestep`). A segment of a slice has no `index.ts` of
+  its own — only the segments of `_app` and `shared` do.
+- **Steiger reads imports, not re-exports.** An `export { … } from "…"` or `export * from`
+  is not checked at all — not the layer, not the public API — so it is how a slice's
+  `index.ts` names its own files and nothing else. Reaching another slice is an `import`,
+  where the check can see it.
+- **Pages are grouped by the segment of their route** once it is shared: `_pages/admin/*`
+  holds the `/admin` screens, `_pages/dashboard/*` the `/dashboard` ones, and
+  `_pages/listings/*` and `_pages/messages/*` a list and the row it opens. Inside a group
+  a slice is named by the rest of its route, and `overview` is the group's own root in
+  each — `/admin`, `/dashboard`, `/listings`, `/messages` themselves. A bare `[id]` is
+  named by what it opens: `listings/listing`, `messages/conversation`, as `/admin/users/[id]`
+  is `admin/user`. The group already says whose screen it is, so the files inside do not
+  repeat it: `admin/users/ui/users-page.tsx`, not `admin-users-page.tsx`, and
+  `messages/overview/ui/conversations-page.tsx`, not `messages-page.tsx`. Two groups have no shared segment and share a purpose
+  instead: `_pages/auth` — `/login` and `/register`, the way into a session — and
+  `_pages/fallback` — `error` and `not-found`, which have no route of their own and are
+  drawn in place of a page that could not be. A group is a plain folder — no `index.ts`,
+  no code of its own — so a page in it is reached as `#_pages/admin/users` through the
+  same `imports` map, and what two pages of a group share moves down a layer like anything
+  else. Steiger's `excessive-slicing` caps a layer at 20 ungrouped slices; grouping is the
+  answer only where the routes already form one or a purpose does. Pages with nothing in
+  common (`profile`, `notifications`) stay flat, and if the flat list outgrows the cap
+  anyway the rule is switched off for `_pages` with the reason written down — a layer
+  that maps routes one to one grows with the product, and a group invented to satisfy a
+  counter is worse than none.
 - **Pages first.** New code goes into the slice of the page that uses it and moves down a
   layer only once a second page actually uses it — not because it looks reusable. Steiger
   enforces the same rule from the other side: a feature or an entity with a single consumer
@@ -300,28 +346,37 @@ The rules of the methodology, as they apply here:
   the backend, `model/` state and pure logic, `lib/` helpers of the slice, `config/`
   constants. A slice grows a segment when it needs one; empty folders are not created up
   front, and neither are empty layers — `features/` and `entities/` appear with their first
-  slice.
+  slice. Those five names are the whole list: a sixth is added to the `null` keys of the
+  `imports` map for every sliced layer in the change that introduces it, or the map stops
+  guarding it.
 - **`_app` and `shared` are sliceless**: their direct children are segments, not slices,
   and each segment carries the `index.ts` (`#_app/layout`, `#shared/api`). The app layer
   has no `ui` segment — markup belongs to a page, and what the shell itself renders is the
   `layout` segment.
 - **A new layer is added to the `imports` map** of `apps/web/package.json` in the change
-  that creates it, or nothing can import it. Steiger needs no such registration: it knows
+  that creates it, or nothing can import it — a sliced one with its five segment keys
+  mapped to `null`. Steiger needs no such registration: it knows
   the canonical layer names and guards a new one from its first file.
 
 Where a new piece of code goes:
 
-| What it is                                                      | Where            |
-| --------------------------------------------------------------- | ---------------- |
-| Used by one page: a block, a form, a fetch, a piece of state    | `_pages/<route>` |
-| The same user action, now run by a second page                  | `features/`      |
-| The same domain model, now needed by a second page or feature   | `entities/`      |
-| CRUD over a resource, the transport, config, a domain-free tool | `shared/`        |
-| The frame around every page: providers, layout, fonts, tokens   | `_app/`          |
+| What it is                                                      | Where                                        |
+| --------------------------------------------------------------- | -------------------------------------------- |
+| Used by one page: a block, a form, a fetch, a piece of state    | `_pages/<slice>` or `_pages/<group>/<slice>` |
+| The same user action, now run by a second page                  | `features/`                                  |
+| The same domain model, now needed by a second page or feature   | `entities/`                                  |
+| CRUD over a resource, the transport, config, a domain-free tool | `shared/`                                    |
+| The frame around every page: providers, layout, fonts, tokens   | `_app/`                                      |
 
 CRUD is infrastructure rather than a domain model, so `bookingsApi` sits in `shared/api`
-next to the transport it uses. An entity slice is for a model with rules of its own, and
-only once a second consumer needs it.
+next to the transport it uses. An entity slice holds one of two things, and only once a
+second consumer needs it: a model with rules of its own (`describeNotification`, the role
+labels), or the way one domain object is drawn wherever two screens draw it
+(`ListingCard`, `ReviewCard`). The second kind draws the object and nothing it does not
+own: what may be done to it, and where that leads, is handed over by the screen — a slot
+(`action`, `actions`) or a target (`editHref`) — because only the screen knows who is
+looking. A card that imports a feature, or decides a route or a role by itself, is a
+composition of a page and stays there.
 
 ### The methodology itself
 
@@ -601,7 +656,7 @@ their refresh token, and only the browser can turn an expired session into a liv
   and trying again would be nonsense in the first case and endless recursion in the
   second.
 - **A rotation runs beside the form, never in place of it**
-  (`_pages/login/model/use-session-resume.ts`). That is the case the transport cannot
+  (`_pages/auth/login/model/use-session-resume.ts`). That is the case the transport cannot
   cover: a cold arrival has been refused nothing yet, so there is no 401 to react to. It
   needs no guard against StrictMode any more — the single flight above is the guard. What
   it must not do is withhold the form until it answers: that would put the state of a
@@ -697,7 +752,7 @@ this side decided.
   reach that `403` are not worth drawing.
 - **One link is current in the navigation**, the deepest one containing the path —
   `/admin` contains `/admin/users` as surely as the users link does.
-- **Ownership of a row is read, not guessed** (`_pages/listing-edit/api/own-listing.ts`).
+- **Ownership of a row is read, not guessed** (`_pages/dashboard/listing-edit/api/own-listing.ts`).
   Every signed-in role may read a listing — the catalogue is not a secret — so a row
   belonging to somebody else comes back with a 200 and would render a form the `PATCH`
   refuses. Inside the owner's own section that is the same 404 as a row that does not
@@ -709,7 +764,7 @@ this side decided.
 Two kinds, and what tells them apart is whether the submit has to survive a page whose
 JavaScript never arrived.
 
-- **The login form is the one that has to** (`_pages/login`). It stays a plain
+- **The login form is the one that has to** (`_pages/auth/login`). It stays a plain
   `<form action={submit}>` over `useActionState`: the browser posts `FormData` to the
   action with or without React, its boxes are controlled by hand so an action that comes
   back with a refusal does not empty them, and nothing validates it in the browser at all.
@@ -724,7 +779,7 @@ JavaScript never arrived.
   wrong place, and none of these screens is reachable by somebody who could not run the
   script that rendered it.
 - **Registration asks for the password twice, and only while it is hidden**
-  (`_pages/register/ui/register-form.tsx`). The second box is a question about what was
+  (`_pages/auth/register/ui/register-form.tsx`). The second box is a question about what was
   typed behind asterisks, so the eye on the first one answers it: revealing the characters
   takes the box away and `unregister` takes its value with it, or a mismatch nobody can
   see any more would go on refusing the submit. It has no eye of its own — that would show
@@ -868,7 +923,7 @@ the `GET` form of the dialog (`FilterForm`), the chips that take a filter off
 the three notices a list shows in place of itself — a cursor the API will not read
 (`StalePageNotice`), a search the contract refuses (`RefusedSearchNotice`) and an answer
 the filters emptied (`NoMatchesNotice`). The two admin lists are the same shape again:
-`_pages/admin-users` over accounts, and `_pages/admin-listings` over the catalogue's own
+`_pages/admin/users` over accounts, and `_pages/admin/overview` over the catalogue's own
 filters plus `ownerId` — the one the catalogue's contract takes and only an admin has a
 use for, shown as a chip named by the owner's name and address. In `shared/lib`
 and `shared/api`, the domain-free mechanics the two slices' search modules would otherwise
@@ -1205,7 +1260,7 @@ A mutation nobody can undo — deleting a row, revoking access, anything the API
 with a `DELETE` — asks first, in an `AlertDialog` from `@repo/ui`
 (`features/delete-listing/ui/delete-listing-button.tsx`,
 `features/delete-review/ui/delete-review-button.tsx`,
-`_pages/bookings/ui/cancel-booking-button.tsx` and `_pages/admin-user/ui/block-button.tsx`). Not a second
+`_pages/bookings/ui/cancel-booking-button.tsx` and `_pages/admin/user/ui/block-button.tsx`). Not a second
 button that takes the place of the first: a modal takes the focus and refuses a click
 outside itself, which is what stops the confirmation being hit by the hand that was
 already moving.
@@ -1236,7 +1291,18 @@ already moving.
 - **A route that reads the API has a `loading.tsx`**, and it is a one-line re-export like
   every other file in `app/`: the skeleton itself is a component of the page's own slice.
   What it draws is the shape of the screen it precedes, so nothing jumps when the answer
-  arrives.
+  arrives. Where several screens are made of one feature, the feature draws the wait of
+  its own part and nothing around it — `ListingFormSkeleton` is the form, box for box —
+  and each page puts it into the same frame it puts the form into (`new-listing-card.tsx`,
+  `edit-listing-card.tsx`), so the title and the line are spelled once per screen. The card
+  itself is the feature's (`ListingFormCard`): its width and spacing are spelled once for
+  every screen, and the frame of each is a title and a line handed to it.
+- **What the wait cannot know, it does not draw.** A part whose length depends on the
+  answer ends the skeleton above it rather than guessing: the edit screens' wait stops at
+  the legend of the date prices (`editing` on `ListingFormSkeleton`), because the rows a
+  listing has — and everything under them — are not known until it arrives. A form that
+  grows below a finished skeleton moves nothing already drawn; one that pushes a drawn
+  button down is the jump the skeleton exists to prevent.
 - **`not-found.tsx` is reached far more often than by a mistyped URL.** Every id that
   cannot name a row arrives there (`requireId`, `orNotFound`), so does a retired listing,
   and so does a user's section opened by an admin.
@@ -1400,7 +1466,7 @@ component:
 
 - A parser of untrusted input — `shared/lib/next-path.ts` (where a visitor is sent after
   signing in), the `Set-Cookie` reader inside `shared/api/session-cookies.ts` (what
-  becomes a cookie of this origin) and the two searches — `_pages/catalogue/lib/catalogue-search.ts`
+  becomes a cookie of this origin) and the two searches — `_pages/listings/overview/lib/catalogue-search.ts`
   and `_pages/bookings/lib/bookings-search.ts`
   (`searchParams` onto the contract's query: what a blank box means, what a repeated
   parameter means, that the link the page writes parses back to the search it came from,
@@ -1426,7 +1492,7 @@ component:
   shape: which of `types` and `message` a box's messages come out of, and that a rule
   recorded as a bare `true` is not one of them), `shared/config/api-url.ts`
   (the trailing slash, the missing-env failure, the module-level cache) and
-  `_pages/listing/lib/months.ts` (the half-open range the calendar shades, the month
+  `_pages/listings/listing/lib/months.ts` (the half-open range the calendar shades, the month
   rollover, the Monday-first offset — a stay's check-out day drawn as taken would be a
   free night the screen refuses to sell). What a night of a stay costs is not here: the
   booking form quotes by `nightlyPrice` from `@repo/contracts`, and its spec lives there,

@@ -1,1 +1,1 @@
-export { ListingPage as default } from "#_pages/listing";
+export { ListingPage as default } from "#_pages/listings/listing";

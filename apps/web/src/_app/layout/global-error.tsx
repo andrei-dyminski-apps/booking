@@ -1,6 +1,6 @@
 "use client";
 
-import { ErrorPage } from "#_pages/error";
+import { ErrorPage } from "#_pages/fallback/error";
 import "../styles/globals.css";
 
 /**

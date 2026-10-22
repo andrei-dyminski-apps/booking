@@ -1,1 +1,1 @@
-export { LoginPage as default } from "#_pages/login";
+export { LoginPage as default } from "#_pages/auth/login";

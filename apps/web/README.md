@@ -18,9 +18,9 @@ pnpm turbo run check-types --filter=@repo/web
 app/                     # layout.tsx, page.tsx — re-exports; favicon.ico
 src/
   _app/                  # the shell in segments: layout, providers, styles, fonts
-  _pages/                # one slice per route, with everything that route needs
+  _pages/                # a slice per screen; folders group the slices of one section
   features/              # a user action a second page also runs (the listing form)
-  entities/              # a domain model a second page also needs (none yet)
+  entities/              # a domain model, or how one is drawn, a second page also needs
   shared/                # no domain knowledge: api transport and routes, config
 ```
 
@@ -29,7 +29,7 @@ when a second page needs it, `widgets/` is not adopted at all, and CRUD over a r
 (`shared/api/bookings.ts`) counts as infrastructure rather than a domain model.
 
 - A layer imports downwards only (`_app → _pages → features → entities → shared`), and never a sibling slice of its own layer. Steiger checks both halves inside `pnpm lint`, so a violation fails the check.
-- A slice is entered through its `index.ts`: the `imports` map of `package.json` maps `#_pages/home` onto `src/_pages/home/index.ts`, so a deep import into another slice cannot even be spelled. Inside a slice the paths are relative.
+- A slice is entered through its `index.ts`: the `imports` map of `package.json` maps `#_pages/home` onto `src/_pages/home/index.ts`, and maps a path ending in a segment (`#_pages/admin/overview/lib`) to `null`, so the compiler refuses it. A path past a segment, a relative walk into a sibling and a cross-slice re-export are what is left; Steiger refuses the first two, and the third is not written — a slice reaches another with an `import`. Inside a slice the paths are relative.
 - Segments describe the nature of the code: `ui/`, `api/`, `model/`, `lib/`, `config/`. They appear when a slice needs them; empty layers and empty segments are not created up front. `_app` and `shared` hold no slices — their direct children are segments, each with its own `index.ts` (`#_app/layout`, `#shared/api`), and the app layer has no `ui` segment.
 - `pnpm lint` runs two tools: ESLint with the ordinary rules of the repository (TypeScript, React, Prettier) and [Steiger](https://github.com/feature-sliced/steiger) with all of the FSD ones — boundaries, cross-imports, public-API sidesteps and the shape of the tree. There are no FSD rules in `eslint.config.js`: Steiger resolves an import to a file rather than matching its text, so it catches cases a per-file rule cannot, and one owner means one place to configure. The two rules turned off in `steiger.config.js` carry their reason in a comment.
 

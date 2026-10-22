@@ -1,1 +1,1 @@
-export { ConversationPage as default } from "#_pages/conversation";
+export { ConversationPage as default } from "#_pages/messages/conversation";

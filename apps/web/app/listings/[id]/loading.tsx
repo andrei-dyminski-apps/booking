@@ -1,1 +1,1 @@
-export { ListingSkeleton as default } from "#_pages/listing";
+export { ListingSkeleton as default } from "#_pages/listings/listing";

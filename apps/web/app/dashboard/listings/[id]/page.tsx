@@ -1,1 +1,1 @@
-export { EditListingPage as default } from "#_pages/listing-edit";
+export { EditListingPage as default } from "#_pages/dashboard/listing-edit";

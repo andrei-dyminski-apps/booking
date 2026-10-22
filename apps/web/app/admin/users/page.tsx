@@ -1,1 +1,1 @@
-export { UsersPage as default } from "#_pages/admin-users";
+export { UsersPage as default } from "#_pages/admin/users";

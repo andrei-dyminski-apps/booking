@@ -1,1 +1,1 @@
-export { NewListingPage as default } from "#_pages/listing-new";
+export { NewListingPage as default } from "#_pages/dashboard/listing-new";

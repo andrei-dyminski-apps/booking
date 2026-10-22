@@ -1,1 +1,1 @@
-export { MessagesSkeleton as default } from "#_pages/messages";
+export { ConversationsSkeleton as default } from "#_pages/messages/overview";

@@ -1,1 +1,1 @@
-export { UsersSkeleton as default } from "#_pages/admin-users";
+export { UsersSkeleton as default } from "#_pages/admin/users";

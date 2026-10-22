@@ -238,7 +238,7 @@ on it says why it is a change to the transport rather than a flag.
 - [x] A list of listings with filters (dates, price, capacity); filters live in the **URL searchParams** (shareable links), Server Components, cursor pagination.
       The filters and the page are `listingQuerySchema` in the contract, so the same shape
       that validates the query string in Nest parses `searchParams` in
-      `_pages/catalogue/lib/catalogue-search.ts` — a URL is untrusted text, and what the
+      `_pages/listings/overview/lib/catalogue-search.ts` — a URL is untrusted text, and what the
       schema refuses is shown under the box it belongs to instead of being sent. The form
       is a plain `method="get"`, which is what makes a search a link somebody can send and
       what makes it work with no JavaScript at all; the price of that is a URL spelling

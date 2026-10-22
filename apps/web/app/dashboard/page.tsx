@@ -1,1 +1,1 @@
-export { DashboardPage as default } from "#_pages/dashboard";
+export { ListingsPage as default } from "#_pages/dashboard/overview";

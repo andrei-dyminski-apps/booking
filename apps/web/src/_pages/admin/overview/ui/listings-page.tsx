@@ -1,0 +1,167 @@
+import { redirect } from "next/navigation";
+import { CalendarCheckIcon, WarehouseIcon } from "lucide-react";
+import { Role, type LookupOption } from "@repo/contracts";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@repo/ui/components/empty";
+import { ListingCard } from "#entities/listing";
+import { anyUser } from "#entities/user";
+import { requireRole } from "#shared/api";
+import { ROUTES } from "#shared/config";
+import { filtersHref, lookupOptionText, today } from "#shared/lib";
+import {
+  BackLink,
+  ButtonLink,
+  NoMatchesNotice,
+  PageHeading,
+  Pager,
+  RefusedSearchNotice,
+  StalePageNotice,
+} from "#shared/ui";
+import { readListingsPage } from "../api/read-listings-page";
+import {
+  activeFilters,
+  listingsHref,
+  readListingsSearch,
+} from "../lib/listings-search";
+import { ListingsToolbar } from "./listings-toolbar";
+
+/**
+ * The admin's half of the catalogue: every listing on offer, each of them editable — the
+ * screen phase 3 left waiting for the catalogue to exist. It is the catalogue's own read
+ * (`GET /listings`), because an admin's question is "what is on offer" exactly as a
+ * guest's is; what differs is the link on each card, and the API is what decides that it
+ * works — `PATCH` and `DELETE` let an admin through on any row.
+ *
+ * The filters are the catalogue's — dates, prices, guests and the ordering — plus
+ * `ownerId`, and they live in the URL with the shape every other list here has: one search
+ * at one address, a refusal shown under its box, a page that reads `no-store`. `ownerId`
+ * is how an account's own page links to what it offers; an id that parses and names
+ * nobody is the 404 any other id gets.
+ *
+ * Retired listings are not here, and that is the catalogue's rule rather than a choice of
+ * this screen: a retired row answers `404` by id to everybody, and nothing in the API
+ * lists them back.
+ */
+export const ListingsPage = async ({ searchParams }: PageProps<"/admin">) => {
+  const { query, ownerId, errors, values, canonical } = readListingsSearch(
+    await searchParams,
+  );
+
+  await requireRole(Role.ADMIN, listingsHref(values));
+
+  // One search, one address — see `canonical` in `catalogue-search.ts`.
+  if (canonical !== null) redirect(canonical);
+
+  // The owner is read whenever the id parses, the list only when the whole search does:
+  // a refused date range still belongs to the account it was asked about.
+  const [page, owner] = await Promise.all([
+    query === null ? null : readListingsPage(query),
+    ownerId === null ? null : anyUser(ownerId),
+  ]);
+  const staleCursor = query !== null && page === null;
+  // The account as the owner box offers it, so the box and the chip read what a pick from
+  // the list would have said — the address beside the name, since an admin may read it.
+  const ownerOption: LookupOption | undefined =
+    owner === null
+      ? undefined
+      : { id: owner.id, label: owner.name, hint: owner.email };
+  const filters = activeFilters(values, {
+    owner: ownerOption && lookupOptionText(ownerOption),
+  });
+  // The owner narrows the list to one account rather than searching it, so an empty
+  // answer under that alone is the account's own empty state, not a search nothing matched.
+  const searched = filters.some((filter) => filter.key !== "ownerId");
+
+  return (
+    <div className="flex flex-col gap-6">
+      {owner !== null && (
+        <BackLink href={ROUTES.adminUser(owner.id)}>
+          Back to the account
+        </BackLink>
+      )}
+
+      <PageHeading
+        title="Listings"
+        description={
+          owner === null
+            ? "Every listing on offer. An admin may edit or retire any of them; creating one stays the owner's."
+            : `What ${owner.name} has on offer.`
+        }
+      />
+
+      <ListingsToolbar
+        values={values}
+        errors={errors}
+        filters={filters}
+        earliest={today()}
+        owner={ownerOption}
+      />
+
+      {staleCursor && <StalePageNotice firstPageHref={listingsHref(values)} />}
+
+      {page !== null &&
+        (page.items.length === 0 ? (
+          searched ? (
+            <NoMatchesNotice />
+          ) : (
+            <Empty className="border">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <WarehouseIcon />
+                </EmptyMedia>
+                <EmptyTitle>Nothing on offer</EmptyTitle>
+                <EmptyDescription>
+                  {owner === null
+                    ? "No owner has published a listing yet, or every one has been retired."
+                    : "This account has no listing on offer."}
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
+          )
+        ) : (
+          <ul role="list" className="grid gap-4 sm:grid-cols-2">
+            {page.items.map((listing) => (
+              <li key={listing.id}>
+                <ListingCard
+                  listing={listing}
+                  editHref={ROUTES.adminListing(listing.id)}
+                  // Every stay taken against it, which the admin's scope of `/bookings`
+                  // answers and an owner's would only for their own.
+                  actions={
+                    <ButtonLink
+                      href={filtersHref(ROUTES.bookings, {
+                        listingId: listing.id,
+                      })}
+                      variant="ghost"
+                      size="sm"
+                    >
+                      <CalendarCheckIcon />
+                      Stays
+                    </ButtonLink>
+                  }
+                />
+              </li>
+            ))}
+          </ul>
+        ))}
+
+      {query === null && <RefusedSearchNotice />}
+
+      {page !== null && (
+        <Pager
+          nextHref={
+            page.nextCursor !== null
+              ? listingsHref(values, page.nextCursor)
+              : null
+          }
+          firstHref={query?.cursor !== undefined ? listingsHref(values) : null}
+        />
+      )}
+    </div>
+  );
+};
