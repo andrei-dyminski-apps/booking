@@ -561,12 +561,21 @@ Internal packages are wired in as `"@repo/ui": "workspace:*"`.
 
 That removes three deployment problems rather than one. There is no `SameSite=None` for Safari's tracking prevention to drop. There is no CORS to keep in step with a list of origins. And a preview deployment can be pointed at any API and still log in, instead of needing a staging backend of its own.
 
-`railway.json` in the root describes the API service. Railway's Root Directory stays the repository root — pnpm workspaces do not build from a subdirectory — so the service is narrowed by its commands instead:
+`.railway/railway.ts` describes the API service as Railway Infrastructure as Code. Railway's Root Directory stays the repository root — pnpm workspaces do not build from a subdirectory — so the service is narrowed by its commands instead:
 
 - `buildCommand` filters turbo down to `@repo/api`, which builds `@repo/contracts` on the way;
 - `watchPatterns` keeps a frontend-only push from redeploying the backend;
-- `preDeployCommand` runs `db:deploy` before the new instance starts — committed migrations only, never `migrate dev`;
-- `startCommand` is a plain `node apps/api/dist/main`: the port comes from Railway's `PORT` and the host from `API_HOST`, both of which `src/main.ts` already reads.
+- `preDeploy` runs `db:deploy` before the new instance starts — committed migrations only, never `migrate dev`;
+- `start` is a plain `node apps/api/dist/main`: the port comes from Railway's `PORT` and the host from `API_HOST`, both of which `src/main.ts` already reads. Not `pnpm start` — that keeps pnpm and the Nest CLI resident beside the API, about 180 MB of memory doing nothing.
+
+Railway does not read the file during a deploy. The Railway CLI compares it with the environment and applies the difference, so a change to it is a separate step:
+
+```sh
+railway config plan     # what would change in the linked environment
+railway config apply    # apply it; the service redeploys
+```
+
+`railway` in the root `devDependencies` is the SDK the file imports (`railway/iac`); the CLI itself is installed separately. The file owns the service settings only: `variables` are unmanaged, so the values below are still set in the dashboard, and Postgres and Redis are left alone because `partial` limits the file to the API.
 
 Postgres is a service in the same Railway project, and `DATABASE_URL` is set as a reference to it (`${{Postgres.DATABASE_URL}}`) rather than copied — the credentials then survive a rotation. The rest of the variables from the table above are set by hand; the JWT secrets are generated (`openssl rand -hex 32`), not taken from `.env.example`.
 
