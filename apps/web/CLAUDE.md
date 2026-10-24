@@ -79,7 +79,6 @@ apps/web/
       bff/api-proxy.ts        # the browser's only way to the API; re-scopes the session
       bff/index.ts
       styles/globals.css      # a single @import "@repo/ui/globals.css"
-      fonts/                  # the faces loaded by next/font
     _pages/                   # a slice per screen, everything it needs; a folder groups slices
       home/ui/home-page.tsx
       home/index.ts
@@ -1383,12 +1382,9 @@ description as a hint beside it, and `CharacterCount`, the room left in a bounde
   `src/_app/styles/globals.css` is a single `@import "@repo/ui/globals.css"`. Colours,
   radii and fonts are CSS variables, so write `bg-background` and `text-muted-foreground`
   rather than `bg-white` or a raw `zinc-800` — otherwise the dark theme breaks.
-- The font tokens are the one thing the package does not own: the application loads the
-  faces into `--app-font-sans` / `--app-font-mono` (`next/font` in
-  `src/_app/layout/root-layout.tsx`) and the token file maps those onto `--font-sans` /
-  `--font-mono`. Never load a face straight into a token name — `--font-sans:
-var(--font-sans)` is a self-reference that only survives while the `next/font` class
-  outranks the `@layer theme` rule Tailwind emits.
+- Font tokens use native system stacks in `packages/ui/src/styles/globals.css`:
+  `system-ui` for body text and headings, and `ui-monospace` for code.
+  Keep fonts local to the operating system; no font loader or font downloads are needed.
 - Tailwind sees only what the `@source` directives of that file name: `packages/ui/src`
   plus `app/` and `src/` of `apps/web`. The frontend is named rather than globbed as
   `apps/*` — that pattern also matches `apps/api/src`, and a class-looking string in a

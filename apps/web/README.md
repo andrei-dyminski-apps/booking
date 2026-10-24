@@ -17,7 +17,7 @@ pnpm turbo run check-types --filter=@repo/web
 ```
 app/                     # layout.tsx, page.tsx — re-exports; favicon.ico
 src/
-  _app/                  # the shell in segments: layout, providers, styles, fonts
+  _app/                  # the shell in segments: layout, providers, styles
   _pages/                # a slice per screen; folders group the slices of one section
   features/              # a user action a second page also runs (the listing form)
   entities/              # a domain model, or how one is drawn, a second page also needs
@@ -44,6 +44,6 @@ when a second page needs it, `widgets/` is not adopted at all, and CRUD over a r
 - The interface is built from `@repo/ui`: Tailwind CSS 4 tokens and shadcn/ui primitives on Base UI, generated into the package as source files. That package is the design system — the `shared/ui` of this project — and the import is per file: `import { Button } from "@repo/ui/components/button"`.
 - A new primitive is added by the CLI from `packages/ui` (`pnpm dlx shadcn@latest add dialog`), followed by `pnpm lint:fix` from the root. Composition specific to one screen stays in the `ui/` segment of that page's slice.
 - Styling is Tailwind utilities over the tokens of `@repo/ui/globals.css`; there are no CSS Modules. The theme is switched by `next-themes` through a class on `<html>`.
-- The faces are loaded here (`src/_app/layout/root-layout.tsx`) into `--app-font-sans` / `--app-font-mono`; the tokens of `@repo/ui` map those onto `--font-sans` and `--font-mono`. The names differ on purpose — a token defined as `var(--font-sans)` would reference itself.
+- Fonts use native system stacks defined in `@repo/ui/globals.css`: `system-ui` for body text and headings, and `ui-monospace` for code. No font files are downloaded; the exact face follows the operating system.
 - Tests are Vitest, `*.spec.ts` next to the code, run from the root with `pnpm test`. What has one is narrow on purpose: a parser whose input somebody else writes — `shared/lib/next-path.ts` (where a visitor is sent after signing in) and the `Set-Cookie` reader behind `mirrorSessionCookies`. Both are security decisions, and neither is visible in a diff.
 - The port comes from `WEB_PORT` (3000 by default), the backend address from `API_ORIGIN`. The latter is read on the server and never inlined into the bundle, so changing the address is a restart rather than a rebuild.
