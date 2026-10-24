@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
+  "sideEffects": [
+    "*.css"
+  ],
   "imports": {
     "#_app/*": "./src/_app/*/index.ts",
     "#_pages/*": "./src/_pages/*/index.ts",

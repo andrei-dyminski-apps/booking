@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import localFont from "next/font/local";
+import { Geist, Geist_Mono } from "next/font/google";
 import { Providers } from "../providers";
 import { AppShell } from "./app-shell";
 import "../styles/globals.css";
@@ -9,13 +9,19 @@ import "../styles/globals.css";
 // and `--font-mono`. Writing straight into the token names would make each of them
 // reference itself, and the tokens would survive only as long as this class outranks
 // the `@layer theme` rule that Tailwind emits.
-const geistSans = localFont({
-  src: "../fonts/GeistVF.woff",
+//
+// `next/font/google` downloads the faces at build time and serves them from this origin,
+// subset to Latin and as woff2 — under half of the full variable `.woff`. The mono face is
+// not preloaded: no first screen sets text in it, and a preload is fetched at high
+// priority alongside the stylesheet, ahead of what the page actually paints.
+const geistSans = Geist({
+  subsets: ["latin"],
   variable: "--app-font-sans",
 });
-const geistMono = localFont({
-  src: "../fonts/GeistMonoVF.woff",
+const geistMono = Geist_Mono({
+  subsets: ["latin"],
   variable: "--app-font-mono",
+  preload: false,
 });
 
 export const metadata: Metadata = {

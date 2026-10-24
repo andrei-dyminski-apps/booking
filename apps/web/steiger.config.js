@@ -11,8 +11,8 @@ import { defineConfig } from "steiger";
 export default defineConfig([
   ...fsd.configs.recommended,
   {
-    // Neither a font file nor the token import is a module Steiger can reason about.
-    ignores: ["**/*.woff", "**/*.css"],
+    // The token import is not a module Steiger can reason about.
+    ignores: ["**/*.css"],
   },
   {
     // `_app` and `_pages` are the prefixes the FSD guide for Next.js prescribes, because
