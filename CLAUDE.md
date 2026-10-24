@@ -39,6 +39,10 @@ pnpm --filter @repo/api db:seed       # demo data (Prisma 7 never seeds automati
 pnpm --filter @repo/api db:deploy     # prisma migrate deploy — production only, applies committed migrations
 ```
 
+The deployed Railway services are stopped and started again by `pnpm railway:stop` /
+`pnpm railway:start` (`pnpm railway:status`, `pnpm railway` for a menu) — see "Deployment"
+in `README.md`. Both act on a live deployment: run them only when the user asks.
+
 Tests:
 
 ```sh

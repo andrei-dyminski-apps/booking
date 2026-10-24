@@ -581,6 +581,40 @@ Postgres is a service in the same Railway project, and `DATABASE_URL` is set as 
 
 On the Vercel side `API_ORIGIN` is a runtime variable of the frontend — it is read on the server, never inlined into the bundle, so a changed API address is a redeploy without a rebuild. `TRUST_PROXY` on the Railway side has to account for the extra `X-Forwarded-For` entry the frontend server's own request produces, or the rate limiter buckets every visitor together.
 
+While nobody uses the deployment, its Railway services can be stopped so they bill no compute, and started again later; volumes keep the data in between. `scripts/railway-power.sh` does it for the project the Railway CLI is linked to (`railway login`, `railway link`): with no arguments it asks what to do, otherwise it takes `stop`, `start` or `status` and optionally the service names (by default `Postgres Redis api`, started in that order and stopped in reverse).
+
+It needs the Railway CLI, installed once with `npm i -g @railway/cli`. The root scripts wrap it.
+
+Interactive menu — stop, start or status:
+
+```sh
+pnpm railway
+```
+
+Status of the linked project:
+
+```sh
+pnpm railway:status
+```
+
+Stop every service (`railway down`, after a confirmation):
+
+```sh
+pnpm railway:stop
+```
+
+Start every service again (`railway redeploy`):
+
+```sh
+pnpm railway:start
+```
+
+Service names narrow any of the three to those services:
+
+```sh
+pnpm railway:start api
+```
+
 ## Build cache
 
 Turborepo caches task results locally in `.turbo`. Cacheable tasks are described in `turbo.json`; `dev` is not cached (`cache: false`, `persistent: true`) but depends on `^build` — otherwise the apps would start before `@repo/contracts` is built.
