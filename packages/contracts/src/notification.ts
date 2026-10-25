@@ -14,6 +14,16 @@ import { PAGING } from "./query.js";
  *   side or by an admin; `recipient` says which side they are.
  * - `BOOKING_EXPIRED` — a hold the recipient is one side of lapsed unpaid and let its
  *   nights go; nobody did it, so both sides hear, and `recipient` says which one this is.
+ * - `BOOKING_CONFIRMED` — a hold the recipient is one side of was paid and is now a stay;
+ *   the payment provider said so rather than either of them, so both sides hear.
+ * - `PAYMENT_REFUNDED` — money the guest paid went back to them without a cancellation of
+ *   theirs saying so: the payment arrived for a hold that no longer held its nights (it
+ *   lapsed or was cancelled while the payment was on its way), or part of a stay was
+ *   refunded from the payment provider's dashboard.
+ * - `PAYMENT_DISPUTED` — the guest of a stay at the recipient's listing disputed the payment
+ *   with their bank; the host's payout for it waits until the dispute is decided.
+ * - `PAYOUT_SENT` — the recipient's share of a stay at their listing was transferred to
+ *   their payout account; `amount` is what was sent.
  * - `REVIEW_RECEIVED` — the other side of a finished stay reviewed the recipient: a guest
  *   reviewed their listing (`kind: LISTING`) or a host reviewed them (`kind: GUEST`).
  * - `WAITLIST_AVAILABLE` — nights the recipient was waiting for came free. Nothing is held
@@ -28,6 +38,10 @@ export const notificationTypeSchema = z.enum([
   "BOOKING_REQUESTED",
   "BOOKING_CANCELLED",
   "BOOKING_EXPIRED",
+  "BOOKING_CONFIRMED",
+  "PAYMENT_REFUNDED",
+  "PAYMENT_DISPUTED",
+  "PAYOUT_SENT",
   "REVIEW_RECEIVED",
   "WAITLIST_AVAILABLE",
 ]);
@@ -62,6 +76,29 @@ const bookingExpiredSchema = z.object({
   data: stayNoticeSchema.extend({ recipient: stayPartySchema }),
 });
 
+const bookingConfirmedSchema = z.object({
+  type: z.literal(NotificationType.BOOKING_CONFIRMED),
+  data: stayNoticeSchema.extend({ recipient: stayPartySchema }),
+});
+
+/** Only the guest paid, so only the guest is told; `amount` is what went back. */
+const paymentRefundedSchema = z.object({
+  type: z.literal(NotificationType.PAYMENT_REFUNDED),
+  data: stayNoticeSchema.extend({ amount: z.number() }),
+});
+
+/** Only the host's money waits on a dispute, so only the host is told. */
+const paymentDisputedSchema = z.object({
+  type: z.literal(NotificationType.PAYMENT_DISPUTED),
+  data: stayNoticeSchema,
+});
+
+/** `amount` is the host's share as it was transferred, the platform's fee already off. */
+const payoutSentSchema = z.object({
+  type: z.literal(NotificationType.PAYOUT_SENT),
+  data: stayNoticeSchema.extend({ amount: z.number() }),
+});
+
 const reviewReceivedSchema = z.object({
   type: z.literal(NotificationType.REVIEW_RECEIVED),
   data: z.object({
@@ -94,6 +131,10 @@ export const notificationContentSchema = z.discriminatedUnion("type", [
   bookingRequestedSchema,
   bookingCancelledSchema,
   bookingExpiredSchema,
+  bookingConfirmedSchema,
+  paymentRefundedSchema,
+  paymentDisputedSchema,
+  payoutSentSchema,
   reviewReceivedSchema,
   waitlistAvailableSchema,
 ]);
@@ -112,6 +153,10 @@ export const notificationSchema = z.discriminatedUnion("type", [
   bookingRequestedSchema.extend(stored),
   bookingCancelledSchema.extend(stored),
   bookingExpiredSchema.extend(stored),
+  bookingConfirmedSchema.extend(stored),
+  paymentRefundedSchema.extend(stored),
+  paymentDisputedSchema.extend(stored),
+  payoutSentSchema.extend(stored),
   reviewReceivedSchema.extend(stored),
   waitlistAvailableSchema.extend(stored),
 ]);

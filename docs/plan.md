@@ -31,19 +31,30 @@ test fakes a repository instead of a query builder. It is a rule now rather than
 judgement call: `auth`, `booking` and `listing` all have one, and so does the next module.
 Cheap, and it is the step the market means when it asks for "clean architecture".
 
-**In `booking` only: ports and adapters.** Once phase 4 and the payment cycle of phase 6
-land, that module is the one that earns the full
+**In `booking` only: ports and adapters — done in phase 6.** With the payment cycle in,
+that module is the one that earned the full
 `domain / application / infrastructure / presentation` split:
 
 ```
 booking/
-  domain/            # status transitions, date range, refund rule — no Nest, no Prisma
+  domain/            # status transitions, date range, the stay's quote — no Nest, no Prisma
   application/
-    ports/           # BookingRepository, PaymentGateway — interfaces
-    *.usecase.ts     # create / confirm / cancel / expire holds
-  infrastructure/    # PrismaBookingRepository, StripePaymentGateway, BullMQ jobs
+    ports/           # PaymentGateway — an abstract class, which is also its DI token
+    booking.service.ts  # create / pay / confirm / cancel / expire holds
+  infrastructure/    # BookingRepository, StripePaymentGateway, the webhook inbox, BullMQ jobs
   presentation/      # controller, Stripe webhook controller, dto
 ```
+
+Two places where it came out simpler than drawn here, both on purpose. The repository is
+not a port: `apps/api/CLAUDE.md` already settled that a second implementation of Postgres
+is never coming, so `BookingRepository` stays a class injected by its own type and only
+Stripe sits behind an interface. And the use cases are one application service rather than
+a file each: the three entry points share the notices, the payment withdrawals and the
+waitlist hand-over between them, and splitting `BookingService` would have meant those
+helpers living in a fifth file every use case imports — the split the layer exists for is
+between the entry points and the rules, and that one is there. The refund rule went to
+`@repo/contracts` (`refundOnCancel`) rather than `domain/`, because the booking page states
+it to the guest before the API applies it — the reason `nightlyPrice` lives there.
 
 What justifies it there and nowhere else:
 
@@ -81,8 +92,8 @@ after, when the step became the rule for every entity rather than something a mo
 earn — and phase 5 put the catalogue's filters, its keyset page and the availability read
 into the two repositories that were already there, without either module growing a layer.
 Phase 4 added the locking transaction to the repository that was already there and
-`booking/domain/` with the statuses; the ports and the use cases follow when Stripe arrives
-in phase 6. Introducing the layers before the rules exist would be a refactor of a CRUD,
+`booking/domain/` with the statuses; the port and the application layer followed when
+Stripe arrived in phase 6. Introducing the layers before the rules exist would be a refactor of a CRUD,
 which is exactly the overengineering an interviewer notices.
 
 ## Layering inside `apps/web`
@@ -232,8 +243,9 @@ The backend of it is done. `GET /listings` is a filtered, cursor-paged catalogue
 public — a catalogue behind a login is not a catalogue, and a read that carried a session
 could not be cached by URL for every visitor at once. The frontend is built on top of it:
 `/listings` is the catalogue, `/listings/:id` the page a stay is booked from, `/bookings`
-the list of stays every role reads its own scope of. The one box left is PPR, and the note
-on it says why it is a change to the transport rather than a flag.
+the list of stays every role reads its own scope of. PPR was the one box left, and it moved
+to the end of the roadmap, phase 10: what it buys is a measured time to first byte, and
+there is nothing to measure before a deploy.
 
 - [x] A list of listings with filters (dates, price, capacity); filters live in the **URL searchParams** (shareable links), Server Components, cursor pagination.
       The filters and the page are `listingQuerySchema` in the contract, so the same shape
@@ -267,15 +279,6 @@ on it says why it is a change to the transport rather than a flag.
       author who is about to be shown their own write. The two reads a hold changes carry
       a minute's lifetime beside the tag as well: a hold lapses on a timer rather than on
       a mutation, and a minute is the interval of the sweep the API releases it on.
-- [ ] `cacheComponents: true` and PPR — the catalogue is finally the page whose shell is
-      worth prerendering, and the flag turned out not to be a flag. Under
-      `cacheComponents` the `cache` and `next` options of `fetch` stop being how a read is
-      cached: `"use cache"` with `cacheLife`/`cacheTag` replaces them, which is a rewrite
-      of the `ReadOptions` argument every read method of `shared/api` takes and of the
-      rule that the call site decides. It is its own change, on top of the reads this
-      phase has just written down, rather than a line in `next.config.js` — and the header
-      still reads the session in the root layout, so it also needs the `<Suspense>`
-      boundary that turns the shell into the prerendered part.
 - [x] `notFound()` for a 404 from `ApiResponseError` — `orNotFound` in `shared/lib`, now
       that two screens read a single row by an id out of the URL. `requireId` beside it is
       the other half: a segment that cannot be a uuid is refused by `ParseUUIDPipe` with a
@@ -313,27 +316,56 @@ on it says why it is a change to the transport rather than a flag.
       cannot drift between the search and the transaction that refuses the booking. A
       lapsed hold holds nothing, whether or not the job meant to release it has run.
 
-## Phase 6 — Stripe
+## Phase 6 — Stripe ✅
 
 The full payment cycle through **PaymentIntent**, on top of the screens phase 5 built — the
 payment step is inserted into a booking flow that already works end to end, and what it adds
-is the transition a hold could not make on its own:
+is the transition a hold could not make on its own. The details are "Payments" in
+`apps/api/CLAUDE.md` and the stay's page in `apps/web/CLAUDE.md`.
 
-- [ ] `POST /bookings` → a hold + a PaymentIntent (the `amount` is computed by the server from the listing price, never taken from the client), the frontend receives `client_secret` → Stripe Elements.
-- [ ] The **webhook** `payment_intent.succeeded` → the booking becomes `CONFIRMED`. Signature verification (`STRIPE_WEBHOOK_SECRET`, raw body), **idempotent** handling, and the webhook — not the user's redirect — as the source of truth.
-- [ ] Cancelling a confirmed booking → a **refund** by the rules (a full refund 48 h before check-in, for example).
-- [ ] An expired hold → the PaymentIntent is cancelled.
-- [ ] The `PaymentGateway` port with a Stripe adapter behind it, and the use cases of
-      `booking/application/` — the webhook and the BullMQ job become entry points of their
-      own, alongside HTTP.
-- [ ] Locally — `stripe listen` (as a service in docker-compose), test cards documented in the README.
-- [ ] **TanStack Query** on the frontend, and this is the phase that earns it: the source
-      of truth for a payment is the webhook, so the screen has to poll the booking until
-      the status changes (`refetchInterval`) instead of trusting the redirect. Cancelling a
-      booking gets an optimistic update with a rollback in the same change. It is
-      deliberately not installed before then — until there is client state worth caching it
-      would only replace three `useState` in forms that are moving to Server Actions
-      anyway, which is a rewrite paid for twice.
+- [x] A hold carries its price: `amount` is quoted inside the locking transaction by
+      `nightlyPrice`, from the prices read under the same lock, and never taken from the
+      client. The PaymentIntent behind it is opened by `POST /bookings/:id/payment`, which
+      the payment form calls from the browser, rather than by `POST /bookings`, under an
+      idempotency key named after the booking: the `client_secret` has to reach the page
+      that pays, a redirect cannot carry it, and one path that opens or replays the intent
+      is simpler than two. `createBookingAction` redirects to that page, `/bookings/:id`,
+      where Stripe Elements confirms the payment.
+- [x] The **webhook** `payment_intent.succeeded` → the booking becomes `CONFIRMED`.
+      Signature verification over the raw body (`STRIPE_PAYMENT_WEBHOOK_SECRET`), an
+      **inbox** — the event recorded in `payment_events` and answered at once, handled by a
+      BullMQ worker with retries and a sweep, every step idempotent by itself — and the
+      webhook, not the user's redirect, as the source of truth. Both sides are told
+      (`BOOKING_CONFIRMED`).
+- [x] Cancelling a confirmed booking → a **refund** by the rules: in full up to 48 h before
+      check-in and nothing after for the guest, in full for an admin, and no cancellation by
+      either once the check-in day has come (`refundOnCancel` and `isCancellableOn` in
+      `@repo/contracts`, which the page states before the button). The cancellation writes
+      what it owes on the row and a job sends the refund, so a Stripe failure delays a
+      refund rather than a cancellation.
+- [x] An expired hold → the PaymentIntent is cancelled, on all three expiry paths and on a
+      cancelled hold. A payment that completes anyway reaches the webhook for nights that
+      are no longer the guest's and is refunded in full (`PAYMENT_REFUNDED`).
+- [x] The `PaymentGateway` port with a Stripe adapter behind it, and `booking/application/`
+      — the webhook and the BullMQ job are entry points of their own, alongside HTTP.
+- [x] Locally — `stripe listen` as a service in docker-compose (the `stripe` profile), test
+      cards documented in the README.
+- [x] **TanStack Query** on the frontend, on the stay's own page only: the source of truth
+      for a payment is the webhook, so the page polls the booking (`refetchInterval`) until
+      the status changes instead of trusting the redirect, and cancelling there updates the
+      same cache once the API has answered. Everything else is still server-rendered.
+- [x] **Host payouts through Stripe Connect** — a marketplace with separate charges and
+      transfers: the guest pays the platform, and 24 h after check-in the host's share
+      (`hostShare`: what is left after refunds, less the platform's 10%) is transferred to
+      their Accounts v2 recipient, funded by the guest's own charge. Embedded onboarding on
+      `/dashboard/payouts`; a host who has not finished it is booked as usual and paid once
+      Stripe reports the account ready (a thin account event, or the screen asking again).
+      A job per stay plus an hourly sweep, like hold expiry.
+- [x] **`charge.refunded` and disputes reach the stay.** A full refund from the dashboard
+      cancels a confirmed stay, a partial one tells the guest; a refund after the payout is
+      taken back from the host by a reversal. A dispute holds the payout; a lost one
+      reverses a payout already sent. Stripe.js runs under a `Content-Security-Policy` with a
+      script nonce per request.
 
 ## Phase 7 — Production polish
 
@@ -476,6 +508,19 @@ copy behind it is a product decision rather than an engineering one. So is curre
 money is stored and answered in one currency, and localizing how a number is written is
 not converting what it is worth.
 
+## Phase 10 — Partial prerendering
+
+- [ ] `cacheComponents: true` and PPR — moved here from phase 5, so the win is
+      measured on the site phase 8 deployed. The catalogue is the page whose shell is worth
+      prerendering, and the flag turned out not to be a flag. Under
+      `cacheComponents` the `cache` and `next` options of `fetch` stop being how a read is
+      cached: `"use cache"` with `cacheLife`/`cacheTag` replaces them, which is a rewrite
+      of the `ReadOptions` argument every read method of `shared/api` takes and of the
+      rule that the call site decides. It is its own change, on top of the reads phase 5
+      wrote down, rather than a line in `next.config.js` — and the header
+      still reads the session in the root layout, so it also needs the `<Suspense>`
+      boundary that turns the shell into the prerendered part.
+
 ## Decisions already made
 
 - **Prisma** (v7: `prisma.config.ts`, the `prisma-client` generator, the `@prisma/adapter-pg` driver adapter) — the most recognizable ORM; interactive transactions and raw migrations cover phase 4.
@@ -506,8 +551,8 @@ not converting what it is worth.
 - **Mutations are Server Actions by default.** Cookies are written on the server, the
   contract schema refuses an obvious mistake before a request is spent, the form works
   before React has hydrated, and `refresh()` / `updateTag` are reachable only from there.
-  The client path stays for what a round trip cannot express — an optimistic update with a
-  rollback, a poll for a webhook — and phase 6 is what brings the first of those.
+  The client path stays for what a round trip cannot express — a poll for a webhook — and
+  phase 6 is what brings the first of those.
 - The order of the phases follows the dependencies: database → auth → roles → concurrency → catalogue → Stripe → polish → deployment. The catalogue comes before Stripe because the dependency runs one way only: Stripe Elements needs a booking to attach to, and a booking is created from the form on the listing page, which is the catalogue's. Nothing in the catalogue needs a payment — it is server-rendered from `searchParams`, and TanStack Query arrives with the polling of the webhook.
 
 ## Decisions deliberately not taken

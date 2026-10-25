@@ -39,6 +39,10 @@ pnpm --filter @repo/api db:seed       # demo data (Prisma 7 never seeds automati
 pnpm --filter @repo/api db:deploy     # prisma migrate deploy — production only, applies committed migrations
 ```
 
+The deployed Railway services are stopped and started again by `pnpm railway:stop` /
+`pnpm railway:start` (`pnpm railway:status`, `pnpm railway` for a menu) — see "Deployment"
+in `README.md`. Both act on a live deployment: run them only when the user asks.
+
 Tests:
 
 ```sh
@@ -46,7 +50,7 @@ pnpm test           # *.spec.ts next to the code: jest in apps/api, vitest in ap
 pnpm test:e2e       # jest -c test/jest-e2e.json; needs the database, wipes tables
 ```
 
-The runners differ because the packages do: `apps/api` is CommonJS with Nest's testing module, `apps/web` is ESM and needed nothing beyond a runner. `packages/contracts` runs Vitest too, for the one rule it holds that both sides apply (`nightlyPrice`) and imports from its own sources. `pnpm test` covers all three through turbo.
+The runners differ because the packages do: `apps/api` is CommonJS with Nest's testing module, `apps/web` is ESM and needed nothing beyond a runner. `packages/contracts` runs Vitest too, for the two rules it holds that both sides apply (`nightlyPrice`, `refundOnCancel`) and imports from its own sources. `pnpm test` covers all three through turbo.
 
 All three tasks declare `dependsOn: ["^build"]`: the specs import `@repo/contracts` schemas as values, so `dist/` has to exist. Running `pnpm --filter @repo/api test` directly skips that and fails on a fresh clone.
 

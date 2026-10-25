@@ -10,7 +10,7 @@ import { z } from "zod";
  *
  * What stays with each resource is the half that knows the domain: which columns the
  * orderings are made of, and how the key of each one is read back. See
- * `listing/catalogue-cursor.ts` and `booking/booking-cursor.ts`.
+ * `listing/catalogue-cursor.ts` and `booking/application/booking-cursor.ts`.
  */
 
 /**

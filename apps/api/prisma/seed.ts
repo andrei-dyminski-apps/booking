@@ -1,7 +1,8 @@
-import { TZDate } from "@date-fns/tz";
+import { tz, TZDate } from "@date-fns/tz";
 import { PrismaPg } from "@prisma/adapter-pg";
 import * as argon2 from "argon2";
 import { addDays, format } from "date-fns";
+import { pricedNights, stayTotal } from "@repo/contracts";
 import {
   BookingStatus,
   ConversationSide,
@@ -157,6 +158,38 @@ function inDays(days: number): Date {
   return TZDate.tz(
     "UTC",
     format(addDays(TZDate.tz("UTC"), days), "yyyy-MM-dd"),
+  );
+}
+
+/**
+ * What a demo stay costs, by the rule the API quotes a hold by (`nightlyPrice` in the
+ * contract) and from the same demo prices the listings are written with — so a seeded
+ * stay's amount is the one the listing page would have quoted for it.
+ */
+function amountOf(index: number, from: Date, to: Date): number {
+  const listing = listings[index];
+
+  if (listing === undefined) {
+    throw new Error(`No demo listing at index ${index}`);
+  }
+
+  const day = (date: Date) => format(date, "yyyy-MM-dd", { in: tz("UTC") });
+
+  return stayTotal(
+    pricedNights(
+      {
+        pricePerNight: listing.pricePerNight,
+        pricing: {
+          weekdays: listing.weekdayPrices ?? {},
+          dates: (listing.datePrices ?? []).map((entry) => ({
+            date: day(inDays(entry.inDays)),
+            price: entry.price,
+          })),
+        },
+      },
+      day(from),
+      day(to),
+    ),
   );
 }
 
@@ -359,6 +392,7 @@ async function main(): Promise<void> {
         guestId: idOf(booking.guest),
         from: booking.from,
         to: booking.to,
+        amount: amountOf(booking.listing, booking.from, booking.to),
         // Confirmed, not holds: a PENDING_PAYMENT booking would lapse 15 minutes after
         // the seed runs and disappear from the demo.
         status: BookingStatus.CONFIRMED,
@@ -396,6 +430,7 @@ async function main(): Promise<void> {
         guestId: idOf("guest"),
         from: past.from,
         to: past.to,
+        amount: amountOf(past.listing, past.from, past.to),
         status: BookingStatus.CONFIRMED,
       },
     });
