@@ -397,6 +397,13 @@ is the transition a hold could not make on its own. The details are "Payments" i
     the sweep takes the row again. Retried rather than resolved by hand: the debt and the
     transfer are still on the row, and the sweep is what sends them.
   - The frontend renders the four admin notices with a link to the screen.
+- [ ] **The payment form opens the payment once.** `POST /bookings/:id/payment` is safe to
+      repeat one after another, but not at the same moment: Stripe refuses a second request
+      under the same idempotency key while the first is in flight, and the API answers it
+      `409` ("being opened by another request — try again"). The form has to call it once per
+      mount — single-flight, the way the transport refreshes a session — survive React's
+      Strict Mode running the effect twice and a double click, and read that `409` as a
+      retry after a short pause rather than as a hold that stopped waiting for payment.
 - [ ] **Authorize the hold, capture the stay.** The guest is charged at once today, so a
       payment that lands on a lapsed or cancelled hold is a full charge and a full refund,
       and Stripe keeps its processing fee on both. Opening the intent with

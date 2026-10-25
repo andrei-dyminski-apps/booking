@@ -106,7 +106,7 @@ export class BookingController {
   })
   @ApiConflictResponse({
     description:
-      "The booking is not waiting for payment: paid, cancelled, or its hold has lapsed",
+      "The booking is not waiting for payment — paid, cancelled, or its hold has lapsed — or another request is opening its payment right now, which a retry answers",
     type: ApiErrorDto,
   })
   @ApiBadGatewayResponse({

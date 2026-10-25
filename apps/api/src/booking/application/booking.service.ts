@@ -48,6 +48,7 @@ import type {
 } from "../domain/booking.types";
 import {
   PaymentGateway,
+  PaymentOpeningInProgressError,
   type OpenedPayment,
 } from "../../payment/application/ports/payment-gateway";
 import { toIsoDate } from "../../common/iso-date";
@@ -237,7 +238,10 @@ export class BookingService {
     return booking;
   }
 
-  /** `403` to the host and the admin, who may read the row; `409` outside the hold's deadline. */
+  /**
+   * `403` to the host and the admin, who may read the row; `409` outside the hold's deadline,
+   * and while another request is opening the same payment.
+   */
   async payment(id: string, user: AuthenticatedUser): Promise<BookingPayment> {
     const { booking } = await this.getReadable(id, user);
 
@@ -258,6 +262,14 @@ export class BookingService {
     try {
       opened = await this.paymentGateway.open(id, booking.amount);
     } catch (error) {
+      // Not the provider failing: a second request for the same payment, answered once the
+      // first one is.
+      if (error instanceof PaymentOpeningInProgressError) {
+        throw new ConflictException(
+          "The payment is being opened by another request — try again",
+        );
+      }
+
       this.logger.error(
         `Could not open the payment of booking ${id}: ${String(error)}`,
       );

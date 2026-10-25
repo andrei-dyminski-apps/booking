@@ -1,7 +1,7 @@
 import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
 import { Logger } from "@nestjs/common";
 import type { Job } from "bullmq";
-import { describeJobFailure } from "../../common/job-failure";
+import { logJobFailure } from "../../common/job-failure";
 import { PaymentEventDispatcher } from "../application/payment-event-dispatcher";
 import {
   PAYMENT_EVENT_QUEUE,
@@ -54,7 +54,7 @@ export class PaymentEventProcessor extends WorkerHost {
 
   @OnWorkerEvent("failed")
   onFailed(job: Job<PaymentEventJobData> | undefined, error: Error): void {
-    this.logger.error(describeJobFailure(job, error), error.stack);
+    logJobFailure(this.logger, job, error);
   }
 }
 

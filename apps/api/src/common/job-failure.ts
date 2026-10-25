@@ -1,4 +1,6 @@
+import type { Logger } from "@nestjs/common";
 import type { Job } from "bullmq";
+import { RetryLaterError } from "./retry-later.error";
 
 /** What a row and an admin's notice keep of an error. */
 const MAX_ERROR_LENGTH = 1_000;
@@ -26,4 +28,19 @@ export function describeJobFailure(
   const last = job.attemptsMade >= attempts ? ", the last one" : "";
 
   return `Job ${job.name} (${String(job.id)}) failed on attempt ${String(job.attemptsMade)} of ${String(attempts)}${last}: ${error.message}`;
+}
+
+/** What every processor's `failed` listener does: a busy retry is a warning, the rest errors. */
+export function logJobFailure(
+  logger: Pick<Logger, "warn" | "error">,
+  job: Pick<Job, "name" | "id" | "attemptsMade" | "opts"> | undefined,
+  error: Error,
+): void {
+  if (error instanceof RetryLaterError) {
+    logger.warn(describeJobFailure(job, error));
+
+    return;
+  }
+
+  logger.error(describeJobFailure(job, error), error.stack);
 }

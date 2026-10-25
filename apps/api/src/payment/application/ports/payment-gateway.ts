@@ -94,6 +94,20 @@ export type PaymentEvent =
     }
   | { kind: "other"; eventId: string; type: string };
 
+/**
+ * `open` while another request is opening the same payment under the same key — two clicks,
+ * or a form mounted twice. The provider refuses the second until the first is answered, and
+ * a retry then gets that same payment.
+ */
+export class PaymentOpeningInProgressError extends Error {
+  constructor(bookingId: string) {
+    super(
+      `The payment of booking ${bookingId} is being opened by another request`,
+    );
+    this.name = "PaymentOpeningInProgressError";
+  }
+}
+
 export class InvalidPaymentEventError extends Error {
   constructor(reason: string) {
     super(`The payment event could not be verified: ${reason}`);

@@ -2,7 +2,7 @@
 
 ## Stack
 
-NestJS 11 on Express, TypeScript, Jest + Supertest. CommonJS (unlike `apps/web`) — built by `nest build` into `dist/`. Storage is PostgreSQL (docker-compose in the root) through Prisma 7. Redis (also in docker-compose) backs three BullMQ queues — `booking-expiry` (the delayed job that releases an unpaid hold, the repeatable sweep behind it, the withdrawal of a released hold's PaymentIntent, the refund a cancellation owes and a sweep of its own for the refunds still owed), `host-payout` (see "Host payouts") and `payment-event` (the webhook inbox's worker, its sweep and a daily prune, see "Payments"); the services schedule through ports (`BookingJobs`, `PaymentEventJobs`, `PayoutJobs`) and never name a queue, and every processor logs its failed jobs (`src/common/job-failure.ts`), which BullMQ otherwise keeps to itself; `@nestjs/bullmq` is pinned to `11.x` because `12` is ESM-only and `nest build` / Jest here are CommonJS, and `ioredis` is a direct dependency because `bullmq` 6 no longer bundles it. The same Redis carries the pub/sub behind the event stream (`RealtimeService`, two connections of its own). Payments go through Stripe (`stripe`, the Node SDK), behind the `PaymentGateway` port of the payment module — see "Payments" below.
+NestJS 11 on Express, TypeScript, Jest + Supertest. CommonJS (unlike `apps/web`) — built by `nest build` into `dist/`. Storage is PostgreSQL (docker-compose in the root) through Prisma 7. Redis (also in docker-compose) backs three BullMQ queues — `booking-expiry` (the delayed job that releases an unpaid hold, the repeatable sweep behind it, the withdrawal of a released hold's PaymentIntent, the refund a cancellation owes and a sweep of its own for the refunds still owed), `host-payout` (see "Host payouts") and `payment-event` (the webhook inbox's worker, its sweep and a daily prune, see "Payments"); the services schedule through ports (`BookingJobs`, `PaymentEventJobs`, `PayoutJobs`) and never name a queue, and every processor logs its failed jobs (`logJobFailure` in `src/common/job-failure.ts`), which BullMQ otherwise keeps to itself — a run that only found a lease taken (`RetryLaterError`: `PaymentEventBusyError`, `CancellationInProgressError`, `SettlementInProgressError`) as a warning without a stack, everything else as an error; `@nestjs/bullmq` is pinned to `11.x` because `12` is ESM-only and `nest build` / Jest here are CommonJS, and `ioredis` is a direct dependency because `bullmq` 6 no longer bundles it. The same Redis carries the pub/sub behind the event stream (`RealtimeService`, two connections of its own). Payments go through Stripe (`stripe`, the Node SDK), behind the `PaymentGateway` port of the payment module — see "Payments" below.
 
 The configuration is shared with the rest of the repository: `tsconfig.json` extends `@repo/typescript-config/nest.json`, `eslint.config.mjs` extends `@repo/eslint-config/nest-js`. Only `outDir` is declared locally. The stock Nest CLI settings (`noImplicitAny: false`, a disabled `no-explicit-any`, its own `.prettierrc`) were removed deliberately — do not bring them back when updating Nest or generating new files.
 
@@ -24,7 +24,8 @@ src/
   common/dto/            # ApiErrorDto — the error body, for the Swagger error responses
   common/redis-url.ts    # requireRedisUrl — the queue and the pub/sub connect with it
   common/body-parsers.ts # Nest's parsers, the raw body kept for the signed webhooks only
-  common/job-failure.ts  # describeJobFailure — the line every processor logs a failed job with
+  common/job-failure.ts  # describeJobFailure, logJobFailure — how every processor logs a failed job
+  common/retry-later.error.ts  # RetryLaterError — a lease held by another run; logged as a warning, not an error
   common/iso-date.ts     # `@db.Date` onto `YYYY-MM-DD`, and today's midnight — the repositories map those columns, the services read today by it
   prisma/                # PrismaModule + PrismaService (extends PrismaClient)
     prisma.errors.ts     # isPrismaError, violatedConstraint — driver failures, read once
@@ -461,7 +462,11 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
   replays the same intent, and `attachPayment` writes its id only into an empty column and
   only while the hold is pending — a hold released while Stripe answered gets the intent
   withdrawn and the caller a `409`. Only the guest is answered (`403` to the host and an
-  admin), and only while the hold is pending and inside its deadline (`409`). A `POST`
+  admin), and only while the hold is pending and inside its deadline (`409`). Two calls at
+  the same moment are one too many for Stripe, which refuses the second under the key while
+  the first is in flight (`idempotency_key_in_use`): the adapter throws
+  `PaymentOpeningInProgressError` and the caller gets a `409` to retry, not the `502` of an
+  unreachable provider. A `POST`
   because it opens something at Stripe; the frontend calls it from the browser, never from a
   render. The intent carries `metadata.bookingId` and `metadata.site` (`STRIPE_SITE`): a test
   account is shared by every developer's `stripe listen`, so a payment another site opened

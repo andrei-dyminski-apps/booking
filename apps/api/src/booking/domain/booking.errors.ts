@@ -1,4 +1,5 @@
 import type { CreateBookingInput } from "@repo/contracts";
+import { RetryLaterError } from "../../common/retry-later.error";
 import { MAX_CHARGE, MIN_CHARGE } from "./stay-price";
 
 /**
@@ -87,7 +88,7 @@ export class PaymentNotConfirmedYetError extends Error {
 }
 
 /** A `409` worth retrying to a request, a retry to a job or an event. */
-export class CancellationInProgressError extends Error {
+export class CancellationInProgressError extends RetryLaterError {
   constructor(id: string) {
     super(`Booking ${id} is being cancelled by another request`);
     this.name = "CancellationInProgressError";

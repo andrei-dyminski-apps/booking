@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   InvalidPaymentEventError,
   PaymentGateway,
+  PaymentOpeningInProgressError,
   type OpenedPayment,
   type PaymentEvent,
 } from "../application/ports/payment-gateway";
@@ -68,17 +69,31 @@ export class StripePaymentGateway extends PaymentGateway {
 
   /** Keyed by the booking: Stripe keeps a key 24 hours, a hold lives 15 minutes. */
   async open(bookingId: string, amount: number): Promise<OpenedPayment> {
-    const intent = await this.stripe.paymentIntents.create(
-      {
-        amount: toCents(amount),
-        currency: CURRENCY,
-        allowed_payment_method_types: [...INSTANT_PAYMENT_METHODS],
-        // What the webhook finds the booking by, and whose database holds it.
-        metadata: { bookingId, site: this.paymentConfig.site },
-        transfer_group: transferGroupOf(bookingId),
-      },
-      { idempotencyKey: `booking-${bookingId}-payment` },
-    );
+    let intent: Stripe.PaymentIntent;
+
+    try {
+      intent = await this.stripe.paymentIntents.create(
+        {
+          amount: toCents(amount),
+          currency: CURRENCY,
+          allowed_payment_method_types: [...INSTANT_PAYMENT_METHODS],
+          // What the webhook finds the booking by, and whose database holds it.
+          metadata: { bookingId, site: this.paymentConfig.site },
+          transfer_group: transferGroupOf(bookingId),
+        },
+        { idempotencyKey: `booking-${bookingId}-payment` },
+      );
+    } catch (error) {
+      // A `409` the SDK types as an API error rather than an idempotency one.
+      if (
+        error instanceof Stripe.errors.StripeError &&
+        error.code === "idempotency_key_in_use"
+      ) {
+        throw new PaymentOpeningInProgressError(bookingId);
+      }
+
+      throw error;
+    }
 
     if (intent.client_secret === null) {
       throw new Error(`PaymentIntent ${intent.id} came back without a secret`);

@@ -21,6 +21,7 @@ import { NotificationService } from "../../../notification/notification.service"
 import { PaymentEventDispatcher } from "../../../payment/application/payment-event-dispatcher";
 import {
   PaymentGateway,
+  PaymentOpeningInProgressError,
   type OpenedPayment,
   type PaymentEvent,
 } from "../../../payment/application/ports/payment-gateway";
@@ -643,7 +644,14 @@ export class FakePaymentGateway implements PublicOf<PaymentGateway> {
   /** Set to have a withdrawal fail, as it does for a payment that completed already. */
   refusingWithdrawal = false;
 
+  /** Set to have `open` find another request opening the same payment under its key. */
+  openingElsewhere = false;
+
   open(bookingId: string): Promise<OpenedPayment> {
+    if (this.openingElsewhere) {
+      return Promise.reject(new PaymentOpeningInProgressError(bookingId));
+    }
+
     const opened = this.opened.get(bookingId) ?? {
       id: `pi_${String(this.opened.size + 1)}`,
       clientSecret: `pi_${String(this.opened.size + 1)}_secret`,

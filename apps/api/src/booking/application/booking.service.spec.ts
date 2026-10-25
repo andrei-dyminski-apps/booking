@@ -615,6 +615,22 @@ describe("BookingService", () => {
       expect(paymentGateway.opened.size).toBe(0);
     });
 
+    it("answers a second request opening the same payment with a 409 to retry", async () => {
+      const id = await bookedByGuest();
+      paymentGateway.openingElsewhere = true;
+
+      await expect(service.payment(id, guest)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(bookingRepository.rows.get(id)?.paymentId).toBeNull();
+
+      paymentGateway.openingElsewhere = false;
+
+      await expect(service.payment(id, guest)).resolves.toMatchObject({
+        clientSecret: "pi_1_secret",
+      });
+    });
+
     it("withdraws a payment opened while the hold was being released", async () => {
       const id = await bookedByGuest();
       bookingRepository.lapsed.add(id);

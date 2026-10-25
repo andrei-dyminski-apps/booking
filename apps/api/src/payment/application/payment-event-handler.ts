@@ -1,3 +1,4 @@
+import { RetryLaterError } from "../../common/retry-later.error";
 import type { PaymentEvent } from "./ports/payment-gateway";
 
 /**
@@ -13,7 +14,7 @@ export interface PaymentEventHandler {
  * that runs out on its own. The dispatcher retries it without counting a failure, so
  * waiting on a cancellation never brings an event closer to being set aside.
  */
-export class PaymentEventBusyError extends Error {
+export class PaymentEventBusyError extends RetryLaterError {
   constructor(reason: string) {
     super(reason);
     this.name = "PaymentEventBusyError";

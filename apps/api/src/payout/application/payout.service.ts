@@ -21,6 +21,7 @@ import { NotificationService } from "../../notification/notification.service";
 import type { PaymentEvent } from "../../payment/application/ports/payment-gateway";
 import { roundCents, toCents } from "../../payment/domain/money";
 import { mayPayOut, owedToHost } from "../domain/payout";
+import { SettlementInProgressError } from "../domain/payout.errors";
 import type { PayoutAccountHolder, SettledStay } from "../domain/payout.types";
 import { PayoutRepository } from "../infrastructure/payout.repository";
 import { PayoutGateway, type AccountEvent } from "./ports/payout-gateway";
@@ -330,6 +331,13 @@ export class PayoutService {
       try {
         if (await this.payOut(bookingId, now, accounts)) paid += 1;
       } catch (error) {
+        // Settled by another run meanwhile: the next run finds it done.
+        if (error instanceof SettlementInProgressError) {
+          this.logger.warn(String(error));
+
+          continue;
+        }
+
         this.logger.error(
           `Could not pay out booking ${bookingId}: ${String(error)}`,
         );

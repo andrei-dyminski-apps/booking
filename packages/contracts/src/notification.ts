@@ -31,6 +31,10 @@ import { PAGING } from "./query.js";
  * - `PAYMENT_EVENT_FAILED` — told to every admin: the worker gave up on a delivery of the
  *   payment provider after failing it again and again, and set it aside. What it would have
  *   done — a confirmation, a refund recorded, a payout taken back — waits for a person.
+ * - `CANCELLATION_REFUND_FAILED` — told to every admin: the refund a cancellation owes kept
+ *   failing and was set aside; the guest's money waits for a person to send it.
+ * - `PAYOUT_FAILED` — told to every admin: the host's transfer for a stay kept failing and
+ *   was set aside; the host's share waits for a person.
  * - `REVIEW_RECEIVED` — the other side of a finished stay reviewed the recipient: a guest
  *   reviewed their listing (`kind: LISTING`) or a host reviewed them (`kind: GUEST`).
  * - `WAITLIST_AVAILABLE` — nights the recipient was waiting for came free. Nothing is held

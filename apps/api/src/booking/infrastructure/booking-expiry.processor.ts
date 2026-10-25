@@ -1,7 +1,7 @@
 import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
 import { Logger } from "@nestjs/common";
 import type { Job } from "bullmq";
-import { describeJobFailure } from "../../common/job-failure";
+import { logJobFailure } from "../../common/job-failure";
 import { BookingService } from "../application/booking.service";
 import {
   BOOKING_EXPIRY_QUEUE,
@@ -71,7 +71,7 @@ export class BookingExpiryProcessor extends WorkerHost {
 
   @OnWorkerEvent("failed")
   onFailed(job: Job<BookingExpiryJobData> | undefined, error: Error): void {
-    this.logger.error(describeJobFailure(job, error), error.stack);
+    logJobFailure(this.logger, job, error);
   }
 }
 
