@@ -20,4 +20,9 @@ export async function resetDatabase(app: INestApplication<App>): Promise<void> {
   await prismaService.conversation.deleteMany();
   await prismaService.listing.deleteMany();
   await prismaService.user.deleteMany();
+  // The webhook ledger names no row, so nothing cascades into it; left behind, an event id
+  // a later spec reuses would be skipped as already handled.
+  await prismaService.paymentEvent.deleteMany();
+  // Names no row either, and a refund id a later spec reuses would be skipped as recorded.
+  await prismaService.refundFailure.deleteMany();
 }

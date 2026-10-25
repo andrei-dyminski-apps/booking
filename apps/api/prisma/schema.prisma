@@ -40,6 +40,67 @@ model Booking {
   /// to the `EXCLUDE` constraint and to nothing else.
   expiresAt DateTime? @map("expires_at")
 
+  /// What the stay costs, quoted under the hold's `FOR UPDATE` lock by `nightlyPrice` from
+  /// `@repo/contracts`, and what the payment charges. A copy, so a later price change does
+  /// not restate this stay. It and the money columns below are held by raw-SQL `CHECK`s
+  /// (`bookings_amount_positive`, `bookings_*_within_amount`): above zero, and nothing
+  /// refunded, owed or paid out beyond it.
+  amount Decimal @db.Decimal(10, 2)
+
+  /// The Stripe PaymentIntent of this hold — opened under a key named after the booking, so
+  /// a second request for the payment gets the same one. `null` until the form asks for it.
+  paymentIntentId String? @unique @map("payment_intent_id")
+
+  /// When a payment confirmed the stay; never cleared, so a redelivery of that payment is
+  /// told from one that arrived for a hold already gone. `null` for the seed's stays.
+  paidAt DateTime? @map("paid_at")
+
+  /// When both sides were told of the confirmation and the payout was scheduled; a rerun
+  /// of the payment event repeats the two only while it is empty.
+  confirmationAnnouncedAt DateTime? @map("confirmation_announced_at")
+
+  /// What went back to the guest; `null` when no refund was ever asked of Stripe.
+  refundedAmount Decimal? @map("refunded_amount") @db.Decimal(10, 2)
+
+  /// What a cancellation decided to give back and has not sent yet — written with
+  /// `CANCELLED`, cleared by the `refund-cancellation` job. Counted as refunded by the host's
+  /// share, so nothing is paid out of money owed to the guest.
+  refundOwed Decimal? @map("refund_owed") @db.Decimal(10, 2)
+
+  /// Failed runs of the owed refund, the latest error, and when it was set aside after
+  /// `MAX_REFUND_ATTEMPTS` — the sweep then leaves it to a person, as the payment inbox
+  /// does. Clearing `refund_failed_at` and `refund_attempts` hands it back.
+  refundAttempts  Int       @default(0) @map("refund_attempts")
+  refundLastError String?   @map("refund_last_error")
+  refundFailedAt  DateTime? @map("refund_failed_at")
+
+  /// The same three for the host's transfer (`MAX_PAYOUT_ATTEMPTS`).
+  payoutAttempts  Int       @default(0) @map("payout_attempts")
+  payoutLastError String?   @map("payout_last_error")
+  payoutFailedAt  DateTime? @map("payout_failed_at")
+
+  /// The payment's Charge, which the host's transfer names as its `source_transaction`.
+  chargeId String? @map("charge_id")
+
+  /// The transfer that paid the host, one per stay, written only into an empty column.
+  transferId String? @unique @map("transfer_id")
+
+  /// What the host holds of this stay now: the transfer less any reversal since.
+  paidOutAmount Decimal? @map("paid_out_amount") @db.Decimal(10, 2)
+
+  /// When the transfer went out. Never cleared by a reversal.
+  paidOutAt DateTime? @map("paid_out_at")
+
+  /// Where a dispute of the payment stands; `null` while nobody disputed it.
+  disputeStatus DisputeStatus? @map("dispute_status")
+
+  /// Until when a cancellation holds the stay — `BookingRepository.whileCancelling`. A lease
+  /// rather than a lock held by a transaction, because the work under it calls Stripe.
+  cancellingUntil DateTime? @map("cancelling_until")
+
+  /// Until when a settlement of the host's payout holds the stay — `whileSettling`.
+  settlingUntil DateTime? @map("settling_until")
+
   /// Restrict, not Cascade: the bookings of other people are not something a listing may
   /// quietly take down with it. What an owner asks for is answered without ever reaching
   /// this key — `DELETE /listings/:id` retires the listing and leaves the row where it
@@ -83,6 +144,13 @@ enum BookingStatus {
   CONFIRMED
   CANCELLED
   EXPIRED
+}
+
+/// The three moments of a dispute this API acts on: opened, and closed one way or the other.
+enum DisputeStatus {
+  OPEN
+  WON
+  LOST
 }
 
 /// What one side of a finished stay said about the other. `kind` is both what the review
@@ -156,7 +224,7 @@ model Listing {
   /// listings first. Nothing in the API reaches that path any more — retiring is what
   /// `DELETE /listings/:id` does — so what the constraint guards now is the hard delete
   /// of the seed, the test cleanup and whatever account deletion turns out to be.
-  owner         User           @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  owner         User            @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   bookings      Booking[]
   conversations Conversation[]
   waitlist      WaitlistEntry[]
@@ -257,6 +325,14 @@ model User {
   /// thing whoever reopens the account asks. Blocking is what the API offers instead of
   /// deleting a user: the rows are kept, and so is everything that points at them.
   blockedAt DateTime? @map("blocked_at")
+
+  /// The Stripe connected account the user is paid out to as a host (an Accounts v2
+  /// recipient), opened the first time they open the payouts screen and never replaced.
+  stripeAccountId String? @unique @map("stripe_account_id")
+
+  /// When that account became able to receive transfers, as Stripe last reported it — what
+  /// selects a payout, read locally so the sweep asks Stripe nothing.
+  payoutsEnabledAt DateTime? @map("payouts_enabled_at")
 
   refreshTokens RefreshToken[]
   listings      Listing[]
@@ -375,6 +451,14 @@ enum NotificationType {
   BOOKING_REQUESTED
   BOOKING_CANCELLED
   BOOKING_EXPIRED
+  BOOKING_CONFIRMED
+  PAYMENT_REFUNDED
+  PAYMENT_DISPUTED
+  PAYOUT_SENT
+  REFUND_FAILED
+  PAYMENT_EVENT_FAILED
+  CANCELLATION_REFUND_FAILED
+  PAYOUT_FAILED
   REVIEW_RECEIVED
   WAITLIST_AVAILABLE
 }
@@ -442,4 +526,56 @@ model WaitlistEntry {
   @@index([from, id])
   @@index([createdAt(sort: Desc), id(sort: Desc)])
   @@map("waitlist_entries")
+}
+
+/// The inbox of the payment provider's webhooks — every event delivered, keyed by the
+/// provider's own event id. The webhook verifies a delivery, writes it here and answers `200`
+/// at once; a BullMQ worker handles it afterwards (`PaymentEventDispatcher`) and stamps
+/// `processed_at`. Stripe delivers at least once, so a second delivery of an event already
+/// here records nothing, and the handlers are idempotent on their own: a run that died half
+/// way is finished by the next one rather than repeated. A sweep re-queues what a lost job
+/// left unprocessed, through the partial index of the migration.
+///
+/// `payload` is the event as the gateway read it (`PaymentEvent`), parsed back against a
+/// schema on the way out, not the provider's raw body.
+///
+/// No relation to a booking: an event can name a booking whose guest has since deleted
+/// their account, and the record of the money outlives that row.
+model PaymentEvent {
+  id          String    @id
+  type        String
+  payload     Json
+  receivedAt  DateTime  @default(now()) @map("received_at")
+  processedAt DateTime? @map("processed_at")
+
+  /// How many runs of the worker failed this event so far — every attempt of every job.
+  attempts  Int     @default(0)
+  /// What the latest failed run threw, cut to `MAX_ERROR_LENGTH`.
+  lastError String? @map("last_error")
+  /// When the worker gave up on the event (`MAX_EVENT_ATTEMPTS`): the sweep leaves it alone
+  /// and the admins are told. Clearing it, with `attempts`, hands it back to the sweep.
+  failedAt  DateTime? @map("failed_at")
+
+  /// What the daily prune deletes by: processed events past `EVENT_RETENTION_DAYS`.
+  @@index([processedAt])
+  @@map("payment_events")
+}
+
+/// A refund the guest's bank sent back (`refund.failed`): the money is on the platform's
+/// balance again and still the guest's, and nothing re-sends it on its own. Kept here until a
+/// person issues the refund again and stamps `resolved_at`; the admins are told when the row
+/// is written. Keyed by the provider's refund id, so a redelivery of the event writes nothing.
+///
+/// No relation to a booking, for the reason `PaymentEvent` has none.
+model RefundFailure {
+  refundId   String    @id @map("refund_id")
+  paymentId  String    @map("payment_id")
+  bookingId  String?   @map("booking_id") @db.Uuid
+  amount     Decimal   @db.Decimal(10, 2)
+  /// The bank's reason as the provider words it; `null` when it gives none.
+  reason     String?
+  failedAt   DateTime  @default(now()) @map("failed_at")
+  resolvedAt DateTime? @map("resolved_at")
+
+  @@map("refund_failures")
 }

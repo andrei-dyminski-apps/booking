@@ -31,7 +31,9 @@ export function holdExpiry(now: Date): Date {
 /**
  * The transitions the lifecycle allows. A hold is paid (`CONFIRMED`), cancelled or left
  * to expire; a confirmed stay can still be cancelled; `CANCELLED` and `EXPIRED` are
- * terminal. Phase 5 reads this on the payment webhook — phase 4 uses it for cancellation.
+ * terminal. Cancellation reads it (`isCancellable`); the payment webhook's transition is
+ * this table's first row written as the `where` of `BookingRepository.confirmPayment`,
+ * because there it has to hold atomically against the row rather than be asked first.
  */
 const TRANSITIONS: Record<BookingStatus, readonly BookingStatus[]> = {
   [BookingStatus.PENDING_PAYMENT]: [

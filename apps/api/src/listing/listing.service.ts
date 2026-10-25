@@ -15,7 +15,7 @@ import type {
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { ownsOrIsAdmin } from "../auth/ownership";
-import { BookingRepository } from "../booking/booking.repository";
+import { BookingRepository } from "../booking/infrastructure/booking.repository";
 import { readCursor } from "../common/paging";
 import { decodeCursor, encodeCursor } from "./catalogue-cursor";
 import { ListingRepository } from "./listing.repository";

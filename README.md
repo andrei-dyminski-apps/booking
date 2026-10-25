@@ -2,7 +2,7 @@
 
 A booking service monorepo: a Next.js frontend and a NestJS backend in one repository, managed by Turborepo and pnpm workspaces.
 
-> Status: the API is a working vertical slice — any account publishes listings and books other people's and the dates are checked for overlaps. Storage is PostgreSQL via Prisma 7, and the API is behind hand-written authentication: argon2, a JWT pair in httpOnly cookies, refresh-token rotation, and role-based authorization on top. The frontend has the session half of it — sign up, sign in, a guarded profile page rendered on the server as the visitor, and a session that survives an expired access token — plus the dashboard, where a listing is published, edited and taken down, and the catalogue: a filtered, cursor-paged list of stays whose filters live in the URL, a listing page with an availability calendar and the form that takes a hold, and a bookings screen with a "Trips" and a "Hosting" side for every user and everything for an admin, filtered and paged out of the URL like the catalogue. What a hold cannot do yet is turn into a paid stay; that is the next phase. The rest are in [docs/plan.md](docs/plan.md).
+> Status: the API is a working vertical slice — any account publishes listings and books other people's and the dates are checked for overlaps. Storage is PostgreSQL via Prisma 7, and the API is behind hand-written authentication: argon2, a JWT pair in httpOnly cookies, refresh-token rotation, and role-based authorization on top. The frontend has the session half of it — sign up, sign in, a guarded profile page rendered on the server as the visitor, and a session that survives an expired access token — plus the dashboard, where a listing is published, edited and taken down, and the catalogue: a filtered, cursor-paged list of stays whose filters live in the URL, a listing page with an availability calendar and the form that takes a hold, and a bookings screen with a "Trips" and a "Hosting" side for every user and everything for an admin, filtered and paged out of the URL like the catalogue. A hold is paid for on the stay's own page through Stripe Elements, and becomes a confirmed stay when Stripe's webhook says the money arrived; cancelling a paid stay refunds it by a rule both sides read from the contract. The rest are in [docs/plan.md](docs/plan.md).
 
 ## Requirements
 
@@ -15,7 +15,8 @@ A booking service monorepo: a Next.js frontend and a NestJS backend in one repos
 ```sh
 pnpm install
 cp .env.example .env
-docker compose up -d                    # PostgreSQL + Redis
+# put the three STRIPE_* keys of a Stripe test account into .env (see Payments below)
+docker compose --profile stripe up -d   # PostgreSQL + Redis + `stripe listen`
 pnpm --filter @repo/api db:migrate      # create the schema
 pnpm --filter @repo/api db:seed         # demo data
 pnpm dev
@@ -111,6 +112,7 @@ Routing belongs to Next.js and everything else to Feature-Sliced Design, so each
 | `/listings`                        | the catalogue: filters in the URL, keyset pages, cached and tagged                                        | everyone    |
 | `/listings/:id`                    | one listing, its calendar and the form that takes a hold or waits                                         | everyone    |
 | `/bookings`                        | Trips and Hosting (`?side=HOST`), keyset pages                                                            | signed in   |
+| `/bookings/:id`                    | one stay: the payment form for its guest's hold, the status polled until the webhook lands, cancelling    | its readers |
 | `/waitlist`                        | the ranges a user waits for, and those waited for on their listings (`?side=HOST`); an admin's, every one | signed in   |
 | `/guests/:id/reviews`              | what hosts said about one guest, for the guest and their hosts                                            | signed in   |
 | `/messages`                        | the caller's conversations, the most recent first                                                         | USER        |
@@ -134,49 +136,55 @@ The three catalogue routes are the first cached reads in the application: `GET /
 Every route below except `/`, the four public `/auth/*` ones, the three reading routes
 of the catalogue and a listing's reviews is behind the global `JwtAuthGuard` and answers `401` without a session.
 
-| Method   | Path                          | What it does                                                                                          |
-| -------- | ----------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `POST`   | `/auth/register`              | register and open a session; `400` — failed the schema, `409` — email is taken                        |
-| `POST`   | `/auth/login`                 | log in; `401` — wrong email or password, `403` — the account is blocked                               |
-| `POST`   | `/auth/refresh`               | rotate the token pair; `401` — missing, spent or forged token, cookies cleared                        |
-| `POST`   | `/auth/logout`                | end the session, `204`; answers the same without one                                                  |
-| `GET`    | `/auth/me`                    | the current user; `401` — no session, the user is gone or blocked                                     |
-| `GET`    | `/listings`                   | the catalogue: filters (`ownerId` among them), an ordering and a cursor; public                       |
-| `GET`    | `/listings/mine`              | the caller's own listings; USER only                                                                  |
-| `GET`    | `/listings/:id`               | a single listing, `404` if missing or retired; public                                                 |
-| `GET`    | `/listings/:id/availability`  | the nights already taken, for a `from`/`to` window; public                                            |
-| `POST`   | `/listings`                   | create, the owner taken from the session; USER only                                                   |
-| `PATCH`  | `/listings/:id`               | edit; the owner or ADMIN, `403` otherwise                                                             |
-| `DELETE` | `/listings/:id`               | retire, `204`; out of the catalogue, booked stays keep their record                                   |
-| `GET`    | `/bookings`                   | one page of the stays the caller may see: `side`, filters, an ordering and a cursor                   |
-| `GET`    | `/bookings/:id`               | a single booking; the guest, the owner of the listing or an admin                                     |
-| `POST`   | `/bookings`                   | a 15-minute hold; USER only, `403` — own listing, `404` — no listing, `409` — dates taken             |
-| `DELETE` | `/bookings/:id`               | cancel, `204`; the guest or an admin. The row stays, with `status: CANCELLED`                         |
-| `GET`    | `/waitlist`                   | the date ranges the caller waits for, check-in still ahead, earliest first; USER only                 |
-| `POST`   | `/waitlist`                   | wait for held nights; `409` — the nights are free, `403` — own listing, own stay or a full list       |
-| `GET`    | `/waitlist/demand`            | ranges waited for on the caller's listings — or every one, with who waits, for an admin; keyset pages |
-| `DELETE` | `/waitlist/:id`               | leave, `204`; `404` — not the caller's, or already told the nights came free                          |
-| `GET`    | `/conversations`              | every thread the caller is a side of, newest message first; `listingId`, a cursor; USER only          |
-| `POST`   | `/conversations`              | a guest's message about a listing: opens the thread or continues it; USER only                        |
-| `GET`    | `/conversations/:id`          | one thread as the caller's side reads it; `404` for anybody but its two sides                         |
-| `GET`    | `/conversations/:id/messages` | one page of the thread, the newest message first, a cursor                                            |
-| `POST`   | `/conversations/:id/messages` | a reply from either side; a retired listing does not close the thread                                 |
-| `POST`   | `/conversations/:id/read`     | the caller's side has seen the thread up to `upTo`, the newest message shown; `204`                   |
-| `GET`    | `/users`                      | one page of accounts: role, status, name and address filters, a cursor; ADMIN only                    |
-| `GET`    | `/users/:id`                  | one account with its stay and listing counts; ADMIN only                                              |
-| `PATCH`  | `/users/:id`                  | change the role and/or block; ADMIN only, `403` on the caller's own account                           |
-| `GET`    | `/lookups/owners`             | accounts with a listing on offer, by `q` — a part of the address or a whole id; ADMIN                 |
-| `GET`    | `/lookups/guests`             | the guests of the caller's stays, by `q`; USER (their listings') or ADMIN                             |
-| `GET`    | `/lookups/listings`           | the listings of the caller's stays on `side`, retired included, by `q` — a part of the title          |
-| `GET`    | `/listings/:id/reviews`       | the guests' reviews of a listing, a page and a summary; `404` if retired; public                      |
-| `GET`    | `/guests/:id/reviews`         | the hosts' reviews of a guest; the guest, a host they booked with or ADMIN, else `404`                |
-| `POST`   | `/bookings/:id/reviews`       | review a confirmed stay that is over; the guest or the owner, `409` — not yet or twice                |
-| `DELETE` | `/reviews/:id`                | remove a review, `204`; ADMIN only                                                                    |
-| `GET`    | `/notifications`              | one page of the caller's notifications, newest first, with a cursor                                   |
-| `GET`    | `/notifications/unread-count` | how many of them are unread                                                                           |
-| `POST`   | `/notifications/:id/read`     | mark one read, answers the unread count; `404` — not one of the caller's                              |
-| `POST`   | `/notifications/read`         | mark all read, answers the unread count                                                               |
-| `GET`    | `/events`                     | the caller's event stream (Server-Sent Events): a `sync`, then whatever happens                       |
+| Method   | Path                          | What it does                                                                                           |
+| -------- | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `POST`   | `/auth/register`              | register and open a session; `400` — failed the schema, `409` — email is taken                         |
+| `POST`   | `/auth/login`                 | log in; `401` — wrong email or password, `403` — the account is blocked                                |
+| `POST`   | `/auth/refresh`               | rotate the token pair; `401` — missing, spent or forged token, cookies cleared                         |
+| `POST`   | `/auth/logout`                | end the session, `204`; answers the same without one                                                   |
+| `GET`    | `/auth/me`                    | the current user; `401` — no session, the user is gone or blocked                                      |
+| `GET`    | `/listings`                   | the catalogue: filters (`ownerId` among them), an ordering and a cursor; public                        |
+| `GET`    | `/listings/mine`              | the caller's own listings; USER only                                                                   |
+| `GET`    | `/listings/:id`               | a single listing, `404` if missing or retired; public                                                  |
+| `GET`    | `/listings/:id/availability`  | the nights already taken, for a `from`/`to` window; public                                             |
+| `POST`   | `/listings`                   | create, the owner taken from the session; USER only                                                    |
+| `PATCH`  | `/listings/:id`               | edit; the owner or ADMIN, `403` otherwise                                                              |
+| `DELETE` | `/listings/:id`               | retire, `204`; out of the catalogue, booked stays keep their record                                    |
+| `GET`    | `/bookings`                   | one page of the stays the caller may see: `side`, filters, an ordering and a cursor                    |
+| `GET`    | `/bookings/:id`               | a single booking; the guest, the owner of the listing or an admin                                      |
+| `POST`   | `/bookings`                   | a 15-minute hold, priced by the server; USER only, `403` — own listing, `409` — dates taken            |
+| `POST`   | `/bookings/:id/payment`       | opens (or answers again) the hold's PaymentIntent secret; its guest only, `409` — not awaiting payment |
+| `DELETE` | `/bookings/:id`               | cancel, `204`; the guest or an admin, a paid stay's refund sent right after by a job (`refundOwed`)    |
+| `POST`   | `/payments/webhook`           | Stripe's deliveries: signature checked, recorded, `200` at once, handled by a worker; public           |
+| `GET`    | `/payouts/account`            | the caller's payout account as the row says it; USER only                                              |
+| `POST`   | `/payouts/account/refresh`    | asks Stripe where an unfinished onboarding stands and writes it down; USER only                        |
+| `POST`   | `/payouts/account/session`    | a session for Stripe's embedded components, opening the account the first time; USER only              |
+| `POST`   | `/payouts/webhook`            | Stripe's thin events about hosts' accounts, into the same inbox; public                                |
+| `GET`    | `/waitlist`                   | the date ranges the caller waits for, check-in still ahead, earliest first; USER only                  |
+| `POST`   | `/waitlist`                   | wait for held nights; `409` — the nights are free, `403` — own listing, own stay or a full list        |
+| `GET`    | `/waitlist/demand`            | ranges waited for on the caller's listings — or every one, with who waits, for an admin; keyset pages  |
+| `DELETE` | `/waitlist/:id`               | leave, `204`; `404` — not the caller's, or already told the nights came free                           |
+| `GET`    | `/conversations`              | every thread the caller is a side of, newest message first; `listingId`, a cursor; USER only           |
+| `POST`   | `/conversations`              | a guest's message about a listing: opens the thread or continues it; USER only                         |
+| `GET`    | `/conversations/:id`          | one thread as the caller's side reads it; `404` for anybody but its two sides                          |
+| `GET`    | `/conversations/:id/messages` | one page of the thread, the newest message first, a cursor                                             |
+| `POST`   | `/conversations/:id/messages` | a reply from either side; a retired listing does not close the thread                                  |
+| `POST`   | `/conversations/:id/read`     | the caller's side has seen the thread up to `upTo`, the newest message shown; `204`                    |
+| `GET`    | `/users`                      | one page of accounts: role, status, name and address filters, a cursor; ADMIN only                     |
+| `GET`    | `/users/:id`                  | one account with its stay and listing counts; ADMIN only                                               |
+| `PATCH`  | `/users/:id`                  | change the role and/or block; ADMIN only, `403` on the caller's own account                            |
+| `GET`    | `/lookups/owners`             | accounts with a listing on offer, by `q` — a part of the address or a whole id; ADMIN                  |
+| `GET`    | `/lookups/guests`             | the guests of the caller's stays, by `q`; USER (their listings') or ADMIN                              |
+| `GET`    | `/lookups/listings`           | the listings of the caller's stays on `side`, retired included, by `q` — a part of the title           |
+| `GET`    | `/listings/:id/reviews`       | the guests' reviews of a listing, a page and a summary; `404` if retired; public                       |
+| `GET`    | `/guests/:id/reviews`         | the hosts' reviews of a guest; the guest, a host they booked with or ADMIN, else `404`                 |
+| `POST`   | `/bookings/:id/reviews`       | review a confirmed stay that is over; the guest or the owner, `409` — not yet or twice                 |
+| `DELETE` | `/reviews/:id`                | remove a review, `204`; ADMIN only                                                                     |
+| `GET`    | `/notifications`              | one page of the caller's notifications, newest first, with a cursor                                    |
+| `GET`    | `/notifications/unread-count` | how many of them are unread                                                                            |
+| `POST`   | `/notifications/:id/read`     | mark one read, answers the unread count; `404` — not one of the caller's                               |
+| `POST`   | `/notifications/read`         | mark all read, answers the unread count                                                                |
+| `GET`    | `/events`                     | the caller's event stream (Server-Sent Events): a `sync`, then whatever happens                        |
 
 The three lookups fill in the id filters of the admin's listings and of the stays: `q` is at
 least three characters, matched anywhere in the name regardless of case — or, when it is a
@@ -346,7 +354,7 @@ back under another `sort`, is a `400` rather than a silent first page.
 ### Concurrent booking
 
 `POST /bookings` creates the booking as a `PENDING_PAYMENT` hold with `expiresAt = now + 15
-min` — the slot is taken while the guest pays (phase 6). Three layers keep two guests from
+min` — the slot is taken while the guest pays (see Payments below). Three layers keep two guests from
 taking the same nights:
 
 1. **A locking transaction.** Creating a booking is an interactive transaction that begins
@@ -364,9 +372,78 @@ taking the same nights:
    fail without failing the request that created the booking.
 
 A booking that leaves the active set — cancelled or expired — frees its slot immediately
-and keeps its row: phase 6 refunds against it, so it goes on answering `GET /bookings/:id`
+and keeps its row: a refund is recorded against it, so it goes on answering `GET /bookings/:id`
 for the people who could read it before, with `status` saying what became of it. What is
 refused afterwards is cancelling it a second time.
+
+### Payments
+
+Stripe, through a **PaymentIntent and Elements** — a payment form of the site's own rather
+than a redirect to Checkout. The cycle:
+
+1. **The server prices the stay.** The hold's `amount` is quoted inside the same locking
+   transaction that takes the nights, by `nightlyPrice` from `@repo/contracts` — the rule the
+   listing page quoted the guest by — and stored on the booking. Nothing about money is
+   ever read from a request.
+2. **The guest pays on `/bookings/:id`.** The payment form asks `POST /bookings/:id/payment`
+   from the browser, which opens the hold's PaymentIntent under an idempotency key named
+   after the booking — a reload is handed the same one — and Stripe Elements confirms it in
+   the browser. Card details go to Stripe and never through this site.
+3. **The webhook confirms the stay.** `payment_intent.succeeded` reaches
+   `POST /payments/webhook`, whose signature is checked over the raw body, and only then
+   does the hold become `CONFIRMED`. The browser's own "success" only starts a poll
+   (TanStack Query, `refetchInterval`) that waits for the status to move.
+4. **Through an inbox.** The webhook records the event in `payment_events` and answers
+   `200` at once; a BullMQ worker handles it afterwards and retries it on a failure, and a
+   sweep re-queues what a lost job left. Stripe delivers at least once, so an event already
+   recorded is not handled again, and each step is idempotent by itself. An event that keeps
+   failing is set aside after 24 runs and every admin is notified, rather than being retried
+   for good.
+
+What else moves money:
+
+- **Cancelling a paid stay refunds it, right after it is cancelled** — in full up to 48
+  hours before check-in, and nothing after (`refundOnCancel` in `@repo/contracts`, the rule
+  the page states). An admin's cancellation refunds in full. Neither may cancel a stay
+  once its check-in day has come. The
+  cancellation answers at once and writes what it owes on the booking (`refundOwed`); a
+  job sends the refund, and a sweep of its own sends any refund Stripe refused until it
+  goes through. A refund the guest's bank sends back is kept on record (`refund_failures`)
+  and every admin is notified, to issue it again.
+- **A hold that lapses or is cancelled withdraws its PaymentIntent.** A payment that
+  completes anyway, in the moment before the withdrawal, reaches the webhook for nights that
+  are no longer the guest's and is refunded in full automatically.
+
+- **Hosts are paid by Stripe Connect, after the stay begins.** The guest pays the site;
+  `PAYOUT_DELAY_HOURS` (24) after check-in the host's share — what is left after refunds,
+  less `PLATFORM_FEE_RATE` (10%), both in `@repo/contracts` — is transferred to their
+  connected account, funded by the guest's own charge. A host sets payouts up on
+  `/dashboard/payouts` (Stripe's embedded onboarding); until then their listings take
+  bookings as usual and the payouts wait, going out as soon as Stripe reports the account
+  ready. A job per stay pays it when it falls due, and an hourly sweep pays whatever the
+  jobs missed.
+- **A refund from Stripe's dashboard and a dispute reach the stay.** A full refund of a
+  confirmed stay cancels it and frees its nights; a partial one tells the guest. A refund
+  after the payout takes the host's share of it back by a transfer reversal. A dispute holds
+  the payout until it is decided; a lost one takes back a payout already sent.
+
+Connect has to be switched on for the account once: Dashboard → Connect, the platform
+profile, and accepting responsibility for losses — the platform carries them for its
+recipients. Without it, opening a host's account answers `502`.
+
+Locally, `stripe listen` runs as the `stripe` service of `docker-compose.yml` (behind the
+`stripe` profile) and forwards the events to the API on the host. Its signing secret is
+printed when it starts — `docker compose --profile stripe logs stripe`, the `whsec_…`
+line — and goes into `STRIPE_PAYMENT_WEBHOOK_SECRET`.
+
+Test cards, with any future expiry date, any CVC and any postcode:
+
+| Card number           | What it does                       |
+| --------------------- | ---------------------------------- |
+| `4242 4242 4242 4242` | succeeds straight away             |
+| `4000 0025 0000 3155` | asks for 3-D Secure, then succeeds |
+| `4000 0000 0000 9995` | is declined (insufficient funds)   |
+| `4000 0000 0000 0002` | is declined (generic decline)      |
 
 ## Authentication
 
@@ -451,27 +528,32 @@ The `nest.json` preset adds what Nest cannot work without: decorators with metad
 
 All settings live in a single `.env` in the repository root — there are no per-app `.env` files inside `apps/*`.
 
-| Variable             | What it sets                                                   | Default                   |
-| -------------------- | -------------------------------------------------------------- | ------------------------- |
-| `NODE_ENV`           | `production` hides Swagger and marks the auth cookies `Secure` | unset, set by the runtime |
-| `WEB_PORT`           | Next port (`apps/web`)                                         | `3000`                    |
-| `API_PORT`           | Nest port (`apps/api`)                                         | `3001`                    |
-| `API_HOST`           | the interface Nest listens on                                  | `0.0.0.0`                 |
-| `API_ORIGIN`         | API address the Next.js server forwards to (server-side only)  | required, no fallback     |
-| `WEB_ORIGIN`         | origin(s) for CORS in Nest, several — comma-separated          | `http://localhost:3000`   |
-| `POSTGRES_USER`      | user inside the Postgres container                             | `booking`                 |
-| `POSTGRES_PASSWORD`  | password inside the Postgres container                         | `booking`                 |
-| `POSTGRES_DB`        | database name inside the Postgres container                    | `booking`                 |
-| `POSTGRES_PORT`      | host port the Postgres container publishes                     | `5432`                    |
-| `DATABASE_URL`       | PostgreSQL connection string for the application               | see `.env.example`        |
-| `REDIS_PORT`         | host port the Redis container publishes                        | `6379`                    |
-| `REDIS_URL`          | Redis for the hold-expiry queue and the event stream's pub/sub | see `.env.example`        |
-| `JWT_ACCESS_SECRET`  | signing key of the access token                                | required, no fallback     |
-| `JWT_REFRESH_SECRET` | signing key of the refresh token — a different one on purpose  | required, no fallback     |
-| `JWT_ACCESS_TTL`     | access token lifetime, seconds (also the cookie Max-Age)       | `900`                     |
-| `JWT_REFRESH_TTL`    | refresh token lifetime, seconds                                | `604800`                  |
-| `AUTH_COOKIE_DOMAIN` | Domain of the auth cookies; empty means the host that set them | empty                     |
-| `TRUST_PROXY`        | trusted `X-Forwarded-For` entries — the rate limiter's key     | `0`                       |
+| Variable                        | What it sets                                                                 | Default                                                 |
+| ------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `NODE_ENV`                      | `production` hides Swagger and marks the auth cookies `Secure`               | unset, set by the runtime                               |
+| `WEB_PORT`                      | Next port (`apps/web`)                                                       | `3000`                                                  |
+| `API_PORT`                      | Nest port (`apps/api`)                                                       | `3001`                                                  |
+| `API_HOST`                      | the interface Nest listens on                                                | `0.0.0.0`                                               |
+| `API_ORIGIN`                    | API address the Next.js server forwards to (server-side only)                | required, no fallback                                   |
+| `WEB_ORIGIN`                    | origin(s) for CORS in Nest, several — comma-separated                        | `http://localhost:3000`                                 |
+| `POSTGRES_USER`                 | user inside the Postgres container                                           | `booking`                                               |
+| `POSTGRES_PASSWORD`             | password inside the Postgres container                                       | `booking`                                               |
+| `POSTGRES_DB`                   | database name inside the Postgres container                                  | `booking`                                               |
+| `POSTGRES_PORT`                 | host port the Postgres container publishes                                   | `5432`                                                  |
+| `DATABASE_URL`                  | PostgreSQL connection string for the application                             | see `.env.example`                                      |
+| `REDIS_PORT`                    | host port the Redis container publishes                                      | `6379`                                                  |
+| `REDIS_URL`                     | Redis for the hold-expiry queue and the event stream's pub/sub               | see `.env.example`                                      |
+| `JWT_ACCESS_SECRET`             | signing key of the access token                                              | required, no fallback                                   |
+| `JWT_REFRESH_SECRET`            | signing key of the refresh token — a different one on purpose                | required, no fallback                                   |
+| `JWT_ACCESS_TTL`                | access token lifetime, seconds (also the cookie Max-Age)                     | `900`                                                   |
+| `JWT_REFRESH_TTL`               | refresh token lifetime, seconds                                              | `604800`                                                |
+| `AUTH_COOKIE_DOMAIN`            | Domain of the auth cookies; empty means the host that set them               | empty                                                   |
+| `TRUST_PROXY`                   | trusted `X-Forwarded-For` entries — the rate limiter's key                   | `0`                                                     |
+| `STRIPE_SECRET_KEY`             | Stripe secret key (`sk_test_…`); the API opens, cancels and refunds payments | required, no fallback                                   |
+| `STRIPE_PAYMENT_WEBHOOK_SECRET` | signs the webhook deliveries; `stripe listen` prints it locally              | required, no fallback                                   |
+| `STRIPE_PAYOUT_WEBHOOK_SECRET`  | signs the deliveries about hosts' payout accounts (a separate destination)   | optional, falls back to `STRIPE_PAYMENT_WEBHOOK_SECRET` |
+| `STRIPE_SITE`                   | this deployment's name on its payments; another site's are left alone        | `local`; required in production                         |
+| `STRIPE_PUBLISHABLE_KEY`        | Stripe.js key, read by the frontend server and handed to the form            | required, no fallback                                   |
 
 The root scripts start turbo through `node --env-file-if-exists=.env`, so the variables reach the environment of both tasks. The same `.env` is read by `docker compose` — it sits next to `docker-compose.yml`, so `POSTGRES_*` and `REDIS_PORT` are substituted into the services without extra flags; compose declares defaults for them, so the database comes up even without a `.env`.
 
@@ -533,7 +615,7 @@ pnpm test           # unit, *.spec.ts next to the code; no database needed
 pnpm test:e2e       # e2e, apps/api/test/*.e2e-spec.ts; needs the database from docker-compose running
 ```
 
-`pnpm test` covers both applications, with a runner each: **Jest** in `apps/api`, where the specs run a service against fakes of its repositories through Nest's testing module, and **Vitest** in `apps/web` and in `packages/contracts` — the latter for `nightlyPrice`, the rule a night of a stay is priced by on both sides of the wire. What has a spec on the frontend is deliberately narrow — a parser whose input somebody else writes, which today means `?next=` after signing in ([`next-path.ts`](apps/web/src/shared/lib/next-path.ts)) and the `Set-Cookie` the proxy re-issues ([`session-cookies.ts`](apps/web/src/shared/api/session-cookies.ts)). Both are security decisions that a diff does not show, and neither is a component: a component that would break is one `check-types` and Steiger already refuse.
+`pnpm test` covers both applications, with a runner each: **Jest** in `apps/api`, where the specs run a service against fakes of its repositories through Nest's testing module, and **Vitest** in `apps/web` and in `packages/contracts` — the latter for `nightlyPrice` and `refundOnCancel`, the rules a night of a stay is priced by and a cancellation refunds by on both sides of the wire. What has a spec on the frontend is deliberately narrow — a parser whose input somebody else writes, which today means `?next=` after signing in ([`next-path.ts`](apps/web/src/shared/lib/next-path.ts)) and the `Set-Cookie` the proxy re-issues ([`session-cookies.ts`](apps/web/src/shared/api/session-cookies.ts)). Both are security decisions that a diff does not show, and neither is a component: a component that would break is one `check-types` and Steiger already refuse.
 
 All of them run through turbo, which builds `@repo/contracts` first — the specs import its schemas as values, and unlike `lint` and `check-types` they need the compiled `dist/`, not the sources.
 
@@ -561,16 +643,54 @@ Internal packages are wired in as `"@repo/ui": "workspace:*"`.
 
 That removes three deployment problems rather than one. There is no `SameSite=None` for Safari's tracking prevention to drop. There is no CORS to keep in step with a list of origins. And a preview deployment can be pointed at any API and still log in, instead of needing a staging backend of its own.
 
-`railway.json` in the root describes the API service. Railway's Root Directory stays the repository root — pnpm workspaces do not build from a subdirectory — so the service is narrowed by its commands instead:
+`.railway/railway.ts` describes the API service as [Railway Infrastructure as Code](https://docs.railway.com/infrastructure-as-code); the `railway` devDependency is the SDK it imports. Railway's Root Directory stays the repository root — pnpm workspaces do not build from a subdirectory — so the service is narrowed by its commands instead:
 
 - `buildCommand` filters turbo down to `@repo/api`, which builds `@repo/contracts` on the way;
 - `watchPatterns` keeps a frontend-only push from redeploying the backend;
-- `preDeployCommand` runs `db:deploy` before the new instance starts — committed migrations only, never `migrate dev`;
-- `startCommand` is a plain `node apps/api/dist/main`: the port comes from Railway's `PORT` and the host from `API_HOST`, both of which `src/main.ts` already reads.
+- `preDeploy` runs `db:deploy` before the new instance starts — committed migrations only, never `migrate dev`;
+- `start` is a plain `node apps/api/dist/main`: the port comes from Railway's `PORT` and the host from `API_HOST`, both of which `src/main.ts` already reads.
+
+The file exports the partial `api`, so it owns only the resources it declares: Postgres and Redis live in the same project but stay managed in the dashboard, and an apply never deletes them. A change to the file reaches Railway through the CLI rather than a push — `railway config plan`, then `railway config apply` once the plan shows only the intended changes.
 
 Postgres is a service in the same Railway project, and `DATABASE_URL` is set as a reference to it (`${{Postgres.DATABASE_URL}}`) rather than copied — the credentials then survive a rotation. The rest of the variables from the table above are set by hand; the JWT secrets are generated (`openssl rand -hex 32`), not taken from `.env.example`.
 
+Stripe needs one more step on each side. The webhook endpoint is registered in the Dashboard at `https://<api>/payments/webhook` for `payment_intent.succeeded`, `charge.refunded`, `refund.failed`, `charge.dispute.created` and `charge.dispute.closed`, and its signing secret becomes `STRIPE_PAYMENT_WEBHOOK_SECRET` on Railway beside `STRIPE_SECRET_KEY` and a `STRIPE_SITE` of the deployment's own (`production`); a second destination, "Your account" with the thin events `v2.core.account[configuration.recipient].capability_status_updated` and `v2.core.account[requirements].updated`, goes to `https://<api>/payouts/webhook` and its secret to `STRIPE_PAYOUT_WEBHOOK_SECRET`; `STRIPE_PUBLISHABLE_KEY` goes to Vercel, as a runtime variable like `API_ORIGIN`. Both destinations deliver in the API version the API pins (`STRIPE_API_VERSION` in `apps/api/src/payment/infrastructure/stripe-client.ts`); the API logs a warning when an event arrives in another.
+
 On the Vercel side `API_ORIGIN` is a runtime variable of the frontend — it is read on the server, never inlined into the bundle, so a changed API address is a redeploy without a rebuild. `TRUST_PROXY` on the Railway side has to account for the extra `X-Forwarded-For` entry the frontend server's own request produces, or the rate limiter buckets every visitor together.
+
+While nobody uses the deployment, its Railway services can be stopped so they bill no compute, and started again later; volumes keep the data in between. `scripts/railway-power.sh` does it for the project the Railway CLI is linked to (`railway login`, `railway link`): with no arguments it asks what to do, otherwise it takes `stop`, `start` or `status` and optionally the service names (by default `Postgres Redis @repo/api`, started in that order and stopped in reverse). Stopping removes each service's latest deployment, so starting deploys it again from its source — the image for Postgres and Redis, the latest commit of the tracked branch for the API.
+
+It needs the Railway CLI, installed once with `npm i -g @railway/cli`. The root scripts wrap it.
+
+Interactive menu — stop, start or status:
+
+```sh
+pnpm railway
+```
+
+Status of the linked project:
+
+```sh
+pnpm railway:status
+```
+
+Stop every service (`railway down`, after a confirmation):
+
+```sh
+pnpm railway:stop
+```
+
+Start every service again (`railway redeploy`):
+
+```sh
+pnpm railway:start
+```
+
+Service names narrow any of the three to those services:
+
+```sh
+pnpm railway:start api
+```
 
 ## Build cache
 
