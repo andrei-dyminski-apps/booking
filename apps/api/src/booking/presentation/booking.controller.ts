@@ -11,6 +11,7 @@ import {
   Query,
 } from "@nestjs/common";
 import {
+  ApiBadGatewayResponse,
   ApiBadRequestResponse,
   ApiConflictResponse,
   ApiCreatedResponse,
@@ -20,15 +21,21 @@ import {
   ApiOkResponse,
   ApiUnauthorizedResponse,
 } from "@nestjs/swagger";
-import { Role, type Booking, type BookingPage } from "@repo/contracts";
-import type { AuthenticatedUser } from "../auth/auth.types";
-import { CurrentUser } from "../auth/decorators/current-user.decorator";
-import { Roles } from "../auth/decorators/roles.decorator";
-import { ApiErrorDto } from "../common/dto/api-error.dto";
-import { BookingService } from "./booking.service";
+import {
+  Role,
+  type Booking,
+  type BookingPage,
+  type BookingPayment,
+} from "@repo/contracts";
+import type { AuthenticatedUser } from "../../auth/auth.types";
+import { CurrentUser } from "../../auth/decorators/current-user.decorator";
+import { Roles } from "../../auth/decorators/roles.decorator";
+import { ApiErrorDto } from "../../common/dto/api-error.dto";
+import { BookingService } from "../application/booking.service";
 import {
   BookingDto,
   BookingPageDto,
+  BookingPaymentDto,
   BookingQueryDto,
   CreateBookingDto,
 } from "./dto/booking.dto";
@@ -79,6 +86,41 @@ export class BookingController {
   }
 
   /**
+   * What the guest pays for their hold with: the secret Stripe Elements confirms the
+   * PaymentIntent with in the browser. A `POST`, because the first call opens the intent at
+   * Stripe and records it; every call after it answers the same one, so the request is safe
+   * to repeat. Whether the stay is then paid is not this route's to say — the webhook
+   * confirms it, and the page polls `GET /bookings/:id`.
+   */
+  @Post(":id/payment")
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.USER)
+  @ApiOkResponse({ type: BookingPaymentDto })
+  @ApiNotFoundResponse({
+    description: "The booking does not exist, or the caller may not read it",
+    type: ApiErrorDto,
+  })
+  @ApiForbiddenResponse({
+    description: "The caller may read the booking but is not its guest",
+    type: ApiErrorDto,
+  })
+  @ApiConflictResponse({
+    description:
+      "The booking is not waiting for payment: paid, cancelled, or its hold has lapsed",
+    type: ApiErrorDto,
+  })
+  @ApiBadGatewayResponse({
+    description: "The payment provider could not be reached",
+    type: ApiErrorDto,
+  })
+  payment(
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<BookingPayment> {
+    return this.bookingService.payment(id, user);
+  }
+
+  /**
    * Any user books — a host too, though not their own listing (`403`). An admin moderates
    * and does not book.
    */
@@ -110,11 +152,20 @@ export class BookingController {
     return this.bookingService.create(user.id, dto);
   }
 
+  /**
+   * Cancelled when it answers; a refund the cancellation owes is sent after it, by a job,
+   * and the booking says so in `refundOwed` until it has gone out.
+   */
   @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse()
   @ApiForbiddenResponse({
     description: "The booking exists but was not made by the caller",
+    type: ApiErrorDto,
+  })
+  @ApiConflictResponse({
+    description:
+      "The stay has begun, its payment is disputed, it was paid for while being cancelled, or another cancellation holds it",
     type: ApiErrorDto,
   })
   @ApiNotFoundResponse({

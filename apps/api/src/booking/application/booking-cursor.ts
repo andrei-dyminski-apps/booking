@@ -1,6 +1,6 @@
 import { bookingSchema, bookingSortSchema } from "@repo/contracts";
 import type { Booking, BookingSort } from "@repo/contracts";
-import { decodeParts, encodeParts } from "../common/paging";
+import { decodeParts, encodeParts } from "../../common/paging";
 
 /**
  * The place in a list of stays a page ends, as the client hands it back. Keyset rather

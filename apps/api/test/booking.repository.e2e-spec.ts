@@ -8,7 +8,7 @@ import {
   DatesUnavailableError,
   GuestNotFoundError,
   ListingNotFoundError,
-} from "./../src/booking/booking.repository";
+} from "./../src/booking/infrastructure/booking.repository";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { HOLD_TTL_MS } from "./../src/booking/domain/booking-status";
 import { resetDatabase } from "./database";
@@ -165,9 +165,9 @@ describe("BookingRepository foreign keys (e2e)", () => {
   it("refuses a hold with no deadline at all", async () => {
     await expect(
       prismaService.$executeRaw`
-        INSERT INTO bookings (id, listing_id, guest_id, from_date, to_date, status, expires_at)
+        INSERT INTO bookings (id, listing_id, guest_id, from_date, to_date, status, expires_at, amount)
         VALUES (gen_random_uuid(), ${listingId}::uuid, ${guestId}::uuid,
-                ${dates.from}::date, ${dates.to}::date, 'PENDING_PAYMENT', NULL)
+                ${dates.from}::date, ${dates.to}::date, 'PENDING_PAYMENT', NULL, 480)
       `,
     ).rejects.toThrow(/bookings_hold_has_deadline/);
 
@@ -175,9 +175,9 @@ describe("BookingRepository foreign keys (e2e)", () => {
     // is what the seed writes.
     await expect(
       prismaService.$executeRaw`
-        INSERT INTO bookings (id, listing_id, guest_id, from_date, to_date, status, expires_at)
+        INSERT INTO bookings (id, listing_id, guest_id, from_date, to_date, status, expires_at, amount)
         VALUES (gen_random_uuid(), ${listingId}::uuid, ${guestId}::uuid,
-                ${dates.from}::date, ${dates.to}::date, 'CONFIRMED', NULL)
+                ${dates.from}::date, ${dates.to}::date, 'CONFIRMED', NULL, 480)
       `,
     ).resolves.toBe(1);
   });

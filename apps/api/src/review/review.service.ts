@@ -1,4 +1,3 @@
-import { TZDate } from "@date-fns/tz";
 import {
   ConflictException,
   ForbiddenException,
@@ -15,15 +14,15 @@ import {
   type ReviewPage,
   type ReviewQuery,
 } from "@repo/contracts";
-import { format } from "date-fns";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import {
   BookingRepository,
   type BookingWithListingOwner,
-} from "../booking/booking.repository";
+} from "../booking/infrastructure/booking.repository";
 import { readCursor, type Page } from "../common/paging";
 import { ListingRepository } from "../listing/listing.repository";
 import { NotificationService } from "../notification/notification.service";
+import { toIsoDate } from "../prisma/iso-date";
 import { decodeCursor, encodeCursor, type ReviewCursor } from "./review-cursor";
 import {
   ReviewAlreadyWrittenError,
@@ -266,5 +265,5 @@ function sameId(left: string, right: string): boolean {
 
 /** UTC, the clock `isReviewable` is written against — see the note on it in the contract. */
 function today(): string {
-  return format(TZDate.tz("UTC"), "yyyy-MM-dd");
+  return toIsoDate(new Date());
 }

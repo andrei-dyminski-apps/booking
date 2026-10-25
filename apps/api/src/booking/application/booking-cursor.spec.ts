@@ -1,5 +1,5 @@
 import { BookingStatus, type Booking, type BookingSort } from "@repo/contracts";
-import { encodeParts } from "../common/paging";
+import { encodeParts } from "../../common/paging";
 import { decodeCursor, encodeCursor } from "./booking-cursor";
 
 const booking: Booking = {
@@ -10,6 +10,11 @@ const booking: Booking = {
   from: "2026-09-01",
   to: "2026-09-05",
   status: BookingStatus.PENDING_PAYMENT,
+  amount: 482,
+  refundedAmount: null,
+  refundOwed: null,
+  paid: false,
+  dispute: null,
   expiresAt: "2026-08-20T12:15:00.000Z",
   createdAt: "2026-08-20T12:00:00.000Z",
   reviewed: { byGuest: false, byOwner: false },

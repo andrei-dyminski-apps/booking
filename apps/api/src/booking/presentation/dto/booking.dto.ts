@@ -1,6 +1,7 @@
 import { createZodDto } from "nestjs-zod";
 import {
   bookingPageSchema,
+  bookingPaymentSchema,
   bookingQuerySchema,
   bookingSchema,
   createBookingSchema,
@@ -25,3 +26,5 @@ export class BookingDto extends createZodDto(bookingSchema) {}
 export class BookingQueryDto extends createZodDto(bookingQuerySchema) {}
 
 export class BookingPageDto extends createZodDto(bookingPageSchema) {}
+
+export class BookingPaymentDto extends createZodDto(bookingPaymentSchema) {}

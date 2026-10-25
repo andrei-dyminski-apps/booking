@@ -64,6 +64,30 @@ export class NotificationService {
     }
   }
 
+  /**
+   * The same notice to every admin — what the money paths raise when a person has to act:
+   * a refund the guest's bank sent back, a payment event the worker gave up on. Never
+   * throws, for the reason `notify` does; a site without an admin is told nobody, and the
+   * caller's own log line is what is left.
+   */
+  async notifyAdmins(content: NotificationContent): Promise<void> {
+    let adminIds: string[];
+
+    try {
+      adminIds = await this.notificationRepository.findAdminIds();
+    } catch (error) {
+      this.logger.error(
+        `Could not find the admins to notify of ${content.type}: ${String(error)}`,
+      );
+
+      return;
+    }
+
+    for (const adminId of adminIds) {
+      await this.notify(adminId, content);
+    }
+  }
+
   async findPage(
     userId: string,
     query: NotificationQuery,

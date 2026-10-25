@@ -2,12 +2,12 @@ import { INestApplication } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { App } from "supertest/types";
 import { AppModule } from "./../src/app.module";
-import { BookingRepository } from "./../src/booking/booking.repository";
+import { BookingRepository } from "./../src/booking/infrastructure/booking.repository";
 import {
   BookingExpiryQueue,
   EXPIRE_HOLD_JOB,
   SWEEP_LAPSED_HOLDS_JOB,
-} from "./../src/booking/booking-expiry.queue";
+} from "./../src/booking/infrastructure/booking-expiry.queue";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
@@ -168,7 +168,7 @@ describe("Booking hold expiry (e2e)", () => {
    */
   it("is a no-op for a booking that is no longer a pending hold", async () => {
     const cancelled = await lapsedHold();
-    await bookingRepository.cancel(cancelled);
+    await bookingRepository.cancel(cancelled, "PENDING_PAYMENT", null);
 
     await expect(bookingRepository.expireHold(cancelled)).resolves.toEqual([]);
     expect(await statusOf(cancelled)).toBe("CANCELLED");

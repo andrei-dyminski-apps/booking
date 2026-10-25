@@ -7,7 +7,10 @@ import {
   type WaitlistEntry,
   type WaitlistSort,
 } from "@repo/contracts";
-import { holdsTheSlot, overlapping } from "../booking/booking.repository";
+import {
+  holdsTheSlot,
+  overlapping,
+} from "../booking/infrastructure/booking.repository";
 import { afterCreatedAt, CREATED_AT_ORDER, type Page } from "../common/paging";
 import type {
   Listing as ListingRow,
