@@ -11,9 +11,9 @@ export interface StayListener {
   confirmed?(stay: StayNotice): Promise<void>;
 
   /**
-   * A refund has been issued for the stay and the stay records it in its refund total. A
-   * cancellation calls it before the cancellation is written and goes ahead if it fails;
-   * the refund's webhook calls it again.
+   * A refund has been issued for the stay and the stay records it in its refund total. The
+   * job that sends a cancellation's refund calls it once the refund is recorded and only
+   * logs a failure; the refund's webhook calls it again, and there a failure is retried.
    */
   refunded?(bookingId: string): Promise<void>;
 }

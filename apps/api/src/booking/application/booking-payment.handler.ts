@@ -15,6 +15,7 @@ import {
   type ConfirmedStay,
   type RefundTarget,
 } from "../infrastructure/booking.repository";
+import { RefundFailureRepository } from "../infrastructure/refund-failure.repository";
 import { StayLifecycle } from "./stay-lifecycle";
 import { notifyBothSides } from "./stay-notices";
 
@@ -32,6 +33,7 @@ export class BookingPaymentHandler
 
   constructor(
     private readonly bookingRepository: BookingRepository,
+    private readonly refundFailureRepository: RefundFailureRepository,
     private readonly paymentGateway: PaymentGateway,
     private readonly notificationService: NotificationService,
     private readonly waitlistService: WaitlistService,
@@ -229,18 +231,33 @@ export class BookingPaymentHandler
   /**
    * A refund the guest's bank sent back. The money is on the platform's balance but still
    * the guest's, so the stay keeps recording it as refunded — which also keeps the host's
-   * share sized without it — and a person is asked to issue it again.
+   * share sized without it — and a person is asked to issue it again: the failure is kept in
+   * `refund_failures` until they do, and every admin is told. Only the delivery that wrote
+   * the row tells them, so a redelivery is news to nobody.
    */
   private async reportFailedRefund(
     event: Extract<PaymentEvent, { kind: "refundFailed" }>,
   ): Promise<void> {
     const stay = await this.bookingRepository.findRefundTarget(event.paymentId);
+    const failure = {
+      refundId: event.refundId,
+      paymentId: event.paymentId,
+      bookingId: stay?.bookingId ?? null,
+      amount: event.amount,
+      reason: event.reason,
+    };
+
+    if (!(await this.refundFailureRepository.record(failure))) return;
 
     this.logger.error(
       `Refund ${event.refundId} of ${String(event.amount)} on payment ${event.paymentId}` +
-        ` (booking ${stay?.bookingId ?? "unknown"}) failed: ${event.reason ?? "no reason given"}.` +
+        ` (booking ${failure.bookingId ?? "unknown"}) failed: ${event.reason ?? "no reason given"}.` +
         " The money is back on the platform balance and still owed to the guest — issue it again by hand.",
     );
+    await this.notificationService.notifyAdmins({
+      type: NotificationType.REFUND_FAILED,
+      data: failure,
+    });
   }
 
   /**

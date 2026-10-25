@@ -17,13 +17,13 @@ import { NotificationService } from "../../notification/notification.service";
 import type { PaymentEvent } from "../../payment/application/ports/payment-gateway";
 import { roundCents, toCents } from "../../payment/domain/money";
 import { mayPayOut, owedToHost } from "../domain/payout";
-import { HostPayoutQueue } from "../infrastructure/host-payout.queue";
 import {
   PayoutRepository,
   type PayoutAccountHolder,
   type SettledStay,
 } from "../infrastructure/payout.repository";
 import { PayoutGateway, type AccountEvent } from "./ports/payout-gateway";
+import { PayoutJobs } from "./ports/payout-jobs";
 
 /**
  * The webhook events this service settles; `PayoutEventHandler` hands them over. A refund
@@ -56,7 +56,7 @@ export class PayoutService {
   constructor(
     private readonly payoutRepository: PayoutRepository,
     private readonly payoutGateway: PayoutGateway,
-    private readonly hostPayoutQueue: HostPayoutQueue,
+    private readonly payoutJobs: PayoutJobs,
     private readonly notificationService: NotificationService,
   ) {}
 
@@ -153,7 +153,7 @@ export class PayoutService {
 
   /** The job that pays a confirmed stay's host when it falls due; the sweep covers a lost one. */
   async schedule(stay: Pick<StayNotice, "bookingId" | "from">): Promise<void> {
-    await this.hostPayoutQueue.schedulePayout(
+    await this.payoutJobs.schedulePayout(
       stay.bookingId,
       payoutDueAt(stay.from),
     );
@@ -267,7 +267,10 @@ export class PayoutService {
     return true;
   }
 
-  /** Every due stay, or one host's; one failure is logged and left to the next run. */
+  /**
+   * The due stays, or one host's, `SWEEP_BATCH` at a time; one failure is logged and left to
+   * the next run, and so is whatever the batch did not reach.
+   */
   async payDuePayouts(hostId?: string): Promise<number> {
     const now = new Date();
     const accounts = new Map<string, boolean>();
@@ -275,6 +278,7 @@ export class PayoutService {
 
     for (const bookingId of await this.payoutRepository.findDuePayouts(
       now,
+      SWEEP_BATCH,
       hostId,
     )) {
       try {
@@ -292,8 +296,14 @@ export class PayoutService {
   /**
    * Takes back whatever the host holds of a stay beyond what they are owed now, under the
    * settlement lease, and answers what they hold afterwards (`null` before a transfer).
-   * Nothing moves while a dispute is open. The reversal is named after the amount the host
-   * is left with, so a repeat is the same reversal.
+   * Nothing moves while a dispute is open.
+   *
+   * The row says when a reversal may be due — a reversal only lowers what the host holds,
+   * so a stored amount at or under what is owed needs nothing and costs no call. How much
+   * to take back is Stripe's figure, not the row's: a reversal that went out and whose
+   * write was lost is already off the transfer, and sizing from the row would take it a
+   * second time once the key is forgotten. The key names both ends of the step, so a repeat
+   * of one step is the same reversal and a later step is a reversal of its own.
    */
   async settle(bookingId: string): Promise<number | null> {
     return this.payoutRepository.whileSettling(
@@ -311,15 +321,24 @@ export class PayoutService {
 
         if (stay.paidOutAmount <= owed) return stay.paidOutAmount;
 
-        await this.payoutGateway.reverseTransfer(
-          stay.transferId,
-          roundCents(stay.paidOutAmount - owed),
-          `booking-${bookingId}-reversal-${String(toCents(owed))}`,
-        );
+        const held = await this.payoutGateway.heldOnTransfer(stay.transferId);
 
-        // A `false` is a write from outside the lease: the reversal is out at Stripe either
-        // way, and the next settlement sizes the difference from what is stored.
-        if (!(await recordReversal(stay.paidOutAmount, owed))) {
+        if (held > owed) {
+          await this.payoutGateway.reverseTransfer(
+            stay.transferId,
+            roundCents(held - owed),
+            `booking-${bookingId}-reversal-${String(toCents(held))}-${String(toCents(owed))}`,
+          );
+          this.logger.log(
+            `Took back ${String(roundCents(held - owed))} of the payout of booking ${bookingId}`,
+          );
+        }
+
+        const left = Math.min(held, owed);
+
+        // A `false` is a write from outside the lease: whatever went out at Stripe stays out,
+        // and the next settlement reads Stripe's figure again.
+        if (!(await recordReversal(stay.paidOutAmount, left))) {
           this.logger.warn(
             `The payout of booking ${bookingId} changed outside the settlement lock while it was being reversed`,
           );
@@ -327,11 +346,7 @@ export class PayoutService {
           return null;
         }
 
-        this.logger.log(
-          `Took back ${String(roundCents(stay.paidOutAmount - owed))} of the payout of booking ${bookingId}`,
-        );
-
-        return owed;
+        return left;
       },
     );
   }
@@ -375,7 +390,7 @@ export class PayoutService {
     );
 
     if (changed?.newlyEnabled === true) {
-      await this.hostPayoutQueue.schedulePayoutsOf(changed.userId);
+      await this.payoutJobs.schedulePayoutsOf(changed.userId);
     }
 
     return enabled;
@@ -406,12 +421,15 @@ export class PayoutService {
     );
 
     if (won) {
-      await this.hostPayoutQueue.schedulePayout(stay.bookingId, new Date());
+      await this.payoutJobs.schedulePayout(stay.bookingId, new Date());
     } else {
       await this.settle(stay.bookingId);
     }
   }
 }
+
+/** How many stays one run pays: each is up to three calls to Stripe, one after another. */
+const SWEEP_BATCH = 100;
 
 /** What a host reads beside a transfer in their payouts list. */
 function describeStay(stay: StayNotice): string {

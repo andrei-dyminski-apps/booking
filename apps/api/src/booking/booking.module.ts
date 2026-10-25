@@ -6,8 +6,10 @@ import { PrismaModule } from "../prisma/prisma.module";
 import { WaitlistModule } from "../waitlist/waitlist.module";
 import { BookingController } from "./presentation/booking.controller";
 import { BookingRepository } from "./infrastructure/booking.repository";
+import { RefundFailureRepository } from "./infrastructure/refund-failure.repository";
 import { BookingPaymentHandler } from "./application/booking-payment.handler";
 import { BookingService } from "./application/booking.service";
+import { BookingJobs } from "./application/ports/booking-jobs";
 import { StayLifecycle } from "./application/stay-lifecycle";
 import { BookingExpiryProcessor } from "./infrastructure/booking-expiry.processor";
 import {
@@ -31,9 +33,13 @@ import {
   providers: [
     BookingService,
     BookingRepository,
+    RefundFailureRepository,
     BookingPaymentHandler,
     StayLifecycle,
     BookingExpiryQueue,
+    // The port the service schedules through, and the queue behind it — one instance, so
+    // the e2e specs that reach for the queue by its class drive the same one.
+    { provide: BookingJobs, useExisting: BookingExpiryQueue },
     BookingExpiryProcessor,
   ],
   // ListingService reads the availability of a listing through it — the stays are booking

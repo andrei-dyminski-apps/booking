@@ -2,7 +2,7 @@
 
 ## Stack
 
-NestJS 11 on Express, TypeScript, Jest + Supertest. CommonJS (unlike `apps/web`) — built by `nest build` into `dist/`. Storage is PostgreSQL (docker-compose in the root) through Prisma 7. Redis (also in docker-compose) backs three BullMQ queues — `booking-expiry` (the delayed job that releases an unpaid hold, the repeatable sweep behind it, which also pays the refunds cancellations still owe, the withdrawal of a released hold's PaymentIntent, and the refund a cancellation owes), `host-payout` (see "Host payouts") and `payment-event` (the webhook inbox's worker, see "Payments"); `@nestjs/bullmq` is pinned to `11.x` because `12` is ESM-only and `nest build` / Jest here are CommonJS, and `ioredis` is a direct dependency because `bullmq` 6 no longer bundles it. The same Redis carries the pub/sub behind the event stream (`RealtimeService`, two connections of its own). Payments go through Stripe (`stripe`, the Node SDK), behind the `PaymentGateway` port of the payment module — see "Payments" below.
+NestJS 11 on Express, TypeScript, Jest + Supertest. CommonJS (unlike `apps/web`) — built by `nest build` into `dist/`. Storage is PostgreSQL (docker-compose in the root) through Prisma 7. Redis (also in docker-compose) backs three BullMQ queues — `booking-expiry` (the delayed job that releases an unpaid hold, the repeatable sweep behind it, the withdrawal of a released hold's PaymentIntent, the refund a cancellation owes and a sweep of its own for the refunds still owed), `host-payout` (see "Host payouts") and `payment-event` (the webhook inbox's worker, its sweep and a daily prune, see "Payments"); the services schedule through ports (`BookingJobs`, `PaymentEventJobs`, `PayoutJobs`) and never name a queue, and every processor logs its failed jobs (`src/common/job-failure.ts`), which BullMQ otherwise keeps to itself; `@nestjs/bullmq` is pinned to `11.x` because `12` is ESM-only and `nest build` / Jest here are CommonJS, and `ioredis` is a direct dependency because `bullmq` 6 no longer bundles it. The same Redis carries the pub/sub behind the event stream (`RealtimeService`, two connections of its own). Payments go through Stripe (`stripe`, the Node SDK), behind the `PaymentGateway` port of the payment module — see "Payments" below.
 
 The configuration is shared with the rest of the repository: `tsconfig.json` extends `@repo/typescript-config/nest.json`, `eslint.config.mjs` extends `@repo/eslint-config/nest-js`. Only `outDir` is declared locally. The stock Nest CLI settings (`noImplicitAny: false`, a disabled `no-explicit-any`, its own `.prettierrc`) were removed deliberately — do not bring them back when updating Nest or generating new files.
 
@@ -24,6 +24,7 @@ src/
   common/dto/            # ApiErrorDto — the error body, for the Swagger error responses
   common/redis-url.ts    # requireRedisUrl — the queue and the pub/sub connect with it
   common/body-parsers.ts # Nest's parsers, the raw body kept for the signed webhooks only
+  common/job-failure.ts  # describeJobFailure — the line every processor logs a failed job with
   prisma/                # PrismaModule + PrismaService (extends PrismaClient)
     prisma.errors.ts     # isPrismaError, violatedConstraint — driver failures, read once
     escape-like.ts       # `%`, `_` and `\` of a `contains`, escaped — two repositories search by a part
@@ -83,15 +84,17 @@ src/
     booking.module.ts      # imports PaymentModule; exports BookingRepository and StayLifecycle
     domain/                # pure functions: statuses and transitions, the date range, quoteStay
     application/
-      booking.service.ts   # HTTP and the jobs meet here; sees neither Prisma nor Stripe
+      booking.service.ts   # HTTP and the jobs meet here; sees neither Prisma, Stripe nor BullMQ
+      ports/booking-jobs.ts  # BookingJobs — the release, withdrawal and refund jobs, as the service asks for them
       booking.service.spec.ts  # against fakes of the repositories, the gateway and a stay listener
       booking-payment.handler.ts  # succeeded: confirms the hold, or refunds a late payment; refunded: records it, cancels a stay refunded in full; a lost dispute: cancels a stay not yet begun
       stay-lifecycle.ts    # confirmed / refunded, announced to whoever follows the stays (payout)
       booking-cursor.ts    # the keyset cursor of GET /bookings, encoded and parsed
     infrastructure/
       booking.repository.ts      # the queries, the locking transaction, the quote under the lock
-      booking-lease.ts           # whileLeased: the per-booking leases, on the database's clock
-      booking-expiry.queue.ts    # BullMQ: the per-hold job and the repeatable sweep
+      booking-lease.ts           # whileLeased: the per-booking leases, on the database's clock, renewed while held
+      refund-failure.repository.ts  # refund_failures: the refunds a guest's bank sent back
+      booking-expiry.queue.ts    # BullMQ, behind BookingJobs: the per-hold job, the two sweeps
       booking-expiry.processor.ts
     presentation/
       booking.controller.ts      # /bookings, POST /bookings/:id/payment
@@ -102,13 +105,14 @@ src/
     domain/money.ts        # toCents, roundCents — the one conversion into cents, keys and charges alike
     application/
       ports/payment-gateway.ts  # PaymentGateway (abstract class = DI token), PaymentEvent
+      ports/payment-event-jobs.ts  # PaymentEventJobs — how the inbox hands an event to its worker
       payment-event-handler.ts  # what a domain registers to act on the provider's news
-      payment-event-dispatcher.ts  # the inbox: receive (record + queue), process (every handler), the sweep
+      payment-event-dispatcher.ts  # the inbox: receive, process (every handler; set aside after MAX_EVENT_ATTEMPTS), the sweep, the prune
     infrastructure/
-      payment-event.repository.ts  # the webhook inbox: record, findUnprocessed, markProcessed, findStale
-      payment-event.queue.ts       # BullMQ: a job per event and the repeatable sweep
+      payment-event.repository.ts  # the webhook inbox: record, findUnprocessed, markProcessed, recordFailure, findStale, pruneProcessed
+      payment-event.queue.ts       # BullMQ, behind PaymentEventJobs: a job per event, the sweep, the daily prune
       payment-event.processor.ts
-      stripe-client.ts           # the client both adapters build, and cents back into euros
+      stripe-client.ts           # the client both adapters build (STRIPE_API_VERSION), and cents back into euros
       stripe-payment.gateway.ts  # the guest's half: PaymentIntents, refunds, snapshot events
       payment.config.ts          # STRIPE_SECRET_KEY, STRIPE_PAYMENT_WEBHOOK_SECRET; no fallback
     presentation/
@@ -121,10 +125,11 @@ src/
       payout.service.spec.ts
       payout-event-handler.ts  # registers with the dispatcher and with StayLifecycle
       ports/payout-gateway.ts   # PayoutGateway — connected accounts, transfers, account events
+      ports/payout-jobs.ts      # PayoutJobs — the payout jobs, as the service asks for them
     infrastructure/
       payout.repository.ts       # a stay's money after payment, and the payout account on a user
       stripe-payout.gateway.ts   # the host's half: Accounts v2 recipients, transfers, thin events
-      host-payout.queue.ts       # BullMQ: the per-stay payout job and the hourly sweep
+      host-payout.queue.ts       # BullMQ, behind PayoutJobs: the per-stay payout job and the hourly sweep
       host-payout.processor.ts
     presentation/
       payout-account.controller.ts   # GET /payouts/account, POST /payouts/account/refresh and /session
@@ -414,8 +419,15 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
   once; the `payment-event` queue's worker handles it afterwards and stamps
   `processed_at`. Stripe expects a `2xx` within seconds, and the work behind an event calls
   Stripe and waits for leases. A failed run is retried with a growing pause, and a
-  repeatable sweep re-queues an event a lost job left unprocessed
-  (`payment_events_unprocessed_idx`, partial). An unsigned delivery is a `400`; one that
+  repeatable sweep re-queues an event a lost job left unprocessed, a hundred at a time
+  (`payment_events_unprocessed_idx`, partial). **Every failed run is counted on the row**
+  (`attempts`, `last_error`), and after `MAX_EVENT_ATTEMPTS` (24 — three rounds of the
+  job's own eight, about half an hour) the event is set aside (`failed_at`): neither the
+  worker nor the sweep touches it again, and every admin is told (`PAYMENT_EVENT_FAILED`).
+  An event that fails the same way every time would otherwise be retried for good with
+  nobody told. Clearing `failed_at` and `attempts` hands it back to the sweep. A daily job
+  deletes the events processed more than `EVENT_RETENTION_DAYS` (90) ago — Stripe
+  redelivers for three days, so nothing older has anything left to deduplicate. An unsigned delivery is a `400`; one that
   could not be recorded a `500`, which Stripe delivers again. Both routes are `@Public()`,
   `@SkipThrottle()` and out of `/docs`. The payout webhook's thin events become a
   `PaymentEvent` of kind `account` and go through the same inbox.
@@ -455,8 +467,12 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
   `booking-<id>-cancellation` (one cancellation per booking, so no amount in the key), capped
   again by what Stripe says is left, and `settleOwedRefund` raises `refunded_amount` by what
   the refund named by that key gave back and clears the debt in one transaction. A refund
-  Stripe refuses is retried by the job, and the sweep of the same queue pays every debt still
-  on a row whose cancellation lease is not running (`bookings_refund_owed_idx`). A dispute
+  Stripe refuses is retried by the job, and a sweep of its own on the same queue — apart
+  from the hold sweep, so a slow Stripe holds back refunds alone — pays every debt still on
+  a row whose cancellation lease is not running, fifty at a time
+  (`bookings_refund_owed_idx`). That lease is compared on the database's clock, in raw SQL,
+  because it was written with it. The worker runs four jobs at a time, so a refund
+  waiting on Stripe does not hold a release behind it. A dispute
   opened after the cancellation leaves the debt waiting — won, it is paid; lost, dropped. A
   disputed payment cannot be refunded: an open dispute is a `409`.
 - **The per-booking leases** (`infrastructure/booking-lease.ts`): `cancelling_until` for a
@@ -464,13 +480,29 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
   three of waiting), and `settling_until` for the settlement of the host's payout
   (`whileSettling`). A lease rather than a lock an open transaction holds, because the work
   under it calls Stripe and a pinned connection per caller starves the pool. The deadline
-  is the database's clock, so instances with clocks apart agree on it. One that waits too
+  is the database's clock, so instances with clocks apart agree on it. The holder renews
+  the lease every third of its length while the work runs, so slow work keeps the row;
+  only a holder that died or froze loses it, and a renewal that finds the lease taken
+  logs the loss when the work ends instead of taking it back. One that waits too
   long is a `409` to a cancellation and a retry to a job or an event.
+- **The API version is pinned** (`STRIPE_API_VERSION` in `stripe-client.ts`, the version
+  the installed SDK is typed against — the compiler refuses another). The webhook
+  endpoints in the Dashboard have to deliver in that version; `readEvent` warns once per
+  process about an event in another.
 - **Stripe is called with four seconds a call and no retry of the SDK's own**
   (`stripe-client.ts`). What retries instead is whatever ran the call — a person pressing
   the button again, a job's next attempt — safe because every write goes under a key.
+- **A refund the bank sent back** (`refund.failed`) is kept in `refund_failures` — keyed by
+  the refund's id, no relation to a booking — and told to every admin (`REFUND_FAILED`)
+  by the delivery that wrote the row. The stay goes on recording it as refunded: the money
+  is the guest's, and a person issues it again and stamps `resolved_at`.
+- **The money columns carry `CHECK`s** (`bookings_amount_positive`,
+  `bookings_*_within_amount`): an amount above zero, and nothing refunded, owed or paid out
+  beyond it — for the writes that go around the API, as the price columns have.
 - **Notices**: `BOOKING_CONFIRMED` to both sides, `PAYMENT_REFUNDED` to the guest of a late
-  payment or a dashboard refund — through `notify`, which never throws. A redelivery of a
+  payment or a dashboard refund — through `notify`, which never throws. What only a person
+  can put right goes to every admin through `notifyAdmins` (`REFUND_FAILED`,
+  `PAYMENT_EVENT_FAILED`). A redelivery of a
   payment that confirmed a still-confirmed stay repeats the payout's scheduling and the
   notices unless `confirmation_announced_at` says they were done; the whole event runs under
   `whileCancelling`, so two runs over one payment tell both sides once.
@@ -497,8 +529,8 @@ platform, and the host is paid their share by a transfer once the stay has begun
   unfinished; `GET /payouts/account` only reads the row. The write that switches it on
   queues a `pay-host` job rather than paying inside the request or the event.
 - **Bookings are never refused for a host who cannot be paid.** Their payouts wait.
-- **Two halves, like hold expiry**: a delayed job per stay at `payoutDueAt` and an hourly
-  sweep over `bookings_awaiting_payout_idx` (partial on `paid_at IS NOT NULL AND
+- **Two halves, like hold expiry**: a delayed job per stay at `payoutDueAt` (`payout-<id>`)
+  and an hourly sweep, a hundred stays a run, over `bookings_awaiting_payout_idx` (partial on `paid_at IS NOT NULL AND
 transfer_id IS NULL`), which leaves out a stay refunded in full or owed a refund.
 - **A transfer is idempotent and recorded once**: funded by the stay's own charge
   (`source_transaction`), sent under `booking-<id>-payout` — no amount in the key, so a retry
@@ -507,9 +539,10 @@ transfer_id IS NULL`), which leaves out a stay refunded in full or owed a refund
   only into an empty column. A refund or dispute that lands while the transfer is in flight
   does not undo the write; `settle` takes back the difference straight after.
 - **`settle` is the one place that takes money back from a host**: under `whileSettling` it
-  compares `paid_out_amount` with what is owed now, reverses the difference under
-  `booking-<id>-reversal-<target cents>` and lowers `paid_out_amount` from exactly what it
-  read. Two settlements of one stay queue on the lease instead of reversing the same money
+  compares `paid_out_amount` with what is owed now and, when the row says more is held,
+  asks Stripe what the transfer still holds — a reversal whose write was lost is already
+  off it — reverses the difference under `booking-<id>-reversal-<held cents>-<owed
+cents>` and lowers `paid_out_amount` from exactly what it read. Two settlements of one stay queue on the lease instead of reversing the same money
   twice; `test/payout.repository.e2e-spec.ts` runs the lease against the real database.
 - **A refund** (`charge.refunded`) is the booking side's: it raises `refunded_amount` to
   Stripe's total, tells the guest of a refund this API did not send, cancels a stay refunded

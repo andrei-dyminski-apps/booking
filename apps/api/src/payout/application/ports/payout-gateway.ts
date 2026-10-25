@@ -22,6 +22,12 @@ export abstract class PayoutGateway {
    */
   abstract transfer(payout: Payout): Promise<SentTransfer>;
 
+  /**
+   * What the host holds of a transfer now, as the provider knows it: what was sent, less
+   * every reversal since — one whose answer never reached the database included.
+   */
+  abstract heldOnTransfer(transferId: string): Promise<number>;
+
   /** Takes `amount` of a transfer back; a second call with the same `key` is the same reversal. */
   abstract reverseTransfer(
     transferId: string,

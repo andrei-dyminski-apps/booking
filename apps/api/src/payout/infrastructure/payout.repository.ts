@@ -168,9 +168,14 @@ export class PayoutRepository {
   /**
    * The paid stays due and not yet sent, to a host who can be paid — a coarse cut over the
    * partial index; what is owed is the service's rule. A stay refunded in full is left out,
-   * or every sweep would read it again for good.
+   * or every sweep would read it again for good. At most `limit`, the earliest check-ins
+   * first; the next sweep reads the rest.
    */
-  async findDuePayouts(now: Date, hostId?: string): Promise<string[]> {
+  async findDuePayouts(
+    now: Date,
+    limit: number,
+    hostId?: string,
+  ): Promise<string[]> {
     const where: Prisma.BookingWhereInput = {
       paidAt: { not: null },
       transferId: null,
@@ -202,6 +207,7 @@ export class PayoutRepository {
       where,
       select: { id: true },
       orderBy: { from: "asc" },
+      take: limit,
     });
 
     return rows.map(({ id }) => id);

@@ -47,6 +47,7 @@ import { toIsoDate } from "../../prisma/iso-date";
 import { CURRENCY } from "../../payment/domain/currency";
 import { roundCents } from "../../payment/domain/money";
 import { isCancellable } from "../domain/booking-status";
+import { BookingJobs } from "./ports/booking-jobs";
 import { StayLifecycle } from "./stay-lifecycle";
 import { notifyBothSides } from "./stay-notices";
 import {
@@ -54,14 +55,14 @@ import {
   encodeCursor,
   type BookingCursor,
 } from "./booking-cursor";
-import { BookingExpiryQueue } from "../infrastructure/booking-expiry.queue";
 
 /**
  * The application layer of the booking module: HTTP takes, reads and cancels stays, and the
  * BullMQ jobs release unpaid holds, withdraw their payments and send the refunds
  * cancellations owe. The provider's news reaches the stays through `BookingPaymentHandler`.
- * It sees neither Prisma nor Stripe — the repositories and the `PaymentGateway` port — and
- * knows nothing of the host's payout: a refund is announced to `StayLifecycle`.
+ * It sees neither Prisma, Stripe nor BullMQ — the repositories, the `PaymentGateway` port
+ * and the `BookingJobs` port — and knows nothing of the host's payout: a refund is
+ * announced to `StayLifecycle`.
  */
 @Injectable()
 export class BookingService {
@@ -70,7 +71,7 @@ export class BookingService {
   constructor(
     private readonly bookingRepository: BookingRepository,
     private readonly paymentGateway: PaymentGateway,
-    private readonly bookingExpiryQueue: BookingExpiryQueue,
+    private readonly bookingJobs: BookingJobs,
     private readonly notificationService: NotificationService,
     private readonly waitlistService: WaitlistService,
     private readonly stayLifecycle: StayLifecycle,
@@ -214,7 +215,7 @@ export class BookingService {
     const { booking, listingOwnerId, released } = created;
 
     if (booking.expiresAt !== null) {
-      await this.bookingExpiryQueue.scheduleExpiry(
+      await this.bookingJobs.scheduleExpiry(
         booking.id,
         new Date(booking.expiresAt),
       );
@@ -332,7 +333,7 @@ export class BookingService {
 
     // The hold no longer needs releasing; the job is idempotent, so this is a tidy-up and
     // fails silently for the same reason scheduling one does.
-    await this.bookingExpiryQueue.cancelExpiry(id);
+    await this.bookingJobs.cancelExpiry(id);
 
     // The payment is the one the cancelled row named, so one a payment page attached a
     // moment ago goes too.
@@ -341,7 +342,7 @@ export class BookingService {
     }
 
     if (refundOwed !== null) {
-      await this.bookingExpiryQueue.refundCancellation(id);
+      await this.bookingJobs.refundCancellation(id);
     }
 
     await this.notifyCancellation(booking, listingOwnerId, user);
@@ -470,11 +471,16 @@ export class BookingService {
     return true;
   }
 
-  /** Every debt still on a row; one failure is logged and left for the next minute. */
+  /**
+   * The debts still on the rows, `SWEEP_BATCH` at a time; one failure is logged and left
+   * for the next minute.
+   */
   async refundOwedCancellations(): Promise<number> {
     let sent = 0;
 
-    for (const id of await this.bookingRepository.findOwedRefunds()) {
+    for (const id of await this.bookingRepository.findOwedRefunds(
+      SWEEP_BATCH,
+    )) {
       try {
         if (await this.refundCancellation(id)) sent += 1;
       } catch (error) {
@@ -556,7 +562,7 @@ export class BookingService {
   ): Promise<void> {
     for (const { paymentId } of holds) {
       if (paymentId !== null) {
-        await this.bookingExpiryQueue.withdrawPayment(paymentId);
+        await this.bookingJobs.withdrawPayment(paymentId);
       }
     }
   }
@@ -653,6 +659,12 @@ export class BookingService {
     return found;
   }
 }
+
+/**
+ * How many owed refunds one sweep sends: each is a call or two to Stripe, one after another,
+ * and the sweep a minute later takes the rest.
+ */
+const SWEEP_BATCH = 50;
 
 /** What a notice about a stay copies off it — see `stayNoticeSchema` in the contract. */
 export function stayNoticeOf(booking: Booking): StayNotice {

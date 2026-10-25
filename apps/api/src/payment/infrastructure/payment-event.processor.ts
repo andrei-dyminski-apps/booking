@@ -1,18 +1,21 @@
-import { Processor, WorkerHost } from "@nestjs/bullmq";
+import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
 import { Logger } from "@nestjs/common";
 import type { Job } from "bullmq";
+import { describeJobFailure } from "../../common/job-failure";
 import { PaymentEventDispatcher } from "../application/payment-event-dispatcher";
 import {
   PAYMENT_EVENT_QUEUE,
   PROCESS_EVENT_JOB,
+  PRUNE_EVENTS_JOB,
   type PaymentEventJobData,
   type ProcessEventJobData,
 } from "./payment-event.queue";
 
 /**
- * The two jobs of the webhook inbox: `process-event` handles the event it names, and the
- * repeatable `sweep-events` re-queues whatever a lost job left unprocessed. A failure is
- * thrown, so BullMQ tries the event again.
+ * The three jobs of the webhook inbox: `process-event` handles the event it names, the
+ * repeatable `sweep-events` re-queues whatever a lost job left unprocessed, and the daily
+ * `prune-events` deletes what is past its retention. A failure is thrown, so BullMQ tries
+ * the event again — and logged here, since BullMQ says nothing of it on its own.
  */
 @Processor(PAYMENT_EVENT_QUEUE)
 export class PaymentEventProcessor extends WorkerHost {
@@ -29,6 +32,16 @@ export class PaymentEventProcessor extends WorkerHost {
       return;
     }
 
+    if (job.name === PRUNE_EVENTS_JOB) {
+      const pruned = await this.paymentEventDispatcher.pruneProcessed();
+
+      if (pruned > 0) {
+        this.logger.log(`Pruned ${String(pruned)} processed payment event(s)`);
+      }
+
+      return;
+    }
+
     const requeued = await this.paymentEventDispatcher.requeueStale();
 
     if (requeued > 0) {
@@ -36,6 +49,12 @@ export class PaymentEventProcessor extends WorkerHost {
         `Re-queued ${String(requeued)} unprocessed payment event(s)`,
       );
     }
+  }
+
+  /** Every failed attempt, the last one marked — see `describeJobFailure`. */
+  @OnWorkerEvent("failed")
+  onFailed(job: Job<PaymentEventJobData> | undefined, error: Error): void {
+    this.logger.error(describeJobFailure(job, error), error.stack);
   }
 }
 

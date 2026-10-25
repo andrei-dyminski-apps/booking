@@ -396,7 +396,9 @@ than a redirect to Checkout. The cycle:
 4. **Through an inbox.** The webhook records the event in `payment_events` and answers
    `200` at once; a BullMQ worker handles it afterwards and retries it on a failure, and a
    sweep re-queues what a lost job left. Stripe delivers at least once, so an event already
-   recorded is not handled again, and each step is idempotent by itself.
+   recorded is not handled again, and each step is idempotent by itself. An event that keeps
+   failing is set aside after 24 runs and every admin is notified, rather than being retried
+   for good.
 
 What else moves money:
 
@@ -405,8 +407,9 @@ What else moves money:
   the page states). An admin's cancellation refunds in full. Neither may cancel a stay
   once its check-in day has come. The
   cancellation answers at once and writes what it owes on the booking (`refundOwed`); a
-  job sends the refund, and the sweep of the same queue sends any refund Stripe refused
-  until it goes through.
+  job sends the refund, and a sweep of its own sends any refund Stripe refused until it
+  goes through. A refund the guest's bank sends back is kept on record (`refund_failures`)
+  and every admin is notified, to issue it again.
 - **A hold that lapses or is cancelled withdraws its PaymentIntent.** A payment that
   completes anyway, in the moment before the withdrawal, reaches the webhook for nights that
   are no longer the guest's and is refunded in full automatically.
@@ -651,7 +654,7 @@ The file exports the partial `api`, so it owns only the resources it declares: P
 
 Postgres is a service in the same Railway project, and `DATABASE_URL` is set as a reference to it (`${{Postgres.DATABASE_URL}}`) rather than copied — the credentials then survive a rotation. The rest of the variables from the table above are set by hand; the JWT secrets are generated (`openssl rand -hex 32`), not taken from `.env.example`.
 
-Stripe needs one more step on each side. The webhook endpoint is registered in the Dashboard at `https://<api>/payments/webhook` for `payment_intent.succeeded`, `charge.refunded`, `refund.failed`, `charge.dispute.created` and `charge.dispute.closed`, and its signing secret becomes `STRIPE_PAYMENT_WEBHOOK_SECRET` on Railway beside `STRIPE_SECRET_KEY` and a `STRIPE_SITE` of the deployment's own (`production`); a second destination, "Your account" with the thin events `v2.core.account[configuration.recipient].capability_status_updated` and `v2.core.account[requirements].updated`, goes to `https://<api>/payouts/webhook` and its secret to `STRIPE_PAYOUT_WEBHOOK_SECRET`; `STRIPE_PUBLISHABLE_KEY` goes to Vercel, as a runtime variable like `API_ORIGIN`.
+Stripe needs one more step on each side. The webhook endpoint is registered in the Dashboard at `https://<api>/payments/webhook` for `payment_intent.succeeded`, `charge.refunded`, `refund.failed`, `charge.dispute.created` and `charge.dispute.closed`, and its signing secret becomes `STRIPE_PAYMENT_WEBHOOK_SECRET` on Railway beside `STRIPE_SECRET_KEY` and a `STRIPE_SITE` of the deployment's own (`production`); a second destination, "Your account" with the thin events `v2.core.account[configuration.recipient].capability_status_updated` and `v2.core.account[requirements].updated`, goes to `https://<api>/payouts/webhook` and its secret to `STRIPE_PAYOUT_WEBHOOK_SECRET`; `STRIPE_PUBLISHABLE_KEY` goes to Vercel, as a runtime variable like `API_ORIGIN`. Both destinations deliver in the API version the API pins (`STRIPE_API_VERSION` in `apps/api/src/payment/infrastructure/stripe-client.ts`); the API logs a warning when an event arrives in another.
 
 On the Vercel side `API_ORIGIN` is a runtime variable of the frontend — it is read on the server, never inlined into the bundle, so a changed API address is a redeploy without a rebuild. `TRUST_PROXY` on the Railway side has to account for the extra `X-Forwarded-For` entry the frontend server's own request produces, or the rate limiter buckets every visitor together.
 

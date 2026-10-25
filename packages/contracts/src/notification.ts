@@ -24,6 +24,13 @@ import { PAGING } from "./query.js";
  *   with their bank; the host's payout for it waits until the dispute is decided.
  * - `PAYOUT_SENT` — the recipient's share of a stay at their listing was transferred to
  *   their payout account; `amount` is what was sent.
+ * - `REFUND_FAILED` — told to every admin: a refund the guest's bank could not take came back
+ *   to the platform's balance. The money is still the guest's and nothing re-sends it on its
+ *   own; the API keeps the failure on record (`refund_failures`) until a person issues the
+ *   refund again.
+ * - `PAYMENT_EVENT_FAILED` — told to every admin: the worker gave up on a delivery of the
+ *   payment provider after failing it again and again, and set it aside. What it would have
+ *   done — a confirmation, a refund recorded, a payout taken back — waits for a person.
  * - `REVIEW_RECEIVED` — the other side of a finished stay reviewed the recipient: a guest
  *   reviewed their listing (`kind: LISTING`) or a host reviewed them (`kind: GUEST`).
  * - `WAITLIST_AVAILABLE` — nights the recipient was waiting for came free. Nothing is held
@@ -42,6 +49,8 @@ export const notificationTypeSchema = z.enum([
   "PAYMENT_REFUNDED",
   "PAYMENT_DISPUTED",
   "PAYOUT_SENT",
+  "REFUND_FAILED",
+  "PAYMENT_EVENT_FAILED",
   "REVIEW_RECEIVED",
   "WAITLIST_AVAILABLE",
 ]);
@@ -99,6 +108,31 @@ const payoutSentSchema = z.object({
   data: stayNoticeSchema.extend({ amount: z.number() }),
 });
 
+/**
+ * What an admin needs to issue the refund again: the provider's ids, the amount and the
+ * bank's reason. `bookingId` is `null` for a payment no stay of this site names any more.
+ */
+const refundFailedSchema = z.object({
+  type: z.literal(NotificationType.REFUND_FAILED),
+  data: z.object({
+    refundId: z.string(),
+    paymentId: z.string(),
+    bookingId: z.uuid().nullable(),
+    amount: z.number(),
+    reason: z.string().nullable(),
+  }),
+});
+
+/** The provider's event, by its id and type, and the last error it failed with. */
+const paymentEventFailedSchema = z.object({
+  type: z.literal(NotificationType.PAYMENT_EVENT_FAILED),
+  data: z.object({
+    eventId: z.string(),
+    eventType: z.string(),
+    error: z.string(),
+  }),
+});
+
 const reviewReceivedSchema = z.object({
   type: z.literal(NotificationType.REVIEW_RECEIVED),
   data: z.object({
@@ -135,6 +169,8 @@ export const notificationContentSchema = z.discriminatedUnion("type", [
   paymentRefundedSchema,
   paymentDisputedSchema,
   payoutSentSchema,
+  refundFailedSchema,
+  paymentEventFailedSchema,
   reviewReceivedSchema,
   waitlistAvailableSchema,
 ]);
@@ -157,6 +193,8 @@ export const notificationSchema = z.discriminatedUnion("type", [
   paymentRefundedSchema.extend(stored),
   paymentDisputedSchema.extend(stored),
   payoutSentSchema.extend(stored),
+  refundFailedSchema.extend(stored),
+  paymentEventFailedSchema.extend(stored),
   reviewReceivedSchema.extend(stored),
   waitlistAvailableSchema.extend(stored),
 ]);

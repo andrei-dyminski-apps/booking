@@ -1,17 +1,22 @@
-import { Processor, WorkerHost } from "@nestjs/bullmq";
+import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
 import { Logger } from "@nestjs/common";
 import type { Job } from "bullmq";
+import { describeJobFailure } from "../../common/job-failure";
 import { BookingService } from "../application/booking.service";
 import {
   BOOKING_EXPIRY_QUEUE,
   EXPIRE_HOLD_JOB,
   REFUND_CANCELLATION_JOB,
+  SWEEP_OWED_REFUNDS_JOB,
   WITHDRAW_PAYMENT_JOB,
   type BookingExpiryJobData,
   type ExpireHoldJobData,
   type RefundCancellationJobData,
   type WithdrawPaymentJobData,
 } from "./booking-expiry.queue";
+
+/** How many jobs one instance runs at once — see the class comment. */
+const WORKER_CONCURRENCY = 4;
 
 /**
  * The proactive half of hold expiry, in two jobs over one queue: `expire-hold` releases
@@ -28,10 +33,15 @@ import {
  * Two more jobs are what letting a stay go leaves behind at Stripe, done here rather than
  * in the request or the job that let it go: `withdraw-payment` withdraws a hold's
  * PaymentIntent, and `refund-cancellation` sends the refund a cancellation owes. A failure
- * of either is thrown, so BullMQ tries it again — and the sweep sends whatever refund is
- * still owed after that, since the debt is on the row and not only in Redis.
+ * of either is thrown, so BullMQ tries it again — and `sweep-owed-refunds`, a scheduler of
+ * its own, sends whatever refund is still owed after that, since the debt is on the row and
+ * not only in Redis.
+ *
+ * Several jobs at a time, so that a refund waiting on Stripe or on a lease does not hold
+ * the release of a hold behind it. Every job here is safe to run beside any other: the
+ * releases are conditional updates, and the refunds run under the cancellation lease.
  */
-@Processor(BOOKING_EXPIRY_QUEUE)
+@Processor(BOOKING_EXPIRY_QUEUE, { concurrency: WORKER_CONCURRENCY })
 export class BookingExpiryProcessor extends WorkerHost {
   private readonly logger = new Logger(BookingExpiryProcessor.name);
 
@@ -59,17 +69,28 @@ export class BookingExpiryProcessor extends WorkerHost {
       return;
     }
 
+    if (job.name === SWEEP_OWED_REFUNDS_JOB) {
+      const refunded = await this.bookingService.refundOwedCancellations();
+
+      if (refunded > 0) {
+        this.logger.log(`Sent ${String(refunded)} owed cancellation refund(s)`);
+      }
+
+      return;
+    }
+
     const released = await this.bookingService.releaseLapsedHolds();
-    const refunded = await this.bookingService.refundOwedCancellations();
 
     // Quiet on the usual outcome: this runs every minute and has nothing to do most times.
     if (released > 0) {
       this.logger.log(`Swept ${String(released)} lapsed hold(s)`);
     }
+  }
 
-    if (refunded > 0) {
-      this.logger.log(`Sent ${String(refunded)} owed cancellation refund(s)`);
-    }
+  /** Every failed attempt, the last one marked — see `describeJobFailure`. */
+  @OnWorkerEvent("failed")
+  onFailed(job: Job<BookingExpiryJobData> | undefined, error: Error): void {
+    this.logger.error(describeJobFailure(job, error), error.stack);
   }
 }
 

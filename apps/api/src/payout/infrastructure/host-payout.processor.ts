@@ -1,6 +1,7 @@
-import { Processor, WorkerHost } from "@nestjs/bullmq";
+import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
 import { Logger } from "@nestjs/common";
 import type { Job } from "bullmq";
+import { describeJobFailure } from "../../common/job-failure";
 import { PayoutService } from "../application/payout.service";
 import {
   HOST_PAYOUT_QUEUE,
@@ -42,6 +43,12 @@ export class HostPayoutProcessor extends WorkerHost {
     const paid = await this.payoutService.payDuePayouts();
 
     if (paid > 0) this.logger.log(`Paid ${String(paid)} due payout(s)`);
+  }
+
+  /** Every failed attempt, the last one marked — see `describeJobFailure`. */
+  @OnWorkerEvent("failed")
+  onFailed(job: Job<HostPayoutJobData> | undefined, error: Error): void {
+    this.logger.error(describeJobFailure(job, error), error.stack);
   }
 }
 

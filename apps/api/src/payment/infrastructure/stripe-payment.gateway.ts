@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import Stripe from "stripe";
 import { z } from "zod";
 import {
@@ -14,6 +14,7 @@ import {
   createStripeClient,
   fromMinorUnits,
   idOf,
+  STRIPE_API_VERSION,
   transferGroupOf,
 } from "./stripe-client";
 
@@ -24,7 +25,11 @@ import {
  */
 @Injectable()
 export class StripePaymentGateway extends PaymentGateway {
+  private readonly logger = new Logger(StripePaymentGateway.name);
   private readonly stripe: Stripe;
+
+  /** Whether an event in another API version was reported already — once per process. */
+  private versionMismatchReported = false;
 
   constructor(
     @Inject(PAYMENT_CONFIG) private readonly paymentConfig: PaymentConfig,
@@ -162,6 +167,8 @@ export class StripePaymentGateway extends PaymentGateway {
       );
     }
 
+    this.checkVersion(event);
+
     const { id: eventId, type } = event;
 
     switch (event.type) {
@@ -235,6 +242,27 @@ export class StripePaymentGateway extends PaymentGateway {
       default:
         return { kind: "other", eventId, type };
     }
+  }
+
+  /**
+   * An event is shaped by the API version of the endpoint that sent it, not by the one the
+   * SDK pins, and the fields read above are typed against the latter. A mismatch is not
+   * refused — most fields read the same across versions — but said once, loudly enough to
+   * set the endpoint right.
+   */
+  private checkVersion(event: Stripe.Event): void {
+    if (
+      this.versionMismatchReported ||
+      event.api_version === null ||
+      event.api_version === STRIPE_API_VERSION
+    ) {
+      return;
+    }
+
+    this.versionMismatchReported = true;
+    this.logger.warn(
+      `Stripe delivered ${event.id} in API version ${event.api_version}, but this API reads ${STRIPE_API_VERSION} — set the webhook endpoint to that version`,
+    );
   }
 
   /**

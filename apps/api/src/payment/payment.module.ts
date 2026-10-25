@@ -1,7 +1,9 @@
 import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
+import { NotificationModule } from "../notification/notification.module";
 import { PrismaModule } from "../prisma/prisma.module";
 import { PaymentEventDispatcher } from "./application/payment-event-dispatcher";
+import { PaymentEventJobs } from "./application/ports/payment-event-jobs";
 import { PaymentGateway } from "./application/ports/payment-gateway";
 import { PaymentEventProcessor } from "./infrastructure/payment-event.processor";
 import {
@@ -25,6 +27,8 @@ import { PaymentWebhookController } from "./presentation/payment-webhook.control
 @Module({
   imports: [
     PrismaModule,
+    // The admins hear about an event the worker set aside.
+    NotificationModule,
     BullModule.registerQueue({ name: PAYMENT_EVENT_QUEUE }),
   ],
   controllers: [PaymentWebhookController],
@@ -32,6 +36,7 @@ import { PaymentWebhookController } from "./presentation/payment-webhook.control
     PaymentEventRepository,
     PaymentEventDispatcher,
     PaymentEventQueue,
+    { provide: PaymentEventJobs, useExisting: PaymentEventQueue },
     PaymentEventProcessor,
     { provide: PAYMENT_CONFIG, useFactory: loadPaymentConfig },
     // The port and its one adapter: a service names `PaymentGateway`, and a test swaps what

@@ -155,6 +155,10 @@ export class StripePayoutGateway extends PayoutGateway {
     return null;
   }
 
+  async heldOnTransfer(transferId: string): Promise<number> {
+    return heldOf(await this.stripe.transfers.retrieve(transferId));
+  }
+
   async reverseTransfer(
     transferId: string,
     amount: number,

@@ -48,6 +48,15 @@ class FakeNotificationRepository implements PublicOf<NotificationRepository> {
   /** Set to have every write fail, as a database that went away would. */
   broken = false;
 
+  /** The accounts `findAdminIds` answers: the admins who are not blocked. */
+  admins: string[] = [];
+
+  findAdminIds(): Promise<string[]> {
+    if (this.broken) return Promise.reject(new Error("connection refused"));
+
+    return Promise.resolve([...this.admins]);
+  }
+
   /** The fake's clock: every count is one tick later than the last, as under the real lock. */
   private revision = 0;
 
@@ -149,6 +158,17 @@ class FakeRealtimeService implements Pick<RealtimeService, "publish"> {
   }
 }
 
+const refundFailed: NotificationContent = {
+  type: NotificationType.REFUND_FAILED,
+  data: {
+    refundId: "re_1",
+    paymentId: "pi_1",
+    bookingId: null,
+    amount: 100,
+    reason: "expired_or_canceled_card",
+  },
+};
+
 describe("NotificationService", () => {
   let service: NotificationService;
   let notificationRepository: FakeNotificationRepository;
@@ -189,6 +209,29 @@ describe("NotificationService", () => {
         unreadRevision: expect.any(Number) as number,
       },
     });
+  });
+
+  it("tells every admin the same news, each with a row and an event of their own", async () => {
+    notificationRepository.admins = [ALICE, BOB];
+
+    await service.notifyAdmins(refundFailed);
+
+    expect(notificationRepository.rows.map(({ userId }) => userId)).toEqual([
+      ALICE,
+      BOB,
+    ]);
+    expect(realtimeService.published.map(({ userId }) => userId)).toEqual([
+      ALICE,
+      BOB,
+    ]);
+  });
+
+  it("tells nobody, and does not throw, when the admins cannot be read", async () => {
+    notificationRepository.admins = [ALICE];
+    notificationRepository.broken = true;
+
+    await expect(service.notifyAdmins(refundFailed)).resolves.toBeUndefined();
+    expect(realtimeService.published).toEqual([]);
   });
 
   // The write it announces is already committed by the caller: a failure here must cost the

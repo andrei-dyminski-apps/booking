@@ -1,11 +1,13 @@
 import { Injectable } from "@nestjs/common";
 import { z } from "zod";
+import type { Prisma } from "../../generated/prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { PaymentEvent } from "../application/ports/payment-gateway";
 
 /**
  * The inbox of the provider's webhook deliveries — see `PaymentEvent` in the schema: a
- * delivery is recorded, read back by the worker that handles it, and stamped processed.
+ * delivery is recorded, read back by the worker that handles it, and stamped processed —
+ * or, after failing too often, set aside.
  */
 @Injectable()
 export class PaymentEventRepository {
@@ -22,10 +24,13 @@ export class PaymentEventRepository {
     });
   }
 
-  /** The event to handle, or `null` when it is processed already or was never recorded. */
+  /**
+   * The event to handle, or `null` when it is processed already, set aside, or was never
+   * recorded. A payload the schema cannot read throws, and counts as a failed run.
+   */
   async findUnprocessed(eventId: string): Promise<PaymentEvent | null> {
     const row = await this.prismaService.paymentEvent.findFirst({
-      where: { id: eventId, processedAt: null },
+      where: { id: eventId, ...STILL_PENDING },
       select: { payload: true },
     });
 
@@ -34,22 +39,76 @@ export class PaymentEventRepository {
 
   async markProcessed(eventId: string): Promise<void> {
     await this.prismaService.paymentEvent.updateMany({
-      where: { id: eventId, processedAt: null },
+      where: { id: eventId, ...STILL_PENDING },
       data: { processedAt: new Date() },
     });
   }
 
-  /** The events still unprocessed that arrived before `before` — what a lost job left. */
-  async findStale(before: Date): Promise<string[]> {
+  /**
+   * Counts a failed run, and sets the event aside once it has failed `maxAttempts` times.
+   * Two steps, each conditional: of two runs failing at once only the one whose write set
+   * the event aside reports it (`setAside`), so the admins are told once. `null` for an
+   * event no longer pending — processed or set aside by a run racing this one.
+   */
+  async recordFailure(
+    eventId: string,
+    error: string,
+    maxAttempts: number,
+  ): Promise<{ type: string; attempts: number; setAside: boolean } | null> {
+    const [counted] = await this.prismaService.paymentEvent.updateManyAndReturn(
+      {
+        where: { id: eventId, ...STILL_PENDING },
+        data: { attempts: { increment: 1 }, lastError: error },
+        select: { type: true, attempts: true },
+      },
+    );
+
+    if (counted === undefined) return null;
+
+    if (counted.attempts < maxAttempts) return { ...counted, setAside: false };
+
+    const { count } = await this.prismaService.paymentEvent.updateMany({
+      where: { id: eventId, ...STILL_PENDING },
+      data: { failedAt: new Date() },
+    });
+
+    return { ...counted, setAside: count > 0 };
+  }
+
+  /**
+   * The oldest of the events still pending that arrived before `before` — what a lost job
+   * left — at most `limit` of them; the sweep after this one reads the rest.
+   */
+  async findStale(before: Date, limit: number): Promise<string[]> {
     const rows = await this.prismaService.paymentEvent.findMany({
-      where: { processedAt: null, receivedAt: { lte: before } },
+      where: { ...STILL_PENDING, receivedAt: { lte: before } },
       select: { id: true },
       orderBy: { receivedAt: "asc" },
+      take: limit,
     });
 
     return rows.map(({ id }) => id);
   }
+
+  /**
+   * Deletes the events processed before `before`. The provider redelivers an event for
+   * three days at most, so a row older than the retention has nothing left to deduplicate;
+   * an event set aside is never processed and stays until a person deals with it.
+   */
+  async pruneProcessed(before: Date): Promise<number> {
+    const { count } = await this.prismaService.paymentEvent.deleteMany({
+      where: { processedAt: { lt: before } },
+    });
+
+    return count;
+  }
 }
+
+/** Neither handled nor given up on — what the worker and the sweep look for. */
+const STILL_PENDING = {
+  processedAt: null,
+  failedAt: null,
+} satisfies Prisma.PaymentEventWhereInput;
 
 /** Nothing in the database holds `payload` to its type, so it is parsed on the way out. */
 const paymentEventSchema = z.discriminatedUnion("kind", [

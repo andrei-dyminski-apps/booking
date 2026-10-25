@@ -1,3 +1,4 @@
+import { Logger } from "@nestjs/common";
 import { Prisma } from "../../generated/prisma/client";
 import type { PrismaService } from "../../prisma/prisma.service";
 
@@ -34,6 +35,14 @@ export class LeaseBusyError extends Error {
  * holder lets go with is the deadline as Postgres spells it, so a lease this run outlived
  * and somebody else took since is left alone.
  *
+ * **The lease is renewed while the work runs**, every third of `leaseMs`, so work that
+ * outlasts one lease — Stripe slow on every call of a refund — still holds the row: only a
+ * holder that stopped renewing loses it, which is a process that died or froze. A renewal
+ * is conditional on the token, so one that finds the lease taken records the loss instead
+ * of taking it back, and the run reports it once its work is over: what it wrote after the
+ * loss was written beside another holder, and the conditional writes and the idempotency
+ * keys under every lease are what kept that safe.
+ *
  * A booking that does not exist is not waited for — the work is what answers it.
  */
 export async function whileLeased<T>(
@@ -61,13 +70,73 @@ export async function whileLeased<T>(
     token = await takeLease(prismaService, column, id, timing.leaseMs);
   }
 
+  const held = { token, lost: false };
+  let renewing: Promise<void> = Promise.resolve();
+  const heartbeat = setInterval(
+    () => {
+      renewing = renewing.then(() =>
+        renewLease(prismaService, column, id, timing.leaseMs, held),
+      );
+    },
+    Math.max(1, Math.floor(timing.leaseMs / 3)),
+  );
+
+  // A pending renewal must not keep a process that is shutting down alive.
+  heartbeat.unref();
+
   try {
     return await work();
   } finally {
-    await prismaService.$executeRaw`
-      UPDATE bookings SET ${Prisma.raw(column)} = NULL
-      WHERE id = ${id}::uuid AND ${Prisma.raw(column)} = ${token}::timestamp
+    clearInterval(heartbeat);
+    await renewing;
+
+    if (held.lost) {
+      logger.error(
+        `Booking ${id} lost its ${column} lease while the work under it ran; another run may have held it meanwhile`,
+      );
+    } else {
+      await prismaService.$executeRaw`
+        UPDATE bookings SET ${Prisma.raw(column)} = NULL
+        WHERE id = ${id}::uuid AND ${Prisma.raw(column)} = ${held.token}::timestamp
+      `;
+    }
+  }
+}
+
+const logger = new Logger("BookingLease");
+
+/**
+ * Pushes the deadline of a lease this run still holds, and moves the token to the new one.
+ * A lease somebody else took — this one ran out before the renewal came — is left alone and
+ * marked lost. A renewal that fails outright is logged and tried again by the next beat.
+ */
+async function renewLease(
+  prismaService: PrismaService,
+  column: LeaseColumn,
+  id: string,
+  leaseMs: number,
+  held: { token: string; lost: boolean },
+): Promise<void> {
+  if (held.lost) return;
+
+  try {
+    const rows = await prismaService.$queryRaw<{ token: string }[]>`
+      UPDATE bookings
+      SET ${Prisma.raw(column)} = (now() AT TIME ZONE 'UTC') + ${leaseMs} * INTERVAL '1 millisecond'
+      WHERE id = ${id}::uuid AND ${Prisma.raw(column)} = ${held.token}::timestamp
+      RETURNING ${Prisma.raw(column)}::text AS token
     `;
+    const renewed = rows[0]?.token;
+
+    if (renewed === undefined) {
+      held.lost = true;
+    } else {
+      held.token = renewed;
+    }
+  } catch (error) {
+    logger.warn(
+      `Could not renew the ${column} lease of booking ${id}: ${String(error)}`,
+    );
   }
 }
 

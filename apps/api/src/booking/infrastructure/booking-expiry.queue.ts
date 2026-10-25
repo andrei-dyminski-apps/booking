@@ -5,6 +5,7 @@ import {
   type OnApplicationBootstrap,
 } from "@nestjs/common";
 import { Queue } from "bullmq";
+import { BookingJobs } from "../application/ports/booking-jobs";
 
 export const BOOKING_EXPIRY_QUEUE = "booking-expiry";
 
@@ -20,6 +21,9 @@ export const WITHDRAW_PAYMENT_JOB = "withdraw-payment";
 /** Sends the refund a cancellation owes, at once. */
 export const REFUND_CANCELLATION_JOB = "refund-cancellation";
 
+/** Sends every refund a cancellation still owes, on a schedule of its own. */
+export const SWEEP_OWED_REFUNDS_JOB = "sweep-owed-refunds";
+
 /**
  * How often the sweep runs. A minute is the worst case by which a hold whose own job was
  * lost stops holding its slot — precise release is what the per-hold job is for, and this
@@ -27,8 +31,20 @@ export const REFUND_CANCELLATION_JOB = "refund-cancellation";
  */
 export const SWEEP_INTERVAL_MS = 60 * 1000;
 
-/** One scheduler for the whole deployment: the id is the key BullMQ upserts on. */
+/** One scheduler per sweep for the whole deployment: the id is the key BullMQ upserts on. */
 const SWEEP_SCHEDULER_ID = "lapsed-holds-sweep";
+
+/**
+ * Apart from the hold sweep, so that a slow or failing Stripe delays the refunds alone:
+ * one job doing both would hold the release of every lapsed hold behind the refunds, and
+ * an exception in either half would cancel the other.
+ */
+const REFUND_SWEEP_SCHEDULER_ID = "owed-refunds-sweep";
+
+/** The job of one hold's release — one name, so cancelling the release finds it. */
+function expireHoldJobId(bookingId: string): string {
+  return `hold-${bookingId}`;
+}
 
 export type ExpireHoldJobData = { bookingId: string };
 
@@ -46,9 +62,10 @@ export type BookingExpiryJobData =
   | RefundCancellationJobData;
 
 /**
- * A thin seam over the BullMQ queue, with the two halves of hold expiry that live in
- * Redis: a job per hold, scheduled for that hold's deadline, and a repeatable sweep behind
- * it. The third half is not here at all — `BookingRepository.create` expires this
+ * The adapter behind `BookingJobs`: a thin seam over the BullMQ queue, with the two halves
+ * of hold expiry that live in Redis — a job per hold, scheduled for that hold's deadline,
+ * and a repeatable sweep behind it — and the refunds and withdrawals the stays leave. The
+ * third half of expiry is not here at all — `BookingRepository.create` expires this
  * listing's lapsed holds inside its own transaction.
  *
  * The sweep is what makes the queue disposable. A per-hold job lives only in Redis, which
@@ -62,20 +79,26 @@ export type BookingExpiryJobData =
  * that is down costs precision rather than correctness.
  */
 @Injectable()
-export class BookingExpiryQueue implements OnApplicationBootstrap {
+export class BookingExpiryQueue
+  extends BookingJobs
+  implements OnApplicationBootstrap
+{
   private readonly logger = new Logger(BookingExpiryQueue.name);
 
   constructor(
     @InjectQueue(BOOKING_EXPIRY_QUEUE)
     private readonly queue: Queue<BookingExpiryJobData>,
-  ) {}
+  ) {
+    super();
+  }
 
   /**
    * Not awaited, and that is the point: a Redis that is slow or unreachable must not hold
    * the API's boot open. The same `void` treatment `main.ts` gives `bootstrap()`.
    */
   onApplicationBootstrap(): void {
-    void this.registerSweep();
+    void this.registerSweep(SWEEP_SCHEDULER_ID, SWEEP_LAPSED_HOLDS_JOB);
+    void this.registerSweep(REFUND_SWEEP_SCHEDULER_ID, SWEEP_OWED_REFUNDS_JOB);
   }
 
   async scheduleExpiry(bookingId: string, runAt: Date): Promise<void> {
@@ -84,7 +107,7 @@ export class BookingExpiryQueue implements OnApplicationBootstrap {
         EXPIRE_HOLD_JOB,
         { bookingId },
         {
-          jobId: bookingId,
+          jobId: expireHoldJobId(bookingId),
           delay: Math.max(0, runAt.getTime() - Date.now()),
           removeOnComplete: true,
           removeOnFail: true,
@@ -160,7 +183,7 @@ export class BookingExpiryQueue implements OnApplicationBootstrap {
    */
   async cancelExpiry(bookingId: string): Promise<void> {
     try {
-      const job = await this.queue.getJob(bookingId);
+      const job = await this.queue.getJob(expireHoldJobId(bookingId));
 
       await job?.remove();
     } catch (error) {
@@ -170,22 +193,26 @@ export class BookingExpiryQueue implements OnApplicationBootstrap {
     }
   }
 
-  private async registerSweep(): Promise<void> {
+  private async registerSweep(
+    schedulerId: string,
+    name: typeof SWEEP_LAPSED_HOLDS_JOB | typeof SWEEP_OWED_REFUNDS_JOB,
+  ): Promise<void> {
     try {
       await this.queue.upsertJobScheduler(
-        SWEEP_SCHEDULER_ID,
+        schedulerId,
         { every: SWEEP_INTERVAL_MS },
         {
-          name: SWEEP_LAPSED_HOLDS_JOB,
+          name,
           data: {},
           opts: { removeOnComplete: true, removeOnFail: true },
         },
       );
     } catch (error) {
-      // Logged rather than raised: the API serves every other route without a queue, and
-      // the lazy half inside `create` still releases the holds of a listing being booked.
+      // Logged rather than raised: the API serves every other route without a queue, the
+      // lazy half inside `create` still releases the holds of a listing being booked, and a
+      // refund's own job still sends it.
       this.logger.error(
-        `Could not register the lapsed-hold sweep — holds will only be released by their own job and by the check inside create: ${String(error)}`,
+        `Could not register the ${name} sweep — only the per-booking jobs and the check inside create will run: ${String(error)}`,
       );
     }
   }

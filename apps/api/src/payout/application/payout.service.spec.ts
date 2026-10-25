@@ -10,7 +10,6 @@ import {
 import type { AuthenticatedUser } from "../../auth/auth.types";
 import { NotificationService } from "../../notification/notification.service";
 import type { DisputeState } from "../domain/payout";
-import { HostPayoutQueue } from "../infrastructure/host-payout.queue";
 import {
   PayoutRepository,
   type PayoutAccountHolder,
@@ -24,6 +23,7 @@ import {
   type PayoutHost,
   type SentTransfer,
 } from "./ports/payout-gateway";
+import { PayoutJobs } from "./ports/payout-jobs";
 
 const GUEST_ID = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
 const HOST_ID = "6d0f2c1e-1a2b-4c3d-8e5f-9a0b1c2d3e4f";
@@ -150,7 +150,7 @@ class FakePayoutRepository implements PublicOf<PayoutRepository> {
     };
   }
 
-  findDuePayouts(now: Date, hostId?: string): Promise<string[]> {
+  findDuePayouts(now: Date, limit: number, hostId?: string): Promise<string[]> {
     return Promise.resolve(
       [...this.stays.values()]
         .filter(
@@ -165,7 +165,8 @@ class FakePayoutRepository implements PublicOf<PayoutRepository> {
             this.holders.get(stay.hold.listingOwnerId)?.enabled === true &&
             (hostId === undefined || stay.hold.listingOwnerId === hostId),
         )
-        .map((stay) => stay.bookingId),
+        .map((stay) => stay.bookingId)
+        .slice(0, limit),
     );
   }
 
@@ -275,6 +276,37 @@ class FakePayoutGateway implements PublicOf<PayoutGateway> {
     return Promise.resolve({ id: sent.id, amount: sent.amount });
   }
 
+  /** A transfer an earlier run sent, as Stripe would hold it. */
+  sent(id: string, amount: number): void {
+    this.transfers.set(`booking-${BOOKING_ID}-payout`, {
+      bookingId: BOOKING_ID,
+      accountId: ACCOUNT_ID,
+      chargeId: CHARGE_ID,
+      amount,
+      description: "sent earlier",
+      id,
+    });
+  }
+
+  /** What was sent less every reversal of it, the way Stripe reads `amount_reversed`. */
+  heldOnTransfer(transferId: string): Promise<number> {
+    const transfer = [...this.transfers.values()].find(
+      ({ id }) => id === transferId,
+    );
+
+    if (transfer === undefined) {
+      return Promise.reject(new Error(`No such transfer: ${transferId}`));
+    }
+
+    const reversed = [...this.reversals.values()]
+      .filter((reversal) => reversal.transferId === transferId)
+      .reduce((sum, { amount }) => sum + amount, 0);
+
+    return Promise.resolve(
+      Math.round((transfer.amount - reversed) * 100) / 100,
+    );
+  }
+
   reverseTransfer(
     transferId: string,
     amount: number,
@@ -300,11 +332,9 @@ class FakePayoutGateway implements PublicOf<PayoutGateway> {
   }
 }
 
-class FakeHostPayoutQueue implements PublicOf<HostPayoutQueue> {
+class FakePayoutJobs implements PublicOf<PayoutJobs> {
   readonly scheduled: { bookingId: string; runAt: Date }[] = [];
   readonly hosts: string[] = [];
-
-  onApplicationBootstrap(): void {}
 
   schedulePayoutsOf(hostId: string): Promise<void> {
     this.hosts.push(hostId);
@@ -333,7 +363,7 @@ describe("PayoutService", () => {
   let service: PayoutService;
   let payoutRepository: FakePayoutRepository;
   let payoutGateway: FakePayoutGateway;
-  let hostPayoutQueue: FakeHostPayoutQueue;
+  let payoutJobs: FakePayoutJobs;
   let notificationService: FakeNotificationService;
 
   /** A stay `GUEST_ID` paid for at a listing `HOST_ID` owns, checking in on `from`. */
@@ -387,7 +417,7 @@ describe("PayoutService", () => {
   beforeEach(async () => {
     payoutRepository = new FakePayoutRepository();
     payoutGateway = new FakePayoutGateway();
-    hostPayoutQueue = new FakeHostPayoutQueue();
+    payoutJobs = new FakePayoutJobs();
     notificationService = new FakeNotificationService();
 
     const moduleRef = await Test.createTestingModule({
@@ -395,7 +425,7 @@ describe("PayoutService", () => {
         PayoutService,
         { provide: PayoutRepository, useValue: payoutRepository },
         { provide: PayoutGateway, useValue: payoutGateway },
-        { provide: HostPayoutQueue, useValue: hostPayoutQueue },
+        { provide: PayoutJobs, useValue: payoutJobs },
         { provide: NotificationService, useValue: notificationService },
       ],
     }).compile();
@@ -436,7 +466,7 @@ describe("PayoutService", () => {
         status: HostAccountStatus.ONBOARDING,
       });
       expect(payoutRepository.holders.get(HOST_ID)?.enabled).toBe(false);
-      expect(hostPayoutQueue.hosts).toEqual([]);
+      expect(payoutJobs.hosts).toEqual([]);
     });
 
     it("asks Stripe about an unfinished account on a refresh, and queues what waited once it is done", async () => {
@@ -447,7 +477,7 @@ describe("PayoutService", () => {
       await expect(service.refresh(host)).resolves.toEqual({
         status: HostAccountStatus.ONBOARDING,
       });
-      expect(hostPayoutQueue.hosts).toEqual([]);
+      expect(payoutJobs.hosts).toEqual([]);
 
       payoutGateway.enabled = true;
 
@@ -459,7 +489,7 @@ describe("PayoutService", () => {
       });
       // Nothing is sent inside the request the dashboard waits on; the job pays it.
       expect(payoutGateway.transfers.size).toBe(0);
-      expect(hostPayoutQueue.hosts).toEqual([HOST_ID]);
+      expect(payoutJobs.hosts).toEqual([HOST_ID]);
 
       await service.payDuePayouts(HOST_ID);
 
@@ -527,7 +557,7 @@ describe("PayoutService", () => {
         accountId: ACCOUNT_ID,
       });
 
-      expect(hostPayoutQueue.hosts).toEqual([HOST_ID]);
+      expect(payoutJobs.hosts).toEqual([HOST_ID]);
 
       await service.payDuePayouts(HOST_ID);
 
@@ -686,6 +716,7 @@ describe("PayoutService", () => {
 
   describe("a refund the booking side recorded", () => {
     it("takes the host's share back after a payout, once", async () => {
+      payoutGateway.sent("tr_1", SHARE);
       paidStay(PAST, {
         transferId: "tr_1",
         paidOutAmount: SHARE,
@@ -697,7 +728,7 @@ describe("PayoutService", () => {
 
       expect([...payoutGateway.reversals.entries()]).toEqual([
         [
-          `booking-${BOOKING_ID}-reversal-0`,
+          `booking-${BOOKING_ID}-reversal-43200-0`,
           { transferId: "tr_1", amount: SHARE },
         ],
       ]);
@@ -705,6 +736,7 @@ describe("PayoutService", () => {
     });
 
     it("takes back the difference once when two settlements race over one stay", async () => {
+      payoutGateway.sent("tr_1", SHARE);
       paidStay(PAST, {
         transferId: "tr_1",
         paidOutAmount: SHARE,
@@ -726,6 +758,7 @@ describe("PayoutService", () => {
     });
 
     it("answers what the host is left holding", async () => {
+      payoutGateway.sent("tr_1", SHARE);
       paidStay(PAST, {
         transferId: "tr_1",
         paidOutAmount: SHARE,
@@ -734,6 +767,41 @@ describe("PayoutService", () => {
 
       // 90% of the 400 left.
       await expect(service.settle(BOOKING_ID)).resolves.toBe(360);
+    });
+
+    it("sizes a reversal from what Stripe holds, so one whose write was lost is not sent twice", async () => {
+      payoutGateway.sent("tr_1", SHARE);
+      // A first refund of 80 took 72 back at Stripe, and the run died before writing it
+      // down: the row still says the whole share.
+      payoutGateway.reversals.set("lost", { transferId: "tr_1", amount: 72 });
+      paidStay(PAST, {
+        transferId: "tr_1",
+        paidOutAmount: SHARE,
+        refundedAmount: 180,
+      });
+
+      // 90% of the 300 left is 270: only the 90 between it and the 360 still held goes back.
+      await expect(service.settle(BOOKING_ID)).resolves.toBe(270);
+      expect(
+        payoutGateway.reversals.get(
+          `booking-${BOOKING_ID}-reversal-36000-27000`,
+        ),
+      ).toEqual({ transferId: "tr_1", amount: 90 });
+      expect(stored()?.paidOutAmount).toBe(270);
+    });
+
+    it("only writes down a reversal Stripe already holds", async () => {
+      payoutGateway.sent("tr_1", SHARE);
+      payoutGateway.reversals.set("lost", { transferId: "tr_1", amount: 72 });
+      paidStay(PAST, {
+        transferId: "tr_1",
+        paidOutAmount: SHARE,
+        refundedAmount: 80,
+      });
+
+      await expect(service.settle(BOOKING_ID)).resolves.toBe(360);
+      expect(payoutGateway.reversals.size).toBe(1);
+      expect(stored()?.paidOutAmount).toBe(360);
     });
   });
 
@@ -767,6 +835,7 @@ describe("PayoutService", () => {
     });
 
     it("leaves a payout already sent alone while the dispute is open", async () => {
+      payoutGateway.sent("tr_1", SHARE);
       paidStay(PAST, { transferId: "tr_1", paidOutAmount: SHARE });
 
       await service.handleSettlementEvent(disputed);
@@ -783,9 +852,9 @@ describe("PayoutService", () => {
 
       // The delivery sends nothing itself: a transfer Stripe refuses must not fail it.
       expect(payoutGateway.transfers.size).toBe(0);
-      expect(
-        hostPayoutQueue.scheduled.map(({ bookingId }) => bookingId),
-      ).toEqual([BOOKING_ID]);
+      expect(payoutJobs.scheduled.map(({ bookingId }) => bookingId)).toEqual([
+        BOOKING_ID,
+      ]);
 
       await service.payOut(BOOKING_ID);
 
@@ -811,6 +880,7 @@ describe("PayoutService", () => {
     });
 
     it("takes the whole payout back once a dispute is lost", async () => {
+      payoutGateway.sent("tr_1", SHARE);
       paidStay(PAST, { transferId: "tr_1", paidOutAmount: SHARE });
 
       await service.handleSettlementEvent(disputed);
@@ -829,7 +899,7 @@ describe("PayoutService", () => {
   it("schedules a stay's payout a day after its check-in", async () => {
     await service.schedule({ bookingId: BOOKING_ID, from: "2030-10-14" });
 
-    expect(hostPayoutQueue.scheduled).toEqual([
+    expect(payoutJobs.scheduled).toEqual([
       { bookingId: BOOKING_ID, runAt: new Date("2030-10-15T00:00:00.000Z") },
     ]);
   });

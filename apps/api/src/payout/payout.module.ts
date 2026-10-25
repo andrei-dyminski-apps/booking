@@ -7,6 +7,7 @@ import { PrismaModule } from "../prisma/prisma.module";
 import { PayoutEventHandler } from "./application/payout-event-handler";
 import { PayoutService } from "./application/payout.service";
 import { PayoutGateway } from "./application/ports/payout-gateway";
+import { PayoutJobs } from "./application/ports/payout-jobs";
 import { HostPayoutProcessor } from "./infrastructure/host-payout.processor";
 import {
   HOST_PAYOUT_QUEUE,
@@ -40,6 +41,7 @@ import { PayoutWebhookController } from "./presentation/payout-webhook.controlle
     // The host's half of the provider, a port of its own beside `PaymentGateway`.
     { provide: PayoutGateway, useClass: StripePayoutGateway },
     HostPayoutQueue,
+    { provide: PayoutJobs, useExisting: HostPayoutQueue },
     HostPayoutProcessor,
   ],
 })

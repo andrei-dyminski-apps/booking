@@ -42,7 +42,9 @@ model Booking {
 
   /// What the stay costs, quoted under the hold's `FOR UPDATE` lock by `nightlyPrice` from
   /// `@repo/contracts`, and what the payment charges. A copy, so a later price change does
-  /// not restate this stay.
+  /// not restate this stay. It and the money columns below are held by raw-SQL `CHECK`s
+  /// (`bookings_amount_positive`, `bookings_*_within_amount`): above zero, and nothing
+  /// refunded, owed or paid out beyond it.
   amount Decimal @db.Decimal(10, 2)
 
   /// The Stripe PaymentIntent of this hold — opened under a key named after the booking, so
@@ -441,6 +443,8 @@ enum NotificationType {
   PAYMENT_REFUNDED
   PAYMENT_DISPUTED
   PAYOUT_SENT
+  REFUND_FAILED
+  PAYMENT_EVENT_FAILED
   REVIEW_RECEIVED
   WAITLIST_AVAILABLE
 }
@@ -530,5 +534,34 @@ model PaymentEvent {
   receivedAt  DateTime  @default(now()) @map("received_at")
   processedAt DateTime? @map("processed_at")
 
+  /// How many runs of the worker failed this event so far — every attempt of every job.
+  attempts  Int     @default(0)
+  /// What the latest failed run threw, cut to `MAX_ERROR_LENGTH`.
+  lastError String? @map("last_error")
+  /// When the worker gave up on the event (`MAX_EVENT_ATTEMPTS`): the sweep leaves it alone
+  /// and the admins are told. Clearing it, with `attempts`, hands it back to the sweep.
+  failedAt  DateTime? @map("failed_at")
+
+  /// What the daily prune deletes by: processed events past `EVENT_RETENTION_DAYS`.
+  @@index([processedAt])
   @@map("payment_events")
+}
+
+/// A refund the guest's bank sent back (`refund.failed`): the money is on the platform's
+/// balance again and still the guest's, and nothing re-sends it on its own. Kept here until a
+/// person issues the refund again and stamps `resolved_at`; the admins are told when the row
+/// is written. Keyed by the provider's refund id, so a redelivery of the event writes nothing.
+///
+/// No relation to a booking, for the reason `PaymentEvent` has none.
+model RefundFailure {
+  refundId   String    @id @map("refund_id")
+  paymentId  String    @map("payment_id")
+  bookingId  String?   @map("booking_id") @db.Uuid
+  amount     Decimal   @db.Decimal(10, 2)
+  /// The bank's reason as the provider words it; `null` when it gives none.
+  reason     String?
+  failedAt   DateTime  @default(now()) @map("failed_at")
+  resolvedAt DateTime? @map("resolved_at")
+
+  @@map("refund_failures")
 }

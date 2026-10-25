@@ -5,6 +5,7 @@ import {
   type OnApplicationBootstrap,
 } from "@nestjs/common";
 import { Queue } from "bullmq";
+import { PayoutJobs } from "../application/ports/payout-jobs";
 
 export const HOST_PAYOUT_QUEUE = "host-payout";
 
@@ -40,8 +41,8 @@ export type HostPayoutJobData =
   | SweepPayoutsJobData;
 
 /**
- * The seam over the payout queue, built the way `BookingExpiryQueue` is and for the same
- * reasons: a job per stay at the moment its payout falls due, and a repeatable sweep behind
+ * The seam over the payout queue and the adapter behind `PayoutJobs`, built the way
+ * `BookingExpiryQueue` is and for the same reasons: a job per stay at the moment its payout falls due, and a repeatable sweep behind
  * it that pays whatever the jobs missed — a Redis restart, a host who could not be paid
  * when their job ran because their onboarding was not finished.
  *
@@ -49,13 +50,18 @@ export type HostPayoutJobData =
  * confirmed, and the sweep pays what the queue never heard about.
  */
 @Injectable()
-export class HostPayoutQueue implements OnApplicationBootstrap {
+export class HostPayoutQueue
+  extends PayoutJobs
+  implements OnApplicationBootstrap
+{
   private readonly logger = new Logger(HostPayoutQueue.name);
 
   constructor(
     @InjectQueue(HOST_PAYOUT_QUEUE)
     private readonly queue: Queue<HostPayoutJobData>,
-  ) {}
+  ) {
+    super();
+  }
 
   /** Not awaited: a Redis that is slow must not hold the API's boot open. */
   onApplicationBootstrap(): void {
@@ -68,7 +74,7 @@ export class HostPayoutQueue implements OnApplicationBootstrap {
         PAY_OUT_JOB,
         { bookingId },
         {
-          jobId: bookingId,
+          jobId: `payout-${bookingId}`,
           delay: Math.max(0, runAt.getTime() - Date.now()),
           // A transfer can fail for reasons that pass — the provider unreachable for a
           // moment — and the sweep would only retry it an hour later.

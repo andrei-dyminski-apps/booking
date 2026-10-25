@@ -41,6 +41,10 @@ import {
   type RefundTarget,
   type ReleasedHold,
 } from "../infrastructure/booking.repository";
+import {
+  RefundFailureRepository,
+  type RefundFailure,
+} from "../infrastructure/refund-failure.repository";
 import { PaymentEventDispatcher } from "../../payment/application/payment-event-dispatcher";
 import {
   PaymentGateway,
@@ -50,8 +54,8 @@ import {
 import type { BookingCursor } from "./booking-cursor";
 import { BookingPaymentHandler } from "./booking-payment.handler";
 import { BookingService, stayNoticeOf } from "./booking.service";
+import { BookingJobs } from "./ports/booking-jobs";
 import { StayLifecycle, type StayListener } from "./stay-lifecycle";
-import { BookingExpiryQueue } from "../infrastructure/booking-expiry.queue";
 import { ACTIVE_STATUSES, holdExpiry } from "../domain/booking-status";
 
 const GUEST_ID = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
@@ -320,11 +324,12 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
     return { paymentId: found.paymentId };
   }
 
-  findOwedRefunds(): Promise<string[]> {
+  findOwedRefunds(limit: number): Promise<string[]> {
     return Promise.resolve(
       this.allBookings()
         .filter((booking) => booking.refundOwed !== null)
-        .map((booking) => booking.id),
+        .map((booking) => booking.id)
+        .slice(0, limit),
     );
   }
 
@@ -694,13 +699,11 @@ class FakeStayListener implements Required<StayListener> {
  * with the shorter signature stays assignable (see `PublicOf` above), so nothing but this
  * would notice a service that scheduled the job for the wrong moment — or for `now`.
  */
-class FakeBookingExpiryQueue implements PublicOf<BookingExpiryQueue> {
+class FakeBookingJobs implements PublicOf<BookingJobs> {
   readonly scheduled: { bookingId: string; runAt: Date }[] = [];
   readonly cancelled: string[] = [];
   /** The payments queued for withdrawal; the job that withdraws them is `withdrawPayment`. */
   readonly withdrawals: string[] = [];
-
-  onApplicationBootstrap(): void {}
 
   scheduleExpiry(bookingId: string, runAt: Date): Promise<void> {
     this.scheduled.push({ bookingId, runAt });
@@ -744,16 +747,39 @@ class FakeBookingExpiryQueue implements PublicOf<BookingExpiryQueue> {
 }
 
 /**
- * Only `notify`, the one method this service calls: what is asserted is who was told what,
- * and the storing and pushing behind it are `notification.service.spec.ts`'s.
+ * `notify` and `notifyAdmins`, the two methods these services call: what is asserted is who
+ * was told what, and the storing and pushing behind it are `notification.service.spec.ts`'s.
  */
-class FakeNotificationService implements Pick<NotificationService, "notify"> {
+class FakeNotificationService implements Pick<
+  NotificationService,
+  "notify" | "notifyAdmins"
+> {
   readonly notices: { userId: string; content: NotificationContent }[] = [];
+  readonly toAdmins: NotificationContent[] = [];
 
   notify(userId: string, content: NotificationContent): Promise<void> {
     this.notices.push({ userId, content });
 
     return Promise.resolve();
+  }
+
+  notifyAdmins(content: NotificationContent): Promise<void> {
+    this.toAdmins.push(content);
+
+    return Promise.resolve();
+  }
+}
+
+/** The failures by refund id, written once each the way the unique key writes them. */
+class FakeRefundFailureRepository implements PublicOf<RefundFailureRepository> {
+  readonly failures = new Map<string, RefundFailure>();
+
+  record(failure: RefundFailure): Promise<boolean> {
+    if (this.failures.has(failure.refundId)) return Promise.resolve(false);
+
+    this.failures.set(failure.refundId, failure);
+
+    return Promise.resolve(true);
   }
 }
 
@@ -776,8 +802,9 @@ class FakeWaitlistService implements Pick<WaitlistService, "announceFreed"> {
 describe("BookingService", () => {
   let service: BookingService;
   let bookingRepository: FakeBookingRepository;
-  let bookingExpiryQueue: FakeBookingExpiryQueue;
+  let bookingJobs: FakeBookingJobs;
   let notificationService: FakeNotificationService;
+  let refundFailureRepository: FakeRefundFailureRepository;
   let waitlistService: FakeWaitlistService;
   let paymentGateway: FakePaymentGateway;
   let stayListener: FakeStayListener;
@@ -800,8 +827,9 @@ describe("BookingService", () => {
 
   beforeEach(async () => {
     bookingRepository = new FakeBookingRepository();
-    bookingExpiryQueue = new FakeBookingExpiryQueue();
+    bookingJobs = new FakeBookingJobs();
     notificationService = new FakeNotificationService();
+    refundFailureRepository = new FakeRefundFailureRepository();
     waitlistService = new FakeWaitlistService();
     paymentGateway = new FakePaymentGateway();
     stayListener = new FakeStayListener(bookingRepository);
@@ -810,7 +838,11 @@ describe("BookingService", () => {
       providers: [
         BookingService,
         { provide: BookingRepository, useValue: bookingRepository },
-        { provide: BookingExpiryQueue, useValue: bookingExpiryQueue },
+        {
+          provide: RefundFailureRepository,
+          useValue: refundFailureRepository,
+        },
+        { provide: BookingJobs, useValue: bookingJobs },
         { provide: NotificationService, useValue: notificationService },
         { provide: WaitlistService, useValue: waitlistService },
         { provide: PaymentGateway, useValue: paymentGateway },
@@ -822,8 +854,7 @@ describe("BookingService", () => {
     }).compile();
 
     service = moduleRef.get(BookingService);
-    bookingExpiryQueue.worker = (bookingId) =>
-      service.refundCancellation(bookingId);
+    bookingJobs.worker = (bookingId) => service.refundCancellation(bookingId);
     paymentHandler = moduleRef.get(BookingPaymentHandler);
     moduleRef.get(StayLifecycle).register(stayListener);
   });
@@ -842,7 +873,7 @@ describe("BookingService", () => {
   it("schedules the hold's expiry for the deadline the row carries", async () => {
     const booking = await service.create(GUEST_ID, input);
 
-    expect(bookingExpiryQueue.scheduled).toEqual([
+    expect(bookingJobs.scheduled).toEqual([
       { bookingId: booking.id, runAt: new Date(String(booking.expiresAt)) },
     ]);
   });
@@ -873,7 +904,7 @@ describe("BookingService", () => {
       ForbiddenException,
     );
     expect(bookingRepository.rows.size).toBe(0);
-    expect(bookingExpiryQueue.scheduled).toEqual([]);
+    expect(bookingJobs.scheduled).toEqual([]);
     expect(notificationService.notices).toEqual([]);
   });
 
@@ -1055,7 +1086,7 @@ describe("BookingService", () => {
     await expect(service.findOne(id, owner)).resolves.toMatchObject({ id });
 
     await service.remove(id, guest);
-    expect(bookingExpiryQueue.cancelled).toContain(id);
+    expect(bookingJobs.cancelled).toContain(id);
 
     const second = await bookedByGuest();
     await service.remove(second, admin);
@@ -1368,7 +1399,7 @@ describe("BookingService", () => {
         ConflictException,
       );
       expect(bookingRepository.rows.get(id)?.paymentId).toBeNull();
-      expect(bookingExpiryQueue.withdrawals).toEqual(["pi_1"]);
+      expect(bookingJobs.withdrawals).toEqual(["pi_1"]);
     });
   });
 
@@ -1589,13 +1620,13 @@ describe("BookingService", () => {
       ]);
     });
 
-    it("keeps a refund the bank sent back on record, owed to the guest", async () => {
+    it("keeps a refund the bank sent back on record, owed to the guest, and tells the admins once", async () => {
       const id = await paidHold();
       await paymentHandler.handle(refunded(100));
       notificationService.notices.length = 0;
       stayListener.settled.length = 0;
 
-      await paymentHandler.handle({
+      const failed: PaymentEvent = {
         kind: "refundFailed",
         eventId: "evt_refund_failed",
         type: "refund.failed",
@@ -1603,7 +1634,11 @@ describe("BookingService", () => {
         refundId: "re_1",
         amount: 100,
         reason: "expired_or_canceled_card",
-      });
+      };
+
+      await paymentHandler.handle(failed);
+      // A redelivery of the same news.
+      await paymentHandler.handle(failed);
 
       // Neither the guest's claim nor the host's share moves: a person issues it again.
       expect(bookingRepository.rows.get(id)?.booking).toMatchObject({
@@ -1612,6 +1647,19 @@ describe("BookingService", () => {
       });
       expect(notificationService.notices).toEqual([]);
       expect(stayListener.settled).toEqual([]);
+
+      const failure = {
+        refundId: "re_1",
+        paymentId: "pi_1",
+        bookingId: id,
+        amount: 100,
+        reason: "expired_or_canceled_card",
+      };
+
+      expect([...refundFailureRepository.failures.values()]).toEqual([failure]);
+      expect(notificationService.toAdmins).toEqual([
+        { type: NotificationType.REFUND_FAILED, data: failure },
+      ]);
     });
 
     it("tells the guest about a partial refund from the dashboard, and keeps the stay", async () => {
@@ -1859,7 +1907,7 @@ describe("BookingService", () => {
 
     it("cancels at once and owes the refund until the job sends it", async () => {
       const id = await paidStay(30);
-      bookingExpiryQueue.worker = null;
+      bookingJobs.worker = null;
 
       await service.remove(id, guest);
 
@@ -1869,7 +1917,7 @@ describe("BookingService", () => {
         refundOwed: AMOUNT,
       });
       expect(paymentGateway.refunds.size).toBe(0);
-      expect(bookingExpiryQueue.refunds).toEqual([id]);
+      expect(bookingJobs.refunds).toEqual([id]);
       expect(waitlistService.freed).toHaveLength(1);
 
       await expect(service.refundCancellation(id)).resolves.toBe(true);
@@ -2015,7 +2063,7 @@ describe("BookingService", () => {
 
       await service.remove(id, guest);
 
-      expect(bookingExpiryQueue.failedRefunds).toHaveLength(1);
+      expect(bookingJobs.failedRefunds).toHaveLength(1);
       expect(bookingRepository.rows.get(id)?.booking).toMatchObject({
         status: BookingStatus.CANCELLED,
         refundOwed: AMOUNT,
@@ -2035,7 +2083,7 @@ describe("BookingService", () => {
 
     it("keeps a refund owed while a dispute opened after the cancellation is open", async () => {
       const id = await paidStay(30);
-      bookingExpiryQueue.worker = null;
+      bookingJobs.worker = null;
       await service.remove(id, guest);
       const found = bookingRepository.rows.get(id);
 
@@ -2054,7 +2102,7 @@ describe("BookingService", () => {
 
     it("drops a refund owed once a dispute opened after the cancellation is lost", async () => {
       const id = await paidStay(30);
-      bookingExpiryQueue.worker = null;
+      bookingJobs.worker = null;
       await service.remove(id, guest);
       const found = bookingRepository.rows.get(id);
 
@@ -2098,7 +2146,7 @@ describe("BookingService", () => {
       expect(bookingRepository.rows.get(id)?.booking.status).toBe(
         BookingStatus.CONFIRMED,
       );
-      expect(bookingExpiryQueue.withdrawals).toEqual([]);
+      expect(bookingJobs.withdrawals).toEqual([]);
     });
 
     it("withdraws a payment a payment page opened while the hold was being cancelled", async () => {
@@ -2110,7 +2158,7 @@ describe("BookingService", () => {
 
       await service.remove(id, guest);
 
-      expect(bookingExpiryQueue.withdrawals).toEqual(["pi_1"]);
+      expect(bookingJobs.withdrawals).toEqual(["pi_1"]);
     });
 
     it("withdraws the payment of a hold instead of refunding it", async () => {
@@ -2119,7 +2167,7 @@ describe("BookingService", () => {
 
       await service.remove(id, guest);
 
-      expect(bookingExpiryQueue.withdrawals).toEqual(["pi_1"]);
+      expect(bookingJobs.withdrawals).toEqual(["pi_1"]);
       expect(paymentGateway.refunds.size).toBe(0);
     });
   });
@@ -2132,7 +2180,7 @@ describe("BookingService", () => {
 
       await service.releaseLapsedHolds();
 
-      expect(bookingExpiryQueue.withdrawals).toEqual(["pi_1"]);
+      expect(bookingJobs.withdrawals).toEqual(["pi_1"]);
     });
 
     it("is withdrawn by the job, not by the path that released the hold", async () => {

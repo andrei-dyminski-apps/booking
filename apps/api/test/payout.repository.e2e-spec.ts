@@ -4,6 +4,11 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { parseISO } from "date-fns";
 import { App } from "supertest/types";
 import { AppModule } from "./../src/app.module";
+import {
+  LeaseBusyError,
+  whileLeased,
+  type LeaseTiming,
+} from "./../src/booking/infrastructure/booking-lease";
 import { BookingRepository } from "./../src/booking/infrastructure/booking.repository";
 import { PayoutRepository } from "./../src/payout/infrastructure/payout.repository";
 import { PrismaService } from "./../src/prisma/prisma.service";
@@ -135,6 +140,40 @@ describe("PayoutRepository settlement lease (e2e)", () => {
     expect(await lease()).toBeNull();
   });
 
+  it("keeps a lease past its length while the work under it still runs", async () => {
+    const bookingId = await stay(1);
+    // A lease a fifth of the work's length, renewed every third of it.
+    const timing: LeaseTiming = {
+      leaseMs: 300,
+      waitMs: 900,
+      pollMs: 50,
+      pollMaxMs: 100,
+    };
+    const holding = whileLeased(
+      prismaService,
+      "settling_until",
+      bookingId,
+      timing,
+      () => new Promise((resolve) => setTimeout(resolve, 1_500)),
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    await expect(
+      whileLeased(prismaService, "settling_until", bookingId, timing, () =>
+        Promise.resolve("rival"),
+      ),
+    ).rejects.toBeInstanceOf(LeaseBusyError);
+
+    await holding;
+
+    const { settlingUntil } = await prismaService.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+    });
+
+    expect(settlingUntil).toBeNull();
+  });
+
   it("takes a lease whose holder died once it has run out", async () => {
     const bookingId = await stay(1);
 
@@ -257,31 +296,47 @@ describe("The money columns of a paid stay (e2e)", () => {
   it("keeps a stay out of the due payouts while a cancellation's refund is owed", async () => {
     await bookingRepository.cancel(bookingId, "CONFIRMED", AMOUNT);
 
-    expect(await payoutRepository.findDuePayouts(new Date(), hostId)).toEqual(
-      [],
-    );
-    expect(await bookingRepository.findOwedRefunds()).toEqual([bookingId]);
+    expect(
+      await payoutRepository.findDuePayouts(new Date(), 10, hostId),
+    ).toEqual([]);
+    expect(await bookingRepository.findOwedRefunds(10)).toEqual([bookingId]);
 
     await bookingRepository.settleOwedRefund(bookingId, AMOUNT);
 
-    expect(await bookingRepository.findOwedRefunds()).toEqual([]);
+    expect(await bookingRepository.findOwedRefunds(10)).toEqual([]);
     expect(await refundedAmount()).toBe(AMOUNT);
   });
 
   it("leaves a stay refunded in full out of the due payouts", async () => {
-    expect(await payoutRepository.findDuePayouts(new Date(), hostId)).toEqual([
-      bookingId,
-    ]);
+    expect(
+      await payoutRepository.findDuePayouts(new Date(), 10, hostId),
+    ).toEqual([bookingId]);
 
     await bookingRepository.raiseRefunded(bookingId, null, 100);
-    expect(await payoutRepository.findDuePayouts(new Date(), hostId)).toEqual([
-      bookingId,
-    ]);
+    expect(
+      await payoutRepository.findDuePayouts(new Date(), 10, hostId),
+    ).toEqual([bookingId]);
 
     await bookingRepository.raiseRefunded(bookingId, 100, AMOUNT);
-    expect(await payoutRepository.findDuePayouts(new Date(), hostId)).toEqual(
-      [],
-    );
+    expect(
+      await payoutRepository.findDuePayouts(new Date(), 10, hostId),
+    ).toEqual([]);
+  });
+
+  it("refuses money columns past what the guest paid, whoever writes them", async () => {
+    await expect(
+      bookingRepository.raiseRefunded(bookingId, null, AMOUNT + 1),
+    ).rejects.toThrow();
+    await expect(
+      bookingRepository.cancel(bookingId, "CONFIRMED", 0),
+    ).rejects.toThrow();
+    await expect(
+      prismaService.booking.update({
+        where: { id: bookingId },
+        data: { paidOutAmount: -1 },
+      }),
+    ).rejects.toThrow();
+    expect(await refundedAmount()).toBeNull();
   });
 
   it("moves a dispute forward only", async () => {
@@ -322,14 +377,14 @@ describe("The money columns of a paid stay (e2e)", () => {
       },
     });
 
-    await expect(bookingRepository.findOwedRefunds()).resolves.toEqual([]);
+    await expect(bookingRepository.findOwedRefunds(10)).resolves.toEqual([]);
 
     await prismaService.booking.update({
       where: { id: bookingId },
       data: { cancellingUntil: new Date(Date.now() - 1_000) },
     });
 
-    await expect(bookingRepository.findOwedRefunds()).resolves.toEqual([
+    await expect(bookingRepository.findOwedRefunds(10)).resolves.toEqual([
       bookingId,
     ]);
   });

@@ -527,21 +527,23 @@ export class BookingRepository {
 
   /**
    * The cancellations whose refund has not gone out yet — a job lost with Redis, or one
-   * Stripe kept refusing. The sweep sends them; the partial index makes this read nothing
-   * on the usual minute. A stay whose cancellation lease is running is left to whoever
-   * holds it — usually the refund job itself — rather than waited for and logged as busy.
+   * Stripe kept refusing — at most `limit` of them; the sweep after this one reads the
+   * rest. The partial index makes this read nothing on the usual minute. A stay whose
+   * cancellation lease is running is left to whoever holds it — usually the refund job
+   * itself — rather than waited for and logged as busy.
+   *
+   * Raw SQL, because the lease is compared on the database's clock, the one it was written
+   * with (`whileLeased`), and Prisma's `where` can only compare against a value this
+   * process sends.
    */
-  async findOwedRefunds(): Promise<string[]> {
-    const rows = await this.prismaService.booking.findMany({
-      where: {
-        refundOwed: { not: null },
-        OR: [
-          { cancellingUntil: null },
-          { cancellingUntil: { lte: new Date() } },
-        ],
-      },
-      select: { id: true },
-    });
+  async findOwedRefunds(limit: number): Promise<string[]> {
+    const rows = await this.prismaService.$queryRaw<{ id: string }[]>`
+      SELECT id::text AS id FROM bookings
+      WHERE refund_owed IS NOT NULL
+        AND (cancelling_until IS NULL OR cancelling_until <= (now() AT TIME ZONE 'UTC'))
+      ORDER BY id
+      LIMIT ${limit}
+    `;
 
     return rows.map(({ id }) => id);
   }
