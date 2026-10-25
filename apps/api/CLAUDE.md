@@ -488,7 +488,8 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
 - **The API version is pinned** (`STRIPE_API_VERSION` in `stripe-client.ts`, the version
   the installed SDK is typed against — the compiler refuses another). The webhook
   endpoints in the Dashboard have to deliver in that version; `readEvent` warns once per
-  process about an event in another.
+  process about an event in another. Locally `stripe listen` runs with `--latest`, which
+  is the same version while the installed SDK is current.
 - **Stripe is called with four seconds a call and no retry of the SDK's own**
   (`stripe-client.ts`). What retries instead is whatever ran the call — a person pressing
   the button again, a job's next attempt — safe because every write goes under a key.

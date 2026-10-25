@@ -375,6 +375,20 @@ is the transition a hold could not make on its own. The details are "Payments" i
 - [ ] Helmet.
 - [ ] Bring Swagger up to a complete description with examples and auth.
 - [ ] Observability: structured logs (pino), a request-logging interceptor, `/health` (`@nestjs/terminus`).
+- [ ] **The admin's side of what the money paths set aside.** The API already keeps both
+      and tells every admin about them (`PAYMENT_EVENT_FAILED`, `REFUND_FAILED`), but the
+      only way to act on either today is SQL. Two pairs of routes behind
+      `@Roles(Role.ADMIN)`, and a screen under `/admin` for them:
+  - `GET /payment-events?status=failed` — the events the worker set aside after
+    `MAX_EVENT_ATTEMPTS`, with `type`, `attempts`, `last_error` and `received_at`; and
+    `POST /payment-events/:id/retry`, which clears `failed_at` and `attempts` so the sweep
+    picks the event up within a minute. The usual order is a fix deployed first, then the
+    events retried; the handlers are idempotent, so a retry is safe.
+  - `GET /refund-failures?status=open` — the refunds a guest's bank sent back, with the
+    stay they belong to; and `POST /refund-failures/:id/resolve`, which stamps
+    `resolved_at` with a note of how the money went back. No "send it again" button: the
+    usual reason is `expired_or_canceled_card`, and the same card refuses it again — the
+    money goes back outside Stripe, and what the API records is that it did.
 - [ ] **JSON-LD across the whole site** — the structured data a catalogue is actually read
       by, and the one SEO question this project has so far answered with nothing. Semantic
       markup is not that answer: wrapping the rows in a `<ul role="list">` bought a screen

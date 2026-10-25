@@ -62,6 +62,12 @@ services:
       - listen
       - --forward-to
       - http://host.docker.internal:${API_PORT:-3001}/payments/webhook
+      # Events in the latest API version rather than the account's default, which is
+      # whatever version the account was opened with. The API pins the version its SDK is
+      # typed against (STRIPE_API_VERSION) and warns about an event in another; while the
+      # installed `stripe` is current the two are the same. After Stripe releases a newer
+      # version they drift until the SDK is updated, and that warning is what says so.
+      - --latest
       # The events the API acts on; the rest would be acknowledged and ignored.
       - --events
       - payment_intent.succeeded,charge.refunded,refund.failed,charge.dispute.created,charge.dispute.closed

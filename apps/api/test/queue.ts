@@ -8,9 +8,9 @@ import { HOST_PAYOUT_QUEUE } from "./../src/payout/infrastructure/host-payout.qu
 
 /**
  * The e2e specs share one Redis as they share one database. A booking's hold-expiry job is
- * delayed 15 minutes and keyed by the (fresh) booking id, so a leftover from a previous
- * run is harmless — but it still piles up in Redis. Draining the queue before each test
- * keeps that clean, the same intent as `resetDatabase`.
+ * delayed 15 minutes and keyed by the (fresh) booking id (`hold-<id>`), so a leftover from
+ * a previous run is harmless — but it still piles up in Redis. Draining the queue before
+ * each test keeps that clean, the same intent as `resetDatabase`.
  */
 export async function resetQueue(app: INestApplication<App>): Promise<void> {
   await bookingExpiryQueue(app).obliterate({ force: true });
