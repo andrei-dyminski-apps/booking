@@ -24,23 +24,27 @@ import {
   type NotificationContent,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
+import type { SetAside } from "../../common/job-failure";
 import type { Page } from "../../common/paging";
 import { NotificationService } from "../../notification/notification.service";
 import { WaitlistService } from "../../waitlist/waitlist.service";
 import type { FreedNights } from "../../waitlist/waitlist.types";
 import {
-  BookingRepository,
   DatesUnavailableError,
   GuestNotFoundError,
   ListingNotFoundError,
   OwnListingError,
-  type BookingWithListingOwner,
-  type CancelledStay,
-  type ConfirmedStay,
-  type CreatedBooking,
-  type RefundTarget,
-  type ReleasedHold,
-} from "../infrastructure/booking.repository";
+} from "../domain/booking.errors";
+import type {
+  BookingCursor,
+  BookingWithListingOwner,
+  CancelledStay,
+  ConfirmedStay,
+  CreatedBooking,
+  RefundTarget,
+  ReleasedHold,
+} from "../domain/booking.types";
+import { BookingRepository } from "../infrastructure/booking.repository";
 import {
   RefundFailureRepository,
   type RefundFailure,
@@ -51,9 +55,12 @@ import {
   type OpenedPayment,
   type PaymentEvent,
 } from "../../payment/application/ports/payment-gateway";
-import type { BookingCursor } from "./booking-cursor";
 import { BookingPaymentHandler } from "./booking-payment.handler";
-import { BookingService, stayNoticeOf } from "./booking.service";
+import {
+  BookingService,
+  MAX_REFUND_ATTEMPTS,
+  stayNoticeOf,
+} from "./booking.service";
 import { BookingJobs } from "./ports/booking-jobs";
 import { StayLifecycle, type StayListener } from "./stay-lifecycle";
 import { ACTIVE_STATUSES, holdExpiry } from "../domain/booking-status";
@@ -324,13 +331,50 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
     return { paymentId: found.paymentId };
   }
 
+  /** The failed runs of an owed refund by booking, and whether it was set aside. */
+  readonly refundFailures = new Map<
+    string,
+    { attempts: number; setAside: boolean }
+  >();
+
+  /** The fewest failures first, leaving out what was set aside or waits on a dispute. */
   findOwedRefunds(limit: number): Promise<string[]> {
+    const attemptsOf = (id: string) =>
+      this.refundFailures.get(id)?.attempts ?? 0;
+
     return Promise.resolve(
       this.allBookings()
-        .filter((booking) => booking.refundOwed !== null)
+        .filter(
+          (booking) =>
+            booking.refundOwed !== null &&
+            booking.dispute !== "OPEN" &&
+            this.refundFailures.get(booking.id)?.setAside !== true,
+        )
         .map((booking) => booking.id)
+        .sort((left, right) => attemptsOf(left) - attemptsOf(right))
         .slice(0, limit),
     );
+  }
+
+  recordRefundFailure(
+    id: string,
+    _error: string,
+    maxAttempts: number,
+  ): Promise<SetAside | null> {
+    const failure = this.refundFailures.get(id) ?? {
+      attempts: 0,
+      setAside: false,
+    };
+
+    if (this.rows.get(id)?.booking.refundOwed == null || failure.setAside) {
+      return Promise.resolve(null);
+    }
+
+    failure.attempts += 1;
+    failure.setAside = failure.attempts >= maxAttempts;
+    this.refundFailures.set(id, failure);
+
+    return Promise.resolve({ ...failure });
   }
 
   /** The total only upwards, and the debt cleared with it. */
@@ -344,6 +388,7 @@ class FakeBookingRepository implements PublicOf<BookingRepository> {
     }
 
     found.booking.refundOwed = null;
+    this.refundFailures.delete(id);
 
     return Promise.resolve();
   }
@@ -2079,6 +2124,45 @@ describe("BookingService", () => {
         refundedAmount: AMOUNT,
         refundOwed: null,
       });
+    });
+
+    it("sets a refund Stripe keeps refusing aside and tells the admins", async () => {
+      const id = await paidStay(30);
+      bookingJobs.worker = null;
+      await service.remove(id, guest);
+      paymentGateway.refusing = true;
+
+      for (let run = 1; run < MAX_REFUND_ATTEMPTS; run += 1) {
+        await expect(service.refundCancellation(id)).rejects.toThrow();
+      }
+
+      expect(notificationService.toAdmins).toEqual([]);
+
+      // The last attempt ends the job's retries instead of failing it once more.
+      await expect(service.refundCancellation(id)).resolves.toBe(false);
+      expect(notificationService.toAdmins).toEqual([
+        {
+          type: NotificationType.CANCELLATION_REFUND_FAILED,
+          data: { bookingId: id, error: expect.any(String) as string },
+        },
+      ]);
+      // Still owed, and left to a person: the sweep no longer reads it.
+      expect(bookingRepository.rows.get(id)?.booking.refundOwed).toBe(AMOUNT);
+      await expect(bookingRepository.findOwedRefunds(50)).resolves.toEqual([]);
+    });
+
+    it("reads the debts that failed least first, so one that keeps failing cannot block the rest", async () => {
+      const failing = await paidStay(30);
+      bookingJobs.worker = null;
+      await service.remove(failing, guest);
+      await bookingRepository.recordRefundFailure(failing, "refused", 99);
+
+      const fresh = await paidStay(31);
+      await service.remove(fresh, guest);
+
+      await expect(bookingRepository.findOwedRefunds(1)).resolves.toEqual([
+        fresh,
+      ]);
     });
 
     it("keeps a refund owed while a dispute opened after the cancellation is open", async () => {

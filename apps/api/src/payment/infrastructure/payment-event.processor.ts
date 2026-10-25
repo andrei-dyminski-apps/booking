@@ -11,12 +11,7 @@ import {
   type ProcessEventJobData,
 } from "./payment-event.queue";
 
-/**
- * The three jobs of the webhook inbox: `process-event` handles the event it names, the
- * repeatable `sweep-events` re-queues whatever a lost job left unprocessed, and the daily
- * `prune-events` deletes what is past its retention. A failure is thrown, so BullMQ tries
- * the event again — and logged here, since BullMQ says nothing of it on its own.
- */
+/** The inbox's jobs: one event, the sweep, and the daily prune. */
 @Processor(PAYMENT_EVENT_QUEUE)
 export class PaymentEventProcessor extends WorkerHost {
   private readonly logger = new Logger(PaymentEventProcessor.name);
@@ -51,7 +46,6 @@ export class PaymentEventProcessor extends WorkerHost {
     }
   }
 
-  /** Every failed attempt, the last one marked — see `describeJobFailure`. */
   @OnWorkerEvent("failed")
   onFailed(job: Job<PaymentEventJobData> | undefined, error: Error): void {
     this.logger.error(describeJobFailure(job, error), error.stack);

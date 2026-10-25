@@ -1,20 +1,15 @@
 import type { IncomingMessage } from "node:http";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 
-/**
- * The routes whose body is checked against a signature over its exact bytes — the two
- * Stripe webhooks. The parsed JSON cannot be turned back into those bytes.
- */
+/** The Stripe webhooks: their signature is over the exact bytes, which parsed JSON loses. */
 const SIGNED_BODY_PATHS: ReadonlySet<string> = new Set([
   "/payments/webhook",
   "/payouts/webhook",
 ]);
 
 /**
- * Nest's own two parsers, with the raw body kept beside the parsed one for the signed routes
- * alone — rather than Nest's `rawBody: true`, which keeps a second copy of every request
- * body for the whole API. For an application created with `bodyParser: false`; `main.ts`
- * and the e2e spec that posts to the webhooks both call it.
+ * Nest's two parsers, keeping the raw body for the signed routes alone — `rawBody: true`
+ * would keep a second copy of every body. For an app created with `bodyParser: false`.
  */
 export function useBodyParsers(app: NestExpressApplication): void {
   app.useBodyParser("json", { verify: keepSignedBody });

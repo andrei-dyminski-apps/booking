@@ -25,11 +25,12 @@ import {
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
 import { ownsOrIsAdmin } from "../../auth/ownership";
+import { errorText, type SetAside } from "../../common/job-failure";
 import { readCursor, type Page } from "../../common/paging";
 import { NotificationService } from "../../notification/notification.service";
 import { WaitlistService } from "../../waitlist/waitlist.service";
+import { BookingRepository } from "../infrastructure/booking.repository";
 import {
-  BookingRepository,
   CancellationInProgressError,
   DatesUnavailableError,
   GuestNotFoundError,
@@ -37,11 +38,14 @@ import {
   OwnListingError,
   StayTooCheapError,
   StayTooExpensiveError,
-  type BookingWithListingOwner,
-  type CancelledStay,
-  type CreatedBooking,
-  type ReleasedHold,
-} from "../infrastructure/booking.repository";
+} from "../domain/booking.errors";
+import type {
+  BookingCursor,
+  BookingWithListingOwner,
+  CancelledStay,
+  CreatedBooking,
+  ReleasedHold,
+} from "../domain/booking.types";
 import { PaymentGateway } from "../../payment/application/ports/payment-gateway";
 import { toIsoDate } from "../../prisma/iso-date";
 import { CURRENCY } from "../../payment/domain/currency";
@@ -50,11 +54,7 @@ import { isCancellable } from "../domain/booking-status";
 import { BookingJobs } from "./ports/booking-jobs";
 import { StayLifecycle } from "./stay-lifecycle";
 import { notifyBothSides } from "./stay-notices";
-import {
-  decodeCursor,
-  encodeCursor,
-  type BookingCursor,
-} from "./booking-cursor";
+import { decodeCursor, encodeCursor } from "./booking-cursor";
 
 /**
  * The application layer of the booking module: HTTP takes, reads and cancels stays, and the
@@ -234,12 +234,7 @@ export class BookingService {
     return booking;
   }
 
-  /**
-   * The secret of the hold's PaymentIntent, opened on the first request and answered again
-   * after it (the gateway names the payment after the booking). Only the guest is answered —
-   * `403` to the host and the admin, who may read the row — and only while the hold waits
-   * for payment and is inside its deadline (`409`).
-   */
+  /** `403` to the host and the admin, who may read the row; `409` outside the hold's deadline. */
   async payment(id: string, user: AuthenticatedUser): Promise<BookingPayment> {
     const { booking } = await this.getReadable(id, user);
 
@@ -267,8 +262,7 @@ export class BookingService {
       throw new BadGatewayException("The payment could not be opened");
     }
 
-    // The hold was released while the provider answered: the release read no payment to
-    // withdraw, so this one is withdrawn here instead of being handed to a page that pays.
+    // Released while the provider answered: the release read no payment to withdraw.
     if (!(await this.bookingRepository.attachPayment(id, opened.id))) {
       await this.withdrawPayments([{ paymentId: opened.id }]);
 
@@ -300,19 +294,9 @@ export class BookingService {
   }
 
   /**
-   * Cancelling is the guest's decision and an admin's, not the owner's: an owner may read
-   * the stay (so gets a `403`), a stranger may not (so gets the `404` of `getReadable`).
-   * Neither may cancel a stay that has begun (`isCancellableOn`, `409`).
-   *
-   * **A cancellation is final when it is answered, and its refund follows it.** What goes
-   * back is decided here by `refundOnCancel` and written with `CANCELLED` in one statement
-   * (`refund_owed`); the `refund-cancellation` job sends it. The request calls no payment
-   * provider, so a slow Stripe slows a refund, not the answer. A hold's payment is withdrawn
-   * afterwards; one that completes anyway reaches the webhook and goes back.
-   *
-   * The cancellation matches only the status the refund was decided by — a hold confirmed in
-   * between is a `409` to try again — and runs under `whileCancelling`, taken only once the
-   * caller is known to be allowed.
+   * The guest's decision and an admin's, not the owner's: an owner may read the stay (`403`),
+   * a stranger may not (`404`). The refund is decided here and written with `CANCELLED`
+   * (`refund_owed`); a job sends it, so a slow Stripe slows a refund, not the answer.
    */
   async remove(id: string, user: AuthenticatedUser): Promise<void> {
     await this.mayCancel(id, user);
@@ -331,12 +315,9 @@ export class BookingService {
         });
     const { booking, listingOwnerId } = found;
 
-    // The hold no longer needs releasing; the job is idempotent, so this is a tidy-up and
-    // fails silently for the same reason scheduling one does.
     await this.bookingJobs.cancelExpiry(id);
 
-    // The payment is the one the cancelled row named, so one a payment page attached a
-    // moment ago goes too.
+    // The payment the cancelled row named, so one attached a moment ago goes too.
     if (wasHold) {
       await this.withdrawPayments([cancelled]);
     }
@@ -358,7 +339,6 @@ export class BookingService {
     }
   }
 
-  /** The half of `remove` that runs under the lock: the fresh read, what is owed, the write. */
   private async cancelReadable(
     id: string,
     user: AuthenticatedUser,
@@ -382,8 +362,6 @@ export class BookingService {
       );
     }
 
-    // Read before the cancellation rather than after it: what is withdrawn afterwards depends
-    // on what the stay was, and the row is about to say something else.
     const wasHold = booking.status === BookingStatus.PENDING_PAYMENT;
     const refundOwed = this.refundOwedOnCancel(found, user);
     const cancelled = await this.bookingRepository.cancel(
@@ -397,11 +375,7 @@ export class BookingService {
     return { found, wasHold, cancelled, refundOwed };
   }
 
-  /**
-   * Why a cancellation matched nothing. Gone from the active set — cancelled by a request
-   * racing this one, or released — is the `404` cancelling twice always was. Still active
-   * means the hold was paid for in between, and that is a `409` worth retrying.
-   */
+  /** Still active means the hold was paid for in between: a `409` worth retrying. */
   private async refuseChangedCancellation(id: string): Promise<never> {
     const now = await this.bookingRepository.findByIdWithListingOwner(id);
 
@@ -414,11 +388,7 @@ export class BookingService {
     throw new NotFoundException(`Booking ${id} not found`);
   }
 
-  /**
-   * What cancelling this stay gives back — `null` for nothing: no payment behind it, outside
-   * the free window, refunded in full already, or a dispute lost (the bank returned the
-   * money). An open dispute is a `409`: Stripe refuses to refund a disputed payment.
-   */
+  /** `null` for nothing. An open dispute is a `409`: Stripe refuses to refund a disputed payment. */
   private refundOwedOnCancel(
     { booking, paymentId }: BookingWithListingOwner,
     user: AuthenticatedUser,
@@ -448,15 +418,24 @@ export class BookingService {
   }
 
   /**
-   * The `refund-cancellation` job, and the sweep's: sends what a cancellation owes and
-   * records it, under `whileCancelling` so the refund's webhook reads it as this
-   * cancellation's. A failure is thrown and the debt stays on the row. The host's share is
-   * settled afterwards, best effort — the refund's webhook settles it again.
+   * Under `whileCancelling`, so the refund's webhook reads it as this cancellation's. The
+   * host's share is settled after, best effort — the refund's webhook settles it again.
    */
   async refundCancellation(id: string): Promise<boolean> {
-    const refunded = await this.bookingRepository.whileCancelling(id, () =>
-      this.sendOwedRefund(id),
-    );
+    let refunded: boolean;
+
+    try {
+      refunded = await this.bookingRepository.whileCancelling(id, () =>
+        this.sendOwedRefund(id),
+      );
+    } catch (error) {
+      // Held by another run: nothing failed yet.
+      if (error instanceof CancellationInProgressError) throw error;
+
+      if (await this.setAsideRefundAfter(id, error)) return false;
+
+      throw error;
+    }
 
     if (!refunded) return false;
 
@@ -471,10 +450,7 @@ export class BookingService {
     return true;
   }
 
-  /**
-   * The debts still on the rows, `SWEEP_BATCH` at a time; one failure is logged and left
-   * for the next minute.
-   */
+  /** One failure is logged and left for the next minute. */
   async refundOwedCancellations(): Promise<number> {
     let sent = 0;
 
@@ -484,7 +460,7 @@ export class BookingService {
       try {
         if (await this.refundCancellation(id)) sent += 1;
       } catch (error) {
-        // Taken by the refund job between the read and here: its business, not a failure.
+        // Taken by the refund job meanwhile: not a failure.
         if (error instanceof CancellationInProgressError) continue;
 
         this.logger.error(
@@ -496,23 +472,56 @@ export class BookingService {
     return sent;
   }
 
+  /** Whether this failed run set the debt aside. A failure to count it leaves it to retry. */
+  private async setAsideRefundAfter(
+    id: string,
+    error: unknown,
+  ): Promise<boolean> {
+    const message = errorText(error);
+    let failure: SetAside | null;
+
+    try {
+      failure = await this.bookingRepository.recordRefundFailure(
+        id,
+        message,
+        MAX_REFUND_ATTEMPTS,
+      );
+    } catch (recordError) {
+      this.logger.error(
+        `Could not count the failed refund of booking ${id}: ${String(recordError)}`,
+      );
+
+      return false;
+    }
+
+    if (failure === null || !failure.setAside) return false;
+
+    this.logger.error(
+      `The refund owed on booking ${id} failed ${String(failure.attempts)} times and is set aside: ${message}`,
+    );
+    await this.notificationService.notifyAdmins({
+      type: NotificationType.CANCELLATION_REFUND_FAILED,
+      data: { bookingId: id, error: message },
+    });
+
+    return true;
+  }
+
   /**
-   * The refund, capped by what is left of the payment — read from Stripe as well as the row,
-   * since a dashboard refund's webhook may not have arrived, and Stripe refuses a refund
-   * larger than the rest. The total recorded starts from the row: the part it does not know
-   * of is the dashboard's, and that webhook tells the guest.
+   * Capped by what Stripe says is left too, since a dashboard refund's webhook may be late.
+   * The total recorded starts from the row: the rest is the dashboard's, and its webhook
+   * tells the guest.
    */
   private async sendOwedRefund(id: string): Promise<boolean> {
     const found = await this.bookingRepository.findByIdWithListingOwner(id);
     const owed = found?.booking.refundOwed ?? null;
 
-    // Paid already, by the job or the sweep racing it.
     if (found === null || owed === null) return false;
 
     const { booking, paymentId } = found;
 
     // Opened after the cancellation: Stripe refuses to refund a disputed payment, so the
-    // debt waits for the outcome. The sweep asks again every minute, without calling Stripe.
+    // debt waits for the outcome, which is when the sweep reads it again.
     if (booking.dispute === DisputeStatus.OPEN) return false;
 
     if (booking.dispute === DisputeStatus.LOST || paymentId === null) {
@@ -535,8 +544,7 @@ export class BookingService {
       return false;
     }
 
-    // One cancellation per booking, so the key needs no amount: a retry after a lost answer
-    // finds the refund already sent rather than sending a second one.
+    // One cancellation per booking, so the key needs no amount.
     const sent = await this.paymentGateway.refund(
       paymentId,
       amount,
@@ -551,12 +559,11 @@ export class BookingService {
     return sent > 0;
   }
 
-  /** The `withdraw-payment` job; it throws, so an unreachable provider is tried again. */
   async withdrawPayment(paymentId: string): Promise<void> {
     await this.paymentGateway.cancel(paymentId);
   }
 
-  /** Queued rather than called here: nobody who let a hold go should wait on Stripe for it. */
+  /** Queued: nobody who let a hold go should wait on Stripe for it. */
   private async withdrawPayments(
     holds: readonly { paymentId: string | null }[],
   ): Promise<void> {
@@ -659,6 +666,12 @@ export class BookingService {
     return found;
   }
 }
+
+/**
+ * How many failed runs set an owed refund aside: about half an hour of the minute sweep
+ * after the job's own attempts, the bound the payment inbox keeps too.
+ */
+export const MAX_REFUND_ATTEMPTS = 30;
 
 /**
  * How many owed refunds one sweep sends: each is a call or two to Stripe, one after another,

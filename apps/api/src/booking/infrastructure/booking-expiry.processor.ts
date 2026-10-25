@@ -15,31 +15,13 @@ import {
   type WithdrawPaymentJobData,
 } from "./booking-expiry.queue";
 
-/** How many jobs one instance runs at once — see the class comment. */
 const WORKER_CONCURRENCY = 4;
 
 /**
- * The proactive half of hold expiry, in two jobs over one queue: `expire-hold` releases
- * the hold it names at that hold's own deadline, and the repeatable `sweep-lapsed-holds`
- * releases whatever the first one missed — a job lost with the Redis it lived in, a
- * `scheduleExpiry` that never reached the queue at all. The lazy half runs inside
- * `BookingRepository.create`.
- *
- * Both updates match only a still-pending, past-deadline row, so a job that fires after
- * the booking was paid or cancelled is a harmless no-op and a job that runs twice is the
- * same one. They go through `BookingService` rather than the repository, because a
- * released hold is news to both of its sides.
- *
- * Two more jobs are what letting a stay go leaves behind at Stripe, done here rather than
- * in the request or the job that let it go: `withdraw-payment` withdraws a hold's
- * PaymentIntent, and `refund-cancellation` sends the refund a cancellation owes. A failure
- * of either is thrown, so BullMQ tries it again — and `sweep-owed-refunds`, a scheduler of
- * its own, sends whatever refund is still owed after that, since the debt is on the row and
- * not only in Redis.
- *
- * Several jobs at a time, so that a refund waiting on Stripe or on a lease does not hold
- * the release of a hold behind it. Every job here is safe to run beside any other: the
- * releases are conditional updates, and the refunds run under the cancellation lease.
+ * The releases match only a pending, past-deadline row, so a late or repeated job is a
+ * no-op, and they go through `BookingService` because a released hold is news to both
+ * sides. Several jobs at a time, so a refund waiting on Stripe or a lease does not hold a
+ * release behind it — the releases are conditional and the refunds run under the lease.
  */
 @Processor(BOOKING_EXPIRY_QUEUE, { concurrency: WORKER_CONCURRENCY })
 export class BookingExpiryProcessor extends WorkerHost {
@@ -87,7 +69,6 @@ export class BookingExpiryProcessor extends WorkerHost {
     }
   }
 
-  /** Every failed attempt, the last one marked — see `describeJobFailure`. */
   @OnWorkerEvent("failed")
   onFailed(job: Job<BookingExpiryJobData> | undefined, error: Error): void {
     this.logger.error(describeJobFailure(job, error), error.stack);

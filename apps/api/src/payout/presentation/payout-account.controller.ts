@@ -12,17 +12,13 @@ import { ApiErrorDto } from "../../common/dto/api-error.dto";
 import { PayoutService } from "../application/payout.service";
 import { AccountSessionDto, HostAccountDto } from "./dto/payout.dto";
 
-/**
- * The caller's own payout account — no account id in any route, so nobody reaches anybody
- * else's. A `USER` only: hosting is owning a listing, any user may, and an admin hosts
- * nothing.
- */
+/** No account id in any route, so nobody reaches anybody else's. An admin hosts nothing. */
 @Controller("payouts/account")
 @Roles(Role.USER)
 export class PayoutAccountController {
   constructor(private readonly payoutService: PayoutService) {}
 
-  /** Where the caller stands, as the row says it — a read that asks Stripe nothing. */
+  /** Asks Stripe nothing. */
   @Get()
   @ApiOkResponse({ type: HostAccountDto })
   @ApiUnauthorizedResponse({
@@ -33,11 +29,7 @@ export class PayoutAccountController {
     return this.payoutService.account(user);
   }
 
-  /**
-   * Asks Stripe where an unfinished onboarding stands and writes down the answer — what the
-   * payouts screen calls when a host comes back from the form, before the account event has
-   * landed. A `POST`, because it writes the flag and may queue the payouts that waited.
-   */
+  /** A `POST`: it writes the flag and may queue the payouts that waited. */
   @Post("refresh")
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ type: HostAccountDto })
@@ -49,11 +41,7 @@ export class PayoutAccountController {
     return this.payoutService.refresh(user);
   }
 
-  /**
-   * A session for Stripe's embedded components, opening the account on the first call. A
-   * `POST` because it creates — the account the first time, a session every time — and a
-   * session is never cached: the components ask for a fresh one whenever theirs runs out.
-   */
+  /** A `POST`: it creates the account the first time and a session every time. */
   @Post("session")
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ type: AccountSessionDto })

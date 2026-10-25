@@ -1,45 +1,18 @@
 import { Injectable } from "@nestjs/common";
-import { PAYOUT_DELAY_HOURS, type BookingStatus } from "@repo/contracts";
+import { DisputeStatus, PAYOUT_DELAY_HOURS } from "@repo/contracts";
 import { subHours } from "date-fns";
-import { DisputeStatus, type Prisma } from "../../generated/prisma/client";
-import {
-  RELEASED_HOLD_INCLUDE,
-  toRefundTarget,
-  type ReleasedHold,
-} from "../../booking/infrastructure/booking.repository";
+import type { Prisma } from "../../generated/prisma/client";
 import {
   whileLeased,
   type LeaseTiming,
 } from "../../booking/infrastructure/booking-lease";
+import {
+  RELEASED_HOLD_INCLUDE,
+  toRefundTarget,
+} from "../../booking/infrastructure/stay-rows";
+import type { SetAside } from "../../common/job-failure";
 import { PrismaService } from "../../prisma/prisma.service";
-import type { DisputeState, PayoutFacts } from "../domain/payout";
-
-/** The host side of a payout: where it goes, and whether it can go there yet. */
-export type PayoutDestination = {
-  accountId: string | null;
-  enabled: boolean;
-};
-
-/**
- * A stay as the money after its payment sees it: paid, refunded and transferred, the two
- * people a notice names, and where the host is paid — read through the listing.
- */
-export type SettledStay = PayoutFacts & {
-  bookingId: string;
-  status: BookingStatus;
-  chargeId: string | null;
-  transferId: string | null;
-  /** What the host holds of this stay now; `null` before a transfer. */
-  paidOutAmount: number | null;
-  hold: ReleasedHold;
-  destination: PayoutDestination;
-};
-
-/** A user as their payout account is opened for them. */
-export type PayoutAccountHolder = PayoutDestination & {
-  email: string;
-  name: string;
-};
+import type { PayoutAccountHolder, SettledStay } from "../domain/payout.types";
 
 const SETTLED_STAY_INCLUDE = {
   listing: {
@@ -51,9 +24,8 @@ const SETTLED_STAY_INCLUDE = {
 } satisfies Prisma.BookingInclude;
 
 /**
- * The queries behind host payouts — a booking's money after its payment, and the payout
- * account on a user. Apart from `BookingRepository` because none of it is about the slot.
- * Every write is conditional on what the caller read.
+ * A stay's money after its payment, and the payout account on a user — apart from
+ * `BookingRepository` because none of it is about the slot.
  */
 @Injectable()
 export class PayoutRepository {
@@ -81,7 +53,6 @@ export class PayoutRepository {
         };
   }
 
-  /** Remembers the account opened for a user, only into an empty column. */
   async attachAccount(userId: string, accountId: string): Promise<void> {
     await this.prismaService.user.updateMany({
       where: { id: userId, stripeAccountId: null },
@@ -90,8 +61,7 @@ export class PayoutRepository {
   }
 
   /**
-   * Writes what Stripe last said about an account's transfers, and answers its user (`null`
-   * for an account this API never opened). `newlyEnabled` is true only for the write that
+   * `null` for an account this API never opened. `newlyEnabled` only for the write that
    * switched it on, so of two runs with the same news one pays what was waiting.
    */
   async setPayoutsEnabled(
@@ -106,8 +76,6 @@ export class PayoutRepository {
     if (user === null) return null;
 
     if (!enabled) {
-      // Conditional, like the write below: the payouts page asks on every view while
-      // onboarding is unfinished, and the column is already empty for all of those.
       await this.prismaService.user.updateMany({
         where: { id: user.id, payoutsEnabledAt: { not: null } },
         data: { payoutsEnabledAt: null },
@@ -116,7 +84,6 @@ export class PayoutRepository {
       return { userId: user.id, newlyEnabled: false };
     }
 
-    // The moment is kept when it is already set: when payouts first opened is the fact.
     const { count } = await this.prismaService.user.updateMany({
       where: { id: user.id, payoutsEnabledAt: null },
       data: { payoutsEnabledAt: new Date() },
@@ -130,11 +97,8 @@ export class PayoutRepository {
   }
 
   /**
-   * Runs `work` with the stay read under the settlement lease (`whileLeased`), which only
-   * other settlements take: a run that arrives while another is between its read and its
-   * write waits, and then reads what that one left. Without it two runs sized from the
-   * same `paid_out_amount` reverse the same money under two different keys. A lease rather
-   * than a lock held by a transaction, because the work calls Stripe.
+   * The stay read under the settlement lease: without it two runs sized from the same
+   * `paid_out_amount` reverse the same money under two different keys.
    */
   async whileSettling<T>(
     bookingId: string,
@@ -155,7 +119,6 @@ export class PayoutRepository {
     );
   }
 
-  /** What a refund or a dispute event names: the payment, which is unique to one stay. */
   async findStayByPayment(paymentId: string): Promise<SettledStay | null> {
     const row = await this.prismaService.booking.findUnique({
       where: { paymentIntentId: paymentId },
@@ -166,10 +129,8 @@ export class PayoutRepository {
   }
 
   /**
-   * The paid stays due and not yet sent, to a host who can be paid — a coarse cut over the
-   * partial index; what is owed is the service's rule. A stay refunded in full is left out,
-   * or every sweep would read it again for good. At most `limit`, the earliest check-ins
-   * first; the next sweep reads the rest.
+   * A coarse cut over the partial index; what is owed is the service's rule. A stay refunded
+   * in full is left out, or every sweep would read it again for good.
    */
   async findDuePayouts(
     now: Date,
@@ -179,10 +140,10 @@ export class PayoutRepository {
     const where: Prisma.BookingWhereInput = {
       paidAt: { not: null },
       transferId: null,
+      payoutFailedAt: null,
       // A refund still on its way is sent first; the stay comes back once it is recorded.
       refundOwed: null,
-      // Due a fixed time after midnight of the check-in day, so every check-in on or before
-      // the day that many hours ago is due. `from` is a `@db.Date`, compared as a day.
+      // `from` is a `@db.Date`, compared as a day.
       from: { lte: subHours(now, PAYOUT_DELAY_HOURS) },
       AND: [
         { OR: [{ disputeStatus: null }, { disputeStatus: DisputeStatus.WON }] },
@@ -206,17 +167,46 @@ export class PayoutRepository {
     const rows = await this.prismaService.booking.findMany({
       where,
       select: { id: true },
-      orderBy: { from: "asc" },
+      // The fewest failures first, so stays that keep failing cannot fill every batch.
+      orderBy: [{ payoutAttempts: "asc" }, { from: "asc" }],
       take: limit,
     });
 
     return rows.map(({ id }) => id);
   }
 
-  /**
-   * Records a transfer, only into an empty column (`false`: another run recorded the same
-   * one). A refund that landed meanwhile does not stop it — the money moved; `settle` follows.
-   */
+  /** `recordRefundFailure`'s two steps. `null` for a stay paid out or set aside already. */
+  async recordPayoutFailure(
+    bookingId: string,
+    error: string,
+    maxAttempts: number,
+  ): Promise<SetAside | null> {
+    const pending = {
+      id: bookingId,
+      transferId: null,
+      payoutFailedAt: null,
+    } satisfies Prisma.BookingWhereInput;
+    const [counted] = await this.prismaService.booking.updateManyAndReturn({
+      where: pending,
+      data: { payoutAttempts: { increment: 1 }, payoutLastError: error },
+      select: { payoutAttempts: true },
+    });
+
+    if (counted === undefined) return null;
+
+    if (counted.payoutAttempts < maxAttempts) {
+      return { attempts: counted.payoutAttempts, setAside: false };
+    }
+
+    const { count } = await this.prismaService.booking.updateMany({
+      where: pending,
+      data: { payoutFailedAt: new Date() },
+    });
+
+    return { attempts: counted.payoutAttempts, setAside: count > 0 };
+  }
+
+  /** Only into an empty column. A refund that landed meanwhile does not stop it; `settle` follows. */
   async recordPayout(
     bookingId: string,
     transferId: string,
@@ -230,13 +220,10 @@ export class PayoutRepository {
     return count > 0;
   }
 
-  /**
-   * Moves a dispute forward, never back — Stripe does not order its events, and a late
-   * `created` must not reopen a settled dispute. `false`: already there or past it.
-   */
+  /** Forward only: Stripe does not order its events, and a late `created` must not reopen one. */
   async setDisputeStatus(
     bookingId: string,
-    status: DisputeState,
+    status: DisputeStatus,
   ): Promise<boolean> {
     const { count } = await this.prismaService.booking.updateMany({
       where: {
@@ -255,10 +242,7 @@ export class PayoutRepository {
   }
 }
 
-/**
- * Room for one Stripe call and the reads around it. A run that waits longer than ten
- * seconds gives up with `LeaseBusyError`, and its job or delivery comes again.
- */
+/** Room for one Stripe call; a run that waits longer gives up and its job or delivery comes again. */
 const SETTLE_LEASE: LeaseTiming = {
   leaseMs: 30_000,
   waitMs: 10_000,
@@ -278,10 +262,7 @@ async function readStay(
   return row === null ? null : toSettledStay(row);
 }
 
-/**
- * Lowers what the host holds from exactly what the caller read. Still conditional under the
- * lease: it is what makes a write by anything that does not take the lease a `false`.
- */
+/** Conditional even under the lease, so a write by anything outside it reads as `false`. */
 async function writeReversal(
   client: Pick<Prisma.TransactionClient, "booking">,
   bookingId: string,

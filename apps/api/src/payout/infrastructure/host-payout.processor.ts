@@ -12,13 +12,7 @@ import {
   type PayOutJobData,
 } from "./host-payout.queue";
 
-/**
- * The three payout jobs over one queue: `pay-out` pays the stay it names when its payout
- * falls due, `pay-host` pays what waited for a host whose account has just been enabled,
- * and the repeatable `sweep-due-payouts` pays whatever the other two missed.
- * Both go through `PayoutService`, where a payout is idempotent — a job that runs twice, or
- * after the sweep paid the stay, sends nothing more.
- */
+/** A payout is idempotent in `PayoutService`, so a job that runs twice sends nothing more. */
 @Processor(HOST_PAYOUT_QUEUE)
 export class HostPayoutProcessor extends WorkerHost {
   private readonly logger = new Logger(HostPayoutProcessor.name);
@@ -45,7 +39,6 @@ export class HostPayoutProcessor extends WorkerHost {
     if (paid > 0) this.logger.log(`Paid ${String(paid)} due payout(s)`);
   }
 
-  /** Every failed attempt, the last one marked — see `describeJobFailure`. */
   @OnWorkerEvent("failed")
   onFailed(job: Job<HostPayoutJobData> | undefined, error: Error): void {
     this.logger.error(describeJobFailure(job, error), error.stack);

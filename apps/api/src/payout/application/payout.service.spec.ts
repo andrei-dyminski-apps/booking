@@ -5,17 +5,19 @@ import {
   NotificationType,
   payoutDueAt,
   Role,
+  type DisputeStatus,
   type NotificationContent,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
+import type { SetAside } from "../../common/job-failure";
 import { NotificationService } from "../../notification/notification.service";
-import type { DisputeState } from "../domain/payout";
+import type { PayoutAccountHolder, SettledStay } from "../domain/payout.types";
+import { PayoutRepository } from "../infrastructure/payout.repository";
 import {
-  PayoutRepository,
-  type PayoutAccountHolder,
-  type SettledStay,
-} from "../infrastructure/payout.repository";
-import { PayoutService, type SettlementEvent } from "./payout.service";
+  MAX_PAYOUT_ATTEMPTS,
+  PayoutService,
+  type SettlementEvent,
+} from "./payout.service";
 import {
   PayoutGateway,
   type AccountEvent,
@@ -150,13 +152,45 @@ class FakePayoutRepository implements PublicOf<PayoutRepository> {
     };
   }
 
+  /** The failed payouts by booking, and whether each was set aside. */
+  readonly payoutFailures = new Map<
+    string,
+    { attempts: number; setAside: boolean }
+  >();
+
+  recordPayoutFailure(
+    bookingId: string,
+    _error: string,
+    maxAttempts: number,
+  ): Promise<SetAside | null> {
+    const stay = this.stays.get(bookingId);
+    const failure = this.payoutFailures.get(bookingId) ?? {
+      attempts: 0,
+      setAside: false,
+    };
+
+    if (stay === undefined || stay.transferId !== null || failure.setAside) {
+      return Promise.resolve(null);
+    }
+
+    failure.attempts += 1;
+    failure.setAside = failure.attempts >= maxAttempts;
+    this.payoutFailures.set(bookingId, failure);
+
+    return Promise.resolve({ ...failure });
+  }
+
   findDuePayouts(now: Date, limit: number, hostId?: string): Promise<string[]> {
+    const attemptsOf = (bookingId: string) =>
+      this.payoutFailures.get(bookingId)?.attempts ?? 0;
+
     return Promise.resolve(
       [...this.stays.values()]
         .filter(
           (stay) =>
             stay.paid &&
             stay.transferId === null &&
+            this.payoutFailures.get(stay.bookingId)?.setAside !== true &&
             stay.refundOwed === null &&
             payoutDueAt(stay.hold.stay.from) <= now &&
             (stay.disputeStatus === null || stay.disputeStatus === "WON") &&
@@ -166,6 +200,7 @@ class FakePayoutRepository implements PublicOf<PayoutRepository> {
             (hostId === undefined || stay.hold.listingOwnerId === hostId),
         )
         .map((stay) => stay.bookingId)
+        .sort((left, right) => attemptsOf(left) - attemptsOf(right))
         .slice(0, limit),
     );
   }
@@ -204,7 +239,7 @@ class FakePayoutRepository implements PublicOf<PayoutRepository> {
   }
 
   /** Forward only: opened from none, settled from none or open. */
-  setDisputeStatus(bookingId: string, status: DisputeState): Promise<boolean> {
+  setDisputeStatus(bookingId: string, status: DisputeStatus): Promise<boolean> {
     const stay = this.stays.get(bookingId);
 
     if (
@@ -247,6 +282,9 @@ class FakePayoutGateway implements PublicOf<PayoutGateway> {
   /** How many reversals fail before Stripe takes one, as a network that drops them would. */
   failingReversals = 0;
 
+  /** Set to have Stripe refuse every transfer, as a restricted account's would be. */
+  refusingTransfers = false;
+
   createRecipientAccount(host: PayoutHost): Promise<string> {
     this.accounts.push(host);
 
@@ -264,6 +302,10 @@ class FakePayoutGateway implements PublicOf<PayoutGateway> {
   }
 
   transfer(payout: Payout): Promise<SentTransfer> {
+    if (this.refusingTransfers) {
+      return Promise.reject(new Error("The transfer was refused"));
+    }
+
     const key = `booking-${payout.bookingId}-payout`;
     const sent = this.transfers.get(key) ?? {
       ...payout,
@@ -349,11 +391,21 @@ class FakePayoutJobs implements PublicOf<PayoutJobs> {
   }
 }
 
-class FakeNotificationService implements Pick<NotificationService, "notify"> {
+class FakeNotificationService implements Pick<
+  NotificationService,
+  "notify" | "notifyAdmins"
+> {
   readonly notices: { userId: string; content: NotificationContent }[] = [];
+  readonly toAdmins: NotificationContent[] = [];
 
   notify(userId: string, content: NotificationContent): Promise<void> {
     this.notices.push({ userId, content });
+
+    return Promise.resolve();
+  }
+
+  notifyAdmins(content: NotificationContent): Promise<void> {
+    this.toAdmins.push(content);
 
     return Promise.resolve();
   }
@@ -519,6 +571,40 @@ describe("PayoutService", () => {
 
       expect(sent.map(({ userId }) => userId)).toEqual([HOST_ID]);
       expect(sent[0]?.content.data).toMatchObject({ amount: SHARE });
+    });
+
+    it("counts a transfer Stripe refuses, and sets the payout aside after the last attempt", async () => {
+      hostWith(ACCOUNT_ID, true);
+      paidStay(PAST);
+      payoutGateway.refusingTransfers = true;
+
+      await expect(service.payOut(BOOKING_ID)).rejects.toThrow(
+        "The transfer was refused",
+      );
+      expect(payoutRepository.payoutFailures.get(BOOKING_ID)).toEqual({
+        attempts: 1,
+        setAside: false,
+      });
+
+      for (let run = 2; run < MAX_PAYOUT_ATTEMPTS; run += 1) {
+        await expect(service.payOut(BOOKING_ID)).rejects.toThrow();
+      }
+
+      // The last attempt ends the retries: the job completes and the admins are told.
+      await expect(service.payOut(BOOKING_ID)).resolves.toBe(false);
+      expect(notificationService.toAdmins).toEqual([
+        {
+          type: NotificationType.PAYOUT_FAILED,
+          data: {
+            bookingId: BOOKING_ID,
+            error: "Error: The transfer was refused",
+          },
+        },
+      ]);
+      await expect(service.payDuePayouts()).resolves.toBe(0);
+      expect(payoutRepository.payoutFailures.get(BOOKING_ID)?.attempts).toBe(
+        MAX_PAYOUT_ATTEMPTS,
+      );
     });
 
     it("sends nothing before the payout falls due", async () => {

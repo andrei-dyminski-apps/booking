@@ -13,41 +13,31 @@ import {
   type StayNotice,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
+import { errorText, type SetAside } from "../../common/job-failure";
 import { NotificationService } from "../../notification/notification.service";
 import type { PaymentEvent } from "../../payment/application/ports/payment-gateway";
 import { roundCents, toCents } from "../../payment/domain/money";
 import { mayPayOut, owedToHost } from "../domain/payout";
-import {
-  PayoutRepository,
-  type PayoutAccountHolder,
-  type SettledStay,
-} from "../infrastructure/payout.repository";
+import type { PayoutAccountHolder, SettledStay } from "../domain/payout.types";
+import { PayoutRepository } from "../infrastructure/payout.repository";
 import { PayoutGateway, type AccountEvent } from "./ports/payout-gateway";
 import { PayoutJobs } from "./ports/payout-jobs";
 
-/**
- * The webhook events this service settles; `PayoutEventHandler` hands them over. A refund
- * is not one of them: recording it, and cancelling a stay it refunded in full, are the
- * booking side's, and it tells this service through `StayLifecycle` once they are done.
- */
+/** A refund is not one: the booking side records it and tells this one through `StayLifecycle`. */
 export type SettlementEvent = Extract<
   PaymentEvent,
   { kind: "disputed" | "disputeClosed" }
 >;
 
-/** The account events that can change whether a host can be paid. */
 const ACCOUNT_CHANGES = new Set([
   "v2.core.account[configuration.recipient].capability_status_updated",
   "v2.core.account[requirements].updated",
 ]);
 
 /**
- * The host's half of the money: the payout account, the transfer of their share once a stay
- * has begun, and what changes that share afterwards — a refund or a dispute. The guest pays
- * the platform; the host is paid `PAYOUT_DELAY_HOURS` after check-in by a separate transfer,
- * and `settle` takes back by a reversal whatever a later refund or lost dispute removes. A
- * host who cannot be paid yet is booked as usual; their payouts wait. Every transfer and
- * reversal goes under a key, and every write is conditional on what the run read.
+ * The host's half of the money: the payout account, the transfer once a stay has begun,
+ * and `settle`, which reverses whatever a later refund or lost dispute removes. Every
+ * transfer and reversal goes under a key, and every write is conditional on what was read.
  */
 @Injectable()
 export class PayoutService {
@@ -60,7 +50,6 @@ export class PayoutService {
     private readonly notificationService: NotificationService,
   ) {}
 
-  /** Where the caller stands with payouts, as the row says it. */
   async account(user: AuthenticatedUser): Promise<HostAccount> {
     const holder = await this.holderOf(user);
 
@@ -76,11 +65,9 @@ export class PayoutService {
   }
 
   /**
-   * Where the caller stands, asked of Stripe while onboarding is unfinished rather than only
-   * waiting for the account event: the screen a host comes back to after the form is where
-   * they look first, and the event may not have landed — or, on a laptop without
-   * `stripe listen`, may never land at all. What waited for the account is paid by a job.
-   * A provider that cannot be reached answers what the row says.
+   * Asks Stripe while onboarding is unfinished instead of waiting for the account event,
+   * which may not have landed when the host comes back from the form — or, without
+   * `stripe listen`, ever. An unreachable provider answers what the row says.
    */
   async refresh(user: AuthenticatedUser): Promise<HostAccount> {
     const holder = await this.holderOf(user);
@@ -116,10 +103,7 @@ export class PayoutService {
     return holder;
   }
 
-  /**
-   * A session for Stripe's embedded components, opening the caller's account the first time
-   * — named after the user at Stripe, written only into the empty column.
-   */
+  /** Opens the caller's account the first time, written only into the empty column. */
   async session(user: AuthenticatedUser): Promise<AccountSession> {
     const holder = await this.holderOf(user);
 
@@ -151,7 +135,6 @@ export class PayoutService {
     }
   }
 
-  /** The job that pays a confirmed stay's host when it falls due; the sweep covers a lost one. */
   async schedule(stay: Pick<StayNotice, "bookingId" | "from">): Promise<void> {
     await this.payoutJobs.schedulePayout(
       stay.bookingId,
@@ -160,20 +143,67 @@ export class PayoutService {
   }
 
   /**
-   * Pays the host of one stay if it is due, owed something, not held back by a dispute, and
-   * their account can receive transfers — asked of Stripe right before, not only read off
-   * the flag. The transfer is recorded as it was, even if a refund landed meanwhile, and
-   * `settle` takes back the difference. `accounts` caches Stripe's answer per run.
+   * Whether the account can receive transfers is asked of Stripe right before, not only
+   * read off the flag. A refund that lands meanwhile is taken back by `settle` afterwards.
+   * `accounts` caches Stripe's answer per run.
    */
   async payOut(
     bookingId: string,
     now = new Date(),
     accounts = new Map<string, boolean>(),
   ): Promise<boolean> {
+    try {
+      return await this.sendPayout(bookingId, now, accounts);
+    } catch (error) {
+      if (await this.setAsidePayoutAfter(bookingId, error)) return false;
+
+      throw error;
+    }
+  }
+
+  /** Whether this failed run set the payout aside. A failure after the transfer is not counted. */
+  private async setAsidePayoutAfter(
+    bookingId: string,
+    error: unknown,
+  ): Promise<boolean> {
+    const message = errorText(error);
+    let failure: SetAside | null;
+
+    try {
+      failure = await this.payoutRepository.recordPayoutFailure(
+        bookingId,
+        message,
+        MAX_PAYOUT_ATTEMPTS,
+      );
+    } catch (recordError) {
+      this.logger.error(
+        `Could not count the failed payout of booking ${bookingId}: ${String(recordError)}`,
+      );
+
+      return false;
+    }
+
+    if (failure === null || !failure.setAside) return false;
+
+    this.logger.error(
+      `The payout of booking ${bookingId} failed ${String(failure.attempts)} times and is set aside: ${message}`,
+    );
+    await this.notificationService.notifyAdmins({
+      type: NotificationType.PAYOUT_FAILED,
+      data: { bookingId, error: message },
+    });
+
+    return true;
+  }
+
+  private async sendPayout(
+    bookingId: string,
+    now: Date,
+    accounts: Map<string, boolean>,
+  ): Promise<boolean> {
     const stay = await this.payoutRepository.findStay(bookingId);
 
-    // Paid already. A run that recorded the transfer and then failed to settle it is retried
-    // by its job and lands here, so the settlement it owes is finished now.
+    // Paid already: a retry of a run that failed to settle finishes the settlement.
     if (stay?.transferId != null) {
       await this.settle(bookingId);
 
@@ -199,9 +229,7 @@ export class PayoutService {
 
     if (destination.accountId === null || !destination.enabled) return false;
 
-    // The stored flag is what the sweep reads without asking Stripe, and it can be stale: an
-    // account whose capability lapsed with no event delivered yet. Money moves only on what
-    // Stripe says now, and the flag is brought in line with it.
+    // The stored flag can be stale — a capability that lapsed with no event yet.
     let enabled = accounts.get(destination.accountId);
 
     if (enabled === undefined) {
@@ -239,16 +267,12 @@ export class PayoutService {
         sent.amount,
       ))
     ) {
-      // Another run recorded the same transfer — the key made it one.
       return false;
     }
 
-    // The transfer is recorded, so a retry of this run takes the branch above and never
-    // gets here again: the host is told now, whatever the settlement does, and a settlement
-    // that failed is thrown after the notice for the job to retry.
-    //
-    // What the host is left holding, not what was sent: a refund that landed on the way has
-    // been taken back from the transfer by now, and the notice should match their list.
+    // A retry takes the branch above and never gets here again, so the host is told now and
+    // a failed settlement is thrown after the notice. The notice states what the host holds
+    // after it, which is what their list shows.
     const settlement = await this.settle(bookingId).then(
       (held) => ({ settled: true as const, held }),
       (error: unknown) => ({ settled: false as const, error }),
@@ -267,10 +291,7 @@ export class PayoutService {
     return true;
   }
 
-  /**
-   * The due stays, or one host's, `SWEEP_BATCH` at a time; one failure is logged and left to
-   * the next run, and so is whatever the batch did not reach.
-   */
+  /** One failure is logged and left to the next run. */
   async payDuePayouts(hostId?: string): Promise<number> {
     const now = new Date();
     const accounts = new Map<string, boolean>();
@@ -294,16 +315,10 @@ export class PayoutService {
   }
 
   /**
-   * Takes back whatever the host holds of a stay beyond what they are owed now, under the
-   * settlement lease, and answers what they hold afterwards (`null` before a transfer).
-   * Nothing moves while a dispute is open.
-   *
-   * The row says when a reversal may be due — a reversal only lowers what the host holds,
-   * so a stored amount at or under what is owed needs nothing and costs no call. How much
-   * to take back is Stripe's figure, not the row's: a reversal that went out and whose
-   * write was lost is already off the transfer, and sizing from the row would take it a
-   * second time once the key is forgotten. The key names both ends of the step, so a repeat
-   * of one step is the same reversal and a later step is a reversal of its own.
+   * Takes back what the host holds beyond what is owed now, and answers what they hold
+   * after (`null` before a transfer). The row says whether a reversal may be due; Stripe's
+   * figure says how much, because a reversal whose write was lost is already off the
+   * transfer. The key names both ends of the step, so a repeat is the same reversal.
    */
   async settle(bookingId: string): Promise<number | null> {
     return this.payoutRepository.whileSettling(
@@ -336,8 +351,7 @@ export class PayoutService {
 
         const left = Math.min(held, owed);
 
-        // A `false` is a write from outside the lease: whatever went out at Stripe stays out,
-        // and the next settlement reads Stripe's figure again.
+        // Written from outside the lease; the next settlement reads Stripe's figure again.
         if (!(await recordReversal(stay.paidOutAmount, left))) {
           this.logger.warn(
             `The payout of booking ${bookingId} changed outside the settlement lock while it was being reversed`,
@@ -351,12 +365,10 @@ export class PayoutService {
     );
   }
 
-  /** A dispute, verified and looked up in the ledger by the dispatcher. */
   async handleSettlementEvent(event: SettlementEvent): Promise<void> {
     const stay = await this.payoutRepository.findStayByPayment(event.paymentId);
 
-    // A payment this API never confirmed a stay with: a late one is refunded by the webhook
-    // itself and recorded there, and `stripe trigger` sends payments nobody opened.
+    // A late payment or `stripe trigger`'s: no stay was confirmed with it.
     if (stay === null || !stay.paid) return;
 
     switch (event.kind) {
@@ -367,21 +379,14 @@ export class PayoutService {
     }
   }
 
-  /**
-   * One of Stripe's account events, from the inbox. Whether the account can receive
-   * transfers is asked afresh — the delivery says only that something changed — and the
-   * account that has just become able to is paid what was waiting for it.
-   */
+  /** A thin event says only that something changed, so the account is asked afresh. */
   async handleAccountEvent(event: AccountEvent): Promise<void> {
     if (event.accountId !== null && ACCOUNT_CHANGES.has(event.type)) {
       await this.refreshAccount(event.accountId);
     }
   }
 
-  /**
-   * What Stripe says of an account's transfers, written down; the write that switched them
-   * on queues the host's due payouts rather than paying them here.
-   */
+  /** The write that switches transfers on queues the host's due payouts. */
   private async refreshAccount(accountId: string): Promise<boolean> {
     const enabled = await this.payoutGateway.transfersEnabled(accountId);
     const changed = await this.payoutRepository.setPayoutsEnabled(
@@ -396,7 +401,7 @@ export class PayoutService {
     return enabled;
   }
 
-  /** The payout waits for the outcome; only the write that opened the dispute tells the host. */
+  /** Only the write that opened the dispute tells the host. */
   private async openDispute(stay: SettledStay): Promise<void> {
     if (
       !(await this.payoutRepository.setDisputeStatus(stay.bookingId, "OPEN"))
@@ -410,10 +415,6 @@ export class PayoutService {
     });
   }
 
-  /**
-   * Won, the stay's payout job is queued (the job already waiting, for a stay not yet due).
-   * Lost, the host's share went with the money: a transfer already sent is reversed.
-   */
   private async closeDispute(stay: SettledStay, won: boolean): Promise<void> {
     await this.payoutRepository.setDisputeStatus(
       stay.bookingId,
@@ -428,10 +429,12 @@ export class PayoutService {
   }
 }
 
-/** How many stays one run pays: each is up to three calls to Stripe, one after another. */
+/** About a day of the hourly sweep; a host is paid by the day, so nothing shorter buys anything. */
+export const MAX_PAYOUT_ATTEMPTS = 24;
+
+/** Each stay is up to three calls to Stripe, one after another. */
 const SWEEP_BATCH = 100;
 
-/** What a host reads beside a transfer in their payouts list. */
 function describeStay(stay: StayNotice): string {
   return `${stay.listingTitle}, ${stay.from} – ${stay.to}`;
 }

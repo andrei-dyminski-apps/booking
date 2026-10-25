@@ -15,10 +15,8 @@ import {
   type ReviewQuery,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
-import {
-  BookingRepository,
-  type BookingWithListingOwner,
-} from "../booking/infrastructure/booking.repository";
+import type { BookingWithListingOwner } from "../booking/domain/booking.types";
+import { BookingRepository } from "../booking/infrastructure/booking.repository";
 import { readCursor, type Page } from "../common/paging";
 import { ListingRepository } from "../listing/listing.repository";
 import { NotificationService } from "../notification/notification.service";

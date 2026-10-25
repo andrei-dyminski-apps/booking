@@ -10,21 +10,13 @@ import {
 import { roundCents } from "../../payment/domain/money";
 import { toIsoDate } from "../../prisma/iso-date";
 import { WaitlistService } from "../../waitlist/waitlist.service";
-import {
-  BookingRepository,
-  type ConfirmedStay,
-  type RefundTarget,
-} from "../infrastructure/booking.repository";
+import type { ConfirmedStay, RefundTarget } from "../domain/booking.types";
+import { BookingRepository } from "../infrastructure/booking.repository";
 import { RefundFailureRepository } from "../infrastructure/refund-failure.repository";
 import { StayLifecycle } from "./stay-lifecycle";
 import { notifyBothSides } from "./stay-notices";
 
-/**
- * What the stays make of the payment provider's news: a payment that succeeded turns a hold
- * into a stay, a refund is recorded and, when it takes the whole payment back, ends the
- * stay, and a dispute lost ends a stay that has not begun. Registered with the dispatcher
- * when the module starts. Idempotent, because a failed event is handled again.
- */
+/** What the stays make of the provider's news. Idempotent, because a failed event runs again. */
 @Injectable()
 export class BookingPaymentHandler
   implements PaymentEventHandler, OnModuleInit
@@ -59,7 +51,7 @@ export class BookingPaymentHandler
       case "disputeClosed":
         if (!event.won) await this.settleLostDispute(event);
         break;
-      // An open dispute changes only what the host is owed, which is the payout side's.
+      // An open dispute changes only what the host is owed: the payout side's.
       case "disputed":
       case "account":
       case "other":
@@ -68,19 +60,16 @@ export class BookingPaymentHandler
   }
 
   /**
-   * Confirms the hold, or refunds a payment that arrived for nights no longer the guest's
-   * (the hold lapsed or was cancelled meanwhile). A booking this payment already confirmed
-   * is a redelivery: it refunds nothing even if cancelled since — the cancellation refunded
-   * it by its own rule — and repeats only the announcement a run that died may have missed.
-   * All under `whileCancelling`, so two runs over one payment tell both sides once.
+   * Confirms the hold, or refunds a payment for nights no longer the guest's. A booking this
+   * payment confirmed already refunds nothing even if cancelled since — the cancellation
+   * refunded it by its own rule. Under `whileCancelling`, so two runs tell both sides once.
    */
   private async settlePayment(
     event: Extract<PaymentEvent, { kind: "succeeded" }>,
   ): Promise<void> {
     const { bookingId, paymentId } = event;
 
-    // A payment this deployment never opened — another site's on the same account, or
-    // `stripe trigger`'s. Nothing to settle, and nothing of it is this API's to refund.
+    // Another site's on the same account, or `stripe trigger`'s: not this API's to refund.
     if (bookingId === null) {
       this.logger.warn(`Payment ${paymentId} names no booking, ignored`);
 
@@ -112,7 +101,6 @@ export class BookingPaymentHandler
 
     const target = await this.bookingRepository.findPaymentTarget(bookingId);
 
-    // Confirmed by an earlier delivery of the same news, whatever happened to the stay since.
     if (target?.paid === true && target.hold.paymentId === paymentId) {
       if (
         target.status === BookingStatus.CONFIRMED &&
@@ -124,10 +112,8 @@ export class BookingPaymentHandler
       return;
     }
 
-    // Given back by an earlier delivery, which died before the ledger recorded it.
     if (target !== null && target.refundedAmount !== null) return;
 
-    // The gateway finds a refund already sent under this key, so a repeat sends nothing.
     await this.paymentGateway.refund(
       paymentId,
       event.amount,
@@ -137,8 +123,7 @@ export class BookingPaymentHandler
       `Refunded payment ${paymentId}: booking ${bookingId} no longer holds its nights`,
     );
 
-    // The guest's account may be gone, and the booking with it; the money still goes back.
-    // Of two deliveries racing here, the one that records the refund is the one that tells.
+    // The booking may be gone with the guest's account; the money still went back.
     if (
       target !== null &&
       (await this.bookingRepository.recordRefund(bookingId, event.amount))
@@ -151,10 +136,8 @@ export class BookingPaymentHandler
   }
 
   /**
-   * A charge was refunded: the stay records Stripe's total. A cancellation's own refund is
-   * recorded by its job under the same lease before it lets go, so whatever this raises is
-   * somebody else's — the dashboard's — and the guest is told. Refunded in full, a stay
-   * still confirmed is cancelled. The host's share follows through `StayLifecycle`.
+   * A cancellation's own refund is recorded by its job under the same lease, so whatever
+   * this raises is the dashboard's, and the guest is told.
    */
   private async settleRefund(
     event: Extract<PaymentEvent, { kind: "refunded" }>,
@@ -162,8 +145,7 @@ export class BookingPaymentHandler
     const { amountRefunded, paymentId } = event;
     const found = await this.bookingRepository.findRefundTarget(paymentId);
 
-    // A payment this API never confirmed a stay with: a late one is refunded by the webhook
-    // itself and recorded there, and `stripe trigger` sends payments nobody opened.
+    // A late payment or `stripe trigger`'s: no stay was confirmed with it.
     if (found === null || !found.paid) return;
 
     await this.bookingRepository.whileCancelling(found.bookingId, async () => {
@@ -197,10 +179,7 @@ export class BookingPaymentHandler
     await this.stayLifecycle.refunded(found.bookingId);
   }
 
-  /**
-   * The bank decided a dispute for the guest: a stay not yet begun is cancelled like one
-   * refunded in full; one under way or over stays as the record of nights spent.
-   */
+  /** A stay under way or over stays as the record of nights spent. */
   private async settleLostDispute(
     event: Extract<PaymentEvent, { kind: "disputeClosed" }>,
   ): Promise<void> {
@@ -229,11 +208,8 @@ export class BookingPaymentHandler
   }
 
   /**
-   * A refund the guest's bank sent back. The money is on the platform's balance but still
-   * the guest's, so the stay keeps recording it as refunded — which also keeps the host's
-   * share sized without it — and a person is asked to issue it again: the failure is kept in
-   * `refund_failures` until they do, and every admin is told. Only the delivery that wrote
-   * the row tells them, so a redelivery is news to nobody.
+   * The money is still the guest's, so the stay keeps recording it as refunded — which also
+   * keeps the host's share without it — and a person re-sends it.
    */
   private async reportFailedRefund(
     event: Extract<PaymentEvent, { kind: "refundFailed" }>,
@@ -261,10 +237,8 @@ export class BookingPaymentHandler
   }
 
   /**
-   * Raises the stay's refund total to Stripe's from exactly what was read, and answers
-   * whether this run did. Lost to another writer, a total already this high is somebody
-   * else's news; one still short throws, so the event is read anew rather than a notice
-   * sized off a stale reading.
+   * Whether this run raised the total. Lost to another writer, a total still short throws,
+   * so the event is read anew rather than a notice sized off a stale reading.
    */
   private async raiseRefundTotal(
     { paymentId, amountRefunded }: Extract<PaymentEvent, { kind: "refunded" }>,
@@ -291,13 +265,12 @@ export class BookingPaymentHandler
     );
   }
 
-  /** A stay whose money went back is cancelled, and both sides are told. */
   private async cancelStay(stay: RefundTarget, why: string): Promise<void> {
     if (
       (await this.bookingRepository.cancel(
         stay.bookingId,
         BookingStatus.CONFIRMED,
-        // The money has gone back already, by the dashboard or the bank: nothing is owed.
+        // The money went back already: nothing is owed.
         null,
       )) === null
     ) {
@@ -314,10 +287,7 @@ export class BookingPaymentHandler
     await this.waitlistService.announceFreed([stay.hold.stay]);
   }
 
-  /**
-   * A hold became a stay: the host's payout is scheduled, both sides are told, and the
-   * announcement is marked done last — a run that dies before that repeats it.
-   */
+  /** Marked done last, so a run that dies before that repeats it. */
   private async announceConfirmed(confirmed: ConfirmedStay): Promise<void> {
     await this.stayLifecycle.confirmed(confirmed.stay);
     await notifyBothSides(

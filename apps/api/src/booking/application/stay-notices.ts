@@ -5,18 +5,12 @@ import {
 } from "@repo/contracts";
 import type { NotificationService } from "../../notification/notification.service";
 
-/** The notices both sides of a stay can be sent, each told which side of it they are. */
 type BothSidesNotice = Extract<
   NotificationContent,
   { data: { recipient: StayParty } }
 >["type"];
 
-/**
- * Tells the guest and the host of a stay the same news, leaving out `except` — whoever
- * made it happen and needs no notice of it. Written once because a confirmation, a lapse
- * and a cancellation are told this way from both the service and the webhook, and who
- * hears about a stay is one rule rather than four.
- */
+/** Both sides of a stay, leaving out `except` — whoever made it happen. */
 export async function notifyBothSides(
   notificationService: Pick<NotificationService, "notify">,
   type: BothSidesNotice,

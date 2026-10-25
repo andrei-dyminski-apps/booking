@@ -51,6 +51,8 @@ export const notificationTypeSchema = z.enum([
   "PAYOUT_SENT",
   "REFUND_FAILED",
   "PAYMENT_EVENT_FAILED",
+  "CANCELLATION_REFUND_FAILED",
+  "PAYOUT_FAILED",
   "REVIEW_RECEIVED",
   "WAITLIST_AVAILABLE",
 ]);
@@ -133,6 +135,22 @@ const paymentEventFailedSchema = z.object({
   }),
 });
 
+/** The stay whose money is stuck, and the last error it failed with. */
+const stuckMoneySchema = z.object({
+  bookingId: z.uuid(),
+  error: z.string(),
+});
+
+const cancellationRefundFailedSchema = z.object({
+  type: z.literal(NotificationType.CANCELLATION_REFUND_FAILED),
+  data: stuckMoneySchema,
+});
+
+const payoutFailedSchema = z.object({
+  type: z.literal(NotificationType.PAYOUT_FAILED),
+  data: stuckMoneySchema,
+});
+
 const reviewReceivedSchema = z.object({
   type: z.literal(NotificationType.REVIEW_RECEIVED),
   data: z.object({
@@ -171,6 +189,8 @@ export const notificationContentSchema = z.discriminatedUnion("type", [
   payoutSentSchema,
   refundFailedSchema,
   paymentEventFailedSchema,
+  cancellationRefundFailedSchema,
+  payoutFailedSchema,
   reviewReceivedSchema,
   waitlistAvailableSchema,
 ]);
@@ -195,6 +215,8 @@ export const notificationSchema = z.discriminatedUnion("type", [
   payoutSentSchema.extend(stored),
   refundFailedSchema.extend(stored),
   paymentEventFailedSchema.extend(stored),
+  cancellationRefundFailedSchema.extend(stored),
+  payoutFailedSchema.extend(stored),
   reviewReceivedSchema.extend(stored),
   waitlistAvailableSchema.extend(stored),
 ]);

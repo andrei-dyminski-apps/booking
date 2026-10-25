@@ -2,20 +2,16 @@ import { Logger } from "@nestjs/common";
 import { Prisma } from "../../generated/prisma/client";
 import type { PrismaService } from "../../prisma/prisma.service";
 
-/** The leases a booking row carries, one column each. */
 export type LeaseColumn = "cancelling_until" | "settling_until";
 
 export type LeaseTiming = {
-  /** How long a holder keeps the row before anybody else may take it. */
   leaseMs: number;
-  /** How long a caller waits for somebody else's lease before giving up. */
   waitMs: number;
-  /** The first pause between two tries, doubled up to `pollMaxMs`. */
+  /** Doubled up to `pollMaxMs`. */
   pollMs: number;
   pollMaxMs: number;
 };
 
-/** Somebody else held the lease for longer than the caller was willing to wait. */
 export class LeaseBusyError extends Error {
   constructor(id: string, column: LeaseColumn) {
     super(`Booking ${id} is held by another run (${column})`);
@@ -24,26 +20,15 @@ export class LeaseBusyError extends Error {
 }
 
 /**
- * Runs `work` while holding a lease on one booking row: a column that says until when the
- * row is taken. A lease rather than a lock an open transaction holds, because the work
- * calls Stripe — a transaction kept open across that pins a pool connection per caller,
- * and a slow provider then starves every other request. A holder that dies frees the row
- * when its lease runs out.
+ * Runs `work` holding a lease on one booking row — a column saying until when it is taken —
+ * rather than a lock an open transaction holds: the work calls Stripe, and a transaction
+ * kept open across that pins a pool connection per caller.
  *
- * The deadline is the database's clock, not this process's: several instances with clocks
- * apart would otherwise each read a lease as expired at a different moment. The token a
- * holder lets go with is the deadline as Postgres spells it, so a lease this run outlived
- * and somebody else took since is left alone.
- *
- * **The lease is renewed while the work runs**, every third of `leaseMs`, so work that
- * outlasts one lease — Stripe slow on every call of a refund — still holds the row: only a
- * holder that stopped renewing loses it, which is a process that died or froze. A renewal
- * is conditional on the token, so one that finds the lease taken records the loss instead
- * of taking it back, and the run reports it once its work is over: what it wrote after the
- * loss was written beside another holder, and the conditional writes and the idempotency
- * keys under every lease are what kept that safe.
- *
- * A booking that does not exist is not waited for — the work is what answers it.
+ * The deadline is the database's clock, so instances with clocks apart agree on it, and the
+ * token is that deadline as Postgres spells it, so a lease taken by somebody else since is
+ * left alone. It is renewed every third of `leaseMs`, so only a holder that died or froze
+ * loses it; a loss is logged, and the conditional writes and idempotency keys under every
+ * lease are what keep that safe.
  */
 export async function whileLeased<T>(
   prismaService: PrismaService,
@@ -95,21 +80,24 @@ export async function whileLeased<T>(
         `Booking ${id} lost its ${column} lease while the work under it ran; another run may have held it meanwhile`,
       );
     } else {
-      await prismaService.$executeRaw`
-        UPDATE bookings SET ${Prisma.raw(column)} = NULL
-        WHERE id = ${id}::uuid AND ${Prisma.raw(column)} = ${held.token}::timestamp
-      `;
+      // Must not replace what the work answered: it has committed, and the lease runs out.
+      try {
+        await prismaService.$executeRaw`
+          UPDATE bookings SET ${Prisma.raw(column)} = NULL
+          WHERE id = ${id}::uuid AND ${Prisma.raw(column)} = ${held.token}::timestamp
+        `;
+      } catch (error) {
+        logger.warn(
+          `Could not let go of the ${column} lease of booking ${id}, it runs out on its own: ${String(error)}`,
+        );
+      }
     }
   }
 }
 
 const logger = new Logger("BookingLease");
 
-/**
- * Pushes the deadline of a lease this run still holds, and moves the token to the new one.
- * A lease somebody else took — this one ran out before the renewal came — is left alone and
- * marked lost. A renewal that fails outright is logged and tried again by the next beat.
- */
+/** A lease somebody else took since is marked lost; a failed renewal waits for the next beat. */
 async function renewLease(
   prismaService: PrismaService,
   column: LeaseColumn,
@@ -140,7 +128,6 @@ async function renewLease(
   }
 }
 
-/** The lease's token when nobody holds one that is still running; `null` otherwise. */
 async function takeLease(
   prismaService: PrismaService,
   column: LeaseColumn,

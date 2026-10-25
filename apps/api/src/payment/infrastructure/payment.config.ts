@@ -2,21 +2,13 @@
 export const PAYMENT_CONFIG = Symbol("PAYMENT_CONFIG");
 
 export type PaymentConfig = {
-  /** The secret API key; a test-mode `sk_test_…` anywhere but production. */
   secretKey: string;
-  /** What signs the payment deliveries (`/payments/webhook`); `stripe listen` prints its own locally. */
   paymentWebhookSecret: string;
-  /**
-   * What signs the payout deliveries (`/payouts/webhook`, the connected accounts of hosts)
-   * — a destination of its own in Stripe, with a secret of its own. `stripe listen` signs
-   * both kinds with one secret, so locally this is the payment secret again.
-   */
+  /** A destination of its own in Stripe; locally `stripe listen` signs both with one secret. */
   payoutWebhookSecret: string;
   /**
-   * The name of this deployment on the payments it opens. A test account is shared — the
-   * deployment and every developer's `stripe listen` hear every event of it — and a payment
-   * succeeding for a booking another database holds would otherwise read here as one whose
-   * hold is gone, and be refunded.
+   * This deployment's name on its payments. A test account is shared, and another
+   * database's payment would otherwise read here as a lapsed hold's and be refunded.
    */
   site: string;
 };
@@ -32,10 +24,8 @@ function required(name: string): string {
 }
 
 /**
- * No fallback, the rule the JWT secrets follow: a missing secret stops the process at boot
- * rather than shipping a webhook that accepts what anybody signs. The payout webhook's
- * secret falls back to the payment one, because `stripe listen` signs both kinds with one.
- * The site falls back to `local` outside production only.
+ * No fallback for the secrets, like the JWT ones: a missing secret stops the boot rather
+ * than shipping a webhook that accepts what anybody signs.
  */
 export function loadPaymentConfig(): PaymentConfig {
   const paymentWebhookSecret = required("STRIPE_PAYMENT_WEBHOOK_SECRET");

@@ -375,10 +375,11 @@ is the transition a hold could not make on its own. The details are "Payments" i
 - [ ] Helmet.
 - [ ] Bring Swagger up to a complete description with examples and auth.
 - [ ] Observability: structured logs (pino), a request-logging interceptor, `/health` (`@nestjs/terminus`).
-- [ ] **The admin's side of what the money paths set aside.** The API already keeps both
-      and tells every admin about them (`PAYMENT_EVENT_FAILED`, `REFUND_FAILED`), but the
-      only way to act on either today is SQL. Two pairs of routes behind
-      `@Roles(Role.ADMIN)`, and a screen under `/admin` for them:
+- [ ] **The admin's side of what the money paths set aside.** The API already keeps all of
+      it and tells every admin (`PAYMENT_EVENT_FAILED`, `REFUND_FAILED`,
+      `CANCELLATION_REFUND_FAILED`, `PAYOUT_FAILED`), but the only way to act on any of it
+      today is SQL. Three pairs of routes behind `@Roles(Role.ADMIN)`, and a screen under
+      `/admin` for them:
   - `GET /payment-events?status=failed` — the events the worker set aside after
     `MAX_EVENT_ATTEMPTS`, with `type`, `attempts`, `last_error` and `received_at`; and
     `POST /payment-events/:id/retry`, which clears `failed_at` and `attempts` so the sweep
@@ -389,6 +390,29 @@ is the transition a hold could not make on its own. The details are "Payments" i
     `resolved_at` with a note of how the money went back. No "send it again" button: the
     usual reason is `expired_or_canceled_card`, and the same card refuses it again — the
     money goes back outside Stripe, and what the API records is that it did.
+  - `GET /bookings/stuck?kind=refund|payout` — the owed refunds and the host payouts set
+    aside after `MAX_REFUND_ATTEMPTS`/`MAX_PAYOUT_ATTEMPTS` (`CANCELLATION_REFUND_FAILED`,
+    `PAYOUT_FAILED`), with the stay, the attempts and the last error; and
+    `POST /bookings/:id/stuck/:kind/retry`, which clears `*_failed_at` and `*_attempts` so
+    the sweep takes the row again. Retried rather than resolved by hand: the debt and the
+    transfer are still on the row, and the sweep is what sends them.
+  - The frontend renders the four admin notices with a link to the screen.
+- [ ] **Authorize the hold, capture the stay.** The guest is charged at once today, so a
+      payment that lands on a lapsed or cancelled hold is a full charge and a full refund,
+      and Stripe keeps its processing fee on both. Opening the intent with
+      `capture_method: "manual"` makes a hold an authorization: `confirmPayment` captures
+      it, a lapsed or cancelled hold cancels it at no cost, and a late payment is a
+      cancellation instead of a refund. What it costs: `payment_intent.amount_capturable_updated`
+      becomes the event that confirms a stay, an authorization lapses after seven days for
+      cards (fine for a fifteen-minute hold), and the methods without manual capture —
+      iDEAL, Bancontact, EPS, MB WAY, Zip — have to stay on immediate capture, so
+      `INSTANT_PAYMENT_METHODS` splits in two.
+- [ ] **Money as whole cents inside the API.** The contract speaks euros as a `number`
+      exact to the cent, and the API does arithmetic on it, which is why `roundCents` sits
+      after nearly every subtraction. Carrying an integer of cents (or a small `Money`
+      value) through `domain/` and converting at the two edges — the contract and Stripe —
+      would remove that class of mistake rather than guard against it each time. The
+      columns stay `numeric(10, 2)`; only the in-memory type changes.
 - [ ] **JSON-LD across the whole site** — the structured data a catalogue is actually read
       by, and the one SEO question this project has so far answered with nothing. Semantic
       markup is not that answer: wrapping the rows in a `<ul role="list">` bought a screen

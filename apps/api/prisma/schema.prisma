@@ -67,6 +67,18 @@ model Booking {
   /// share, so nothing is paid out of money owed to the guest.
   refundOwed Decimal? @map("refund_owed") @db.Decimal(10, 2)
 
+  /// Failed runs of the owed refund, the latest error, and when it was set aside after
+  /// `MAX_REFUND_ATTEMPTS` — the sweep then leaves it to a person, as the payment inbox
+  /// does. Clearing `refund_failed_at` and `refund_attempts` hands it back.
+  refundAttempts  Int       @default(0) @map("refund_attempts")
+  refundLastError String?   @map("refund_last_error")
+  refundFailedAt  DateTime? @map("refund_failed_at")
+
+  /// The same three for the host's transfer (`MAX_PAYOUT_ATTEMPTS`).
+  payoutAttempts  Int       @default(0) @map("payout_attempts")
+  payoutLastError String?   @map("payout_last_error")
+  payoutFailedAt  DateTime? @map("payout_failed_at")
+
   /// The payment's Charge, which the host's transfer names as its `source_transaction`.
   chargeId String? @map("charge_id")
 
@@ -445,6 +457,8 @@ enum NotificationType {
   PAYOUT_SENT
   REFUND_FAILED
   PAYMENT_EVENT_FAILED
+  CANCELLATION_REFUND_FAILED
+  PAYOUT_FAILED
   REVIEW_RECEIVED
   WAITLIST_AVAILABLE
 }

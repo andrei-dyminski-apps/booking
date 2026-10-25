@@ -20,15 +20,9 @@ import {
 } from "../application/ports/payout-gateway";
 
 /**
- * The provider's news about connected accounts — the payout accounts of hosts. A delivery of
- * its own because Stripe sends these in another format (a thin event: what changed is read
- * back from the provider, not out of the body) to a destination of its own, signed with that
- * destination's secret. Public, unthrottled and out of `/docs` for the reasons
+ * Thin events about hosts' accounts: another format, to a destination of its own with its
+ * own secret, into the same inbox. Public, unthrottled and out of `/docs` for the reasons
  * `PaymentWebhookController` states.
- *
- * Verified here and handed to the same inbox as the payment events, so it is answered at
- * once and handled by the worker (`PayoutEventHandler`). `200` once recorded, `400` for one
- * that is not the provider's, `500` when it could not be recorded.
  */
 @Controller("payouts")
 export class PayoutWebhookController {

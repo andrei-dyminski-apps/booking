@@ -10,10 +10,8 @@ import type { PaymentEvent } from "../../payment/application/ports/payment-gatew
 import { PayoutService } from "./payout.service";
 
 /**
- * Where the payout side plugs into the other two. From the payment provider it takes the
- * disputes and the news about hosts' accounts, and from the stays it takes the moments a host's share is decided at: a stay
- * confirmed (its payout is scheduled) and a refund recorded (the host's part of it is taken
- * back) — whether the cancellation issued it or somebody did from Stripe's dashboard.
+ * Where payout plugs into the other two: disputes and account news from the provider, and
+ * from the stays a confirmation (the payout is scheduled) and a refund (it is settled).
  */
 @Injectable()
 export class PayoutEventHandler
@@ -39,7 +37,6 @@ export class PayoutEventHandler
       case "account":
         await this.payoutService.handleAccountEvent(event);
         break;
-      // A refund reaches this side through `StayLifecycle`, once the stay has recorded it.
       case "succeeded":
       case "refunded":
       case "refundFailed":

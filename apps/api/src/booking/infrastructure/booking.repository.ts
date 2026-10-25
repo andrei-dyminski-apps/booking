@@ -6,7 +6,6 @@ import {
   type BookingQuery,
   type BookingSort,
   type CreateBookingInput,
-  type StayNotice,
 } from "@repo/contracts";
 import { z } from "zod";
 import {
@@ -27,167 +26,36 @@ import {
   CREATED_AT_ORDER,
   type Page,
 } from "../../common/paging";
+import type { SetAside } from "../../common/job-failure";
 import { readPricedListing } from "../../listing/listing-pricing";
 import { toIsoDate } from "../../prisma/iso-date";
 import { PrismaService } from "../../prisma/prisma.service";
-import type { BookingCursor } from "../application/booking-cursor";
 import { ACTIVE_STATUSES, holdExpiry } from "../domain/booking-status";
-import { LeaseBusyError, whileLeased, type LeaseTiming } from "./booking-lease";
+import {
+  CancellationInProgressError,
+  DatesUnavailableError,
+  GuestNotFoundError,
+  ListingNotFoundError,
+  OwnListingError,
+  StayTooCheapError,
+  StayTooExpensiveError,
+} from "../domain/booking.errors";
+import type {
+  BookingCursor,
+  BookingWithListingOwner,
+  CancelledStay,
+  ConfirmedStay,
+  CreatedBooking,
+  RefundTarget,
+  ReleasedHold,
+} from "../domain/booking.types";
 import { MAX_CHARGE, MIN_CHARGE, quoteStay } from "../domain/stay-price";
-
-/**
- * What `create` throws instead of letting a Prisma error code reach the service. The
- * listing key is now checked under the `FOR UPDATE` lock rather than at the insert, so an
- * insert only reaches this for the guest key — but the translation is kept whole, because
- * `test/booking.repository.e2e-spec.ts` still drives both sides directly.
- */
-export class ListingNotFoundError extends Error {
-  constructor(listingId: string) {
-    super(`Listing ${listingId} not found`);
-    this.name = "ListingNotFoundError";
-  }
-}
-
-/**
- * The other row an insert can fail on, and the one nothing checks beforehand: the guest is
- * whoever the access token names, and `JwtStrategy` reads no database, so an account
- * deleted mid-session keeps minting valid requests for as long as `JWT_ACCESS_TTL`. That
- * is an ended session rather than a missing listing — the service answers it the way
- * `/auth/me` answers a token whose row is gone.
- */
-export class GuestNotFoundError extends Error {
-  constructor(guestId: string) {
-    super(`Guest ${guestId} not found`);
-    this.name = "GuestNotFoundError";
-  }
-}
-
-/**
- * The guest owns the listing they asked to book. Read off the same locked row as the
- * existence check, so it costs no query of its own; the service answers it the way
- * starting a conversation about one's own listing is answered.
- */
-export class OwnListingError extends Error {
-  constructor(listingId: string) {
-    super(`Listing ${listingId} is your own`);
-    this.name = "OwnListingError";
-  }
-}
-
-/**
- * The dates asked for overlap an active stay on that listing. Raised from inside the
- * locking transaction — either by the explicit overlap check or, if a bug slips past it,
- * by the `EXCLUDE` constraint. The service turns both into one `409`.
- */
-export class DatesUnavailableError extends Error {
-  constructor(input: CreateBookingInput) {
-    super(
-      `Listing ${input.listingId} is already booked for an overlapping range (${input.from} to ${input.to})`,
-    );
-    this.name = "DatesUnavailableError";
-  }
-}
-
-/**
- * The stay costs more than one payment can carry — see `MAX_CHARGE`. Raised under the
- * lock, once the quote exists, so nothing is inserted; the service answers it with a `422`.
- */
-export class StayTooExpensiveError extends Error {
-  constructor(amount: number) {
-    super(
-      `A stay costing ${amount.toFixed(2)} is more than one payment can carry (${MAX_CHARGE.toFixed(2)})`,
-    );
-    this.name = "StayTooExpensiveError";
-  }
-}
-
-/** The stay costs less than one payment can carry — see `MIN_CHARGE`. Raised like the above. */
-export class StayTooCheapError extends Error {
-  constructor(amount: number) {
-    super(
-      `A stay costing ${amount.toFixed(2)} is less than one payment can carry (${MIN_CHARGE.toFixed(2)})`,
-    );
-    this.name = "StayTooCheapError";
-  }
-}
-
-/**
- * Another cancellation of the same stay — or the webhook of its refund — held it for longer
- * than `whileCancelling` waits. The service answers it with a `409` worth retrying, the
- * webhook with a `500` and a redelivery.
- */
-export class CancellationInProgressError extends Error {
-  constructor(id: string) {
-    super(`Booking ${id} is being cancelled by another request`);
-    this.name = "CancellationInProgressError";
-  }
-}
-
-/**
- * The owner of the listing is kept beside the booking rather than inside it: the
- * authorization rules need that column, the contract does not have it, and a flat shape
- * would let a `return booking` carry it into a response body without the types or the
- * review noticing. The payment is the same case — the id of a PaymentIntent is what
- * cancelling and refunding are done through, and nothing a reader of the booking needs.
- */
-export type BookingWithListingOwner = {
-  booking: Booking;
-  listingOwnerId: string;
-  paymentId: string | null;
-};
-
-/**
- * A hold one of the three expiry paths let go of, with the two people it concerned. Not a
- * `Booking`: the row is read back by the `UPDATE` that released it, and what is said about
- * it afterwards is a notice — so it carries what a notice copies and nothing a response
- * body would want.
- */
-export type ReleasedHold = {
-  stay: StayNotice;
-  guestId: string;
-  listingOwnerId: string;
-  /** The payment opened for the hold, which has to be withdrawn now it can never complete. */
-  paymentId: string | null;
-};
-
-/**
- * A hold the payment webhook turned into a stay — the same three things a released one
- * carries, because the same two people are told about it.
- */
-export type ConfirmedStay = ReleasedHold;
-
-/** What a cancellation leaves behind: the payment the row named when it was cancelled. */
-export type CancelledStay = {
-  paymentId: string | null;
-};
-
-/**
- * A stay's money as the payment handlers read it — found by its payment, or by the booking a
- * payment names. The payout side extends it with its own columns (`SettledStay`).
- */
-export type RefundTarget = {
-  bookingId: string;
-  status: BookingStatus;
-  amount: number;
-  /** What the stay records as refunded so far; `null` before anything went back. */
-  refundedAmount: number | null;
-  /** What a cancellation decided to give back and has not sent yet. */
-  refundOwed: number | null;
-  /** A payment turned this booking into a stay at some point, whatever its status now. */
-  paid: boolean;
-  /** Both sides were told of the confirmation and the payout scheduled — see the column. */
-  confirmationAnnounced: boolean;
-  hold: ReleasedHold;
-};
-
-/**
- * What `create` hands back: the new hold, and the lapsed holds of the same listing its
- * transaction released on the way — those are only released if the hold is taken, because
- * a refusal rolls the release back with it.
- */
-export type CreatedBooking = BookingWithListingOwner & {
-  released: ReleasedHold[];
-};
+import { LeaseBusyError, whileLeased, type LeaseTiming } from "./booking-lease";
+import {
+  RELEASED_HOLD_INCLUDE,
+  toRefundTarget,
+  toReleasedHold,
+} from "./stay-rows";
 
 /** One row of the `FOR UPDATE` read — raw SQL, so the column keeps its stored name. */
 type LockedListing = {
@@ -223,15 +91,6 @@ const BOOKING_INCLUDE = {
   ...LISTING_SUMMARY,
   ...REVIEW_KINDS,
 } satisfies Prisma.BookingInclude;
-
-/**
- * What a released hold is read back with: the listing's title for the notice and its owner
- * for the recipient. `updateManyAndReturn` loads to-one relations only, which is all this
- * needs — the reviews `toBooking` reads are not wanted here.
- */
-export const RELEASED_HOLD_INCLUDE = {
-  listing: { select: { title: true, ownerId: true } },
-} satisfies Prisma.BookingIncludeUpdateManyAndReturn;
 
 /**
  * A stored booking with the listing columns the contract's `listing` is built from. Taken
@@ -526,22 +385,18 @@ export class BookingRepository {
   }
 
   /**
-   * The cancellations whose refund has not gone out yet — a job lost with Redis, or one
-   * Stripe kept refusing — at most `limit` of them; the sweep after this one reads the
-   * rest. The partial index makes this read nothing on the usual minute. A stay whose
-   * cancellation lease is running is left to whoever holds it — usually the refund job
-   * itself — rather than waited for and logged as busy.
-   *
-   * Raw SQL, because the lease is compared on the database's clock, the one it was written
-   * with (`whileLeased`), and Prisma's `where` can only compare against a value this
-   * process sends.
+   * The debts still owed, the fewest failures first. A stay under a running lease is left
+   * to its holder, and one under an open dispute to the outcome. Raw SQL, because the lease
+   * is compared on the database's clock, which Prisma's `where` cannot name.
    */
   async findOwedRefunds(limit: number): Promise<string[]> {
     const rows = await this.prismaService.$queryRaw<{ id: string }[]>`
       SELECT id::text AS id FROM bookings
       WHERE refund_owed IS NOT NULL
+        AND refund_failed_at IS NULL
+        AND dispute_status IS DISTINCT FROM 'OPEN'
         AND (cancelling_until IS NULL OR cancelling_until <= (now() AT TIME ZONE 'UTC'))
-      ORDER BY id
+      ORDER BY refund_attempts, id
       LIMIT ${limit}
     `;
 
@@ -549,9 +404,42 @@ export class BookingRepository {
   }
 
   /**
-   * The refund total raised and the debt cleared in one transaction — apart, the host's
-   * share would count the refund twice. `total` is `null` when nothing went out after all.
-   * The total only rises, so a webhook that raised it to Stripe's figure is not written over.
+   * Sets the debt aside at `maxAttempts`. Two conditional steps, so of two runs failing at
+   * once only one reports it. `null` for a debt no longer pending.
+   */
+  async recordRefundFailure(
+    id: string,
+    error: string,
+    maxAttempts: number,
+  ): Promise<SetAside | null> {
+    const pending = {
+      id,
+      refundOwed: { not: null },
+      refundFailedAt: null,
+    } satisfies Prisma.BookingWhereInput;
+    const [counted] = await this.prismaService.booking.updateManyAndReturn({
+      where: pending,
+      data: { refundAttempts: { increment: 1 }, refundLastError: error },
+      select: { refundAttempts: true },
+    });
+
+    if (counted === undefined) return null;
+
+    if (counted.refundAttempts < maxAttempts) {
+      return { attempts: counted.refundAttempts, setAside: false };
+    }
+
+    const { count } = await this.prismaService.booking.updateMany({
+      where: pending,
+      data: { refundFailedAt: new Date() },
+    });
+
+    return { attempts: counted.refundAttempts, setAside: count > 0 };
+  }
+
+  /**
+   * One transaction, or the host's share would count the refund twice. `total` is `null`
+   * when nothing went out; it only rises, so Stripe's figure from a webhook is kept.
    */
   async settleOwedRefund(id: string, total: number | null): Promise<void> {
     await this.prismaService.$transaction([
@@ -571,17 +459,14 @@ export class BookingRepository {
           ]),
       this.prismaService.booking.updateMany({
         where: { id },
-        data: { refundOwed: null },
+        data: { refundOwed: null, refundAttempts: 0, refundLastError: null },
       }),
     ]);
   }
 
   /**
-   * Runs `work` under the per-booking cancellation lease (`whileLeased`), which a
-   * cancellation, the job that sends its refund and the payment webhooks take. The job
-   * refunds before it records the refund, so the webhook that reports that refund waits
-   * here instead of reading the stay half way — and finds it recorded, or records it itself
-   * after a job that died in between.
+   * The cancellation lease, which the refund job and the payment webhooks take too: the
+   * webhook reporting a refund waits here instead of reading the stay half way.
    */
   async whileCancelling<T>(id: string, work: () => Promise<T>): Promise<T> {
     try {
@@ -601,11 +486,7 @@ export class BookingRepository {
     }
   }
 
-  /**
-   * Remembers which PaymentIntent was opened for a hold — only into an empty column (or
-   * the same id again), and only while the hold is pending. `false` is a hold released
-   * while Stripe answered: the caller withdraws the payment instead of handing it out.
-   */
+  /** Only into an empty column, and only while pending: `false` is a hold released meanwhile. */
   async attachPayment(id: string, paymentId: string): Promise<boolean> {
     const { count } = await this.prismaService.booking.updateMany({
       where: {
@@ -620,10 +501,8 @@ export class BookingRepository {
   }
 
   /**
-   * A hold whose payment succeeded becomes a stay — any `PENDING_PAYMENT` row, whatever its
-   * deadline: a lapsed hold no path has released still holds its nights. A released or
-   * cancelled one matches nothing and the caller refunds. Read back from the `UPDATE`, so of
-   * two runs over one payment only one is told. The charge funds the host's transfer later.
+   * Any `PENDING_PAYMENT` row, whatever its deadline: a lapsed hold no path has released
+   * still holds its nights. Read back from the `UPDATE`, so of two runs only one is told.
    */
   async confirmPayment(
     id: string,
@@ -635,8 +514,7 @@ export class BookingRepository {
       where: {
         id,
         status: BookingStatus.PENDING_PAYMENT,
-        // A payment that took another sum than the stay was quoted confirms nothing and is
-        // given back like a late one; only this API opens payments, so it is a safeguard.
+        // Another sum than quoted confirms nothing and goes back; a safeguard only.
         amount,
       },
       data: {
@@ -651,10 +529,6 @@ export class BookingRepository {
     return confirmed === undefined ? null : toReleasedHold(confirmed);
   }
 
-  /**
-   * The steps after a confirmation are done: both sides were told and the payout scheduled.
-   * Written after them, so a delivery that dies before this is repeated by the next one.
-   */
   async markConfirmationAnnounced(id: string): Promise<void> {
     await this.prismaService.booking.updateMany({
       where: { id, confirmationAnnouncedAt: null },
@@ -662,15 +536,11 @@ export class BookingRepository {
     });
   }
 
-  /** What a payment that confirmed nothing finds in its place — see `RefundTarget`. */
   async findPaymentTarget(id: string): Promise<RefundTarget | null> {
     return this.readRefundTarget({ id });
   }
 
-  /**
-   * What went back of a payment that arrived for nights no longer the guest's — only into
-   * an empty column, so of two runs racing only the one that wrote it tells the guest.
-   */
+  /** Only into an empty column, so of two runs only the one that wrote it tells the guest. */
   async recordRefund(id: string, amount: number): Promise<boolean> {
     const { count } = await this.prismaService.booking.updateMany({
       where: { id, refundedAmount: null },
@@ -680,7 +550,6 @@ export class BookingRepository {
     return count > 0;
   }
 
-  /** What a refund event names: the payment, which is unique to one stay. */
   async findRefundTarget(paymentId: string): Promise<RefundTarget | null> {
     return this.readRefundTarget({ paymentIntentId: paymentId });
   }
@@ -696,10 +565,7 @@ export class BookingRepository {
     return row === null ? null : toRefundTarget(row);
   }
 
-  /**
-   * Raises a paid stay's refund total to Stripe's, from exactly what was read; refunds only
-   * add up, so an older event never lowers it.
-   */
+  /** From exactly what was read, so an older event never lowers it. */
   async raiseRefunded(
     id: string,
     from: number | null,
@@ -921,11 +787,8 @@ export function overlapping(
 }
 
 /**
- * The cancellation lease. Sixty seconds is room for the refund job's work under it — a
- * refund at Stripe and the settlement of the host's payout. Three seconds of waiting keep a
- * cancellation that waits for it well inside the ten seconds the frontend's transport
- * waits; each try is an `UPDATE`, so the tries back off rather than write ten times a
- * second while Stripe is slow.
+ * Sixty seconds of room for a refund and a settlement; three of waiting keep a cancellation
+ * inside the frontend's ten. Each try is an `UPDATE`, so the tries back off.
  */
 const CANCEL_LEASE: LeaseTiming = {
   leaseMs: 60_000,
@@ -987,38 +850,5 @@ function toBooking(row: BookingRowWithListing): Booking {
       byGuest: row.reviews.some((review) => review.kind === ReviewKind.LISTING),
       byOwner: row.reviews.some((review) => review.kind === ReviewKind.GUEST),
     },
-  };
-}
-
-/** The one reading of a stay's money, which `PayoutRepository` extends with its own. */
-export function toRefundTarget(
-  row: BookingRow & { listing: Pick<ListingRow, "title" | "ownerId"> },
-): RefundTarget {
-  return {
-    bookingId: row.id,
-    status: row.status,
-    amount: row.amount.toNumber(),
-    refundedAmount: row.refundedAmount?.toNumber() ?? null,
-    refundOwed: row.refundOwed?.toNumber() ?? null,
-    paid: row.paidAt !== null,
-    confirmationAnnounced: row.confirmationAnnouncedAt !== null,
-    hold: toReleasedHold(row),
-  };
-}
-
-export function toReleasedHold(
-  row: BookingRow & { listing: Pick<ListingRow, "title" | "ownerId"> },
-): ReleasedHold {
-  return {
-    stay: {
-      bookingId: row.id,
-      listingId: row.listingId,
-      listingTitle: row.listing.title,
-      from: toIsoDate(row.from),
-      to: toIsoDate(row.to),
-    },
-    guestId: row.guestId,
-    listingOwnerId: row.listing.ownerId,
-    paymentId: row.paymentIntentId,
   };
 }

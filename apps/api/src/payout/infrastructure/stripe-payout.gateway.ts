@@ -21,14 +21,9 @@ import {
 } from "../application/ports/payout-gateway";
 
 /**
- * The port over Stripe Connect — the host's half of the money. Hosts are Accounts v2
- * recipients: the platform is the merchant of record and charges the guest itself, so an
- * account here only ever receives transfers, and onboarding asks a host for no more than
- * that takes.
- *
- * The platform carries the fees and the losses (`application` for both — the only pair a
- * recipient without a full dashboard may have), which is also why a refund or a lost
- * dispute after a payout is the platform's to take back from the host, by a reversal.
+ * Hosts are Accounts v2 recipients: the platform charges the guest itself, so an account
+ * only receives transfers. The platform carries fees and losses (`application`), which is
+ * why a refund or lost dispute after a payout is taken back from the host by a reversal.
  */
 @Injectable()
 export class StripePayoutGateway extends PayoutGateway {
@@ -41,10 +36,7 @@ export class StripePayoutGateway extends PayoutGateway {
     this.stripe = createStripeClient(paymentConfig.secretKey);
   }
 
-  /**
-   * The Express dashboard rather than none: a host gets Stripe's own support and emails
-   * about their account, while the payouts screen of this site embeds the parts they use.
-   */
+  /** The Express dashboard, so a host gets Stripe's own support and emails about the account. */
   async createRecipientAccount(host: PayoutHost): Promise<string> {
     const account = await this.stripe.v2.core.accounts.create(
       {
@@ -98,9 +90,7 @@ export class StripePayoutGateway extends PayoutGateway {
   }
 
   async transfer(payout: Payout): Promise<SentTransfer> {
-    // Looked up before sending, not only when the key refuses a retry: Stripe forgets a key
-    // after 24 hours, and a transfer sent and never recorded — a database that failed the
-    // write, a run that crashed — would be sent again by the first retry after that.
+    // Stripe forgets a key after 24 hours; a transfer sent and never recorded would go twice.
     const sent = await this.findTransfer(payout.bookingId);
 
     if (sent !== null) return sent;
@@ -111,8 +101,6 @@ export class StripePayoutGateway extends PayoutGateway {
           amount: toCents(payout.amount),
           currency: CURRENCY,
           destination: payout.accountId,
-          // Funded by the guest's own charge: the transfer is accepted at once and waits for
-          // that money to settle instead of drawing on whatever the platform holds.
           source_transaction: payout.chargeId,
           transfer_group: transferGroupOf(payout.bookingId),
           description: payout.description,
@@ -123,10 +111,8 @@ export class StripePayoutGateway extends PayoutGateway {
 
       return { id: transfer.id, amount: heldOf(transfer) };
     } catch (error) {
-      // The key is the booking and remembers the first request's parameters for 24 hours. A
-      // run racing this one with another amount — a refund landed between the two — is
-      // refused for it, and the transfer the other run sent is handed back instead of
-      // sending a second one, which a key that named the amount would have done.
+      // A run racing this one with another amount is refused by the key; the transfer the
+      // other run sent is the answer. A key that named the amount would have sent two.
       if (!(error instanceof Stripe.errors.StripeIdempotencyError)) throw error;
 
       const existing = await this.findTransfer(payout.bookingId);
@@ -137,11 +123,6 @@ export class StripePayoutGateway extends PayoutGateway {
     }
   }
 
-  /**
-   * The transfer already sent for a stay, found by the group it shares with the charge and
-   * the booking in its metadata. A stay has one: the key above and the empty `transfer_id`
-   * it is recorded into both guarantee it.
-   */
   private async findTransfer(bookingId: string): Promise<SentTransfer | null> {
     for await (const transfer of this.stripe.transfers.list({
       transfer_group: transferGroupOf(bookingId),
@@ -203,7 +184,6 @@ export class StripePayoutGateway extends PayoutGateway {
   }
 }
 
-/** What the host holds of a transfer: what was sent, less whatever was taken back. */
 function heldOf(transfer: Stripe.Transfer): number {
   return fromMinorUnits(transfer.amount - transfer.amount_reversed);
 }

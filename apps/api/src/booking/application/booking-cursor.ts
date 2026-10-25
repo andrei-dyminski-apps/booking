@@ -1,23 +1,7 @@
 import { bookingSchema, bookingSortSchema } from "@repo/contracts";
 import type { Booking, BookingSort } from "@repo/contracts";
 import { decodeParts, encodeParts } from "../../common/paging";
-
-/**
- * The place in a list of stays a page ends, as the client hands it back. Keyset rather
- * than an offset, for the reason `catalogue-cursor.ts` spells out: a booking taken while
- * somebody is paging would shift every offset after it, showing one row twice and skipping
- * another. Here the shift is the ordinary case rather than the rare one — `newest` is the
- * default and a new stay lands at the top of it.
- *
- * The pair it carries is the pair the ordering is made of — the sort key and `id`, the
- * tiebreaker for two rows level on that key — and the sort itself, which is what makes the
- * key readable: `2026-09-01` is a check-in under one ordering and nothing at all under
- * another. It is also what lets the API refuse a cursor handed back under a different
- * ordering; see `readCursor` in `src/common/paging.ts`.
- */
-export type BookingCursor =
-  | { sort: "newest" | "oldest"; createdAt: Date; id: string }
-  | { sort: "checkInAsc" | "checkInDesc"; from: Date; id: string };
+import type { BookingCursor } from "../domain/booking.types";
 
 /**
  * The envelope — the base64 spelling, the separator and the resource tag — belongs to

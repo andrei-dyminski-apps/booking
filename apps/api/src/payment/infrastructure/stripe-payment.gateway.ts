@@ -19,16 +19,44 @@ import {
 } from "./stripe-client";
 
 /**
- * The port over Stripe, through PaymentIntents — the guest's half of the money. The host's
- * half is `StripePayoutGateway`; the two share a client factory and the conversion into
- * cents (`stripe-client.ts`), which happens at this edge alone.
+ * The payment methods a hold may be paid with: those Stripe confirms at once, in Europe and
+ * in the Americas. A method that stays `processing` — SEPA and ACH Direct Debit, Canadian
+ * pre-authorized debits, bank transfers, Multibanco — would outlive the fifteen-minute hold
+ * and be refunded in full on arrival. Wallets on top of cards (Apple Pay, Google Pay) come
+ * with `card`.
+ *
+ * An allow-list rather than `payment_method_types`, which `STRIPE_API_VERSION` no longer
+ * accepts: Stripe leaves out a listed method the dashboard has not enabled, or that does
+ * not take the currency or the amount, instead of refusing the payment — so the American
+ * ones (Cash App Pay, Afterpay, Zip) wait for a `CURRENCY` they take. Przelewy24, Satispay
+ * and Affirm confirm at once too, and are left out because they prohibit lodging merchants.
  */
+const INSTANT_PAYMENT_METHODS = [
+  "card",
+  "link",
+  "amazon_pay",
+  "paypal",
+  "klarna",
+  // Europe
+  "revolut_pay",
+  "ideal",
+  "wero",
+  "bancontact",
+  "eps",
+  "mobilepay",
+  "mb_way",
+  // The Americas
+  "cashapp",
+  "afterpay_clearpay",
+  "zip",
+] as const;
+
+/** The guest's half of the money, through PaymentIntents; the host's is `StripePayoutGateway`. */
 @Injectable()
 export class StripePaymentGateway extends PaymentGateway {
   private readonly logger = new Logger(StripePaymentGateway.name);
   private readonly stripe: Stripe;
 
-  /** Whether an event in another API version was reported already — once per process. */
   private versionMismatchReported = false;
 
   constructor(
@@ -38,20 +66,15 @@ export class StripePaymentGateway extends PaymentGateway {
     this.stripe = createStripeClient(paymentConfig.secretKey);
   }
 
-  /**
-   * Keyed by the booking, so a second call replays the same intent (Stripe keeps a key 24
-   * hours, a hold lives 15 minutes). No list of payment methods: the dashboard decides, and
-   * must enable only methods that confirm at once — one `processing` for days outlives its
-   * hold and is refunded in full on arrival.
-   */
+  /** Keyed by the booking: Stripe keeps a key 24 hours, a hold lives 15 minutes. */
   async open(bookingId: string, amount: number): Promise<OpenedPayment> {
     const intent = await this.stripe.paymentIntents.create(
       {
         amount: toCents(amount),
         currency: CURRENCY,
+        allowed_payment_method_types: [...INSTANT_PAYMENT_METHODS],
         // What the webhook finds the booking by, and whose database holds it.
         metadata: { bookingId, site: this.paymentConfig.site },
-        // The charge and the host's transfer it funds, grouped in the dashboard.
         transfer_group: transferGroupOf(bookingId),
       },
       { idempotencyKey: `booking-${bookingId}-payment` },
@@ -68,9 +91,7 @@ export class StripePaymentGateway extends PaymentGateway {
     try {
       await this.stripe.paymentIntents.cancel(paymentId);
     } catch (error) {
-      // Cancelled already — a retried job — or completed in the meantime, which the webhook
-      // refunds. Either way there is nothing left to withdraw, and a retry would change
-      // nothing but the log.
+      // Cancelled already, or completed and refunded by the webhook: nothing to withdraw.
       if (
         error instanceof Stripe.errors.StripeInvalidRequestError &&
         error.code === "payment_intent_unexpected_state"
@@ -124,7 +145,6 @@ export class StripePaymentGateway extends PaymentGateway {
     }
   }
 
-  /** What the refund named by `key` gave back, or `null` when none was sent. */
   private async findRefund(
     paymentId: string,
     key: string,
@@ -245,10 +265,8 @@ export class StripePaymentGateway extends PaymentGateway {
   }
 
   /**
-   * An event is shaped by the API version of the endpoint that sent it, not by the one the
-   * SDK pins, and the fields read above are typed against the latter. A mismatch is not
-   * refused — most fields read the same across versions — but said once, loudly enough to
-   * set the endpoint right.
+   * An event is shaped by its endpoint's API version, not the SDK's. Most fields read the
+   * same across versions, so a mismatch is said once rather than refused.
    */
   private checkVersion(event: Stripe.Event): void {
     if (
@@ -266,10 +284,8 @@ export class StripePaymentGateway extends PaymentGateway {
   }
 
   /**
-   * The booking a payment was opened for, if this deployment opened it. Another site's
-   * payment names a booking of another database, and anything that is not a uuid — a
-   * payment made by hand, `stripe trigger` — would fail the `uuid` column's query and have
-   * the delivery come again for days.
+   * `null` for another site's payment, and for a booking id that is not a uuid (`stripe
+   * trigger`), which would fail the column's query and be redelivered for days.
    */
   private bookingIdOf(metadata: Stripe.Metadata): string | null {
     const { bookingId, site } = metadata;

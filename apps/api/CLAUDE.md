@@ -83,6 +83,8 @@ src/
   booking/               # the stays: the hold, the cancellation, the expiry
     booking.module.ts      # imports PaymentModule; exports BookingRepository and StayLifecycle
     domain/                # pure functions: statuses and transitions, the date range, quoteStay
+      booking.types.ts     # the shapes the layers share: a stay with its owner, a released hold, a refund target, the cursor
+      booking.errors.ts    # what the repository throws instead of a Prisma code; the service turns them into HTTP
     application/
       booking.service.ts   # HTTP and the jobs meet here; sees neither Prisma, Stripe nor BullMQ
       ports/booking-jobs.ts  # BookingJobs — the release, withdrawal and refund jobs, as the service asks for them
@@ -93,6 +95,7 @@ src/
     infrastructure/
       booking.repository.ts      # the queries, the locking transaction, the quote under the lock
       booking-lease.ts           # whileLeased: the per-booking leases, on the database's clock, renewed while held
+      stay-rows.ts               # a stay's money and its two people off a row — BookingRepository and PayoutRepository both map through it
       refund-failure.repository.ts  # refund_failures: the refunds a guest's bank sent back
       booking-expiry.queue.ts    # BullMQ, behind BookingJobs: the per-hold job, the two sweeps
       booking-expiry.processor.ts
@@ -120,6 +123,7 @@ src/
   payout/                # the host's half of the money; follows booking and payment
     payout.module.ts       # imports BookingModule and PaymentModule; nothing imports it
     domain/payout.ts       # owedToHost, mayPayOut — the host's share after refunds and disputes
+    domain/payout.types.ts # SettledStay, PayoutAccountHolder — what the repository answers and the service reads
     application/
       payout.service.ts    # host payouts: the account, the transfer, reversals, refunds, disputes
       payout.service.spec.ts
@@ -454,9 +458,13 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
   the guest is told (`PAYMENT_REFUNDED`) by the run whose `recordRefund` wrote the empty
   column. A booking this payment confirmed (`paid_at`, never cleared) is a redelivery and
   refunds nothing even if it was cancelled since.
-- **Only payment methods that confirm at once are enabled in the dashboard.** A method that
-  stays `processing` for days outlives its fifteen-minute hold and is refunded in full when
-  it lands.
+- **Only payment methods that confirm at once are offered, and the code says which.** A
+  method that stays `processing` for days outlives its fifteen-minute hold and is refunded
+  in full when it lands, so the intent is opened with `allowed_payment_method_types` set to
+  `INSTANT_PAYMENT_METHODS` (`stripe-payment.gateway.ts`) — not `payment_method_types`, which
+  the pinned API version refuses with a `400`. The dashboard still decides which of them are
+  switched on: Stripe drops a listed method that is not enabled instead of failing the
+  payment. A method added to the list has to be one Stripe confirms immediately.
 - **A cancellation is final when it is answered, and its refund follows it.**
   `DELETE /bookings/:id` calls no payment provider. A hold can be cancelled at any time, a
   confirmed stay only before its check-in day — by the guest and by an admin alike
@@ -469,12 +477,20 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
   the refund named by that key gave back and clears the debt in one transaction. A refund
   Stripe refuses is retried by the job, and a sweep of its own on the same queue — apart
   from the hold sweep, so a slow Stripe holds back refunds alone — pays every debt still on
-  a row whose cancellation lease is not running, fifty at a time
-  (`bookings_refund_owed_idx`). That lease is compared on the database's clock, in raw SQL,
-  because it was written with it. The worker runs four jobs at a time, so a refund
-  waiting on Stripe does not hold a release behind it. A dispute
-  opened after the cancellation leaves the debt waiting — won, it is paid; lost, dropped. A
+  a row whose cancellation lease is not running, fifty at a time and the fewest failures
+  first (`bookings_refund_owed_idx`). That lease is compared on the database's clock, in raw
+  SQL, because it was written with it. The worker runs four jobs at a time, so a refund
+  waiting on Stripe does not hold a release behind it. A dispute opened after the
+  cancellation leaves the debt waiting, out of the sweep — won, it is paid; lost, dropped. A
   disputed payment cannot be refunded: an open dispute is a `409`.
+- **A debt or a payout that keeps failing is set aside**, the way the inbox sets an event
+  aside: every failed run counts on the row (`refund_attempts`/`refund_last_error`,
+  `payout_attempts`/`payout_last_error`), the sweeps read the fewest failures first so a
+  failing row cannot fill a batch, and after `MAX_REFUND_ATTEMPTS` (30, about half an hour of
+  the minute sweep) or `MAX_PAYOUT_ATTEMPTS` (24, about a day of the hourly one) the row is
+  stamped `refund_failed_at`/`payout_failed_at`, the sweep leaves it alone, the job stops
+  retrying and every admin is told (`CANCELLATION_REFUND_FAILED`, `PAYOUT_FAILED`). Clearing
+  the stamp and the counter hands it back; the admin screen for that is in `docs/plan.md`.
 - **The per-booking leases** (`infrastructure/booking-lease.ts`): `cancelling_until` for a
   cancellation, its refund job and the payment webhooks (`whileCancelling`, sixty seconds,
   three of waiting), and `settling_until` for the settlement of the host's payout
@@ -503,7 +519,7 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
 - **Notices**: `BOOKING_CONFIRMED` to both sides, `PAYMENT_REFUNDED` to the guest of a late
   payment or a dashboard refund — through `notify`, which never throws. What only a person
   can put right goes to every admin through `notifyAdmins` (`REFUND_FAILED`,
-  `PAYMENT_EVENT_FAILED`). A redelivery of a
+  `PAYMENT_EVENT_FAILED`, `CANCELLATION_REFUND_FAILED`, `PAYOUT_FAILED`). A redelivery of a
   payment that confirmed a still-confirmed stay repeats the payout's scheduling and the
   notices unless `confirmation_announced_at` says they were done; the whole event runs under
   `whileCancelling`, so two runs over one payment tell both sides once.
@@ -531,8 +547,9 @@ platform, and the host is paid their share by a transfer once the stay has begun
   queues a `pay-host` job rather than paying inside the request or the event.
 - **Bookings are never refused for a host who cannot be paid.** Their payouts wait.
 - **Two halves, like hold expiry**: a delayed job per stay at `payoutDueAt` (`payout-<id>`)
-  and an hourly sweep, a hundred stays a run, over `bookings_awaiting_payout_idx` (partial on `paid_at IS NOT NULL AND
-transfer_id IS NULL`), which leaves out a stay refunded in full or owed a refund.
+  and an hourly sweep, a hundred stays a run, the fewest failures first, over
+  `bookings_awaiting_payout_idx` (partial: paid, no transfer, not set aside), which leaves
+  out a stay refunded in full or owed a refund.
 - **A transfer is idempotent and recorded once**: funded by the stay's own charge
   (`source_transaction`), sent under `booking-<id>-payout` — no amount in the key, so a retry
   cannot send a second one — and looked up by `transfer_group` and `metadata.bookingId`

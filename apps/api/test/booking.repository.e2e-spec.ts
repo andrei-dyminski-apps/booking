@@ -4,11 +4,11 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { App } from "supertest/types";
 import { AppModule } from "./../src/app.module";
 import {
-  BookingRepository,
   DatesUnavailableError,
   GuestNotFoundError,
   ListingNotFoundError,
-} from "./../src/booking/infrastructure/booking.repository";
+} from "./../src/booking/domain/booking.errors";
+import { BookingRepository } from "./../src/booking/infrastructure/booking.repository";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { HOLD_TTL_MS } from "./../src/booking/domain/booking-status";
 import { resetDatabase } from "./database";

@@ -368,6 +368,71 @@ describe("The money columns of a paid stay (e2e)", () => {
     ).resolves.toBe(true);
   });
 
+  it("sets an owed refund aside on its last failed run, and leaves it out of the sweep", async () => {
+    await bookingRepository.cancel(bookingId, "CONFIRMED", AMOUNT);
+
+    await expect(
+      bookingRepository.recordRefundFailure(bookingId, "refused", 2),
+    ).resolves.toEqual({ attempts: 1, setAside: false });
+    await expect(bookingRepository.findOwedRefunds(10)).resolves.toEqual([
+      bookingId,
+    ]);
+    await expect(
+      bookingRepository.recordRefundFailure(bookingId, "refused", 2),
+    ).resolves.toEqual({ attempts: 2, setAside: true });
+    await expect(bookingRepository.findOwedRefunds(10)).resolves.toEqual([]);
+    // Set aside already: a later failure is nobody's news.
+    await expect(
+      bookingRepository.recordRefundFailure(bookingId, "refused", 2),
+    ).resolves.toBeNull();
+  });
+
+  it("leaves a refund owed out of the sweep while a dispute is open", async () => {
+    await bookingRepository.cancel(bookingId, "CONFIRMED", AMOUNT);
+    await payoutRepository.setDisputeStatus(bookingId, "OPEN");
+
+    await expect(bookingRepository.findOwedRefunds(10)).resolves.toEqual([]);
+
+    await payoutRepository.setDisputeStatus(bookingId, "WON");
+
+    await expect(bookingRepository.findOwedRefunds(10)).resolves.toEqual([
+      bookingId,
+    ]);
+  });
+
+  it("clears the failures of a refund once it is sent", async () => {
+    await bookingRepository.cancel(bookingId, "CONFIRMED", AMOUNT);
+    await bookingRepository.recordRefundFailure(bookingId, "refused", 5);
+    await bookingRepository.settleOwedRefund(bookingId, AMOUNT);
+
+    await expect(
+      prismaService.booking.findUniqueOrThrow({ where: { id: bookingId } }),
+    ).resolves.toMatchObject({ refundAttempts: 0, refundLastError: null });
+  });
+
+  it("sets a payout aside on its last failed run, and leaves it out of the sweep", async () => {
+    await expect(
+      payoutRepository.recordPayoutFailure(bookingId, "refused", 2),
+    ).resolves.toEqual({ attempts: 1, setAside: false });
+    await expect(
+      payoutRepository.findDuePayouts(new Date(), 10, hostId),
+    ).resolves.toEqual([bookingId]);
+    await expect(
+      payoutRepository.recordPayoutFailure(bookingId, "refused", 2),
+    ).resolves.toEqual({ attempts: 2, setAside: true });
+    await expect(
+      payoutRepository.findDuePayouts(new Date(), 10, hostId),
+    ).resolves.toEqual([]);
+  });
+
+  it("counts no failure of a payout that was sent", async () => {
+    await payoutRepository.recordPayout(bookingId, "tr_money", 432);
+
+    await expect(
+      payoutRepository.recordPayoutFailure(bookingId, "settle failed", 2),
+    ).resolves.toBeNull();
+  });
+
   it("leaves a refund owed out of the sweep while its cancellation lease runs", async () => {
     await prismaService.booking.update({
       where: { id: bookingId },

@@ -18,18 +18,12 @@ import { StripePayoutGateway } from "./infrastructure/stripe-payout.gateway";
 import { PayoutAccountController } from "./presentation/payout-account.controller";
 import { PayoutWebhookController } from "./presentation/payout-webhook.controller";
 
-/**
- * The host's half of the money. It follows `booking` and `payment` — the stays it pays for,
- * the refunds and disputes that change its share — and neither of them imports it: it plugs
- * in through `PayoutEventHandler`, which registers with the payment dispatcher and with the
- * stay lifecycle when the module starts.
- */
+/** Nothing imports it: `PayoutEventHandler` registers with the dispatcher and `StayLifecycle`. */
 @Module({
   imports: [
     PrismaModule,
     BookingModule,
     PaymentModule,
-    // A host hears about a payout sent and a payment disputed.
     NotificationModule,
     BullModule.registerQueue({ name: HOST_PAYOUT_QUEUE }),
   ],
@@ -38,7 +32,6 @@ import { PayoutWebhookController } from "./presentation/payout-webhook.controlle
     PayoutService,
     PayoutRepository,
     PayoutEventHandler,
-    // The host's half of the provider, a port of its own beside `PaymentGateway`.
     { provide: PayoutGateway, useClass: StripePayoutGateway },
     HostPayoutQueue,
     { provide: PayoutJobs, useExisting: HostPayoutQueue },

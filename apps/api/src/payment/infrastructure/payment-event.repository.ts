@@ -4,19 +4,12 @@ import type { Prisma } from "../../generated/prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { PaymentEvent } from "../application/ports/payment-gateway";
 
-/**
- * The inbox of the provider's webhook deliveries — see `PaymentEvent` in the schema: a
- * delivery is recorded, read back by the worker that handles it, and stamped processed —
- * or, after failing too often, set aside.
- */
+/** The webhook inbox — see `PaymentEvent` in the schema. */
 @Injectable()
 export class PaymentEventRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
-  /**
-   * Written by the webhook before it answers. A redelivery of an event already here writes
-   * nothing — `skipDuplicates` rather than a failure on the key.
-   */
+  /** A redelivery writes nothing rather than failing on the key. */
   async record(event: PaymentEvent): Promise<void> {
     await this.prismaService.paymentEvent.createMany({
       data: [{ id: event.eventId, type: event.type, payload: event }],
@@ -24,10 +17,7 @@ export class PaymentEventRepository {
     });
   }
 
-  /**
-   * The event to handle, or `null` when it is processed already, set aside, or was never
-   * recorded. A payload the schema cannot read throws, and counts as a failed run.
-   */
+  /** `null` when processed, set aside or never recorded. An unreadable payload throws. */
   async findUnprocessed(eventId: string): Promise<PaymentEvent | null> {
     const row = await this.prismaService.paymentEvent.findFirst({
       where: { id: eventId, ...STILL_PENDING },
@@ -45,10 +35,8 @@ export class PaymentEventRepository {
   }
 
   /**
-   * Counts a failed run, and sets the event aside once it has failed `maxAttempts` times.
-   * Two steps, each conditional: of two runs failing at once only the one whose write set
-   * the event aside reports it (`setAside`), so the admins are told once. `null` for an
-   * event no longer pending — processed or set aside by a run racing this one.
+   * Counts a failed run and sets the event aside at `maxAttempts`. Two conditional steps, so
+   * of two runs failing at once only one reports it. `null` for an event no longer pending.
    */
   async recordFailure(
     eventId: string,
@@ -75,10 +63,7 @@ export class PaymentEventRepository {
     return { ...counted, setAside: count > 0 };
   }
 
-  /**
-   * The oldest of the events still pending that arrived before `before` — what a lost job
-   * left — at most `limit` of them; the sweep after this one reads the rest.
-   */
+  /** The oldest pending events that arrived before `before`. */
   async findStale(before: Date, limit: number): Promise<string[]> {
     const rows = await this.prismaService.paymentEvent.findMany({
       where: { ...STILL_PENDING, receivedAt: { lte: before } },
@@ -90,11 +75,7 @@ export class PaymentEventRepository {
     return rows.map(({ id }) => id);
   }
 
-  /**
-   * Deletes the events processed before `before`. The provider redelivers an event for
-   * three days at most, so a row older than the retention has nothing left to deduplicate;
-   * an event set aside is never processed and stays until a person deals with it.
-   */
+  /** An event set aside is never processed, so it stays until a person deals with it. */
   async pruneProcessed(before: Date): Promise<number> {
     const { count } = await this.prismaService.paymentEvent.deleteMany({
       where: { processedAt: { lt: before } },
@@ -104,7 +85,7 @@ export class PaymentEventRepository {
   }
 }
 
-/** Neither handled nor given up on — what the worker and the sweep look for. */
+/** Neither handled nor given up on. */
 const STILL_PENDING = {
   processedAt: null,
   failedAt: null,

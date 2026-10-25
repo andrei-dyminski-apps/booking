@@ -20,15 +20,10 @@ import {
 } from "../application/ports/payment-gateway";
 
 /**
- * Where the payment provider tells this API what happened to a payment, and the source of
- * truth for whether a stay is paid — the guest's redirect is a URL anybody can type. This
- * route verifies a delivery and hands it to the inbox (`PaymentEventDispatcher.receive`);
- * what the news means is the registered handlers' to decide, in a worker.
- *
- * `@Public()` because the provider has no session; the signature over the raw body stands
- * in for one, which is why the body parser keeps the bytes of this route (`body-parsers.ts`).
- * Out of the throttle, since the provider retries on its own schedule from shared
- * addresses, and out of `/docs`: its contract is the provider's event format.
+ * The source of truth for whether a stay is paid — the guest's redirect is a URL anybody
+ * can type. `@Public()` because the signature over the raw body stands in for a session;
+ * unthrottled because the provider retries from shared addresses; out of `/docs` because
+ * its contract is the provider's event format.
  */
 @Controller("payments")
 export class PaymentWebhookController {
@@ -37,11 +32,7 @@ export class PaymentWebhookController {
     private readonly paymentGateway: PaymentGateway,
   ) {}
 
-  /**
-   * `200` once the event is recorded or was already; `400` for one that is not the
-   * provider's; a `500` when it could not be recorded, which the provider answers by
-   * delivering it again.
-   */
+  /** A `500` when the event could not be recorded, which the provider answers by redelivering. */
   @Post("webhook")
   @Public()
   @SkipThrottle()
