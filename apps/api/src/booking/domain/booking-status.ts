@@ -31,7 +31,9 @@ export function holdExpiry(now: Date): Date {
 /**
  * The transitions the lifecycle allows. A hold is paid (`CONFIRMED`), cancelled or left
  * to expire; a confirmed stay can still be cancelled; `CANCELLED` and `EXPIRED` are
- * terminal. Phase 5 reads this on the payment webhook — phase 4 uses it for cancellation.
+ * terminal. Cancellation reads it (`isCancellable`); the payment webhook's transition is
+ * this table's first row written as the `where` of `BookingRepository.confirmPayment`,
+ * because there it has to hold atomically against the row rather than be asked first.
  */
 const TRANSITIONS: Record<BookingStatus, readonly BookingStatus[]> = {
   [BookingStatus.PENDING_PAYMENT]: [
@@ -51,4 +53,23 @@ export function canTransition(from: BookingStatus, to: BookingStatus): boolean {
 /** Whether a booking in this status can still be cancelled by its guest or an admin. */
 export function isCancellable(status: BookingStatus): boolean {
   return canTransition(status, BookingStatus.CANCELLED);
+}
+
+/**
+ * The hold the event's payment is attached to, not confirmed by it yet, with nothing given
+ * back: the news of that payment's refund or dispute came before the news of the payment
+ * itself, which Stripe does not order, or whose run failed and waits for its retry. Such
+ * an event has to come again rather than be read as one about a payment that never
+ * confirmed a stay. The wait is bounded: the hold is confirmed or released within minutes.
+ */
+export function awaitsItsPayment(stay: {
+  status: BookingStatus;
+  paid: boolean;
+  refundedAmount: number | null;
+}): boolean {
+  return (
+    stay.status === BookingStatus.PENDING_PAYMENT &&
+    !stay.paid &&
+    stay.refundedAmount === null
+  );
 }

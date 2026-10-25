@@ -15,6 +15,8 @@ import { EventsModule } from "./events/events.module";
 import { ListingModule } from "./listing/listing.module";
 import { LookupModule } from "./lookup/lookup.module";
 import { NotificationModule } from "./notification/notification.module";
+import { PaymentModule } from "./payment/payment.module";
+import { PayoutModule } from "./payout/payout.module";
 import { ReviewModule } from "./review/review.module";
 import { UserModule } from "./user/user.module";
 import { WaitlistModule } from "./waitlist/waitlist.module";
@@ -44,6 +46,8 @@ import { WaitlistModule } from "./waitlist/waitlist.module";
     ListingModule,
     LookupModule,
     NotificationModule,
+    PaymentModule,
+    PayoutModule,
     ReviewModule,
     UserModule,
     WaitlistModule,

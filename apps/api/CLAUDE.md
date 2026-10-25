@@ -2,7 +2,7 @@
 
 ## Stack
 
-NestJS 11 on Express, TypeScript, Jest + Supertest. CommonJS (unlike `apps/web`) — built by `nest build` into `dist/`. Storage is PostgreSQL (docker-compose in the root) through Prisma 7. Redis (also in docker-compose) backs one BullMQ queue — `booking-expiry`, which carries two jobs: the delayed one that releases an unpaid booking hold and the repeatable sweep behind it; `@nestjs/bullmq` is pinned to `11.x` because `12` is ESM-only and `nest build` / Jest here are CommonJS, and `ioredis` is a direct dependency because `bullmq` 6 no longer bundles it. The same Redis carries the pub/sub behind the event stream (`RealtimeService`, two connections of its own).
+NestJS 11 on Express, TypeScript, Jest + Supertest. CommonJS (unlike `apps/web`) — built by `nest build` into `dist/`. Storage is PostgreSQL (docker-compose in the root) through Prisma 7. Redis (also in docker-compose) backs three BullMQ queues — `booking-expiry` (the delayed job that releases an unpaid hold, the repeatable sweep behind it, the withdrawal of a released hold's PaymentIntent, the refund a cancellation owes and a sweep of its own for the refunds still owed), `host-payout` (see "Host payouts") and `payment-event` (the webhook inbox's worker, its sweep and a daily prune, see "Payments"); the services schedule through ports (`BookingJobs`, `PaymentEventJobs`, `PayoutJobs`) and never name a queue, and every processor logs its failed jobs (`src/common/job-failure.ts`), which BullMQ otherwise keeps to itself; `@nestjs/bullmq` is pinned to `11.x` because `12` is ESM-only and `nest build` / Jest here are CommonJS, and `ioredis` is a direct dependency because `bullmq` 6 no longer bundles it. The same Redis carries the pub/sub behind the event stream (`RealtimeService`, two connections of its own). Payments go through Stripe (`stripe`, the Node SDK), behind the `PaymentGateway` port of the payment module — see "Payments" below.
 
 The configuration is shared with the rest of the repository: `tsconfig.json` extends `@repo/typescript-config/nest.json`, `eslint.config.mjs` extends `@repo/eslint-config/nest-js`. Only `outDir` is declared locally. The stock Nest CLI settings (`noImplicitAny: false`, a disabled `no-explicit-any`, its own `.prettierrc`) were removed deliberately — do not bring them back when updating Nest or generating new files.
 
@@ -23,10 +23,12 @@ src/
   common/throttle.ts     # CATALOGUE_READS — the widened limit of the public, cached reads
   common/dto/            # ApiErrorDto — the error body, for the Swagger error responses
   common/redis-url.ts    # requireRedisUrl — the queue and the pub/sub connect with it
+  common/body-parsers.ts # Nest's parsers, the raw body kept for the signed webhooks only
+  common/job-failure.ts  # describeJobFailure — the line every processor logs a failed job with
+  common/iso-date.ts     # `@db.Date` onto `YYYY-MM-DD`, and today's midnight — the repositories map those columns, the services read today by it
   prisma/                # PrismaModule + PrismaService (extends PrismaClient)
     prisma.errors.ts     # isPrismaError, violatedConstraint — driver failures, read once
     escape-like.ts       # `%`, `_` and `\` of a `contains`, escaped — two repositories search by a part
-    iso-date.ts          # `@db.Date` onto `YYYY-MM-DD`, and today's midnight — two repositories map those columns
   auth/                  # registration, login, the JWT pair and its rotation
     auth.config.ts       # secrets, lifetimes and cookie attributes out of the environment
     auth.controller.ts
@@ -43,6 +45,7 @@ src/
     listing.controller.ts
     listing.service.ts       # who may edit and delete a row; sees no Prisma
     listing.repository.ts    # the queries, the catalogue page, the FK violation
+    listing-pricing.ts       # the price rows onto the contract; the hold's quote reads them through it
     listing.service.spec.ts
     catalogue-cursor.ts      # the keyset cursor of GET /listings, encoded and parsed
     catalogue-cursor.spec.ts
@@ -73,15 +76,72 @@ src/
     conversation.service.spec.ts
     conversation-cursor.spec.ts
     dto/conversation.dto.ts
-  booking/               # rules over rows; phases 4-6 give it a domain of its own
-    booking.module.ts
-    booking.controller.ts
-    booking.service.ts     # who may read and cancel what; sees no Prisma
-    booking.repository.ts  # the queries, the date mapping, the FK violation
-    booking.service.spec.ts
-    booking-cursor.ts        # the keyset cursor of GET /bookings, encoded and parsed
-    booking-cursor.spec.ts
-    dto/booking.dto.ts
+  # booking, payment and payout are the modules split into domain/, application/,
+  # infrastructure/ and presentation/ — see "Payments". The dependencies run one way:
+  # payment <- booking <- payout (payout also uses payment). Neither payment nor booking
+  # imports the module that follows it; payout plugs in through two registries.
+  booking/               # the stays: the hold, the cancellation, the expiry
+    booking.module.ts      # imports PaymentModule; exports BookingRepository and StayLifecycle
+    domain/                # pure functions: statuses and transitions, the date range, quoteStay
+      booking.types.ts     # the shapes the layers share: a stay with its owner, a released hold, a refund target, the cursor
+      booking.errors.ts    # what the repository throws instead of a Prisma code; the service turns them into HTTP
+    application/
+      booking.service.ts   # HTTP and the jobs meet here; sees neither Prisma, Stripe nor BullMQ
+      ports/booking-jobs.ts  # BookingJobs — the release, withdrawal and refund jobs, as the service asks for them
+      booking.service.spec.ts  # against fakes of the repositories, the gateway and a stay listener
+      booking-payment.handler.ts  # succeeded: confirms the hold, or refunds a late payment; refunded: records it, cancels a stay not yet begun refunded in full; a lost dispute: cancels a stay not yet begun
+      booking-payment.handler.spec.ts  # the provider's news, in the same module as the service
+      testing/booking.fakes.ts  # the fixtures, fakes and module both specs share; out of the build (`*.fakes.ts`)
+      stay-lifecycle.ts    # confirmed / refunded, announced to whoever follows the stays (payout)
+      booking-cursor.ts    # the keyset cursor of GET /bookings, encoded and parsed
+    infrastructure/
+      booking.repository.ts      # the queries, the locking transaction, the quote under the lock
+      booking-lease.ts           # whileLeased: the per-booking leases, on the database's clock, renewed while held
+      stay-rows.ts               # a stay's money and its two people off a row — BookingRepository and PayoutRepository both map through it
+      refund-failure.repository.ts  # refund_failures: the refunds a guest's bank sent back
+      booking-expiry.queue.ts    # BullMQ, behind BookingJobs: the per-hold job, the two sweeps
+      booking-expiry.processor.ts
+    presentation/
+      booking.controller.ts      # /bookings, POST /bookings/:id/payment
+      dto/booking.dto.ts
+  payment/               # the guest's half of the money and the provider's front door; knows no stay
+    payment.module.ts      # wires the port to its adapter: PaymentGateway → StripePaymentGateway
+    domain/currency.ts     # CURRENCY, the one currency of the site
+    domain/money.ts        # toCents, roundCents — the one conversion into cents, keys and charges alike
+    application/
+      ports/payment-gateway.ts  # PaymentGateway (abstract class = DI token), PaymentEvent
+      ports/payment-event-jobs.ts  # PaymentEventJobs — how the inbox hands an event to its worker
+      payment-event-handler.ts  # what a domain registers to act on the provider's news
+      payment-event-dispatcher.ts  # the inbox: receive, process (every handler; set aside after MAX_EVENT_ATTEMPTS), the sweep, the prune
+    infrastructure/
+      payment-event.repository.ts  # the webhook inbox: record, findUnprocessed, markProcessed, recordFailure, findStale, pruneProcessed
+      payment-event.queue.ts       # BullMQ, behind PaymentEventJobs: a job per event, the sweep, the daily prune
+      payment-event.processor.ts
+      stripe-client.ts           # the client both adapters build (STRIPE_API_VERSION), and cents back into euros
+      stripe-payment.gateway.ts  # the guest's half: PaymentIntents, refunds, snapshot events
+      payment.config.ts          # STRIPE_SECRET_KEY, STRIPE_PAYMENT_WEBHOOK_SECRET; no fallback (the payout secret and the site only outside production)
+    presentation/
+      payment-webhook.controller.ts  # POST /payments/webhook — verified, recorded, answered
+  payout/                # the host's half of the money; follows booking and payment
+    payout.module.ts       # imports BookingModule and PaymentModule; nothing imports it
+    domain/payout.ts       # owedToHost, mayPayOut — the host's share after refunds and disputes
+    domain/payout.types.ts # SettledStay, PayoutAccountHolder — what the repository answers and the service reads
+    domain/payout.errors.ts # SettlementInProgressError — the settlement lease held past its wait
+    application/
+      payout.service.ts    # host payouts: the account, the transfer, reversals, refunds, disputes
+      payout.service.spec.ts
+      payout-event-handler.ts  # registers with the dispatcher and with StayLifecycle
+      ports/payout-gateway.ts   # PayoutGateway — connected accounts, transfers, account events
+      ports/payout-jobs.ts      # PayoutJobs — the payout jobs, as the service asks for them
+    infrastructure/
+      payout.repository.ts       # a stay's money after payment, and the payout account on a user
+      stripe-payout.gateway.ts   # the host's half: Accounts v2 recipients, transfers, thin events
+      host-payout.queue.ts       # BullMQ, behind PayoutJobs: the per-stay payout job and the hourly sweep
+      host-payout.processor.ts
+    presentation/
+      payout-account.controller.ts   # GET /payouts/account, POST /payouts/account/refresh and /session
+      payout-webhook.controller.ts   # POST /payouts/webhook — the thin account events, into the same inbox
+      dto/payout.dto.ts
   review/                # the two-sided review of a finished stay
     review.controller.ts # no prefix: each route names its parent — a listing, a guest, a stay
     review.service.ts    # which half a caller writes, when a stay opens for review, who reads a guest's
@@ -127,7 +187,7 @@ src/
 - The check-in/check-out columns are `@db.Date`, while dates are exposed as `YYYY-MM-DD` strings (the mapper in `BookingService`); the contract did not change when the storage did.
 - Money is the currency itself, exact to the cent: `listings.price_per_night` is `numeric(10, 2)` and never a float, because a float stores neither 120.10 nor the sum of a stay's nights exactly and the error accumulates across the nights. The contract refuses anything finer than a cent (`MONEY` in `packages/contracts/src/listing.ts`), so the column can never round a price the API accepted, and the repository is the one place a `Decimal` row becomes the `number` the contract speaks. A payment that wants minor units multiplies at its own edge rather than making every screen divide.
 - **The ceiling on a price is written on both ends, and the two move together.** `MAX_PRICE` in the contract is what a request is refused against; `listings_price_within_contract` (a `CHECK`, raw SQL like the `EXCLUDE` constraint and the partial indexes) is the same number on the column. The number lives in the constraint rather than in the width of the type on purpose — the column holds a hundred times the ceiling, so moving it is a `CHECK` to rewrite instead of a table. The constraint is unreachable over HTTP — zod answers `400` first, which is why nothing translates SQLSTATE `23514` — and it exists for the writes that go around the API: the seed, a later migration, an import, `psql`. A price above the ceiling fails on the way out rather than on the way in, because the frontend parses every response against `listingSchema`, so one such row takes a whole catalogue page down with it. Raising the ceiling is one change in the contract plus a migration; raising it past `numeric(10, 2)` is the day the column changes too.
-- **A nightly price is a default plus exceptions.** `listings.price_per_night` stays the default — the catalogue shows, filters and sorts by it alone — and two tables hold the exceptions: `listing_weekday_prices` (one row per listing and `Weekday`, an enum spelled in lower case so it is the contract's `weekdaySchema` as it is) and `listing_date_prices` (one row per listing and `@db.Date`). A night costs its date's price, else its weekday's, else the default — the order `listingPricingSchema` documents and `nightlyPrice` in `@repo/contracts` applies. The listing page quotes a stay by it; nothing in the API computes a total yet, and the payment that does has to call the same function rather than restate the order. `weekdays` is a strict object: an unknown key is a `400`, because a stripped one would be a `PATCH` that replaces the set with an empty one and answers `200`. Both tables cascade from the listing and carry the same price `CHECK` as the column (`*_price_within_contract`). They travel as `pricing` on `POST`/`PATCH /listings`, and a `PATCH` that carries it replaces the whole set: `ListingRepository.update` writes the listing row first in the same statement, which locks it, so two saves of one listing's prices queue instead of colliding on the key. The explicit `updatedAt` it adds to `data` whenever prices are present is what makes the row written at all — given nested writes alone, Prisma issues no `UPDATE` of the parent — and `test/listing.e2e-spec.ts` races ten saves to hold it there. Only `GET /listings/:id` reads them back (`listingDetailSchema`), and only the dates from today (UTC) on; past rows are never swept, they drop out of the reads and out of the table at the next save.
+- **A nightly price is a default plus exceptions.** `listings.price_per_night` stays the default — the catalogue shows, filters and sorts by it alone — and two tables hold the exceptions: `listing_weekday_prices` (one row per listing and `Weekday`, an enum spelled in lower case so it is the contract's `weekdaySchema` as it is) and `listing_date_prices` (one row per listing and `@db.Date`). A night costs its date's price, else its weekday's, else the default — the order `listingPricingSchema` documents and `nightlyPrice` in `@repo/contracts` applies. The listing page quotes a stay by it, and so does the hold: `BookingRepository.create` reads the prices through `readPricedListing` (`src/listing/listing-pricing.ts`) under its `FOR UPDATE` lock and stores `quoteStay`'s total as the booking's `amount` — the same function, never a restatement of the order. `weekdays` is a strict object: an unknown key is a `400`, because a stripped one would be a `PATCH` that replaces the set with an empty one and answers `200`. Both tables cascade from the listing and carry the same price `CHECK` as the column (`*_price_within_contract`). They travel as `pricing` on `POST`/`PATCH /listings`, and a `PATCH` that carries it replaces the whole set: `ListingRepository.update` writes the listing row first in the same statement, which locks it, so two saves of one listing's prices queue instead of colliding on the key. The explicit `updatedAt` it adds to `data` whenever prices are present is what makes the row written at all — given nested writes alone, Prisma issues no `UPDATE` of the parent — and `test/listing.e2e-spec.ts` races ten saves to hold it there. Only `GET /listings/:id` reads them back (`listingDetailSchema`), and only the dates from today (UTC) on; past rows are never swept, they drop out of the reads and out of the table at the next save.
 - A booking references a listing with `onDelete: Restrict` and a guest with `onDelete: Cascade`, and a listing references its owner with `onDelete: Restrict` as well. The restrict is deliberate — a listing somebody has booked is not something the database will let go of, because that would take their stay down with it — and it has to hold one level up too: a cascade from `users` would have to delete listings that bookings restrict, so it would promise an account deletion the database refuses to perform. Removing an owner therefore lets go of the listings first, which is the delete order everywhere rows are wiped anyway: bookings, then listings, then users (`test/database.ts`, `prisma/seed.ts`). A guest is the case that does cascade — their bookings are theirs to take with them.
 - **`DELETE /listings/:id` retires the listing, it does not remove the row** (`deleted_at`). The constraint above is why: a booking names where the stay was, so the row has to outlive the offer, and refusing the delete outright reached an owner as a `409` that anyone with one finished stay in their history could never get past. Retired means out of the catalogue, off its owner's dashboard, `404` on the way back, and closed to new bookings — the stays already taken against it keep their record.
 - **`ListingRepository` owns what "still offered" means**, and that is what makes the soft delete affordable: the condition is written once as the exported `STILL_OFFERED`, every read of the class is already narrowed by it, and a call site cannot forget a filter it has no way to spell. `deletedAt: null` is not spelled anywhere else — four queries over `listings` live outside the class, and each says whether it narrows. `ConversationRepository.start` does, by spreading `STILL_OFFERED`: a thread cannot begin about a retired listing. `BookingRepository.findByIdWithListingOwner` deliberately does not, because it resolves the listing of a stay whether or not it is retired and the stay is what the row was kept for; `LookupRepository.findListings` does not either, for the same reason — it offers the listings stays were taken against. Phase 4's `create` in `BookingRepository` reads `deleted_at` itself under the `FOR UPDATE` lock — the one place the check has to be atomic. A new query over that table has to answer the same question.
@@ -159,8 +219,9 @@ src/
 - **The messages between users join the same stream.** `ConversationService` publishes `message.created` to both sides of the thread (the first message of a new one included) and `conversation.read` to the reader when a marker moved; every event, notices' included, carries `unreadNotifications` and `unreadConversations` with one `unreadRevision`. So every write that moves either count counts both: `ConversationRepository.append`, `start` and `markRead` call `countUnreadOf` inside their transactions, after the thread's row lock — the order every caller keeps, and several accounts are locked sorted by id, so two messages crossing between the same two people cannot deadlock. A thread is unread for a side while `last_message_at` is later than that side's marker, counted in two halves for the reason `findPageFor` reads two. A message is **not** a `notify`: the thread holds its own unread state, and a notice per message would bury the bookings and reviews on the bell. The notification routes still answer `{ unread, revision }` — the bell's half, on the same revision sequence. `EventsController` reads the opening `sync` through `UnreadService.count`, like any controller through its service. The count after the lock is one statement (two subqueries for the threads, one for the notices, and the clock), not one before the lock: under `READ COMMITTED` a statement that waited for the lock would read the snapshot from before the commit it waited for.
 - **A waitlist entry is a wish, not a claim, and the API never books for a waiter.** A booking is a 15-minute hold its guest has to pay; taken for somebody who is not looking it would lapse, keep the nights off the calendar meanwhile, and send a second round of notices. So `waitlist_entries` holds nothing — neither the overlap check nor the `EXCLUDE` constraint reads it — and when nights stop being held `BookingService` hands them to `WaitlistService.announceFreed` on every path that frees them: a cancellation and all three expiry paths (the lazy one inside `create` only after the new hold is in, so nights it took back are news to nobody). Every entry on that listing whose nights overlap the freed ones and whose **whole** range no stay now holds (`holdsTheSlot`, imported from `booking.repository.ts` like the catalogue does) is deleted and its owner told — all of them at once, `WAITLIST_AVAILABLE`, and the first to book takes the nights. That is two reads whatever the number of waiters — the candidates, then every stay holding a night in the span they cover — and one `DELETE ... RETURNING` for the claim. The `DELETE` comes before the notice and only the call it matched tells anybody, so two releases racing over one entry tell one person once: at most once, the trade every `notify` makes, and `announceFreed` never throws for the same reason. `join` locks the listing row (`FOR UPDATE`, the lock `create` takes) so its "are these nights held" read cannot interleave with a booking, and then the caller's own row, which serialises two joins of one account so the cap (`MAX_WAITLIST_ENTRIES`) and the duplicate check count what the other wrote; joining twice answers the entry already there. Free nights are a `409` — the answer to them is booking — and the only one: a full list and a range only the caller's own stays hold are a `403`, so the frontend reads a `409` as its calendar being stale. The cap counts what `GET /waitlist` shows, entries on a listing still offered. A cancellation and a lapsing hold do not take the listing lock, so one can commit and announce between `join`'s read and its commit; `WaitlistService.join` therefore announces the joined range once more after the commit, and a release is either visible to that read or its own announcement sees the entry. An entry whose check-in has passed is left out of every read and deleted at the owner's next join. **The other side of the list is `GET /waitlist/demand`**, a keyset page scoped by the role the way `GET /bookings` is (`WaitlistService.demandFor`, the same exhaustive switch): a user is answered the entries on their own listings, an admin every entry, both still ahead and on a listing still offered. Only the admin's carries `waiter` (the id and the name); a host's is `null`, because a waiter has taken nothing from the host yet and a booking is what introduces a guest. Its two orderings (`checkInAsc`, the default, and `newest`) have an index apiece on the table; the host's scope narrows through `listings.owner_id` and gets none, the trade the owner's page of stays makes. `WaitlistModule` imports nothing of `BookingModule`, which is what lets `BookingModule` import it. The entries cascade with their listing and their user, so `resetDatabase` and the seed need no line for them.
 - A model change means a migration (`db:migrate`), and the migration files are committed.
-- `db:migrate` is `prisma migrate dev` and belongs to a developer machine only — it can decide to reset the database. A deployed environment runs `db:deploy` (`prisma migrate deploy`), which only applies what is already committed; that is what `railway.json` hangs on `preDeployCommand`.
+- `db:migrate` is `prisma migrate dev` and belongs to a developer machine only — it can decide to reset the database. A deployed environment runs `db:deploy` (`prisma migrate deploy`), which only applies what is already committed; that is what `.railway/railway.ts` hangs on `preDeploy`.
 - **Resetting the local dev database during a migration is allowed.** When `db:migrate` asks for a reset — drift, an applied migration edited after the fact — accept it (or run `pnpm --filter @repo/api exec prisma migrate reset`) and follow with `db:seed`; the local data is demo data the seed writes back. Do not work around the prompt with `migrate diff` plus `db:deploy`. This holds for the database the root `.env` points at on a developer machine only, never for a deployed one.
+- **Under Claude Code the reset needs the user's explicit consent, every time.** Prisma detects an AI agent through the environment and refuses `migrate reset` (and a `migrate dev` that wants one). A command the user types with `!` runs in the same session environment, so handing the command back to them does not get around it. Ask first — through the structured question tool where there is one — and say four things: the exact command, why it is needed (a migration edited or added), that every row in the database is destroyed, and which database it is (the `POSTGRES_*` one from docker-compose on `localhost`, a development database, never a deployed one). Only after a clear "yes" rerun it with `PRISMA_USER_CONSENT_FOR_DANGEROUS_AI_ACTION` set to the user's answer verbatim, then `db:seed`. Permission given for one reset does not cover the next.
 - Prisma 7 dropped the automatic steps of v6: neither `migrate dev` nor `migrate reset` runs the seed script, and `migrate dev` no longer regenerates the client. So a schema change is `db:migrate` + `db:generate`, and a recreated database is `db:migrate` + `db:seed`.
 
 Generate scaffolding through the Nest CLI rather than by hand:
@@ -336,6 +397,206 @@ Two checks, and the split between them is the point.
   `USER` before it casts the column — Postgres cannot drop an enum value, so it is a new
   type and an `ALTER COLUMN ... USING`, which would refuse a row still holding the old one.
 
+## Payments
+
+Stripe, through PaymentIntents and Elements. Three modules are split into `domain/`,
+`application/`, `infrastructure/` and `presentation/` — the departure `docs/plan.md` plans
+for them and for nothing else — because the money has several entry points into one set of
+rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, Stripe):
+`payment` is the provider's side, `booking` the stays, `payout` the host's share.
+
+- **The dependencies run one way, and registries are how the other way is reached.**
+  `payment` imports no stay; `booking` imports `payment`; `payout` imports both and nothing
+  imports `payout`. What a webhook event means is decided by whoever registers a
+  `PaymentEventHandler` with `PaymentEventDispatcher` in `onModuleInit`:
+  `BookingPaymentHandler` (a payment, a refund, a lost dispute) and `PayoutEventHandler`
+  (disputes, and the news about hosts' accounts). Each writes only its own columns, so the
+  order they run in does not matter. What the booking side has to tell the payout side — a
+  stay confirmed, a refund recorded — it tells `StayLifecycle`, an awaited registry rather
+  than an event bus: a listener that throws fails the caller, and the event is retried.
+- **The port is the external service, not the database.** `PaymentGateway` and
+  `PayoutGateway` are abstract classes, which Nest takes as their own injection tokens; the
+  Stripe adapters are provided behind them. The unit specs fake the ports, and
+  `test/payment.e2e-spec.ts` overrides the payment one with the real adapter minus its
+  outgoing calls, so the signature check is the production code. A gateway speaks the
+  contract's money — euros to the cent — and only the adapter multiplies into cents.
+- **The webhooks are an inbox** (`POST /payments/webhook`, `POST /payouts/webhook`). A
+  delivery is verified (the signature over the raw body — `src/common/body-parsers.ts` keeps
+  the bytes for these two routes only), written to `payment_events` and answered `200` at
+  once; the `payment-event` queue's worker handles it afterwards and stamps
+  `processed_at`. Stripe expects a `2xx` within seconds, and the work behind an event calls
+  Stripe and waits for leases. The worker runs four events at a time, so one waiting on a
+  lease or on Stripe does not hold the rest behind it. A failed run is retried with a growing pause, and a
+  repeatable sweep re-queues an event a lost job left unprocessed, a hundred at a time
+  (`payment_events_unprocessed_idx`, partial). **Every failed run is counted on the row**
+  (`attempts`, `last_error`), and after `MAX_EVENT_ATTEMPTS` (24 — three rounds of the
+  job's own eight, about half an hour) the event is set aside (`failed_at`): neither the
+  worker nor the sweep touches it again, and every admin is told (`PAYMENT_EVENT_FAILED`).
+  An event that fails the same way every time would otherwise be retried for good with
+  nobody told. **A run that finds the stay held by another — a cancellation's or a
+  settlement's lease — is no failure**: the handler throws `PaymentEventBusyError`, which
+  the dispatcher retries without counting, since a lease runs out on its own. Clearing
+  `failed_at` and `attempts` hands it back to the sweep. A daily job
+  deletes the events processed more than `EVENT_RETENTION_DAYS` (90) ago — Stripe
+  redelivers for three days, so nothing older has anything left to deduplicate. An unsigned delivery is a `400`; one that
+  could not be recorded a `500`, which Stripe delivers again. Both routes are `@Public()`,
+  `@SkipThrottle()` and out of `/docs`. The payout webhook's thin events become a
+  `PaymentEvent` of kind `account` and go through the same inbox.
+- **The handlers are idempotent on their own**, which is what makes retrying safe:
+  `confirmPayment` is a conditional `updateManyAndReturn` on `PENDING_PAYMENT` (whatever the
+  deadline — a lapsed hold no path has released still holds its nights), every write to
+  Stripe goes under an idempotency key, and a refund is looked up by its key before it is
+  sent, so it goes out once even after Stripe forgot the key. Stripe does not order its
+  deliveries, so a refund or a dispute of a payment whose hold is still pending, unpaid and
+  unrefunded (`awaitsItsPayment`) arrived before the payment's own news: it throws
+  `PaymentNotConfirmedYetError` and comes again, counted, rather than being read as news
+  about a payment that never confirmed a stay — the hold is confirmed or released within
+  minutes, well inside `MAX_EVENT_ATTEMPTS`.
+- **The amount is the server's.** The hold is priced inside the locking transaction
+  (`quoteStay` over `readPricedListing`), stored as `bookings.amount`, and charged as it is.
+  A stay costs between `MIN_CHARGE` and `MAX_CHARGE` (`domain/stay-price.ts`, Stripe's floor
+  and ceiling for one charge); `create` refuses a quote outside them with a `422`.
+- **One PaymentIntent per hold, opened by the payment form.** `POST /bookings/:id/payment`
+  opens it under `booking-<id>-payment` and answers its `client_secret`; a second call
+  replays the same intent, and `attachPayment` writes its id only into an empty column and
+  only while the hold is pending — a hold released while Stripe answered gets the intent
+  withdrawn and the caller a `409`. Only the guest is answered (`403` to the host and an
+  admin), and only while the hold is pending and inside its deadline (`409`). A `POST`
+  because it opens something at Stripe; the frontend calls it from the browser, never from a
+  render. The intent carries `metadata.bookingId` and `metadata.site` (`STRIPE_SITE`): a test
+  account is shared by every developer's `stripe listen`, so a payment another site opened
+  reads as naming no booking and is left alone.
+- **A payment that confirms nothing is refunded** in full under `payment-<pi>-unheld`, and
+  the guest is told (`PAYMENT_REFUNDED`) by the run whose `recordRefund` wrote the empty
+  column — capped at `amount`, which the column's `CHECK` holds it to. A booking this
+  payment confirmed (`paid_at`, never cleared) is a redelivery and refunds nothing even if
+  it was cancelled since. `confirmPayment` confirms only with the intent the row names (or
+  none yet), and another intent naming the same booking goes back without touching the
+  row's refund total. A payment naming a booking this database does not hold is left alone
+  and logged, like one naming none: there is no account deletion to have taken the row, so
+  it belongs to another database.
+- **Only payment methods that confirm at once are offered, and the code says which.** A
+  method that stays `processing` for days outlives its fifteen-minute hold and is refunded
+  in full when it lands, so the intent is opened with `allowed_payment_method_types` set to
+  `INSTANT_PAYMENT_METHODS` (`stripe-payment.gateway.ts`) — not `payment_method_types`, which
+  the pinned API version refuses with a `400`. The dashboard still decides which of them are
+  switched on: Stripe drops a listed method that is not enabled instead of failing the
+  payment. A method added to the list has to be one Stripe confirms immediately.
+- **A cancellation is final when it is answered, and its refund follows it.**
+  `DELETE /bookings/:id` calls no payment provider. A hold can be cancelled at any time, a
+  confirmed stay only before its check-in day — by the guest and by an admin alike
+  (`isCancellableOn`, `409` once it has begun). `refundOnCancel` decides the amount — the
+  guest in full until 48 hours before check-in and nothing after, an admin in full — capped
+  by what the row records as refunded, and `cancel` writes it as `refund_owed` in the
+  statement that writes `CANCELLED`. The `refund-cancellation` job sends it under
+  `booking-<id>-cancellation` (one cancellation per booking, so no amount in the key), capped
+  again by what Stripe says is left, and `settleOwedRefund` raises `refunded_amount` by what
+  the refund named by that key gave back and clears the debt in one transaction. A refund
+  Stripe refuses is retried by the job, and a sweep of its own on the same queue — apart
+  from the hold sweep, so a slow Stripe holds back refunds alone — pays every debt still on
+  a row whose cancellation lease is not running, fifty at a time and the fewest failures
+  first (`bookings_refund_owed_idx`). That lease is compared on the database's clock, in raw
+  SQL, because it was written with it. The worker runs four jobs at a time, so a refund
+  waiting on Stripe does not hold a release behind it. A dispute opened after the
+  cancellation leaves the debt waiting, out of the sweep — won, it is paid; lost, dropped. A
+  disputed payment cannot be refunded: an open dispute is a `409`.
+- **A debt or a payout that keeps failing is set aside**, the way the inbox sets an event
+  aside: every failed run counts on the row (`refund_attempts`/`refund_last_error`,
+  `payout_attempts`/`payout_last_error`), the sweeps read the fewest failures first so a
+  failing row cannot fill a batch, and after `MAX_REFUND_ATTEMPTS` (30, about half an hour of
+  the minute sweep) or `MAX_PAYOUT_ATTEMPTS` (24, about a day of the hourly one) the row is
+  stamped `refund_failed_at`/`payout_failed_at`, the sweep leaves it alone, the job stops
+  retrying and every admin is told (`CANCELLATION_REFUND_FAILED`, `PAYOUT_FAILED`). Clearing
+  the stamp and the counter hands it back; the admin screen for that is in `docs/plan.md`.
+- **The per-booking leases** (`infrastructure/booking-lease.ts`): `cancelling_until` for a
+  cancellation, its refund job and the payment webhooks (`whileCancelling`, sixty seconds,
+  three of waiting), and `settling_until` for the settlement of the host's payout
+  (`whileSettling`). A lease rather than a lock an open transaction holds, because the work
+  under it calls Stripe and a pinned connection per caller starves the pool. The deadline
+  is the database's clock, so instances with clocks apart agree on it. The holder renews
+  the lease every third of its length while the work runs, so slow work keeps the row;
+  only a holder that died or froze loses it, and a renewal that finds the lease taken
+  logs the loss when the work ends instead of taking it back. One that waits too
+  long is a `409` to a cancellation and a retry to a job or an event.
+- **The API version is pinned** (`STRIPE_API_VERSION` in `stripe-client.ts`, the version
+  the installed SDK is typed against — the compiler refuses another). The webhook
+  endpoints in the Dashboard have to deliver in that version; `readEvent` warns once per
+  process about an event in another. Locally `stripe listen` runs with `--latest`, which
+  is the same version while the installed SDK is current.
+- **Stripe is called with four seconds a call and no retry of the SDK's own**
+  (`stripe-client.ts`). What retries instead is whatever ran the call — a person pressing
+  the button again, a job's next attempt — safe because every write goes under a key.
+- **A refund the bank sent back** (`refund.failed`) is kept in `refund_failures` — keyed by
+  the refund's id, no relation to a booking — and told to every admin (`REFUND_FAILED`)
+  by the delivery that wrote the row. The stay goes on recording it as refunded: the money
+  is the guest's, and a person issues it again and stamps `resolved_at`.
+- **The money columns carry `CHECK`s** (`bookings_amount_positive`,
+  `bookings_*_within_amount`): an amount above zero, and nothing refunded, owed or paid out
+  beyond it — for the writes that go around the API, as the price columns have.
+- **Notices**: `BOOKING_CONFIRMED` to both sides, `PAYMENT_REFUNDED` to the guest of a late
+  payment or a dashboard refund — through `notify`, which never throws. What only a person
+  can put right goes to every admin through `notifyAdmins` (`REFUND_FAILED`,
+  `PAYMENT_EVENT_FAILED`, `CANCELLATION_REFUND_FAILED`, `PAYOUT_FAILED`). A redelivery of a
+  payment that confirmed a still-confirmed stay repeats the payout's scheduling and the
+  notices unless `confirmation_announced_at` says they were done; the whole event runs under
+  `whileCancelling`, so two runs over one payment tell both sides once.
+
+### Host payouts
+
+Stripe Connect as a marketplace, with **separate charges and transfers**: the guest pays the
+platform, and the host is paid their share by a transfer once the stay has begun.
+`PayoutService` owns it.
+
+- **The rule is the contract's.** `hostShare` (what is left after refunds, less
+  `PLATFORM_FEE_RATE`, in whole cents) and `payoutDueAt` (`PAYOUT_DELAY_HOURS` after
+  midnight UTC of check-in) live in `packages/contracts/src/payout.ts`, because the host's
+  screen states them. `domain/payout.ts` adds what only the API knows: nothing is owed for
+  an unpaid stay or a lost dispute, a refund owed counts as refunded, and nothing leaves
+  while a dispute is open.
+- **A host is an Accounts v2 recipient**, opened by the first
+  `POST /payouts/account/session` under `user-<id>-account` and written only into the empty
+  `users.stripe_account_id`. Onboarding is Stripe's embedded component on the frontend.
+- **`users.payouts_enabled_at` selects a payout and Stripe's answer releases it**: `payOut`
+  asks `transfersEnabled` again right before the transfer, and a lapsed account is held back
+  and the flag switched off. The flag is written from the account events and from
+  `POST /payouts/account/refresh`, which the payouts screen calls while onboarding is
+  unfinished; `GET /payouts/account` only reads the row. The write that switches it on
+  queues a `pay-host` job rather than paying inside the request or the event.
+- **Bookings are never refused for a host who cannot be paid.** Their payouts wait.
+- **Two halves, like hold expiry**: a delayed job per stay at `payoutDueAt` (`payout-<id>`)
+  and an hourly sweep, a hundred stays a run, the fewest failures first, over
+  `bookings_awaiting_payout_idx` (partial: paid, no transfer, not set aside), which leaves
+  out a stay refunded in full or owed a refund.
+- **A transfer is idempotent and recorded once**: funded by the stay's own charge
+  (`source_transaction`), sent under `booking-<id>-payout` — no amount in the key, so a retry
+  cannot send a second one — and looked up by `transfer_group` and `metadata.bookingId`
+  before it is sent, because Stripe forgets a key after 24 hours. `transfer_id` is written
+  only into an empty column. Those three, not a lease, are what keep the stay's job, the
+  sweep and a host's `pay-host` job — run four at a time by the worker — to one transfer. A
+  refund or dispute that lands while the transfer is in flight does not undo the write;
+  `settle` takes back the difference straight after.
+- **`settle` is the one place that takes money back from a host**: under `whileSettling` it
+  compares `paid_out_amount` with what is owed now and, when the row says more is held,
+  asks Stripe what the transfer still holds — a reversal whose write was lost is already
+  off it — reverses the difference under `booking-<id>-reversal-<held cents>-<owed
+cents>` and lowers `paid_out_amount` from exactly what it read. Two settlements of one stay queue on the lease instead of reversing the same money
+  twice; `test/payout.repository.e2e-spec.ts` runs the lease against the real database.
+- **A refund** (`charge.refunded`) is the booking side's: it raises `refunded_amount` to
+  Stripe's total, tells the guest of a refund this API did not send, cancels a stay not yet
+  begun refunded in full — one under way or over keeps its status and its nights, as a lost
+  dispute's does — and announces the refund to `StayLifecycle`, where `PayoutEventHandler`
+  settles.
+- **Disputes** move forward only — `OPEN` from none, `WON`/`LOST` from none or `OPEN` —
+  because Stripe does not order its deliveries. Opened, the host is told (`PAYMENT_DISPUTED`)
+  and nothing moves; won, the stay's `pay-out` job is queued; lost, `settle` reverses what
+  was sent and the booking side cancels the stay if its check-in has not come.
+  `PAYOUT_SENT` tells the host about each transfer.
+- **Stripe's side has to be set up once**: Connect enabled with the platform profile and
+  loss liability accepted, and — deployed — a second event destination for the thin
+  account events with its own secret (`STRIPE_PAYOUT_WEBHOOK_SECRET`, which falls back to
+  `STRIPE_PAYMENT_WEBHOOK_SECRET` outside production only, because `stripe listen` signs both
+  kinds with one; with `NODE_ENV=production` a missing one stops the boot).
+
 ## main.ts
 
 `src/main.ts` is already set up and driven by environment variables:
@@ -344,6 +605,7 @@ Two checks, and the split between them is the point.
 - listens on `API_PORT ?? PORT ?? 3001` at `API_HOST ?? '0.0.0.0'`;
 - CORS: the list of origins from `WEB_ORIGIN` (comma-separated), `credentials: true`;
 - `trust proxy` from `TRUST_PROXY`. Express counts `X-Forwarded-For` from the right, so the value is the number of proxies that **append** to it, not the number of hops a request makes — the frontend's BFF forwards the header untouched and is therefore not one of them, while the proxy in front of this service is (it appends the frontend server's address). 0 means believe nothing and use the socket address. It is what makes `req.ip` — and with it the rate limiter's bucket — the client rather than the proxy. Never set above the truth: one entry too many and `req.ip` becomes a header the client writes rather than an address.
+- `bodyParser: false` plus `useBodyParsers` (`src/common/body-parsers.ts`): Nest's two parsers, with the raw body kept for the two Stripe webhooks alone — their signature is over the body exactly as it was sent, which the parsed JSON cannot give back.
 - Swagger at `/docs`: the document is built from the same zod schemas, and `cleanupOpenApiDoc` is mandatory (in `nestjs-zod` 5 it replaced `patchNestJsSwagger`). It is published only when `NODE_ENV !== "production"` — the document describes the whole API surface. `addCookieAuth(ACCESS_TOKEN_COOKIE)` declares the session and `addSecurityRequirements` applies it to every operation, matching the global guard; `@Public()` is what drops it again. The credential is a cookie, so "Try it out" works from a browser that logged in through `/auth/login` and not from a pasted bearer header.
 
 Do not hardcode the port, the host or an origin. A new frontend origin goes into `.env`, not into the code.
@@ -365,9 +627,9 @@ The connection URLs repeat what docker-compose.yml is given, and nothing links t
 - E2E: `test/*.e2e-spec.ts`, config `test/jest-e2e.json`, run with `pnpm test:e2e` from the root. They hit the real database **and Redis** from docker-compose (it needs `docker compose up -d` and applied migrations) and reset both in `beforeEach` — `resetDatabase` wipes the tables, `resetQueue` (`test/queue.ts`) obliterates the `booking-expiry` queue. The script loads the root `.env` and enables `--experimental-vm-modules` — do not remove it. `maxWorkers: 1` in the same config is not optional either: the spec files share one database, and in parallel workers one file's cleanup wipes rows another one is working with. `booking.concurrency.e2e-spec.ts` is phase 4's proof — ten parallel identical `POST /bookings`, exactly one `201`. `booking-expiry.e2e-spec.ts` is the other half of that phase and the one thing no request can provoke: a hold is released fifteen minutes later by a job, so the spec drives the queue directly, pushes a deadline into the past and waits for the worker `app.init()` started.
 - `--experimental-vm-modules` is needed by the tests that actually execute queries, not by every test that sees Prisma. Prisma 7 has no binary engine: with a driver adapter the generated client loads a WASM query compiler through `await import(...)` on `$connect()`, and Jest forbids a dynamic import inside its vm context without the flag. No unit test ever gets the real `PrismaService` — a service sees fakes of its repositories, a repository spec a mock — so its constructor never runs and `$connect()` never happens; hence no flag there. If a unit spec starts failing with `A dynamic import callback was invoked without --experimental-vm-modules`, it has reached the real database: mock Prisma, do not add the flag.
 - Both test tasks are declared in `turbo.json` with `dependsOn: ["^build"]`, so run them from the root. The specs import `@repo/contracts` schemas as values and need the built `dist/`; a direct `pnpm --filter @repo/api test` skips the build and fails on a fresh clone.
-- A new controller or service comes with a spec modelled on `src/booking/booking.service.spec.ts` (`Test.createTestingModule`).
+- A new controller or service comes with a spec modelled on `src/booking/application/booking.service.spec.ts` (`Test.createTestingModule`).
 - A cursor is untrusted input and gets a spec of its own — `catalogue-cursor.spec.ts`, `booking-cursor.spec.ts`, `user-cursor.spec.ts` and `lookup-cursor.spec.ts`, and both are about what the parse refuses: a key the column it names could not hold, an id that is not one, an ordering nobody offers, and a cursor the other list of this API issued. What a fake repository has to get right beside them is the shape the service reasons about (a page of `limit` rows with `hasMore`, a scope the filters narrow), not the SQL — that is the e2e specs' half.
-- A service spec fakes the repositories instead of mocking Prisma — every module has them, so the only spec left holding a `PrismaService` mock is the one written for a repository itself (`src/user/user.repository.spec.ts`): `src/auth/auth.service.spec.ts`, `src/user/user.service.spec.ts`, `src/listing/listing.service.spec.ts` and `src/booking/booking.service.spec.ts` run their service against in-memory stores and assert what ends up stored, so the test states the rule ("a replayed token revokes the family", "an owner may read the stay and not cancel it") rather than the call the service happens to make. The fakes are typed `PublicOf<Repository>` — a mapped type keeps only the public surface, so a fake needs no inheritance and still stops compiling when the real class gains or drops a method, or changes what one returns. An argument added to an existing method it does not catch: a shorter signature stays assignable to a longer one, and method parameters are compared bivariantly even under `strictFunctionTypes`. With the repository faked, the Prisma code paths of that module are covered by e2e alone; that is the trade, and it is why `test/auth.e2e-spec.ts` and `test/listing.e2e-spec.ts` have to keep exercising them. Where a query decides something HTTP cannot provoke on demand, the e2e spec takes the repository out of the container and calls it directly instead of going through the API. There are two: `test/refresh-token.repository.e2e-spec.ts`, because which of two parallel refreshes reads the row first is a matter of timing — reading it after the winner burned it is a replay, not the race the conditional update exists for; and `test/booking.repository.e2e-spec.ts`, because two adapter-specific error shapes decide something HTTP cannot provoke: the guest foreign key (a missing listing is now refused by the `FOR UPDATE` read, so only the guest key reaches the insert) read through `violatedConstraint`, and the `EXCLUDE` constraint violation (`23P01`) read through `isExclusionViolation` when two overlapping creates race past the in-transaction check. Both are the kind of parse that has to be executed against the real driver rather than trusted.
+- A service spec fakes the repositories instead of mocking Prisma — every module has them, so the only spec left holding a `PrismaService` mock is the one written for a repository itself (`src/user/user.repository.spec.ts`): `src/auth/auth.service.spec.ts`, `src/user/user.service.spec.ts`, `src/listing/listing.service.spec.ts` and `src/booking/application/booking.service.spec.ts` run their service against in-memory stores and assert what ends up stored, so the test states the rule ("a replayed token revokes the family", "an owner may read the stay and not cancel it") rather than the call the service happens to make. The fakes are typed `PublicOf<Repository>` — a mapped type keeps only the public surface, so a fake needs no inheritance and still stops compiling when the real class gains or drops a method, or changes what one returns. An argument added to an existing method it does not catch: a shorter signature stays assignable to a longer one, and method parameters are compared bivariantly even under `strictFunctionTypes`. With the repository faked, the Prisma code paths of that module are covered by e2e alone; that is the trade, and it is why `test/auth.e2e-spec.ts` and `test/listing.e2e-spec.ts` have to keep exercising them. Where a query decides something HTTP cannot provoke on demand, the e2e spec takes the repository out of the container and calls it directly instead of going through the API. There are two: `test/refresh-token.repository.e2e-spec.ts`, because which of two parallel refreshes reads the row first is a matter of timing — reading it after the winner burned it is a replay, not the race the conditional update exists for; and `test/booking.repository.e2e-spec.ts`, because two adapter-specific error shapes decide something HTTP cannot provoke: the guest foreign key (a missing listing is now refused by the `FOR UPDATE` read, so only the guest key reaches the insert) read through `violatedConstraint`, and the `EXCLUDE` constraint violation (`23P01`) read through `isExclusionViolation` when two overlapping creates race past the in-transaction check. Both are the kind of parse that has to be executed against the real driver rather than trusted.
 - In e2e, check the response with a schema from `@repo/contracts` (`bookingSchema.parse(response.body)`) — that way the test catches a drift from the contract, not only a status code.
 - Every route except the `@Public()` ones is behind the global guard, so an e2e spec talks to the API through the agent from `test/session.ts` (`signIn(app)`) — a `request(app.getHttpServer())` without cookies only ever gets a 401. A rule that differs by role needs an agent per role: `signInAs(app, Role.ADMIN)` registers, promotes the row and logs in again, because the token minted at registration still says `USER`. A host is not a role, so it is `signIn(app, hostCredentials)` — a second `USER` whose listing makes it the host.
 - `test/event-stream.ts` reads `GET /events` off a real socket (`app.listen(0)`, once per application, and `fetch`) for the notification and conversation specs: supertest waits for a body to end, and this one never does.
