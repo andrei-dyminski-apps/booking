@@ -5,8 +5,12 @@ import {
   type StayListener,
 } from "../../booking/application/stay-lifecycle";
 import { PaymentEventDispatcher } from "../../payment/application/payment-event-dispatcher";
-import type { PaymentEventHandler } from "../../payment/application/payment-event-handler";
+import {
+  PaymentEventBusyError,
+  type PaymentEventHandler,
+} from "../../payment/application/payment-event-handler";
 import type { PaymentEvent } from "../../payment/application/ports/payment-gateway";
+import { SettlementInProgressError } from "../domain/payout.errors";
 import { PayoutService } from "./payout.service";
 
 /**
@@ -28,28 +32,46 @@ export class PayoutEventHandler
     this.stayLifecycle.register(this);
   }
 
-  async handle(event: PaymentEvent): Promise<void> {
-    switch (event.kind) {
-      case "disputed":
-      case "disputeClosed":
-        await this.payoutService.handleSettlementEvent(event);
-        break;
-      case "account":
-        await this.payoutService.handleAccountEvent(event);
-        break;
-      case "succeeded":
-      case "refunded":
-      case "refundFailed":
-      case "other":
-        break;
-    }
+  handle(event: PaymentEvent): Promise<void> {
+    return busyAsRetry(async () => {
+      switch (event.kind) {
+        case "disputed":
+        case "disputeClosed":
+          await this.payoutService.handleSettlementEvent(event);
+          break;
+        case "account":
+          await this.payoutService.handleAccountEvent(event);
+          break;
+        case "succeeded":
+        case "refunded":
+        case "refundFailed":
+        case "other":
+          break;
+      }
+    });
   }
 
   confirmed(stay: StayNotice): Promise<void> {
     return this.payoutService.schedule(stay);
   }
 
-  async refunded(bookingId: string): Promise<void> {
-    await this.payoutService.settle(bookingId);
+  /** Reached from the refund's event too, which retries a busy settlement uncounted. */
+  refunded(bookingId: string): Promise<void> {
+    return busyAsRetry(async () => {
+      await this.payoutService.settle(bookingId);
+    });
+  }
+}
+
+/** A settlement another run holds, as the inbox's retry that counts no failure. */
+async function busyAsRetry(work: () => Promise<void>): Promise<void> {
+  try {
+    await work();
+  } catch (error) {
+    if (error instanceof SettlementInProgressError) {
+      throw new PaymentEventBusyError(error.message);
+    }
+
+    throw error;
   }
 }

@@ -54,3 +54,22 @@ export function canTransition(from: BookingStatus, to: BookingStatus): boolean {
 export function isCancellable(status: BookingStatus): boolean {
   return canTransition(status, BookingStatus.CANCELLED);
 }
+
+/**
+ * The hold the event's payment is attached to, not confirmed by it yet, with nothing given
+ * back: the news of that payment's refund or dispute came before the news of the payment
+ * itself, which Stripe does not order, or whose run failed and waits for its retry. Such
+ * an event has to come again rather than be read as one about a payment that never
+ * confirmed a stay. The wait is bounded: the hold is confirmed or released within minutes.
+ */
+export function awaitsItsPayment(stay: {
+  status: BookingStatus;
+  paid: boolean;
+  refundedAmount: number | null;
+}): boolean {
+  return (
+    stay.status === BookingStatus.PENDING_PAYMENT &&
+    !stay.paid &&
+    stay.refundedAmount === null
+  );
+}

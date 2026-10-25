@@ -2,14 +2,22 @@ import { Injectable, Logger, type OnModuleInit } from "@nestjs/common";
 import { BookingStatus, NotificationType } from "@repo/contracts";
 import { NotificationService } from "../../notification/notification.service";
 import { PaymentEventDispatcher } from "../../payment/application/payment-event-dispatcher";
-import type { PaymentEventHandler } from "../../payment/application/payment-event-handler";
+import {
+  PaymentEventBusyError,
+  type PaymentEventHandler,
+} from "../../payment/application/payment-event-handler";
 import {
   PaymentGateway,
   type PaymentEvent,
 } from "../../payment/application/ports/payment-gateway";
 import { roundCents } from "../../payment/domain/money";
-import { toIsoDate } from "../../prisma/iso-date";
+import { toIsoDate } from "../../common/iso-date";
 import { WaitlistService } from "../../waitlist/waitlist.service";
+import { awaitsItsPayment } from "../domain/booking-status";
+import {
+  CancellationInProgressError,
+  PaymentNotConfirmedYetError,
+} from "../domain/booking.errors";
 import type { ConfirmedStay, RefundTarget } from "../domain/booking.types";
 import { BookingRepository } from "../infrastructure/booking.repository";
 import { RefundFailureRepository } from "../infrastructure/refund-failure.repository";
@@ -37,7 +45,20 @@ export class BookingPaymentHandler
     this.paymentEventDispatcher.register(this);
   }
 
+  /** A stay a cancellation holds is the inbox's retry that counts no failure. */
   async handle(event: PaymentEvent): Promise<void> {
+    try {
+      await this.dispatch(event);
+    } catch (error) {
+      if (error instanceof CancellationInProgressError) {
+        throw new PaymentEventBusyError(error.message);
+      }
+
+      throw error;
+    }
+  }
+
+  private async dispatch(event: PaymentEvent): Promise<void> {
     switch (event.kind) {
       case "succeeded":
         await this.settlePayment(event);
@@ -101,7 +122,18 @@ export class BookingPaymentHandler
 
     const target = await this.bookingRepository.findPaymentTarget(bookingId);
 
-    if (target?.paid === true && target.hold.paymentId === paymentId) {
+    // A booking this database does not hold: another database's on a shared test account
+    // that took this site's name, or a local one wiped since. There is no account deletion
+    // to have taken it, so the payment is not this API's to give back.
+    if (target === null) {
+      this.logger.warn(
+        `Payment ${paymentId} names booking ${bookingId}, which this database does not hold; ignored`,
+      );
+
+      return;
+    }
+
+    if (target.paid && target.hold.paymentId === paymentId) {
       if (
         target.status === BookingStatus.CONFIRMED &&
         !target.confirmationAnnounced
@@ -112,7 +144,12 @@ export class BookingPaymentHandler
       return;
     }
 
-    if (target !== null && target.refundedAmount !== null) return;
+    // The row's refund total belongs to the payment the booking was paid or held with. A
+    // stray one — another intent naming the same booking — is given back without it.
+    const ownPayment =
+      target.hold.paymentId === null || target.hold.paymentId === paymentId;
+
+    if (ownPayment && target.refundedAmount !== null) return;
 
     await this.paymentGateway.refund(
       paymentId,
@@ -123,10 +160,14 @@ export class BookingPaymentHandler
       `Refunded payment ${paymentId}: booking ${bookingId} no longer holds its nights`,
     );
 
-    // The booking may be gone with the guest's account; the money still went back.
+    // Never past what the stay costs, which its CHECK refuses: a payment of another sum
+    // than quoted goes back whole, but the row records the most it could have charged.
     if (
-      target !== null &&
-      (await this.bookingRepository.recordRefund(bookingId, event.amount))
+      ownPayment &&
+      (await this.bookingRepository.recordRefund(
+        bookingId,
+        Math.min(event.amount, target.amount),
+      ))
     ) {
       await this.notificationService.notify(target.hold.guestId, {
         type: NotificationType.PAYMENT_REFUNDED,
@@ -137,13 +178,19 @@ export class BookingPaymentHandler
 
   /**
    * A cancellation's own refund is recorded by its job under the same lease, so whatever
-   * this raises is the dashboard's, and the guest is told.
+   * this raises is the dashboard's, and the guest is told. A refund in full cancels a stay
+   * that has not begun; one under way or over stays the record of the nights spent, and
+   * keeps holding them.
    */
   private async settleRefund(
     event: Extract<PaymentEvent, { kind: "refunded" }>,
   ): Promise<void> {
     const { amountRefunded, paymentId } = event;
     const found = await this.bookingRepository.findRefundTarget(paymentId);
+
+    if (found !== null && awaitsItsPayment(found)) {
+      throw new PaymentNotConfirmedYetError(paymentId);
+    }
 
     // A late payment or `stripe trigger`'s: no stay was confirmed with it.
     if (found === null || !found.paid) return;
@@ -167,7 +214,8 @@ export class BookingPaymentHandler
 
       if (
         amountRefunded >= stay.amount &&
-        stay.status === BookingStatus.CONFIRMED
+        stay.status === BookingStatus.CONFIRMED &&
+        notBegunYet(stay)
       ) {
         await this.cancelStay(
           stay,
@@ -187,17 +235,21 @@ export class BookingPaymentHandler
       event.paymentId,
     );
 
+    if (found !== null && awaitsItsPayment(found)) {
+      throw new PaymentNotConfirmedYetError(event.paymentId);
+    }
+
     if (found === null || !found.paid) return;
 
     await this.bookingRepository.whileCancelling(found.bookingId, async () => {
       const stay = await this.bookingRepository.findRefundTarget(
         event.paymentId,
       );
-      const today = toIsoDate(new Date());
 
       if (
-        stay?.status === BookingStatus.CONFIRMED &&
-        today < stay.hold.stay.from
+        stay !== null &&
+        stay.status === BookingStatus.CONFIRMED &&
+        notBegunYet(stay)
       ) {
         await this.cancelStay(
           stay,
@@ -299,4 +351,9 @@ export class BookingPaymentHandler
       confirmed.stay.bookingId,
     );
   }
+}
+
+/** Before the check-in day, UTC — the day `isCancellableOn` stops letting a stay go. */
+function notBegunYet(stay: RefundTarget): boolean {
+  return toIsoDate(new Date()) < stay.hold.stay.from;
 }

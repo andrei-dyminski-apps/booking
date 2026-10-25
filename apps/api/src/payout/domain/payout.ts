@@ -1,4 +1,4 @@
-import { hostShare, type DisputeStatus } from "@repo/contracts";
+import { DisputeStatus, hostShare } from "@repo/contracts";
 
 /**
  * The share itself is `hostShare` from the contract, which the host's screens state too;
@@ -17,7 +17,7 @@ export type PayoutFacts = {
  * platform, and the host's share with it; an open one only holds back sending (`mayPayOut`).
  */
 export function owedToHost(facts: PayoutFacts): number {
-  if (!facts.paid || facts.disputeStatus === "LOST") return 0;
+  if (!facts.paid || facts.disputeStatus === DisputeStatus.LOST) return 0;
 
   // A refund owed is the guest's money already; paying it out would only be taken back.
   return hostShare(
@@ -27,5 +27,5 @@ export function owedToHost(facts: PayoutFacts): number {
 }
 
 export function mayPayOut(facts: PayoutFacts): boolean {
-  return facts.disputeStatus !== "OPEN" && owedToHost(facts) > 0;
+  return facts.disputeStatus !== DisputeStatus.OPEN && owedToHost(facts) > 0;
 }

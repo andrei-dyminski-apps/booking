@@ -3,7 +3,7 @@ import type {
   Booking as BookingRow,
   Listing as ListingRow,
 } from "../../generated/prisma/client";
-import { toIsoDate } from "../../prisma/iso-date";
+import { toIsoDate } from "../../common/iso-date";
 import type { ReleasedHold, RefundTarget } from "../domain/booking.types";
 
 /*

@@ -9,7 +9,10 @@ import {
   PaymentEventDispatcher,
   SWEEP_BATCH,
 } from "./payment-event-dispatcher";
-import type { PaymentEventHandler } from "./payment-event-handler";
+import {
+  PaymentEventBusyError,
+  type PaymentEventHandler,
+} from "./payment-event-handler";
 import { PaymentEventJobs } from "./ports/payment-event-jobs";
 import type { PaymentEvent } from "./ports/payment-gateway";
 
@@ -145,8 +148,15 @@ class RecordingHandler implements PaymentEventHandler {
   /** Set to have the handler fail, as a refund the provider cannot be asked for would. */
   failing = false;
 
+  /** Set to have the handler find its stay held by another run, as a cancellation would. */
+  busy = false;
+
   handle(event: PaymentEvent): Promise<void> {
     if (this.failing) return Promise.reject(new Error("api_connection_error"));
+
+    if (this.busy) {
+      return Promise.reject(new PaymentEventBusyError("held by another run"));
+    }
 
     this.seen.push(event);
 
@@ -246,6 +256,31 @@ describe("PaymentEventDispatcher", () => {
 
     await expect(dispatcher.requeueStale()).resolves.toBe(1);
     expect(paymentEventJobs.queued).toEqual(["evt_old"]);
+  });
+
+  it("retries an event whose stay another run holds without counting a failure", async () => {
+    await dispatcher.receive(event("evt_1"));
+    second.busy = true;
+
+    for (let run = 0; run < MAX_EVENT_ATTEMPTS; run += 1) {
+      await expect(dispatcher.process("evt_1")).rejects.toBeInstanceOf(
+        PaymentEventBusyError,
+      );
+    }
+
+    expect(paymentEventRepository.rows.get("evt_1")).toMatchObject({
+      attempts: 0,
+      setAside: false,
+      processedAt: null,
+    });
+    expect(notificationService.toAdmins).toEqual([]);
+
+    second.busy = false;
+    await dispatcher.process("evt_1");
+
+    expect(
+      paymentEventRepository.rows.get("evt_1")?.processedAt,
+    ).not.toBeNull();
   });
 
   it("counts every failed run on the event, with what it failed with", async () => {

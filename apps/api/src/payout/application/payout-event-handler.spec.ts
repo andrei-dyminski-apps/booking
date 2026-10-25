@@ -2,7 +2,9 @@ import { Test } from "@nestjs/testing";
 import type { StayNotice } from "@repo/contracts";
 import { StayLifecycle } from "../../booking/application/stay-lifecycle";
 import { PaymentEventDispatcher } from "../../payment/application/payment-event-dispatcher";
+import { PaymentEventBusyError } from "../../payment/application/payment-event-handler";
 import type { PaymentEvent } from "../../payment/application/ports/payment-gateway";
+import { SettlementInProgressError } from "../domain/payout.errors";
 import { PayoutEventHandler } from "./payout-event-handler";
 import { PayoutService, type SettlementEvent } from "./payout.service";
 
@@ -18,6 +20,9 @@ class FakePayoutService implements Pick<
   readonly settled: string[] = [];
   readonly events: SettlementEvent[] = [];
 
+  /** Set to have every settlement find the stay held by another run. */
+  held = false;
+
   schedule(stay: { bookingId: string }): Promise<void> {
     this.scheduled.push(stay.bookingId);
 
@@ -25,12 +30,20 @@ class FakePayoutService implements Pick<
   }
 
   settle(bookingId: string): Promise<number | null> {
+    if (this.held) {
+      return Promise.reject(new SettlementInProgressError(bookingId));
+    }
+
     this.settled.push(bookingId);
 
     return Promise.resolve(null);
   }
 
   handleSettlementEvent(event: SettlementEvent): Promise<void> {
+    if (this.held) {
+      return Promise.reject(new SettlementInProgressError("booking"));
+    }
+
     this.events.push(event);
 
     return Promise.resolve();
@@ -126,5 +139,22 @@ describe("PayoutEventHandler", () => {
     await stayLifecycle.refunded(stay.bookingId);
 
     expect(payoutService.settled).toEqual([stay.bookingId]);
+  });
+
+  it("hands a settlement another run holds back to the inbox as busy, not failed", async () => {
+    payoutService.held = true;
+
+    await expect(stayLifecycle.refunded(stay.bookingId)).rejects.toBeInstanceOf(
+      PaymentEventBusyError,
+    );
+    await expect(
+      handler.handle({
+        kind: "disputeClosed",
+        eventId: "evt_closed",
+        type: "charge.dispute.closed",
+        paymentId: "pi_1",
+        won: false,
+      }),
+    ).rejects.toBeInstanceOf(PaymentEventBusyError);
   });
 });

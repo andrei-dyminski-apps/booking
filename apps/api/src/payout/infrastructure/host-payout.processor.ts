@@ -12,8 +12,14 @@ import {
   type PayOutJobData,
 } from "./host-payout.queue";
 
-/** A payout is idempotent in `PayoutService`, so a job that runs twice sends nothing more. */
-@Processor(HOST_PAYOUT_QUEUE)
+const WORKER_CONCURRENCY = 4;
+
+/**
+ * A payout is idempotent in `PayoutService`, so a job that runs twice sends nothing more —
+ * which is also what lets several run at once, and a stay's own job run beside the hourly
+ * sweep instead of waiting out a hundred stays' worth of Stripe calls.
+ */
+@Processor(HOST_PAYOUT_QUEUE, { concurrency: WORKER_CONCURRENCY })
 export class HostPayoutProcessor extends WorkerHost {
   private readonly logger = new Logger(HostPayoutProcessor.name);
 

@@ -25,10 +25,10 @@ src/
   common/redis-url.ts    # requireRedisUrl — the queue and the pub/sub connect with it
   common/body-parsers.ts # Nest's parsers, the raw body kept for the signed webhooks only
   common/job-failure.ts  # describeJobFailure — the line every processor logs a failed job with
+  common/iso-date.ts     # `@db.Date` onto `YYYY-MM-DD`, and today's midnight — the repositories map those columns, the services read today by it
   prisma/                # PrismaModule + PrismaService (extends PrismaClient)
     prisma.errors.ts     # isPrismaError, violatedConstraint — driver failures, read once
     escape-like.ts       # `%`, `_` and `\` of a `contains`, escaped — two repositories search by a part
-    iso-date.ts          # `@db.Date` onto `YYYY-MM-DD`, and today's midnight — two repositories map those columns
   auth/                  # registration, login, the JWT pair and its rotation
     auth.config.ts       # secrets, lifetimes and cookie attributes out of the environment
     auth.controller.ts
@@ -89,7 +89,9 @@ src/
       booking.service.ts   # HTTP and the jobs meet here; sees neither Prisma, Stripe nor BullMQ
       ports/booking-jobs.ts  # BookingJobs — the release, withdrawal and refund jobs, as the service asks for them
       booking.service.spec.ts  # against fakes of the repositories, the gateway and a stay listener
-      booking-payment.handler.ts  # succeeded: confirms the hold, or refunds a late payment; refunded: records it, cancels a stay refunded in full; a lost dispute: cancels a stay not yet begun
+      booking-payment.handler.ts  # succeeded: confirms the hold, or refunds a late payment; refunded: records it, cancels a stay not yet begun refunded in full; a lost dispute: cancels a stay not yet begun
+      booking-payment.handler.spec.ts  # the provider's news, in the same module as the service
+      testing/booking.fakes.ts  # the fixtures, fakes and module both specs share; out of the build (`*.fakes.ts`)
       stay-lifecycle.ts    # confirmed / refunded, announced to whoever follows the stays (payout)
       booking-cursor.ts    # the keyset cursor of GET /bookings, encoded and parsed
     infrastructure/
@@ -117,13 +119,14 @@ src/
       payment-event.processor.ts
       stripe-client.ts           # the client both adapters build (STRIPE_API_VERSION), and cents back into euros
       stripe-payment.gateway.ts  # the guest's half: PaymentIntents, refunds, snapshot events
-      payment.config.ts          # STRIPE_SECRET_KEY, STRIPE_PAYMENT_WEBHOOK_SECRET; no fallback
+      payment.config.ts          # STRIPE_SECRET_KEY, STRIPE_PAYMENT_WEBHOOK_SECRET; no fallback (the payout secret and the site only outside production)
     presentation/
       payment-webhook.controller.ts  # POST /payments/webhook — verified, recorded, answered
   payout/                # the host's half of the money; follows booking and payment
     payout.module.ts       # imports BookingModule and PaymentModule; nothing imports it
     domain/payout.ts       # owedToHost, mayPayOut — the host's share after refunds and disputes
     domain/payout.types.ts # SettledStay, PayoutAccountHolder — what the repository answers and the service reads
+    domain/payout.errors.ts # SettlementInProgressError — the settlement lease held past its wait
     application/
       payout.service.ts    # host payouts: the account, the transfer, reversals, refunds, disputes
       payout.service.spec.ts
@@ -422,14 +425,18 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
   the bytes for these two routes only), written to `payment_events` and answered `200` at
   once; the `payment-event` queue's worker handles it afterwards and stamps
   `processed_at`. Stripe expects a `2xx` within seconds, and the work behind an event calls
-  Stripe and waits for leases. A failed run is retried with a growing pause, and a
+  Stripe and waits for leases. The worker runs four events at a time, so one waiting on a
+  lease or on Stripe does not hold the rest behind it. A failed run is retried with a growing pause, and a
   repeatable sweep re-queues an event a lost job left unprocessed, a hundred at a time
   (`payment_events_unprocessed_idx`, partial). **Every failed run is counted on the row**
   (`attempts`, `last_error`), and after `MAX_EVENT_ATTEMPTS` (24 — three rounds of the
   job's own eight, about half an hour) the event is set aside (`failed_at`): neither the
   worker nor the sweep touches it again, and every admin is told (`PAYMENT_EVENT_FAILED`).
   An event that fails the same way every time would otherwise be retried for good with
-  nobody told. Clearing `failed_at` and `attempts` hands it back to the sweep. A daily job
+  nobody told. **A run that finds the stay held by another — a cancellation's or a
+  settlement's lease — is no failure**: the handler throws `PaymentEventBusyError`, which
+  the dispatcher retries without counting, since a lease runs out on its own. Clearing
+  `failed_at` and `attempts` hands it back to the sweep. A daily job
   deletes the events processed more than `EVENT_RETENTION_DAYS` (90) ago — Stripe
   redelivers for three days, so nothing older has anything left to deduplicate. An unsigned delivery is a `400`; one that
   could not be recorded a `500`, which Stripe delivers again. Both routes are `@Public()`,
@@ -439,7 +446,12 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
   `confirmPayment` is a conditional `updateManyAndReturn` on `PENDING_PAYMENT` (whatever the
   deadline — a lapsed hold no path has released still holds its nights), every write to
   Stripe goes under an idempotency key, and a refund is looked up by its key before it is
-  sent, so it goes out once even after Stripe forgot the key.
+  sent, so it goes out once even after Stripe forgot the key. Stripe does not order its
+  deliveries, so a refund or a dispute of a payment whose hold is still pending, unpaid and
+  unrefunded (`awaitsItsPayment`) arrived before the payment's own news: it throws
+  `PaymentNotConfirmedYetError` and comes again, counted, rather than being read as news
+  about a payment that never confirmed a stay — the hold is confirmed or released within
+  minutes, well inside `MAX_EVENT_ATTEMPTS`.
 - **The amount is the server's.** The hold is priced inside the locking transaction
   (`quoteStay` over `readPricedListing`), stored as `bookings.amount`, and charged as it is.
   A stay costs between `MIN_CHARGE` and `MAX_CHARGE` (`domain/stay-price.ts`, Stripe's floor
@@ -456,8 +468,13 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
   reads as naming no booking and is left alone.
 - **A payment that confirms nothing is refunded** in full under `payment-<pi>-unheld`, and
   the guest is told (`PAYMENT_REFUNDED`) by the run whose `recordRefund` wrote the empty
-  column. A booking this payment confirmed (`paid_at`, never cleared) is a redelivery and
-  refunds nothing even if it was cancelled since.
+  column — capped at `amount`, which the column's `CHECK` holds it to. A booking this
+  payment confirmed (`paid_at`, never cleared) is a redelivery and refunds nothing even if
+  it was cancelled since. `confirmPayment` confirms only with the intent the row names (or
+  none yet), and another intent naming the same booking goes back without touching the
+  row's refund total. A payment naming a booking this database does not hold is left alone
+  and logged, like one naming none: there is no account deletion to have taken the row, so
+  it belongs to another database.
 - **Only payment methods that confirm at once are offered, and the code says which.** A
   method that stays `processing` for days outlives its fifteen-minute hold and is refunded
   in full when it lands, so the intent is opened with `allowed_payment_method_types` set to
@@ -554,8 +571,10 @@ platform, and the host is paid their share by a transfer once the stay has begun
   (`source_transaction`), sent under `booking-<id>-payout` — no amount in the key, so a retry
   cannot send a second one — and looked up by `transfer_group` and `metadata.bookingId`
   before it is sent, because Stripe forgets a key after 24 hours. `transfer_id` is written
-  only into an empty column. A refund or dispute that lands while the transfer is in flight
-  does not undo the write; `settle` takes back the difference straight after.
+  only into an empty column. Those three, not a lease, are what keep the stay's job, the
+  sweep and a host's `pay-host` job — run four at a time by the worker — to one transfer. A
+  refund or dispute that lands while the transfer is in flight does not undo the write;
+  `settle` takes back the difference straight after.
 - **`settle` is the one place that takes money back from a host**: under `whileSettling` it
   compares `paid_out_amount` with what is owed now and, when the row says more is held,
   asks Stripe what the transfer still holds — a reversal whose write was lost is already
@@ -563,8 +582,10 @@ platform, and the host is paid their share by a transfer once the stay has begun
 cents>` and lowers `paid_out_amount` from exactly what it read. Two settlements of one stay queue on the lease instead of reversing the same money
   twice; `test/payout.repository.e2e-spec.ts` runs the lease against the real database.
 - **A refund** (`charge.refunded`) is the booking side's: it raises `refunded_amount` to
-  Stripe's total, tells the guest of a refund this API did not send, cancels a stay refunded
-  in full, and announces the refund to `StayLifecycle`, where `PayoutEventHandler` settles.
+  Stripe's total, tells the guest of a refund this API did not send, cancels a stay not yet
+  begun refunded in full — one under way or over keeps its status and its nights, as a lost
+  dispute's does — and announces the refund to `StayLifecycle`, where `PayoutEventHandler`
+  settles.
 - **Disputes** move forward only — `OPEN` from none, `WON`/`LOST` from none or `OPEN` —
   because Stripe does not order its deliveries. Opened, the host is told (`PAYMENT_DISPUTED`)
   and nothing moves; won, the stay's `pay-out` job is queued; lost, `settle` reverses what
@@ -573,7 +594,8 @@ cents>` and lowers `paid_out_amount` from exactly what it read. Two settlements 
 - **Stripe's side has to be set up once**: Connect enabled with the platform profile and
   loss liability accepted, and — deployed — a second event destination for the thin
   account events with its own secret (`STRIPE_PAYOUT_WEBHOOK_SECRET`, which falls back to
-  `STRIPE_PAYMENT_WEBHOOK_SECRET` because `stripe listen` signs both kinds with one).
+  `STRIPE_PAYMENT_WEBHOOK_SECRET` outside production only, because `stripe listen` signs both
+  kinds with one; with `NODE_ENV=production` a missing one stops the boot).
 
 ## main.ts
 

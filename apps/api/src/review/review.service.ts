@@ -20,7 +20,7 @@ import { BookingRepository } from "../booking/infrastructure/booking.repository"
 import { readCursor, type Page } from "../common/paging";
 import { ListingRepository } from "../listing/listing.repository";
 import { NotificationService } from "../notification/notification.service";
-import { toIsoDate } from "../prisma/iso-date";
+import { toIsoDate } from "../common/iso-date";
 import { decodeCursor, encodeCursor, type ReviewCursor } from "./review-cursor";
 import {
   ReviewAlreadyWrittenError,

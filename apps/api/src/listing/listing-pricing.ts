@@ -6,7 +6,7 @@ import type {
   ListingDatePrice as DatePriceRow,
   ListingWeekdayPrice as WeekdayPriceRow,
 } from "../generated/prisma/client";
-import { toIsoDate } from "../prisma/iso-date";
+import { toIsoDate } from "../common/iso-date";
 
 /**
  * The exception rows onto the contract. The `Decimal` becomes a `number` here for the

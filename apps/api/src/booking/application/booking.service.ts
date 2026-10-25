@@ -46,8 +46,11 @@ import type {
   CreatedBooking,
   ReleasedHold,
 } from "../domain/booking.types";
-import { PaymentGateway } from "../../payment/application/ports/payment-gateway";
-import { toIsoDate } from "../../prisma/iso-date";
+import {
+  PaymentGateway,
+  type OpenedPayment,
+} from "../../payment/application/ports/payment-gateway";
+import { toIsoDate } from "../../common/iso-date";
 import { CURRENCY } from "../../payment/domain/currency";
 import { roundCents } from "../../payment/domain/money";
 import { isCancellable } from "../domain/booking-status";
@@ -250,7 +253,7 @@ export class BookingService {
       throw new ConflictException("This booking is not waiting for payment");
     }
 
-    let opened;
+    let opened: OpenedPayment;
 
     try {
       opened = await this.paymentGateway.open(id, booking.amount);

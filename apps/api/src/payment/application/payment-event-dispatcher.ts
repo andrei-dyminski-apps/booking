@@ -4,7 +4,10 @@ import { subDays, subMinutes } from "date-fns";
 import { errorText } from "../../common/job-failure";
 import { NotificationService } from "../../notification/notification.service";
 import { PaymentEventRepository } from "../infrastructure/payment-event.repository";
-import type { PaymentEventHandler } from "./payment-event-handler";
+import {
+  PaymentEventBusyError,
+  type PaymentEventHandler,
+} from "./payment-event-handler";
 import { PaymentEventJobs } from "./ports/payment-event-jobs";
 import type { PaymentEvent } from "./ports/payment-gateway";
 
@@ -49,7 +52,10 @@ export class PaymentEventDispatcher {
     await this.paymentEventJobs.process(event.eventId);
   }
 
-  /** Throws to have the job retry, unless this failure set the event aside. */
+  /**
+   * Throws to have the job retry, unless this failure set the event aside. A stay held by
+   * another run is no failure of the event's, so it is retried without being counted.
+   */
   async process(eventId: string): Promise<void> {
     try {
       const event = await this.paymentEventRepository.findUnprocessed(eventId);
@@ -60,6 +66,8 @@ export class PaymentEventDispatcher {
         await handler.handle(event);
       }
     } catch (error) {
+      if (error instanceof PaymentEventBusyError) throw error;
+
       if (await this.setAsideAfter(eventId, error)) return;
 
       throw error;

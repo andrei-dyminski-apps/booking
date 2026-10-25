@@ -3,6 +3,7 @@ import { DisputeStatus, PAYOUT_DELAY_HOURS } from "@repo/contracts";
 import { subHours } from "date-fns";
 import type { Prisma } from "../../generated/prisma/client";
 import {
+  LeaseBusyError,
   whileLeased,
   type LeaseTiming,
 } from "../../booking/infrastructure/booking-lease";
@@ -12,6 +13,7 @@ import {
 } from "../../booking/infrastructure/stay-rows";
 import type { SetAside } from "../../common/job-failure";
 import { PrismaService } from "../../prisma/prisma.service";
+import { SettlementInProgressError } from "../domain/payout.errors";
 import type { PayoutAccountHolder, SettledStay } from "../domain/payout.types";
 
 const SETTLED_STAY_INCLUDE = {
@@ -98,7 +100,8 @@ export class PayoutRepository {
 
   /**
    * The stay read under the settlement lease: without it two runs sized from the same
-   * `paid_out_amount` reverse the same money under two different keys.
+   * `paid_out_amount` reverse the same money under two different keys. A lease held past
+   * the wait is `SettlementInProgressError`, the way `whileCancelling` answers its own.
    */
   async whileSettling<T>(
     bookingId: string,
@@ -107,16 +110,24 @@ export class PayoutRepository {
       recordReversal: (from: number, to: number) => Promise<boolean>,
     ) => Promise<T>,
   ): Promise<T> {
-    return whileLeased(
-      this.prismaService,
-      "settling_until",
-      bookingId,
-      SETTLE_LEASE,
-      async () =>
-        work(await readStay(this.prismaService, bookingId), (from, to) =>
-          writeReversal(this.prismaService, bookingId, from, to),
-        ),
-    );
+    try {
+      return await whileLeased(
+        this.prismaService,
+        "settling_until",
+        bookingId,
+        SETTLE_LEASE,
+        async () =>
+          work(await readStay(this.prismaService, bookingId), (from, to) =>
+            writeReversal(this.prismaService, bookingId, from, to),
+          ),
+      );
+    } catch (error) {
+      if (error instanceof LeaseBusyError) {
+        throw new SettlementInProgressError(bookingId);
+      }
+
+      throw error;
+    }
   }
 
   async findStayByPayment(paymentId: string): Promise<SettledStay | null> {

@@ -7,3 +7,15 @@ import type { PaymentEvent } from "./ports/payment-gateway";
 export interface PaymentEventHandler {
   handle(event: PaymentEvent): Promise<void>;
 }
+
+/**
+ * Thrown by a handler that could not start because another run holds the stay — a lease
+ * that runs out on its own. The dispatcher retries it without counting a failure, so
+ * waiting on a cancellation never brings an event closer to being set aside.
+ */
+export class PaymentEventBusyError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "PaymentEventBusyError";
+  }
+}

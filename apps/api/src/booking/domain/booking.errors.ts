@@ -73,6 +73,19 @@ export class StayTooCheapError extends Error {
   }
 }
 
+/**
+ * A refund or a dispute of a payment whose own confirmation has not been handled yet — see
+ * `awaitsItsPayment`. Thrown so the event is delivered again once it has.
+ */
+export class PaymentNotConfirmedYetError extends Error {
+  constructor(paymentId: string) {
+    super(
+      `Payment ${paymentId} has not confirmed its hold yet; its news is handled once it has`,
+    );
+    this.name = "PaymentNotConfirmedYetError";
+  }
+}
+
 /** A `409` worth retrying to a request, a retry to a job or an event. */
 export class CancellationInProgressError extends Error {
   constructor(id: string) {

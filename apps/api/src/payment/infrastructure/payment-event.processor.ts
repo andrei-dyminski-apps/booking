@@ -11,8 +11,14 @@ import {
   type ProcessEventJobData,
 } from "./payment-event.queue";
 
-/** The inbox's jobs: one event, the sweep, and the daily prune. */
-@Processor(PAYMENT_EVENT_QUEUE)
+const WORKER_CONCURRENCY = 4;
+
+/**
+ * The inbox's jobs: one event, the sweep, and the daily prune. Several events at a time, so
+ * one waiting on a lease or on Stripe does not hold the rest behind it — the handlers take
+ * the per-booking leases and write conditionally, as they must across instances anyway.
+ */
+@Processor(PAYMENT_EVENT_QUEUE, { concurrency: WORKER_CONCURRENCY })
 export class PaymentEventProcessor extends WorkerHost {
   private readonly logger = new Logger(PaymentEventProcessor.name);
 

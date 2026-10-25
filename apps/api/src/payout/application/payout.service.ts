@@ -5,6 +5,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import {
+  DisputeStatus,
   HostAccountStatus,
   NotificationType,
   payoutDueAt,
@@ -13,6 +14,8 @@ import {
   type StayNotice,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
+import { awaitsItsPayment } from "../../booking/domain/booking-status";
+import { PaymentNotConfirmedYetError } from "../../booking/domain/booking.errors";
 import { errorText, type SetAside } from "../../common/job-failure";
 import { NotificationService } from "../../notification/notification.service";
 import type { PaymentEvent } from "../../payment/application/ports/payment-gateway";
@@ -103,29 +106,43 @@ export class PayoutService {
     return holder;
   }
 
-  /** Opens the caller's account the first time, written only into the empty column. */
+  /**
+   * Opens the caller's account the first time, written only into the empty column. Only
+   * the provider's failures are a `502`; the database's stay the `500` they are.
+   */
   async session(user: AuthenticatedUser): Promise<AccountSession> {
     const holder = await this.holderOf(user);
+    let accountId = holder.accountId;
 
-    try {
-      let accountId = holder.accountId;
-
-      if (accountId === null) {
-        const opened = await this.payoutGateway.createRecipientAccount({
+    if (accountId === null) {
+      const opened = await this.askProvider(user, () =>
+        this.payoutGateway.createRecipientAccount({
           userId: user.id,
           email: holder.email,
           name: holder.name,
-        });
+        }),
+      );
 
-        await this.payoutRepository.attachAccount(user.id, opened);
-        accountId =
-          (await this.payoutRepository.findHolder(user.id))?.accountId ??
-          opened;
-      }
+      await this.payoutRepository.attachAccount(user.id, opened);
+      accountId =
+        (await this.payoutRepository.findHolder(user.id))?.accountId ?? opened;
+    }
 
-      return {
-        clientSecret: await this.payoutGateway.createAccountSession(accountId),
-      };
+    const sessionAccountId = accountId;
+
+    return {
+      clientSecret: await this.askProvider(user, () =>
+        this.payoutGateway.createAccountSession(sessionAccountId),
+      ),
+    };
+  }
+
+  private async askProvider<T>(
+    user: AuthenticatedUser,
+    call: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await call();
     } catch (error) {
       this.logger.error(
         `Could not open the payout session of user ${user.id}: ${String(error)}`,
@@ -196,6 +213,14 @@ export class PayoutService {
     return true;
   }
 
+  /**
+   * Not under a lease, unlike `settle`: the stay's own job, the sweep and a host's newly
+   * enabled account may all reach one stay at once, and what keeps that to one transfer is
+   * the transfer itself — one idempotency key per booking with no amount in it, a lookup by
+   * `transfer_group` before sending for when Stripe has forgotten the key, and
+   * `recordPayout` writing only into an empty `transfer_id`. A lease here would only make
+   * the losers wait, and it cannot be the settlement's, which `settle` takes below.
+   */
   private async sendPayout(
     bookingId: string,
     now: Date,
@@ -327,7 +352,7 @@ export class PayoutService {
         if (
           stay?.transferId == null ||
           stay.paidOutAmount === null ||
-          stay.disputeStatus === "OPEN"
+          stay.disputeStatus === DisputeStatus.OPEN
         ) {
           return stay?.paidOutAmount ?? null;
         }
@@ -368,6 +393,11 @@ export class PayoutService {
   async handleSettlementEvent(event: SettlementEvent): Promise<void> {
     const stay = await this.payoutRepository.findStayByPayment(event.paymentId);
 
+    // The dispute's news came before the payment's: handled once the stay is confirmed.
+    if (stay !== null && awaitsItsPayment(stay)) {
+      throw new PaymentNotConfirmedYetError(event.paymentId);
+    }
+
     // A late payment or `stripe trigger`'s: no stay was confirmed with it.
     if (stay === null || !stay.paid) return;
 
@@ -404,7 +434,10 @@ export class PayoutService {
   /** Only the write that opened the dispute tells the host. */
   private async openDispute(stay: SettledStay): Promise<void> {
     if (
-      !(await this.payoutRepository.setDisputeStatus(stay.bookingId, "OPEN"))
+      !(await this.payoutRepository.setDisputeStatus(
+        stay.bookingId,
+        DisputeStatus.OPEN,
+      ))
     ) {
       return;
     }
@@ -418,7 +451,7 @@ export class PayoutService {
   private async closeDispute(stay: SettledStay, won: boolean): Promise<void> {
     await this.payoutRepository.setDisputeStatus(
       stay.bookingId,
-      won ? "WON" : "LOST",
+      won ? DisputeStatus.WON : DisputeStatus.LOST,
     );
 
     if (won) {

@@ -28,7 +28,7 @@ import {
 } from "../../common/paging";
 import type { SetAside } from "../../common/job-failure";
 import { readPricedListing } from "../../listing/listing-pricing";
-import { toIsoDate } from "../../prisma/iso-date";
+import { toIsoDate } from "../../common/iso-date";
 import { PrismaService } from "../../prisma/prisma.service";
 import { ACTIVE_STATUSES, holdExpiry } from "../domain/booking-status";
 import {
@@ -516,6 +516,9 @@ export class BookingRepository {
         status: BookingStatus.PENDING_PAYMENT,
         // Another sum than quoted confirms nothing and goes back; a safeguard only.
         amount,
+        // The intent the payment form opened, or none yet when its write was lost — never
+        // another one naming the same booking, which `attachPayment` would refuse too.
+        OR: [{ paymentIntentId: null }, { paymentIntentId: paymentId }],
       },
       data: {
         status: BookingStatus.CONFIRMED,

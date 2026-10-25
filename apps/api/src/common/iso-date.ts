@@ -4,9 +4,10 @@ import { format } from "date-fns";
 /**
  * A `@db.Date` column arrives as a Date at UTC midnight, so formatting in UTC is exact.
  *
- * It lives beside the client rather than in one repository because two of them map those
- * columns onto the contract's `YYYY-MM-DD` days — the stays and the waitlist — and the two
- * have to agree about what day a row is.
+ * Shared rather than kept in one repository because two of them map those columns onto
+ * the contract's `YYYY-MM-DD` days — the stays and the waitlist — and the two have to agree
+ * about what day a row is. In `common/` rather than beside the Prisma client because the
+ * services read today's day by it too, and a service imports nothing of Prisma's.
  */
 export function toIsoDate(date: Date): string {
   return format(date, "yyyy-MM-dd", { in: tz("UTC") });

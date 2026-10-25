@@ -1,3 +1,4 @@
+import { BadGatewayException } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import {
   BookingStatus,
@@ -9,6 +10,7 @@ import {
   type NotificationContent,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
+import { PaymentNotConfirmedYetError } from "../../booking/domain/booking.errors";
 import type { SetAside } from "../../common/job-failure";
 import { NotificationService } from "../../notification/notification.service";
 import type { PayoutAccountHolder, SettledStay } from "../domain/payout.types";
@@ -73,7 +75,14 @@ class FakePayoutRepository implements PublicOf<PayoutRepository> {
     return Promise.resolve(this.holders.get(userId) ?? null);
   }
 
+  /** Set to have writing the account fail, as a database that went away would. */
+  brokenAttach = false;
+
   attachAccount(userId: string, accountId: string): Promise<void> {
+    if (this.brokenAttach) {
+      return Promise.reject(new Error("connection refused"));
+    }
+
     const holder = this.holders.get(userId);
 
     if (holder !== undefined && holder.accountId === null) {
@@ -291,7 +300,14 @@ class FakePayoutGateway implements PublicOf<PayoutGateway> {
     return Promise.resolve(ACCOUNT_ID);
   }
 
+  /** Set to have Stripe refuse the onboarding session, as an outage would. */
+  refusingSessions = false;
+
   createAccountSession(accountId: string): Promise<string> {
+    if (this.refusingSessions) {
+      return Promise.reject(new Error("api_connection_error"));
+    }
+
     return Promise.resolve(`${accountId}_session`);
   }
 
@@ -507,6 +523,24 @@ describe("PayoutService", () => {
         { userId: HOST_ID, email: host.email, name: "Harbour Host" },
       ]);
       expect(payoutRepository.holders.get(HOST_ID)?.accountId).toBe(ACCOUNT_ID);
+    });
+
+    it("answers 502 for the provider's failure and leaves the database's its own", async () => {
+      hostWith(null, false);
+      payoutGateway.refusingSessions = true;
+
+      await expect(service.session(host)).rejects.toBeInstanceOf(
+        BadGatewayException,
+      );
+
+      payoutGateway.refusingSessions = false;
+      hostWith(null, false);
+      payoutRepository.brokenAttach = true;
+
+      const failure = service.session(host);
+
+      await expect(failure).rejects.toThrow("connection refused");
+      await expect(failure).rejects.not.toBeInstanceOf(BadGatewayException);
     });
 
     it("reads the account off the row without asking Stripe", async () => {
@@ -905,6 +939,17 @@ describe("PayoutService", () => {
       type: "charge.dispute.closed",
       paymentId: PAYMENT_ID,
       won,
+    });
+
+    it("has a dispute that arrives before its payment's news come again", async () => {
+      hostWith(ACCOUNT_ID, true);
+      paidStay(PAST, { status: BookingStatus.PENDING_PAYMENT, paid: false });
+
+      await expect(
+        service.handleSettlementEvent(disputed),
+      ).rejects.toBeInstanceOf(PaymentNotConfirmedYetError);
+      expect(stored()?.disputeStatus).toBeNull();
+      expect(noticesOf(NotificationType.PAYMENT_DISPUTED)).toEqual([]);
     });
 
     it("holds the payout back and tells the host, once", async () => {

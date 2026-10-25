@@ -18,7 +18,7 @@ import type {
   WaitlistEntry as WaitlistEntryRow,
 } from "../generated/prisma/client";
 import { STILL_OFFERED } from "../listing/listing.repository";
-import { startOfToday, toIsoDate } from "../prisma/iso-date";
+import { startOfToday, toIsoDate } from "../common/iso-date";
 import { PrismaService } from "../prisma/prisma.service";
 import type { WaitlistCursor } from "./waitlist-cursor";
 import type { FreedNights, WaitingEntry } from "./waitlist.types";

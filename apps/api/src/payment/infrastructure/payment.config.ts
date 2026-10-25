@@ -25,19 +25,23 @@ function required(name: string): string {
 
 /**
  * No fallback for the secrets, like the JWT ones: a missing secret stops the boot rather
- * than shipping a webhook that accepts what anybody signs.
+ * than shipping a webhook that accepts what anybody signs. The payout secret falls back to
+ * the payment one only outside production, where `stripe listen` signs both kinds with one;
+ * a deployment has two destinations with two secrets, and a forgotten one would otherwise
+ * answer every account event `400` with nothing saying why.
  */
 export function loadPaymentConfig(): PaymentConfig {
   const paymentWebhookSecret = required("STRIPE_PAYMENT_WEBHOOK_SECRET");
+  const production = process.env.NODE_ENV === "production";
 
   return {
     secretKey: required("STRIPE_SECRET_KEY"),
     paymentWebhookSecret,
-    payoutWebhookSecret:
-      process.env.STRIPE_PAYOUT_WEBHOOK_SECRET || paymentWebhookSecret,
-    site:
-      process.env.NODE_ENV === "production"
-        ? required("STRIPE_SITE")
-        : process.env.STRIPE_SITE || "local",
+    payoutWebhookSecret: production
+      ? required("STRIPE_PAYOUT_WEBHOOK_SECRET")
+      : process.env.STRIPE_PAYOUT_WEBHOOK_SECRET || paymentWebhookSecret,
+    site: production
+      ? required("STRIPE_SITE")
+      : process.env.STRIPE_SITE || "local",
   };
 }

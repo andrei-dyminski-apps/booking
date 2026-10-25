@@ -551,7 +551,7 @@ All settings live in a single `.env` in the repository root — there are no per
 | `TRUST_PROXY`                   | trusted `X-Forwarded-For` entries — the rate limiter's key                   | `0`                                                     |
 | `STRIPE_SECRET_KEY`             | Stripe secret key (`sk_test_…`); the API opens, cancels and refunds payments | required, no fallback                                   |
 | `STRIPE_PAYMENT_WEBHOOK_SECRET` | signs the webhook deliveries; `stripe listen` prints it locally              | required, no fallback                                   |
-| `STRIPE_PAYOUT_WEBHOOK_SECRET`  | signs the deliveries about hosts' payout accounts (a separate destination)   | optional, falls back to `STRIPE_PAYMENT_WEBHOOK_SECRET` |
+| `STRIPE_PAYOUT_WEBHOOK_SECRET`  | signs the deliveries about hosts' payout accounts (a separate destination)   | `STRIPE_PAYMENT_WEBHOOK_SECRET`; required in production |
 | `STRIPE_SITE`                   | this deployment's name on its payments; another site's are left alone        | `local`; required in production                         |
 | `STRIPE_PUBLISHABLE_KEY`        | Stripe.js key, read by the frontend server and handed to the form            | required, no fallback                                   |
 
