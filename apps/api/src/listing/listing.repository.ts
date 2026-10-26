@@ -1,6 +1,4 @@
 import { Injectable } from "@nestjs/common";
-import { tz } from "@date-fns/tz";
-import { format } from "date-fns";
 import { weekdaySchema, type Weekday } from "@repo/contracts";
 import type {
   CreateListingInput,
@@ -11,16 +9,19 @@ import type {
   ListingSort,
   UpdateListingInput,
 } from "@repo/contracts";
-import { holdsTheSlot, overlapping } from "../booking/booking.repository";
+import {
+  holdsTheSlot,
+  overlapping,
+} from "../booking/infrastructure/booking.repository";
 import {
   type Prisma,
   type Listing as ListingRow,
-  type ListingDatePrice as DatePriceRow,
-  type ListingWeekdayPrice as WeekdayPriceRow,
 } from "../generated/prisma/client";
 import { afterCreatedAt, CREATED_AT_ORDER, type Page } from "../common/paging";
+import { startOfToday } from "../common/iso-date";
 import { isPrismaError, PrismaErrorCode } from "../prisma/prisma.errors";
 import { PrismaService } from "../prisma/prisma.service";
+import { toPricing } from "./listing-pricing";
 import type { CatalogueCursor } from "./catalogue-cursor";
 
 /**
@@ -107,13 +108,12 @@ export class ListingRepository {
    * against a list the owner sees and edits.
    */
   async findDetailById(id: string): Promise<ListingDetail | null> {
-    const today = format(new Date(), "yyyy-MM-dd", { in: tz("UTC") });
     const row = await this.prismaService.listing.findFirst({
       where: { id, ...STILL_OFFERED },
       include: {
         weekdayPrices: true,
         datePrices: {
-          where: { date: { gte: new Date(today) } },
+          where: { date: { gte: startOfToday(new Date()) } },
           orderBy: { date: "asc" },
         },
       },
@@ -371,24 +371,4 @@ function weekdayOf(key: string): Weekday {
   if (!parsed.success) throw new Error(`${key} is not a day of the week`);
 
   return parsed.data;
-}
-
-/**
- * The exception rows onto the contract. The `Decimal` becomes a `number` here for the
- * reason `toListing` gives, and the date is cut back to its day the way `BookingRepository`
- * cuts a stay's.
- */
-function toPricing(
-  weekdayRows: WeekdayPriceRow[],
-  dateRows: DatePriceRow[],
-): ListingPricing {
-  return {
-    weekdays: Object.fromEntries(
-      weekdayRows.map((row) => [row.weekday, row.price.toNumber()]),
-    ),
-    dates: dateRows.map((row) => ({
-      date: format(row.date, "yyyy-MM-dd", { in: tz("UTC") }),
-      price: row.price.toNumber(),
-    })),
-  };
 }

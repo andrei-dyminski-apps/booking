@@ -10,10 +10,15 @@
     "format": "prettier --write \"**/*.{ts,tsx,md,css}\"",
     "check-types": "pnpm turbo run check-types",
     "test": "pnpm turbo run test",
-    "test:e2e": "pnpm turbo run test:e2e"
+    "test:e2e": "pnpm turbo run test:e2e",
+    "railway": "scripts/railway-power.sh",
+    "railway:stop": "scripts/railway-power.sh stop",
+    "railway:start": "scripts/railway-power.sh start",
+    "railway:status": "scripts/railway-power.sh status"
   },
   "devDependencies": {
     "prettier": "^3.7.4",
+    "railway": "^3.16.0",
     "turbo": "^2.10.10",
     "typescript": "5.9.2"
   },

@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import {
   notificationSchema,
+  Role,
   type Notification,
   type NotificationContent,
   type NotificationQuery,
@@ -42,6 +43,21 @@ export class NotificationRepository {
     );
 
     return { notification: result, count };
+  }
+
+  /**
+   * Who hears what only a person can put right — the admins whose accounts are not
+   * blocked. A read of `users` rather than of this table, the one query here that is not
+   * scoped to a recipient: it is what picks the recipients.
+   */
+  async findAdminIds(): Promise<string[]> {
+    const rows = await this.prismaService.user.findMany({
+      where: { role: Role.ADMIN, blockedAt: null },
+      select: { id: true },
+      orderBy: { id: "asc" },
+    });
+
+    return rows.map(({ id }) => id);
   }
 
   /** `limit + 1` rows, so the caller learns whether there is another page without a `count`. */

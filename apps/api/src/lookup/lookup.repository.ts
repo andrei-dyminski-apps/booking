@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type { LookupOption, LookupQuery } from "@repo/contracts";
-import { againstListingsOf } from "../booking/booking.repository";
+import { againstListingsOf } from "../booking/infrastructure/booking.repository";
 import type { Page } from "../common/paging";
 import type { Prisma } from "../generated/prisma/client";
 import { STILL_OFFERED } from "../listing/listing.repository";

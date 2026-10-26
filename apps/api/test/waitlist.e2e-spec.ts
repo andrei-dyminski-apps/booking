@@ -13,7 +13,7 @@ import {
   type Notification,
 } from "@repo/contracts";
 import { AppModule } from "./../src/app.module";
-import { BookingService } from "./../src/booking/booking.service";
+import { BookingService } from "./../src/booking/application/booking.service";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";

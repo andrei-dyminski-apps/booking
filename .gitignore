@@ -44,3 +44,6 @@ yarn-error.log*
 # Misc
 .DS_Store
 *.pem
+
+# A snapshot written by a redis-server started inside the repository
+dump.rdb

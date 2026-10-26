@@ -21,6 +21,14 @@ export const bookingStatusSchema = z.enum([
 export const BookingStatus = bookingStatusSchema.enum;
 
 /**
+ * A dispute of a stay's payment with the guest's bank, mirrored by the `DisputeStatus` enum
+ * of the Prisma schema. `LOST` is the platform's loss: the bank gave the guest their money.
+ */
+export const disputeStatusSchema = z.enum(["OPEN", "WON", "LOST"]);
+
+export const DisputeStatus = disputeStatusSchema.enum;
+
+/**
  * Dates are stored as `YYYY-MM-DD`, so they compare lexicographically.
  *
  * A booking names two people-facing rows rather than free text: the listing it takes and
@@ -54,6 +62,28 @@ export const bookingSchema = z.object({
   }),
   status: bookingStatusSchema,
   /**
+   * What the stay costs, quoted by the server when the hold is taken (`nightlyPrice` over its
+   * nights), and what the payment charges. A copy: a later price change does not restate it.
+   */
+  amount: z.number(),
+  /**
+   * What went back to the guest, or `null` when nothing did: a cancellation outside the
+   * free window, a hold that was never paid. See `refundOnCancel` (`refund.ts`).
+   */
+  refundedAmount: z.number().nullable(),
+  /**
+   * What a cancellation is giving back and has not sent yet, or `null`. The refund follows
+   * the cancellation in the background and moves into `refundedAmount` once sent.
+   */
+  refundOwed: z.number().nullable(),
+  /** A payment confirmed this booking at some point, whatever its status is now. */
+  paid: z.boolean(),
+  /**
+   * Where a dispute of the payment stands with the guest's bank, or `null`. Open, a
+   * cancellation waits for the outcome; lost, the bank gave the money back already.
+   */
+  dispute: disputeStatusSchema.nullable(),
+  /**
    * When the hold lapses — and it stays on the row after it has. Which moment a stay
    * stopped holding its slot is what a refund or a dispute asks about, and `status`
    * already says whether it still holds one, so clearing the column would only leave
@@ -74,8 +104,9 @@ export const bookingSchema = z.object({
 
 /**
  * `guestId` comes from the session, so a request cannot book in another person's name.
- * `status` and `expiresAt` are the server's to set — a booking is always created as a
- * hold, and the deadline is computed from the server clock. `listing` is omitted for the
+ * The money fields are the server's to work out — a price taken from the client would be a
+ * price the client chooses. `status` and `expiresAt` are the server's to set — a booking is
+ * always created as a hold, and the deadline is computed from the server clock. `listing` is omitted for the
  * same reason: `listingId` is what a request names, and what that id resolves to is the
  * server's answer rather than the client's claim.
  */
@@ -85,6 +116,11 @@ export const createBookingSchema = bookingSchema
     listing: true,
     guestId: true,
     status: true,
+    amount: true,
+    refundedAmount: true,
+    refundOwed: true,
+    paid: true,
+    dispute: true,
     expiresAt: true,
     createdAt: true,
     reviewed: true,
@@ -107,6 +143,17 @@ export const createBookingSchema = bookingSchema
   });
 
 export const bookingListSchema = z.array(bookingSchema);
+
+/**
+ * What the payment form needs for one hold: its PaymentIntent's `client_secret`, which
+ * Stripe Elements confirms, and the amount and currency. Answered to the guest alone.
+ */
+export const bookingPaymentSchema = z.object({
+  clientSecret: z.string(),
+  amount: z.number(),
+  /** ISO 4217, lower case — the spelling Stripe answers with. */
+  currency: z.string(),
+});
 
 /**
  * How a list of stays is ordered, as the client asks for it. Four values rather than a
@@ -199,8 +246,10 @@ export const bookingPageSchema = z.object({
 
 export type StayParty = z.infer<typeof stayPartySchema>;
 export type BookingStatus = z.infer<typeof bookingStatusSchema>;
+export type DisputeStatus = z.infer<typeof disputeStatusSchema>;
 export type BookingSort = z.infer<typeof bookingSortSchema>;
 export type BookingQuery = z.infer<typeof bookingQuerySchema>;
 export type BookingPage = z.infer<typeof bookingPageSchema>;
 export type Booking = z.infer<typeof bookingSchema>;
 export type CreateBookingInput = z.infer<typeof createBookingSchema>;
+export type BookingPayment = z.infer<typeof bookingPaymentSchema>;

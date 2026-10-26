@@ -15,7 +15,7 @@ import {
   type UpdateListingInput,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
-import { BookingRepository } from "../booking/booking.repository";
+import { BookingRepository } from "../booking/infrastructure/booking.repository";
 import type { Page } from "../common/paging";
 import { decodeCursor, type CatalogueCursor } from "./catalogue-cursor";
 import { ListingRepository } from "./listing.repository";

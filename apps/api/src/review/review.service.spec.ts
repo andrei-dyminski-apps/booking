@@ -22,10 +22,8 @@ import {
   type ReviewSummary,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
-import {
-  BookingRepository,
-  type BookingWithListingOwner,
-} from "../booking/booking.repository";
+import type { BookingWithListingOwner } from "../booking/domain/booking.types";
+import { BookingRepository } from "../booking/infrastructure/booking.repository";
 import type { Page } from "../common/paging";
 import { ListingRepository } from "../listing/listing.repository";
 import { NotificationService } from "../notification/notification.service";
@@ -84,12 +82,18 @@ const stay = (overrides: Partial<Booking> = {}): BookingWithListingOwner => ({
     from: inDays(-5),
     to: inDays(-1),
     status: BookingStatus.CONFIRMED,
+    amount: 480,
+    refundedAmount: null,
+    refundOwed: null,
+    paid: true,
+    dispute: null,
     expiresAt: null,
     createdAt: new Date().toISOString(),
     reviewed: { byGuest: false, byOwner: false },
     ...overrides,
   },
   listingOwnerId: OWNER_ID,
+  paymentId: null,
 });
 
 type StoredReview = { review: Review; booking: Booking };
