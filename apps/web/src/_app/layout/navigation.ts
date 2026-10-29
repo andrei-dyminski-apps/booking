@@ -8,6 +8,7 @@ import {
   ShieldIcon,
   UserIcon,
   UsersIcon,
+  WalletIcon,
   type LucideIcon,
 } from "lucide-react";
 import { Role, type User } from "@repo/contracts";
@@ -86,6 +87,14 @@ export function navigationFor(user: User | null): NavItem[] {
         label: "Dashboard",
         hint: "Your listings",
         icon: LayoutDashboardIcon,
+      },
+      // Inside the dashboard's path, and the deepest link containing the path is the
+      // current one — so the payouts screen lights this link rather than both.
+      {
+        href: ROUTES.payouts,
+        label: "Payouts",
+        hint: "What your stays paid you",
+        icon: WalletIcon,
       },
     );
   }

@@ -1,1 +1,1 @@
-export { BookingsPage as default } from "#_pages/bookings";
+export { BookingsPage as default } from "#_pages/bookings/overview";

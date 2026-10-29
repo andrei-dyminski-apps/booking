@@ -1,20 +1,16 @@
 "use client";
 
 import { useActionState } from "react";
-import { TriangleAlertIcon } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogCancel,
   AlertDialogContent,
-  AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogMedia,
-  AlertDialogTitle,
   AlertDialogTrigger,
 } from "@repo/ui/components/alert-dialog";
 import { Button } from "@repo/ui/components/button";
 import { FieldError } from "@repo/ui/components/field";
+import { CancelStayWarning } from "#features/cancel-booking";
 import { NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
 import { cancelBookingAction } from "../api/cancel-booking-action";
 
@@ -31,9 +27,12 @@ import { cancelBookingAction } from "../api/cancel-booking-action";
 export const CancelBookingButton = ({
   bookingId,
   listingId,
+  refundNote,
 }: {
   bookingId: string;
   listingId: string;
+  /** What the cancellation gives back, worded for the viewer — `cancellationRefundNote`. */
+  refundNote: string | null;
 }) => {
   const [errors, submit, pending] = useActionState<FormErrors, FormData>(
     cancelBookingAction.bind(null, bookingId, listingId),
@@ -48,16 +47,7 @@ export const CancelBookingButton = ({
 
       <AlertDialogContent>
         <form action={submit} className="contents">
-          <AlertDialogHeader>
-            <AlertDialogMedia>
-              <TriangleAlertIcon className="text-destructive" />
-            </AlertDialogMedia>
-            <AlertDialogTitle>Cancel this stay?</AlertDialogTitle>
-            <AlertDialogDescription>
-              The nights go back on offer straight away and somebody else can
-              take them. Booking them again is a new booking, not this one back.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <CancelStayWarning refundNote={refundNote} />
 
           {errors.message !== null && <FieldError>{errors.message}</FieldError>}
 

@@ -94,6 +94,7 @@ export const BookingsPage = async ({
   const byGuest = side !== StayParty.GUEST;
   // Computed here and handed down rather than read by each card — see `shared/lib/dates.ts`.
   const day = today();
+  const now = new Date().toISOString();
   // A question the contract refuses is not put to the API at all: the messages are under
   // the boxes, and an unfiltered list beside them would read as the answer to it. The names
   // of the rows the filters name are read beside it — the chips read them, and so do the
@@ -169,6 +170,7 @@ export const BookingsPage = async ({
                   viewer={viewer}
                   side={side}
                   today={day}
+                  now={now}
                 />
               </li>
             ))}

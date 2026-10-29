@@ -18,9 +18,10 @@ export const BookingsSkeleton = () => (
       <Skeleton className="h-7 w-44 rounded-lg" />
     </div>
 
+    {/* A card is its header and the footer of its controls, which every stay has. */}
     <div className="flex flex-col gap-4">
       {[0, 1, 2].map((index) => (
-        <Skeleton key={index} className="h-28 w-full rounded-xl" />
+        <Skeleton key={index} className="h-44 w-full rounded-xl" />
       ))}
     </div>
   </div>

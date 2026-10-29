@@ -14,9 +14,12 @@ import {
   CardAction,
   CardContent,
   CardDescription,
+  CardFooter,
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
+import { cancellationRefundNote, mayCancel } from "#features/cancel-booking";
+import { awaitsPaymentFrom, BookingStatusBadge } from "#entities/booking";
 import { ROUTES } from "#shared/config";
 import {
   countOf,
@@ -27,7 +30,6 @@ import {
 } from "#shared/lib";
 import { ButtonLink } from "#shared/ui";
 import { listingStaysHref } from "../lib/bookings-search";
-import { BookingStatusBadge } from "./booking-status-badge";
 import { CancelBookingButton } from "./cancel-booking-button";
 import { ReviewBookingButton } from "./review-booking-button";
 
@@ -45,6 +47,7 @@ export const BookingCard = ({
   viewer,
   side,
   today,
+  now,
 }: {
   booking: Booking;
   viewer: User;
@@ -55,12 +58,17 @@ export const BookingCard = ({
   side: StayParty | null;
   /** Today in UTC, from the server — the day `isReviewable` compares the check-out to. */
   today: string;
+  /** The server's clock at the render: the offer to cancel, its refund, a hold's deadline. */
+  now: string;
 }) => {
   const nights = nightsBetween(booking.from, booking.to);
   const review = reviewHalf(booking, viewer, side, today);
   // A host and an admin see other people's stays; on the guest's side the list is one
   // person's, the viewer's own.
   const ofOthers = side !== StayParty.GUEST;
+  // A hold past its deadline waits only for the sweep: "Pay" would open a form the API
+  // refuses, so it reads "Details" like any other stay.
+  const awaitsPayment = awaitsPaymentFrom(booking, viewer, now);
 
   return (
     <Card>
@@ -83,72 +91,22 @@ export const BookingCard = ({
             {countOf(nights, "night")}
           </span>
           {/*
-            What these nights cost today, which is not the same claim as what this stay
-            cost. The nightly price is read off the listing as it stands now — a booking
-            carries no amount of its own until the payment step of phase 6 puts one there
-            — so an owner who has since changed the price would otherwise have every past
-            stay silently restated at the new one.
+            What this stay costs, as the API quoted it when the hold was taken — the amount
+            the payment charges, and one an owner's later change of price does not restate.
           */}
           <span className="font-medium text-foreground">
-            {formatMoney(nights * booking.listing.pricePerNight)} at the current
-            rate
+            {formatMoney(booking.amount)}
           </span>
+          {booking.refundedAmount !== null && (
+            <span>{formatMoney(booking.refundedAmount)} refunded</span>
+          )}
+          {booking.refundOwed !== null && (
+            <span>{formatMoney(booking.refundOwed)} refund on its way</span>
+          )}
         </CardDescription>
         <CardAction className="flex items-center gap-2">
-          {/*
-            The stays against one listing, for a host and an admin, who see more than their
-            own. It is how the `listingId` filter is reached in practice — the id is in the
-            URL it writes rather than typed into the box behind the dialog — and the guest's
-            side is not offered it because that list is already one person's.
-          */}
-          {ofOthers && (
-            <ButtonLink
-              href={listingStaysHref(
-                booking.listingId,
-                side ?? StayParty.GUEST,
-              )}
-              variant="ghost"
-              size="sm"
-            >
-              Stays here
-            </ButtonLink>
-          )}
-          {/*
-            What other hosts said about this guest, for the two the API lets read it from
-            here: the host the guest asked to stay with, and an admin. A guest reads their
-            own from the profile.
-          */}
-          {ofOthers && (
-            <ButtonLink
-              href={ROUTES.guestReviews(booking.guestId)}
-              variant="ghost"
-              size="sm"
-            >
-              Guest reviews
-            </ButtonLink>
-          )}
           <BookingStatusBadge status={booking.status} />
           {review === "written" && <Badge variant="outline">Reviewed</Badge>}
-          {review === "listing" && (
-            <ReviewBookingButton
-              bookingId={booking.id}
-              listingId={booking.listingId}
-              about="listing"
-            />
-          )}
-          {review === "guest" && (
-            <ReviewBookingButton
-              bookingId={booking.id}
-              listingId={null}
-              about="guest"
-            />
-          )}
-          {mayCancel(booking, viewer) && (
-            <CancelBookingButton
-              bookingId={booking.id}
-              listingId={booking.listingId}
-            />
-          )}
         </CardAction>
       </CardHeader>
 
@@ -156,12 +114,79 @@ export const BookingCard = ({
         booking.expiresAt !== null && (
           <CardContent>
             <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-              The hold lasts until {formatMoment(booking.expiresAt)} UTC. There
-              is nothing to pay with yet, so it lapses then and the nights go
-              back on offer.
+              The hold lasts until {formatMoment(booking.expiresAt)} UTC. Unpaid
+              by then, it lapses and the nights go back on offer.
             </p>
           </CardContent>
         )}
+
+      {/*
+        What may be done with the stay, under it rather than beside the title: up to five
+        controls, which a corner of the header has no room to wrap.
+      */}
+      <CardFooter className="flex-wrap gap-2">
+        {/*
+          The stay's own page: where its guest pays for a hold, and where anybody who may
+          read it follows the payment through. Worded by what the guest still has to do.
+        */}
+        <ButtonLink
+          href={ROUTES.booking(booking.id)}
+          variant={awaitsPayment ? "default" : "outline"}
+          size="sm"
+        >
+          {awaitsPayment ? "Pay" : "Details"}
+        </ButtonLink>
+        {review === "listing" && (
+          <ReviewBookingButton
+            bookingId={booking.id}
+            listingId={booking.listingId}
+            about="listing"
+          />
+        )}
+        {review === "guest" && (
+          <ReviewBookingButton
+            bookingId={booking.id}
+            listingId={null}
+            about="guest"
+          />
+        )}
+        {mayCancel(booking, viewer, now) && (
+          <CancelBookingButton
+            bookingId={booking.id}
+            listingId={booking.listingId}
+            refundNote={cancellationRefundNote(booking, viewer, now)}
+          />
+        )}
+        {/*
+          The stays against one listing, for a host and an admin, who see more than their
+          own. It is how the `listingId` filter is reached in practice — the id is in the
+          URL it writes rather than typed into the box behind the dialog — and the guest's
+          side is not offered it because that list is already one person's.
+        */}
+        {ofOthers && (
+          <ButtonLink
+            href={listingStaysHref(booking.listingId, side ?? StayParty.GUEST)}
+            variant="ghost"
+            size="sm"
+          >
+            Stays here
+          </ButtonLink>
+        )}
+        {/*
+          What other hosts said about this guest, for the two the API lets read it from
+          here: the host the guest asked to stay with, and an admin. A guest reads their
+          own from the profile.
+        */}
+        {ofOthers && (
+          <ButtonLink
+            href={ROUTES.guestReviews(booking.guestId)}
+            variant="ghost"
+            size="sm"
+          >
+            Guest reviews
+          </ButtonLink>
+        )}
+      </CardFooter>
     </Card>
   );
 };
@@ -191,24 +216,4 @@ function reviewHalf(
   if (half.done) return "written";
 
   return isReviewable(booking, today) ? half.kind : null;
-}
-
-/**
- * Whether the button is worth offering, which is not the same as whether it is allowed:
- * the API decides that on every request — the guest and an admin may cancel, the owner of
- * the listing may read the stay and not cancel it — and a button rendered by mistake would
- * reach a `403` rather than a cancelled booking.
- *
- * The status half is the same rule read from this side: only a stay that still holds its
- * slot can be let go of, and cancelling one that no longer does is the `404` the
- * repository answers by narrowing to the active set.
- */
-function mayCancel(booking: Booking, viewer: User): boolean {
-  const active =
-    booking.status === BookingStatus.PENDING_PAYMENT ||
-    booking.status === BookingStatus.CONFIRMED;
-
-  return (
-    active && (viewer.role === Role.ADMIN || viewer.id === booking.guestId)
-  );
 }

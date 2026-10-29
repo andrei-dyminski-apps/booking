@@ -1,1 +1,1 @@
-export { BookingsSkeleton as default } from "#_pages/bookings";
+export { BookingsSkeleton as default } from "#_pages/bookings/overview";

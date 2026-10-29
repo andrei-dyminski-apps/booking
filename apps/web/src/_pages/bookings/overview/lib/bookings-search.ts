@@ -2,11 +2,11 @@ import {
   bookingQuerySchema,
   bookingSortSchema,
   bookingStatusSchema,
-  BookingStatus,
   StayParty,
   type BookingQuery,
   type BookingSort,
 } from "@repo/contracts";
+import { BOOKING_STATUS_LABELS } from "#entities/booking";
 import { ROUTES } from "#shared/config";
 import {
   dayLabelOrAny,
@@ -124,23 +124,10 @@ export function bookingsHref(values: FilterValues, cursor?: string): string {
   return filtersHref(ROUTES.bookings, values, cursor);
 }
 
-/**
- * The four states of a stay, named for a person. Keyed by the contract's own enum, so a
- * fifth status stops compiling here rather than appearing as a blank option — and read by
- * the badge on every card as well as by the filter, because a status called one thing in
- * the box and another on the row is two names for one value.
- */
-export const STATUS_LABELS: Record<BookingStatus, string> = {
-  [BookingStatus.PENDING_PAYMENT]: "On hold",
-  [BookingStatus.CONFIRMED]: "Confirmed",
-  [BookingStatus.CANCELLED]: "Cancelled",
-  [BookingStatus.EXPIRED]: "Lapsed",
-};
-
 /** The statuses a visitor can filter by, in the order the lifecycle runs. */
 export const statusOptions = bookingStatusSchema.options.map((value) => ({
   value,
-  label: STATUS_LABELS[value],
+  label: BOOKING_STATUS_LABELS[value],
 }));
 
 /**
@@ -341,7 +328,7 @@ export function activeFilters(
 function statusLabel(value: string): string {
   const parsed = bookingStatusSchema.safeParse(value);
 
-  return parsed.success ? STATUS_LABELS[parsed.data] : value;
+  return parsed.success ? BOOKING_STATUS_LABELS[parsed.data] : value;
 }
 
 /**

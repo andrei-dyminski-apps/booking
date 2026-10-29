@@ -404,7 +404,7 @@ describe("activeFilters", () => {
       status: "PENDING_PAYMENT",
     });
 
-    expect(status?.label).toBe("On hold");
+    expect(status?.label).toBe("Awaiting payment");
     expect(status?.href).toBe("/bookings");
   });
 
