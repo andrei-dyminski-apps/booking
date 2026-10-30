@@ -13,6 +13,12 @@ import { AppModule } from "./../src/app.module";
 import { useBodyParsers } from "./../src/common/body-parsers";
 import type { OpenedPayment } from "./../src/payment/application/ports/payment-gateway";
 import { PaymentGateway } from "./../src/payment/application/ports/payment-gateway";
+import {
+  addCents,
+  NO_CENTS,
+  type Cents,
+  cents,
+} from "./../src/payment/domain/money";
 import { PAYMENT_CONFIG } from "./../src/payment/infrastructure/payment.config";
 import { createStripeClient } from "./../src/payment/infrastructure/stripe";
 import { StripePaymentGateway } from "./../src/payment/infrastructure/stripe-payment.gateway";
@@ -36,7 +42,7 @@ import { hostCredentials, signIn, signInAs, type Agent } from "./session";
 class OfflineStripeGateway extends StripePaymentGateway {
   readonly opened: string[] = [];
   readonly withdrawn: string[] = [];
-  readonly refunds: { paymentId: string; amount: number; key: string }[] = [];
+  readonly refunds: { paymentId: string; amount: Cents; key: string }[] = [];
 
   /** How many refunds to refuse before taking one, as a provider that cannot be reached. */
   refusedRefunds = 0;
@@ -58,9 +64,9 @@ class OfflineStripeGateway extends StripePaymentGateway {
 
   override refund(
     paymentId: string,
-    amount: number,
+    amount: Cents,
     key: string,
-  ): Promise<number> {
+  ): Promise<Cents> {
     if (this.refusedRefunds > 0) {
       this.refusedRefunds -= 1;
 
@@ -76,7 +82,7 @@ class OfflineStripeGateway extends StripePaymentGateway {
     return Promise.resolve(amount);
   }
 
-  override refundedSoFar(paymentId: string): Promise<number> {
+  override refundedSoFar(paymentId: string): Promise<Cents> {
     // One refund per key, as Stripe keeps them.
     const byKey = new Map(
       this.refunds
@@ -85,7 +91,10 @@ class OfflineStripeGateway extends StripePaymentGateway {
     );
 
     return Promise.resolve(
-      [...byKey.values()].reduce((total, amount) => total + amount, 0),
+      [...byKey.values()].reduce(
+        (total, amount) => addCents(total, amount),
+        NO_CENTS,
+      ),
     );
   }
 }
@@ -101,7 +110,7 @@ const chargeIdOf = (bookingId: string): string =>
 const listingInput: CreateListingInput = {
   title: "Loft above the harbour",
   description: "Two rooms under the roof and a wall of glass facing the water.",
-  pricePerNight: 120.35,
+  pricePerNightCents: cents(12_035),
   capacity: 4,
 };
 
@@ -174,7 +183,7 @@ describe("Payments (e2e)", () => {
 
   /** A cancellation's refund is sent by the queue's worker, after the request answered. */
   const refundSent = (id: string): Promise<void> =>
-    waitUntil(async () => (await read(id)).refundOwed === null);
+    waitUntil(async () => (await read(id)).refundOwedCents === null);
 
   /**
    * The webhook answers once it has recorded the event and a worker handles it afterwards;
@@ -231,7 +240,7 @@ describe("Payments (e2e)", () => {
           object: {
             id: paymentIdOf(booking.id),
             object: "payment_intent",
-            amount_received: Math.round(booking.amount * 100),
+            amount_received: booking.amountCents,
             latest_charge: chargeIdOf(booking.id),
             metadata,
           },
@@ -271,8 +280,8 @@ describe("Payments (e2e)", () => {
   it("quotes the stay on the server and opens one payment for it", async () => {
     const booking = await hold();
 
-    // Three nights at 120.35, summed in cents: 361.05, not 361.05000000000007.
-    expect(booking.amount).toBe(361.05);
+    // Three nights at 12_035 cents.
+    expect(booking.amountCents).toBe(36_105);
 
     const first = bookingPaymentSchema.parse(
       (await guest.post(`/bookings/${booking.id}/payment`).expect(200)).body,
@@ -281,7 +290,7 @@ describe("Payments (e2e)", () => {
 
     expect(first).toEqual({
       clientSecret: `${paymentIdOf(booking.id)}_secret_e2e`,
-      amount: 361.05,
+      amountCents: 36_105,
       currency: "usd",
     });
     // The host may read the stay; paying for it is the guest's alone.
@@ -293,7 +302,7 @@ describe("Payments (e2e)", () => {
       (
         await owner
           .post("/listings")
-          .send({ ...listingInput, pricePerNight: 0.3 })
+          .send({ ...listingInput, pricePerNightCents: 30 })
           .expect(201)
       ).body as { id: string }
     ).id;
@@ -346,11 +355,11 @@ describe("Payments (e2e)", () => {
 
     const after = await read(booking.id);
     expect(after.status).toBe("CANCELLED");
-    expect(after.refundedAmount).toBe(361.05);
+    expect(after.refundedAmountCents).toBe(36_105);
     expect(gateway.refunds).toEqual([
       expect.objectContaining({
         paymentId: paymentIdOf(booking.id),
-        amount: 361.05,
+        amount: 36_105,
       }),
     ]);
   });
@@ -373,7 +382,7 @@ describe("Payments (e2e)", () => {
 
     // The worker's next attempt, five seconds on, sends it.
     await waitUntil(
-      async () => (await read(booking.id)).refundedAmount !== null,
+      async () => (await read(booking.id)).refundedAmountCents !== null,
     );
     expect(gateway.refunds).toHaveLength(1);
     await waitUntil(
@@ -406,7 +415,7 @@ describe("Payments (e2e)", () => {
     );
 
     expect(gateway.refunds).toEqual([]);
-    expect((await read(booking.id)).refundedAmount).toBeNull();
+    expect((await read(booking.id)).refundedAmountCents).toBeNull();
   });
 
   it("refunds a paid stay cancelled inside the free window", async () => {
@@ -419,11 +428,11 @@ describe("Payments (e2e)", () => {
 
     const after = await read(booking.id);
     expect(after.status).toBe("CANCELLED");
-    expect(after.refundedAmount).toBe(booking.amount);
+    expect(after.refundedAmountCents).toBe(booking.amountCents);
     expect(gateway.refunds).toEqual([
       {
         paymentId: paymentIdOf(booking.id),
-        amount: booking.amount,
+        amount: booking.amountCents,
         key: `booking-${booking.id}-cancellation`,
       },
     ]);
@@ -435,7 +444,7 @@ describe("Payments (e2e)", () => {
     await settled(deliver(late).expect(200));
 
     await guest.delete(`/bookings/${late.id}`).expect(204);
-    expect((await read(late.id)).refundedAmount).toBeNull();
+    expect((await read(late.id)).refundedAmountCents).toBeNull();
 
     const taken = await hold(1, 3);
     await guest.post(`/bookings/${taken.id}/payment`).expect(200);
@@ -443,7 +452,7 @@ describe("Payments (e2e)", () => {
 
     await admin.delete(`/bookings/${taken.id}`).expect(204);
     await refundSent(taken.id);
-    expect((await read(taken.id)).refundedAmount).toBe(taken.amount);
+    expect((await read(taken.id)).refundedAmountCents).toBe(taken.amountCents);
   });
 
   it("records the charge a payment produced, for the host's transfer", async () => {
@@ -463,13 +472,13 @@ describe("Payments (e2e)", () => {
       deliverChargeEvent(booking, "charge.refunded", {
         id: chargeIdOf(booking.id),
         object: "charge",
-        amount_refunded: Math.round(booking.amount * 100),
+        amount_refunded: booking.amountCents,
       }).expect(200),
     );
 
     const after = await read(booking.id);
     expect(after.status).toBe("CANCELLED");
-    expect(after.refundedAmount).toBe(booking.amount);
+    expect(after.refundedAmountCents).toBe(booking.amountCents);
     // The dashboard did the refunding; the API sends none of its own.
     expect(gateway.refunds).toEqual([]);
   });
@@ -483,13 +492,13 @@ describe("Payments (e2e)", () => {
       deliverChargeEvent(booking, "charge.refunded", {
         id: chargeIdOf(booking.id),
         object: "charge",
-        amount_refunded: Math.round(booking.amount * 100),
+        amount_refunded: booking.amountCents,
       }).expect(200),
     );
 
     const after = await read(booking.id);
     expect(after.status).toBe("CANCELLED");
-    expect(after.refundedAmount).toBe(booking.amount);
+    expect(after.refundedAmountCents).toBe(booking.amountCents);
   });
 
   it("marks a disputed stay and tells its host", async () => {

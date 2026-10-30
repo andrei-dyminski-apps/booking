@@ -1,15 +1,13 @@
 import { Inject, Injectable } from "@nestjs/common";
 import Stripe from "stripe";
 import { InvalidPaymentEventError } from "../../payment/application/ports/payment-gateway";
-import { CURRENCY } from "../../payment/domain/currency";
-import { toCents } from "../../payment/domain/money";
+import { cents, CURRENCY, type Cents } from "../../payment/domain/money";
 import {
   PAYMENT_CONFIG,
   type PaymentConfig,
 } from "../../payment/infrastructure/payment.config";
 import {
   BACKGROUND_REQUEST,
-  fromMinorUnits,
   STRIPE_CLIENT,
   transferGroupOf,
 } from "../../payment/infrastructure/stripe";
@@ -100,8 +98,8 @@ export class StripePayoutGateway extends PayoutGateway {
     try {
       const transfer = await this.stripe.transfers.create(
         {
-          amount: toCents(payout.amount),
-          currency: CURRENCY,
+          amount: payout.amount,
+          currency: payout.currency,
           destination: payout.accountId,
           source_transaction: payout.chargeId,
           transfer_group: transferGroupOf(payout.bookingId),
@@ -141,7 +139,7 @@ export class StripePayoutGateway extends PayoutGateway {
     return null;
   }
 
-  async heldOnTransfer(transferId: string): Promise<number> {
+  async heldOnTransfer(transferId: string): Promise<Cents> {
     return heldOf(
       await this.stripe.transfers.retrieve(transferId, {}, BACKGROUND_REQUEST),
     );
@@ -149,12 +147,12 @@ export class StripePayoutGateway extends PayoutGateway {
 
   async reverseTransfer(
     transferId: string,
-    amount: number,
+    amount: Cents,
     key: string,
   ): Promise<void> {
     await this.stripe.transfers.createReversal(
       transferId,
-      { amount: toCents(amount) },
+      { amount },
       { idempotencyKey: key, ...BACKGROUND_REQUEST },
     );
   }
@@ -191,6 +189,6 @@ export class StripePayoutGateway extends PayoutGateway {
   }
 }
 
-function heldOf(transfer: Stripe.Transfer): number {
-  return fromMinorUnits(transfer.amount - transfer.amount_reversed);
+function heldOf(transfer: Stripe.Transfer): Cents {
+  return cents(transfer.amount - transfer.amount_reversed);
 }

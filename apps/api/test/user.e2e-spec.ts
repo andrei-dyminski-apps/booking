@@ -76,7 +76,7 @@ describe("UserController (e2e)", () => {
   it("reads one account with the stays it took and the listings it still offers", async () => {
     const listing = {
       description: "Two rooms under the roof and a wall of glass.",
-      pricePerNight: 120,
+      pricePerNightCents: 12_000,
       capacity: 4,
     };
     const kept = await owner

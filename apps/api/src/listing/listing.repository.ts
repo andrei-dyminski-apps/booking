@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { weekdaySchema, type Weekday } from "@repo/contracts";
+import { cents } from "../payment/domain/money";
 import type {
   CreateListingInput,
   Listing,
@@ -217,7 +218,7 @@ export const STILL_OFFERED = {
  *
  * The cursor goes under `AND` rather than into this object, and that is not a matter of
  * shape: it narrows by the sort key, which for a price-ordered page is the same field
- * `minPrice`/`maxPrice` narrow. Spread in here, the later key would replace the earlier
+ * `minPriceCents`/`maxPriceCents` narrow. Spread in here, the later key would replace the earlier
  * one and every page after the first would silently drop the price filter.
  */
 function catalogueWhere(
@@ -230,7 +231,7 @@ function catalogueWhere(
     ...STILL_OFFERED,
     ownerId: query.ownerId,
     capacity: { gte: query.guests },
-    pricePerNight: { gte: query.minPrice, lte: query.maxPrice },
+    pricePerNightCents: { gte: query.minPriceCents, lte: query.maxPriceCents },
     ...(from !== undefined && to !== undefined
       ? {
           bookings: {
@@ -255,8 +256,8 @@ function catalogueWhere(
 const ORDER_BY: Record<ListingSort, Prisma.ListingOrderByWithRelationInput[]> =
   {
     ...CREATED_AT_ORDER,
-    priceAsc: [{ pricePerNight: "asc" }, { id: "asc" }],
-    priceDesc: [{ pricePerNight: "desc" }, { id: "desc" }],
+    priceAsc: [{ pricePerNightCents: "asc" }, { id: "asc" }],
+    priceDesc: [{ pricePerNightCents: "desc" }, { id: "desc" }],
   };
 
 /**
@@ -291,37 +292,36 @@ function afterCursor(cursor: CatalogueCursor): Prisma.ListingWhereInput {
       return afterCreatedAt(cursor);
     case "priceAsc":
       return {
-        pricePerNight: { gte: cursor.pricePerNight },
+        pricePerNightCents: { gte: cursor.pricePerNightCents },
         OR: [
-          { pricePerNight: { gt: cursor.pricePerNight } },
-          { pricePerNight: cursor.pricePerNight, id: { gt: cursor.id } },
+          { pricePerNightCents: { gt: cursor.pricePerNightCents } },
+          {
+            pricePerNightCents: cursor.pricePerNightCents,
+            id: { gt: cursor.id },
+          },
         ],
       };
     case "priceDesc":
       return {
-        pricePerNight: { lte: cursor.pricePerNight },
+        pricePerNightCents: { lte: cursor.pricePerNightCents },
         OR: [
-          { pricePerNight: { lt: cursor.pricePerNight } },
-          { pricePerNight: cursor.pricePerNight, id: { lt: cursor.id } },
+          { pricePerNightCents: { lt: cursor.pricePerNightCents } },
+          {
+            pricePerNightCents: cursor.pricePerNightCents,
+            id: { lt: cursor.id },
+          },
         ],
       };
   }
 }
 
-/**
- * `price_per_night` is a `numeric` column, which the driver hands over as a `Decimal`
- * rather than as a number — exactly so that reading it cannot lose a cent on the way. The
- * contract speaks a `number`, and this is the one place that conversion happens: the scale
- * is two decimals and a double holds that exactly up to far more than the ceiling a price
- * has, so nothing is lost by it either.
- */
 function toListing(row: ListingRow): Listing {
   return {
     id: row.id,
     ownerId: row.ownerId,
     title: row.title,
     description: row.description,
-    pricePerNight: row.pricePerNight.toNumber(),
+    pricePerNightCents: cents(row.pricePerNightCents),
     capacity: row.capacity,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -339,13 +339,15 @@ function pricingRows(
 ): Pick<Prisma.ListingUpdateInput, "weekdayPrices" | "datePrices"> &
   Pick<Prisma.ListingCreateInput, "weekdayPrices" | "datePrices"> {
   const weekdays = Object.entries(pricing.weekdays).flatMap(
-    ([weekday, price]) =>
-      price === undefined ? [] : [{ weekday: weekdayOf(weekday), price }],
+    ([weekday, priceCents]) =>
+      priceCents === undefined
+        ? []
+        : [{ weekday: weekdayOf(weekday), priceCents }],
   );
-  const dates = pricing.dates.map(({ date, price }) => ({
+  const dates = pricing.dates.map(({ date, priceCents }) => ({
     // A `YYYY-MM-DD` parses as UTC midnight, which is what a `@db.Date` holds.
     date: new Date(date),
-    price,
+    priceCents,
   }));
 
   return {

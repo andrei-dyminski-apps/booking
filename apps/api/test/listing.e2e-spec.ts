@@ -14,6 +14,7 @@ import {
   type ListingPage,
   type ListingPricing,
 } from "@repo/contracts";
+import { cents } from "./../src/payment/domain/money";
 import { AppModule } from "./../src/app.module";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
@@ -23,7 +24,7 @@ import { hostCredentials, signIn, signInAs, type Agent } from "./session";
 const input: CreateListingInput = {
   title: "Loft above the harbour",
   description: "Two rooms under the roof and a wall of glass facing the water.",
-  pricePerNight: 120,
+  pricePerNightCents: cents(12_000),
   capacity: 4,
 };
 
@@ -135,15 +136,22 @@ describe("ListingController (e2e)", () => {
   });
 
   it("filters by price and by the party that has to fit", async () => {
-    await publish({ title: "Attic room", pricePerNight: 39.5, capacity: 1 });
-    await publish({ title: "Farmhouse", pricePerNight: 210, capacity: 12 });
+    await publish({
+      title: "Attic room",
+      pricePerNightCents: cents(3950),
+      capacity: 1,
+    });
+    await publish({
+      title: "Farmhouse",
+      pricePerNightCents: cents(21_000),
+      capacity: 12,
+    });
 
-    await expect(catalogue("?minPrice=40").then(titles)).resolves.toEqual([
-      "Farmhouse",
-      input.title,
-    ]);
     await expect(
-      catalogue("?minPrice=40&maxPrice=200").then(titles),
+      catalogue("?minPriceCents=4000").then(titles),
+    ).resolves.toEqual(["Farmhouse", input.title]);
+    await expect(
+      catalogue("?minPriceCents=4000&maxPriceCents=20000").then(titles),
     ).resolves.toEqual([input.title]);
     await expect(catalogue("?guests=5").then(titles)).resolves.toEqual([
       "Farmhouse",
@@ -240,8 +248,8 @@ describe("ListingController (e2e)", () => {
   });
 
   it("orders the catalogue the way it was asked to", async () => {
-    await publish({ title: "Attic room", pricePerNight: 39.5 });
-    await publish({ title: "Farmhouse", pricePerNight: 210 });
+    await publish({ title: "Attic room", pricePerNightCents: cents(3950) });
+    await publish({ title: "Farmhouse", pricePerNightCents: cents(21_000) });
 
     // Four orderings out of two keys, each read in both directions — and the default is
     // the one a catalogue with nothing asked of it shows.
@@ -278,8 +286,8 @@ describe("ListingController (e2e)", () => {
    * somewhere else entirely, and the page after it would belong to neither.
    */
   it("pages a sorted catalogue, and refuses its cursor under another ordering", async () => {
-    await publish({ title: "Attic room", pricePerNight: 39.5 });
-    await publish({ title: "Farmhouse", pricePerNight: 210 });
+    await publish({ title: "Attic room", pricePerNightCents: cents(3950) });
+    await publish({ title: "Farmhouse", pricePerNightCents: cents(21_000) });
 
     const first = await catalogue("?sort=priceAsc&limit=2");
 
@@ -299,16 +307,17 @@ describe("ListingController (e2e)", () => {
   });
 
   /**
-   * A price-ordered page narrows by the same column `minPrice`/`maxPrice` narrow, so the
+   * A price-ordered page narrows by the same column `minPriceCents`/`maxPriceCents` narrow, so the
    * cursor and the filter meet on one field. They are `AND`-ed rather than merged, and
    * this is what would catch it if they stopped being: the second page would let a
    * listing above the ceiling back in.
    */
   it("keeps the price filter on every page of a price-ordered catalogue", async () => {
-    await publish({ title: "Attic room", pricePerNight: 39.5 });
-    await publish({ title: "Farmhouse", pricePerNight: 210 });
+    await publish({ title: "Attic room", pricePerNightCents: cents(3950) });
+    await publish({ title: "Farmhouse", pricePerNightCents: cents(21_000) });
 
-    const filtered = "?sort=priceAsc&limit=1&minPrice=39&maxPrice=120";
+    const filtered =
+      "?sort=priceAsc&limit=1&minPriceCents=3900&maxPriceCents=12000";
     const first = await catalogue(filtered);
 
     expect(titles(first)).toEqual(["Attic room"]);
@@ -334,27 +343,27 @@ describe("ListingController (e2e)", () => {
     await anyone().get("/listings?guests=none").expect(400);
     // A third decimal is finer than the column stores, so it is refused rather than
     // rounded into a filter nobody asked for.
-    await anyone().get("/listings?minPrice=50.005").expect(400);
+    await anyone().get("/listings?minPriceCents=5000.5").expect(400);
   });
 
   /**
    * A form with an empty field serialises to `?guests=`, not to nothing at all, and every
    * coercion of this query would otherwise read that differently — `Number("")` is `0`, so
-   * `minPrice` would quietly become a filter while the four beside it answered `400`. All
+   * `minPriceCents` would quietly become a filter while the four beside it answered `400`. All
    * of them are the same question as no parameter at all.
    */
   it("reads a blank filter as one nobody filled in", async () => {
     const unfiltered = await catalogue();
 
     for (const query of [
-      "?minPrice=",
-      "?maxPrice=",
+      "?minPriceCents=",
+      "?maxPriceCents=",
       "?guests=",
       "?limit=",
       "?cursor=",
       "?sort=",
       "?from=&to=",
-      "?minPrice=&maxPrice=&guests=&limit=&cursor=&sort=&from=&to=",
+      "?minPriceCents=&maxPriceCents=&guests=&limit=&cursor=&sort=&from=&to=",
     ]) {
       await expect(catalogue(query)).resolves.toEqual(unfiltered);
     }
@@ -441,16 +450,16 @@ describe("ListingController (e2e)", () => {
   it("lets the owner edit their listing", async () => {
     const response = await owner
       .patch(`/listings/${listingId}`)
-      .send({ pricePerNight: 135.5 })
+      .send({ pricePerNightCents: 13_550 })
       .expect(200);
 
-    expect(listingSchema.parse(response.body).pricePerNight).toBe(135.5);
+    expect(listingSchema.parse(response.body).pricePerNightCents).toBe(13_550);
   });
 
   it("refuses the edit to another owner — the role passes, the ownership does not", async () => {
     await otherOwner
       .patch(`/listings/${listingId}`)
-      .send({ pricePerNight: 1 })
+      .send({ pricePerNightCents: 100 })
       .expect(403);
   });
 
@@ -498,17 +507,17 @@ describe("ListingController (e2e)", () => {
 
     await owner
       .patch(`/listings/${listingId}`)
-      .send({ pricePerNight: 135.5 })
+      .send({ pricePerNightCents: 13_550 })
       .expect(404);
     await owner.delete(`/listings/${listingId}`).expect(404);
   });
 
   it("stores the exceptions to a price, answers them on the listing alone, and replaces them whole", async () => {
     const pricing: ListingPricing = {
-      weekdays: { fri: 150, sat: 160.5 },
+      weekdays: { fri: cents(15_000), sat: cents(16_050) },
       dates: [
-        { date: inDays(20), price: 400 },
-        { date: inDays(10), price: 99.99 },
+        { date: inDays(20), priceCents: cents(40_000) },
+        { date: inDays(10), priceCents: cents(9999) },
       ],
     };
     const id = await publish({ pricing });
@@ -521,8 +530,8 @@ describe("ListingController (e2e)", () => {
     expect(detail.pricing).toEqual({
       weekdays: pricing.weekdays,
       dates: [
-        { date: inDays(10), price: 99.99 },
-        { date: inDays(20), price: 400 },
+        { date: inDays(10), priceCents: 9999 },
+        { date: inDays(20), priceCents: 40_000 },
       ],
     });
 
@@ -543,7 +552,10 @@ describe("ListingController (e2e)", () => {
     ).toEqual(detail.pricing);
 
     // ...and one that does is the whole set: what it leaves out is gone.
-    const fridaysOnly: ListingPricing = { weekdays: { fri: 140 }, dates: [] };
+    const fridaysOnly: ListingPricing = {
+      weekdays: { fri: cents(14_000) },
+      dates: [],
+    };
 
     await owner
       .patch(`/listings/${id}`)
@@ -563,8 +575,8 @@ describe("ListingController (e2e)", () => {
 
     await prismaService.listingDatePrice.createMany({
       data: [
-        { listingId, date: new Date(inDays(-3)), price: 300 },
-        { listingId, date: new Date(inDays(3)), price: 200 },
+        { listingId, date: new Date(inDays(-3)), priceCents: 30_000 },
+        { listingId, date: new Date(inDays(3)), priceCents: 20_000 },
       ],
     });
 
@@ -573,7 +585,9 @@ describe("ListingController (e2e)", () => {
         (await anyone().get(`/listings/${listingId}`).expect(200)).body,
       ).pricing;
 
-    expect((await read()).dates).toEqual([{ date: inDays(3), price: 200 }]);
+    expect((await read()).dates).toEqual([
+      { date: inDays(3), priceCents: 20_000 },
+    ]);
 
     await owner
       .patch(`/listings/${listingId}`)
@@ -589,8 +603,8 @@ describe("ListingController (e2e)", () => {
     // The same days in every set, so two saves interleaved between clearing and inserting
     // would both insert `fri` and one of them would fail on the primary key.
     const sets: ListingPricing[] = Array.from({ length: 10 }, (_, n) => ({
-      weekdays: { fri: 100 + n, sat: 200 + n },
-      dates: [{ date: inDays(7), price: 300 + n }],
+      weekdays: { fri: cents(10_000 + n), sat: cents(20_000 + n) },
+      dates: [{ date: inDays(7), priceCents: cents(30_000 + n) }],
     }));
 
     const responses = await Promise.all(
@@ -615,20 +629,20 @@ describe("ListingController (e2e)", () => {
 
     await send({
       weekdays: {},
-      dates: [{ date: inDays(-1), price: 100 }],
+      dates: [{ date: inDays(-1), priceCents: 10_000 }],
     }).expect(400);
     await send({
       weekdays: {},
       dates: [
-        { date: inDays(5), price: 100 },
-        { date: inDays(5), price: 120 },
+        { date: inDays(5), priceCents: 10_000 },
+        { date: inDays(5), priceCents: 12_000 },
       ],
     }).expect(400);
     await send({ weekdays: { fri: 0 }, dates: [] }).expect(400);
-    await send({ weekdays: { fri: 150.555 }, dates: [] }).expect(400);
+    await send({ weekdays: { fri: 15_055.5 }, dates: [] }).expect(400);
     // Not a day of the week: refused rather than stripped, because a save that dropped the
     // key would replace the set with an empty one and still answer 200.
-    await send({ weekdays: { Fri: 150 }, dates: [] }).expect(400);
+    await send({ weekdays: { Fri: 15_000 }, dates: [] }).expect(400);
   });
 
   it("rejects a body that does not pass the schema", async () => {
@@ -640,7 +654,7 @@ describe("ListingController (e2e)", () => {
     // refused rather than rounded into a price nobody typed.
     await owner
       .post("/listings")
-      .send({ ...input, pricePerNight: 120.505 })
+      .send({ ...input, pricePerNightCents: 12_050.5 })
       .expect(400);
     // A PATCH that changes nothing is a mistake on the caller's side, not a no-op.
     await owner.patch(`/listings/${listingId}`).send({}).expect(400);
@@ -654,14 +668,16 @@ describe("ListingController (e2e)", () => {
     // being the first thing a float would have lost.
     const created = await owner
       .post("/listings")
-      .send({ ...input, pricePerNight: 999_999.99 })
+      .send({ ...input, pricePerNightCents: 99_999_999 })
       .expect(201);
 
-    expect(listingSchema.parse(created.body).pricePerNight).toBe(999_999.99);
+    expect(listingSchema.parse(created.body).pricePerNightCents).toBe(
+      99_999_999,
+    );
 
     await owner
       .post("/listings")
-      .send({ ...input, pricePerNight: 1_000_000.01 })
+      .send({ ...input, pricePerNightCents: 100_000_000 })
       .expect(400);
   });
 });

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { dayMessage, isDay, today } from "./day.js";
 import { listingSummarySchema } from "./listing.js";
+import { centsSchema, currencySchema } from "./money.js";
+import { pricedNightSchema } from "./pricing.js";
 import { blank, PAGING } from "./query.js";
 
 /**
@@ -64,18 +66,24 @@ export const bookingSchema = z.object({
   /**
    * What the stay costs, quoted by the server when the hold is taken (`nightlyPrice` over its
    * nights), and what the payment charges. A copy: a later price change does not restate it.
+   * In whole cents of `currency`, like every amount on this contract.
    */
-  amount: z.number(),
+  amountCents: centsSchema,
+  /**
+   * What every amount of this stay is cents of — the currency it was charged in, stored with
+   * it rather than assumed, so the record says on its own what the money was.
+   */
+  currency: currencySchema,
   /**
    * What went back to the guest, or `null` when nothing did: a cancellation outside the
    * free window, a hold that was never paid. See `refundOnCancel` (`refund.ts`).
    */
-  refundedAmount: z.number().nullable(),
+  refundedAmountCents: centsSchema.nullable(),
   /**
    * What a cancellation is giving back and has not sent yet, or `null`. The refund follows
-   * the cancellation in the background and moves into `refundedAmount` once sent.
+   * the cancellation in the background and moves into `refundedAmountCents` once sent.
    */
-  refundOwed: z.number().nullable(),
+  refundOwedCents: centsSchema.nullable(),
   /** A payment confirmed this booking at some point, whatever its status is now. */
   paid: z.boolean(),
   /**
@@ -116,9 +124,10 @@ export const createBookingSchema = bookingSchema
     listing: true,
     guestId: true,
     status: true,
-    amount: true,
-    refundedAmount: true,
-    refundOwed: true,
+    amountCents: true,
+    currency: true,
+    refundedAmountCents: true,
+    refundOwedCents: true,
     paid: true,
     dispute: true,
     expiresAt: true,
@@ -145,14 +154,25 @@ export const createBookingSchema = bookingSchema
 export const bookingListSchema = z.array(bookingSchema);
 
 /**
+ * One stay as its own page reads it: the booking, and what each of its nights cost when the
+ * hold was quoted — `amountCents` is their sum. Only `GET /bookings/:id` answers with it, for
+ * the reason a listing's exceptions travel with one listing: a page of stays would carry a
+ * list per row that nobody reading the page looks at. Empty for a stay taken before the
+ * nights were recorded.
+ */
+export const bookingDetailSchema = bookingSchema.extend({
+  nights: z.array(pricedNightSchema),
+});
+
+/**
  * What the payment form needs for one hold: its PaymentIntent's `client_secret`, which
  * Stripe Elements confirms, and the amount and currency. Answered to the guest alone.
  */
 export const bookingPaymentSchema = z.object({
   clientSecret: z.string(),
-  amount: z.number(),
-  /** ISO 4217, lower case — the spelling Stripe answers with. */
-  currency: z.string(),
+  /** In cents, as Stripe counts it. */
+  amountCents: centsSchema,
+  currency: currencySchema,
 });
 
 /**
@@ -251,5 +271,6 @@ export type BookingSort = z.infer<typeof bookingSortSchema>;
 export type BookingQuery = z.infer<typeof bookingQuerySchema>;
 export type BookingPage = z.infer<typeof bookingPageSchema>;
 export type Booking = z.infer<typeof bookingSchema>;
+export type BookingDetail = z.infer<typeof bookingDetailSchema>;
 export type CreateBookingInput = z.infer<typeof createBookingSchema>;
 export type BookingPayment = z.infer<typeof bookingPaymentSchema>;

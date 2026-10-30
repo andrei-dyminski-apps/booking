@@ -65,11 +65,11 @@ export function isCancellable(status: BookingStatus): boolean {
 export function awaitsItsPayment(stay: {
   status: BookingStatus;
   paid: boolean;
-  refundedAmount: number | null;
+  refundedAmountCents: number | null;
 }): boolean {
   return (
     stay.status === BookingStatus.PENDING_PAYMENT &&
     !stay.paid &&
-    stay.refundedAmount === null
+    stay.refundedAmountCents === null
   );
 }

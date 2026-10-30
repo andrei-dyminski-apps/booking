@@ -1,7 +1,18 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { NotificationType } from "@repo/contracts";
+import {
+  failedPaymentEventSchema,
+  NotificationType,
+  type FailedPaymentEventPage,
+  type FailedPaymentEventQuery,
+} from "@repo/contracts";
 import { subDays, subMinutes } from "date-fns";
 import { errorText } from "../../common/job-failure";
+import { readCursor } from "../../common/paging";
+import { writeOrRefuse } from "../../common/set-aside";
+import {
+  decodeSetAsideCursor,
+  nextSetAsideCursor,
+} from "../../common/set-aside-cursor";
 import { NotificationService } from "../../notification/notification.service";
 import { PaymentEventRepository } from "../infrastructure/payment-event.repository";
 import {
@@ -21,6 +32,9 @@ export const MAX_EVENT_ATTEMPTS = 24;
 export const EVENT_RETENTION_DAYS = 90;
 
 export const SWEEP_BATCH = 100;
+
+/** The resource tag of the failed events' cursor. */
+const FAILED_EVENTS = "payment-events-failed";
 
 /**
  * The webhook inbox. The webhook records and queues an event and answers at once — Stripe
@@ -97,6 +111,50 @@ export class PaymentEventDispatcher {
     return this.paymentEventRepository.pruneProcessed(
       subDays(now, EVENT_RETENTION_DAYS),
     );
+  }
+
+  /** The admin's list of what `setAsideAfter` gave up on. */
+  async failedPage(
+    query: FailedPaymentEventQuery,
+  ): Promise<FailedPaymentEventPage> {
+    const cursor = readCursor(query.cursor, "newest", (raw) =>
+      decodeSetAsideCursor(
+        FAILED_EVENTS,
+        raw,
+        failedPaymentEventSchema.shape.id,
+      ),
+    );
+    const page = await this.paymentEventRepository.findFailedPage(
+      cursor,
+      query.limit,
+    );
+
+    return {
+      items: page.items,
+      nextCursor: nextSetAsideCursor(FAILED_EVENTS, page, (row) => ({
+        at: row.failedAt,
+        id: row.id,
+      })),
+    };
+  }
+
+  /**
+   * Handed back with a whole count of attempts and queued at once, rather than left to the
+   * sweep. The usual order is a fix deployed first, then the event retried — every handler is
+   * idempotent, so a retry is safe whatever the event did before it was set aside.
+   */
+  async retry(eventId: string): Promise<void> {
+    await writeOrRefuse(
+      this.paymentEventRepository.handBack(eventId),
+      () => this.paymentEventRepository.exists(eventId),
+      {
+        conflict: `Payment event ${eventId} is not set aside`,
+        notFound: `Payment event ${eventId} not found`,
+      },
+    );
+
+    this.logger.log(`Payment event ${eventId} was handed back to the worker`);
+    await this.paymentEventJobs.process(eventId);
   }
 
   /** Whether this failed run set the event aside. A failure to count it leaves it to retry. */

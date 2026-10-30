@@ -1,10 +1,16 @@
 import { createZodDto } from "nestjs-zod";
 import {
+  bookingDetailSchema,
   bookingPageSchema,
   bookingPaymentSchema,
   bookingQuerySchema,
   bookingSchema,
   createBookingSchema,
+  refundFailurePageSchema,
+  refundFailureQuerySchema,
+  resolveRefundFailureSchema,
+  stuckStayPageSchema,
+  stuckStayQuerySchema,
 } from "@repo/contracts";
 
 /**
@@ -18,6 +24,8 @@ export class CreateBookingDto extends createZodDto(createBookingSchema) {}
 
 export class BookingDto extends createZodDto(bookingSchema) {}
 
+export class BookingDetailDto extends createZodDto(bookingDetailSchema) {}
+
 /**
  * A query string is a request the pipe validates like any other, and the DTO is what makes
  * `@Query()` reach it — the same class is also what puts the filters in `/docs`, which no
@@ -28,3 +36,19 @@ export class BookingQueryDto extends createZodDto(bookingQuerySchema) {}
 export class BookingPageDto extends createZodDto(bookingPageSchema) {}
 
 export class BookingPaymentDto extends createZodDto(bookingPaymentSchema) {}
+
+export class StuckStayQueryDto extends createZodDto(stuckStayQuerySchema) {}
+
+export class StuckStayPageDto extends createZodDto(stuckStayPageSchema) {}
+
+export class RefundFailureQueryDto extends createZodDto(
+  refundFailureQuerySchema,
+) {}
+
+export class RefundFailurePageDto extends createZodDto(
+  refundFailurePageSchema,
+) {}
+
+export class ResolveRefundFailureDto extends createZodDto(
+  resolveRefundFailureSchema,
+) {}

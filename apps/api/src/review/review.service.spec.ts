@@ -27,6 +27,7 @@ import { BookingRepository } from "../booking/infrastructure/booking.repository"
 import type { Page } from "../common/paging";
 import { ListingRepository } from "../listing/listing.repository";
 import { NotificationService } from "../notification/notification.service";
+import { cents, CURRENCY } from "../payment/domain/money";
 import type { ReviewCursor } from "./review-cursor";
 import {
   ReviewAlreadyWrittenError,
@@ -77,14 +78,18 @@ const stay = (overrides: Partial<Booking> = {}): BookingWithListingOwner => ({
   booking: {
     id: randomUUID(),
     listingId: LISTING_ID,
-    listing: { title: "Loft above the harbour", pricePerNight: 120 },
+    listing: {
+      title: "Loft above the harbour",
+      pricePerNightCents: cents(12_000),
+    },
     guestId: GUEST_ID,
     from: inDays(-5),
     to: inDays(-1),
     status: BookingStatus.CONFIRMED,
-    amount: 480,
-    refundedAmount: null,
-    refundOwed: null,
+    amountCents: cents(48_000),
+    currency: CURRENCY,
+    refundedAmountCents: null,
+    refundOwedCents: null,
     paid: true,
     dispute: null,
     expiresAt: null,
@@ -277,7 +282,7 @@ class FakeListingRepository implements Pick<
       ownerId: OWNER_ID,
       title: "Loft above the harbour",
       description: "Two rooms under the roof and a wall of glass.",
-      pricePerNight: 120,
+      pricePerNightCents: cents(12_000),
       capacity: 4,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),

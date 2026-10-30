@@ -1,8 +1,12 @@
 import { Injectable } from "@nestjs/common";
+import type { FailedPaymentEvent } from "@repo/contracts";
 import { z } from "zod";
 import type { Prisma } from "../../generated/prisma/client";
+import type { Page } from "../../common/paging";
+import type { SetAsideCursor } from "../../common/set-aside-cursor";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { PaymentEvent } from "../application/ports/payment-gateway";
+import { cents } from "../domain/money";
 
 /** The webhook inbox — see `PaymentEvent` in the schema. */
 @Injectable()
@@ -78,6 +82,78 @@ export class PaymentEventRepository {
     return rows.map(({ id }) => id);
   }
 
+  /**
+   * The events set aside, newest first, over the partial `payment_events_failed_idx`. The
+   * cursor's key is said twice for the reason `afterCursor` in `listing.repository.ts` gives.
+   */
+  async findFailedPage(
+    cursor: SetAsideCursor | null,
+    limit: number,
+  ): Promise<Page<FailedPaymentEvent>> {
+    const rows = await this.prismaService.paymentEvent.findMany({
+      where: {
+        failedAt: cursor === null ? { not: null } : { lte: cursor.at },
+        ...(cursor === null
+          ? {}
+          : {
+              OR: [
+                { failedAt: { lt: cursor.at } },
+                { failedAt: cursor.at, id: { lt: cursor.id } },
+              ],
+            }),
+      },
+      select: {
+        id: true,
+        type: true,
+        attempts: true,
+        lastError: true,
+        receivedAt: true,
+        failedAt: true,
+      },
+      orderBy: [{ failedAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+    });
+
+    return {
+      items: rows.slice(0, limit).flatMap((row) =>
+        row.failedAt === null
+          ? []
+          : [
+              {
+                id: row.id,
+                type: row.type,
+                attempts: row.attempts,
+                lastError: row.lastError,
+                receivedAt: row.receivedAt.toISOString(),
+                failedAt: row.failedAt.toISOString(),
+              },
+            ],
+      ),
+      hasMore: rows.length > limit,
+    };
+  }
+
+  /**
+   * Hands a set-aside event back to the worker: `failed_at` and `attempts` cleared, so it
+   * gets the whole count again. `false` for an event that is not set aside — or not there.
+   */
+  async handBack(eventId: string): Promise<boolean> {
+    const { count } = await this.prismaService.paymentEvent.updateMany({
+      where: { id: eventId, processedAt: null, failedAt: { not: null } },
+      data: { failedAt: null, attempts: 0 },
+    });
+
+    return count > 0;
+  }
+
+  async exists(eventId: string): Promise<boolean> {
+    return (
+      (await this.prismaService.paymentEvent.count({
+        where: { id: eventId },
+      })) > 0
+    );
+  }
+
   /** An event set aside is never processed, so it stays until a person deals with it. */
   async pruneProcessed(before: Date): Promise<number> {
     const { count } = await this.prismaService.paymentEvent.deleteMany({
@@ -94,6 +170,9 @@ const STILL_PENDING = {
   failedAt: null,
 } satisfies Prisma.PaymentEventWhereInput;
 
+/** An amount as the payload stores it, in cents like every amount; `cents` refuses a fraction. */
+const storedAmount = z.int().transform(cents);
+
 /** Nothing in the database holds `payload` to its type, so it is parsed on the way out. */
 const paymentEventSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -103,7 +182,7 @@ const paymentEventSchema = z.discriminatedUnion("kind", [
     paymentId: z.string(),
     chargeId: z.string().nullable(),
     bookingId: z.string().nullable(),
-    amount: z.number(),
+    amount: storedAmount,
   }),
   z.object({
     kind: z.literal("refunded"),
@@ -111,7 +190,7 @@ const paymentEventSchema = z.discriminatedUnion("kind", [
     type: z.string(),
     paymentId: z.string(),
     chargeId: z.string(),
-    amountRefunded: z.number(),
+    amountRefunded: storedAmount,
   }),
   z.object({
     kind: z.literal("refundFailed"),
@@ -119,7 +198,7 @@ const paymentEventSchema = z.discriminatedUnion("kind", [
     type: z.string(),
     paymentId: z.string(),
     refundId: z.string(),
-    amount: z.number(),
+    amount: storedAmount,
     reason: z.string().nullable(),
   }),
   z.object({

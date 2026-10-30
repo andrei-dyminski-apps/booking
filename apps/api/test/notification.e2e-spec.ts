@@ -10,6 +10,7 @@ import {
   unreadCountSchema,
   type CreateListingInput,
 } from "@repo/contracts";
+import { cents } from "./../src/payment/domain/money";
 import { AppModule } from "./../src/app.module";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
@@ -22,7 +23,7 @@ import { waitUntil } from "./wait-until";
 const listingInput: CreateListingInput = {
   title: "Loft above the harbour",
   description: "Two rooms under the roof and a wall of glass facing the water.",
-  pricePerNight: 120,
+  pricePerNightCents: cents(12_000),
   capacity: 4,
 };
 

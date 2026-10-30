@@ -8,12 +8,10 @@ import {
   type OpenedPayment,
   type PaymentEvent,
 } from "../application/ports/payment-gateway";
-import { CURRENCY } from "../domain/currency";
-import { toCents } from "../domain/money";
+import { cents, NO_CENTS, type Cents, type Currency } from "../domain/money";
 import { PAYMENT_CONFIG, type PaymentConfig } from "./payment.config";
 import {
   BACKGROUND_REQUEST,
-  fromMinorUnits,
   idOf,
   STRIPE_API_VERSION,
   STRIPE_CLIENT,
@@ -80,14 +78,18 @@ export class StripePaymentGateway extends PaymentGateway {
   }
 
   /** Keyed by the booking: Stripe keeps a key 24 hours, a hold lives 15 minutes. */
-  async open(bookingId: string, amount: number): Promise<OpenedPayment> {
+  async open(
+    bookingId: string,
+    amount: Cents,
+    currency: Currency,
+  ): Promise<OpenedPayment> {
     let intent: Stripe.PaymentIntent;
 
     try {
       intent = await this.stripe.paymentIntents.create(
         {
-          amount: toCents(amount),
-          currency: CURRENCY,
+          amount,
+          currency,
           allowed_payment_method_types: [...INSTANT_PAYMENT_METHODS],
           // What the webhook finds the booking by, and whose database holds it.
           metadata: { bookingId, site: this.paymentConfig.site },
@@ -134,11 +136,7 @@ export class StripePaymentGateway extends PaymentGateway {
     }
   }
 
-  async refund(
-    paymentId: string,
-    amount: number,
-    key: string,
-  ): Promise<number> {
+  async refund(paymentId: string, amount: Cents, key: string): Promise<Cents> {
     // Looked up first rather than trusted to the idempotency key alone: Stripe forgets a key
     // after 24 hours, and a refund whose answer was lost would be sent again after that.
     const sent = await this.findRefund(paymentId, key);
@@ -149,20 +147,20 @@ export class StripePaymentGateway extends PaymentGateway {
       const refund = await this.stripe.refunds.create(
         {
           payment_intent: paymentId,
-          amount: toCents(amount),
+          amount,
           metadata: { key },
         },
         { idempotencyKey: key, ...BACKGROUND_REQUEST },
       );
 
-      return fromMinorUnits(refund.amount);
+      return cents(refund.amount);
     } catch (error) {
       // Everything went back already — a refund from the dashboard in between.
       if (
         error instanceof Stripe.errors.StripeInvalidRequestError &&
         error.code === "charge_already_refunded"
       ) {
-        return 0;
+        return NO_CENTS;
       }
 
       // The key was used with another amount by a run racing this one: that refund stands.
@@ -179,20 +177,20 @@ export class StripePaymentGateway extends PaymentGateway {
   private async findRefund(
     paymentId: string,
     key: string,
-  ): Promise<number | null> {
+  ): Promise<Cents | null> {
     for await (const refund of this.stripe.refunds.list(
       { payment_intent: paymentId, limit: 100 },
       BACKGROUND_REQUEST,
     )) {
       if (refund.metadata?.key === key && refund.status !== "canceled") {
-        return fromMinorUnits(refund.amount);
+        return cents(refund.amount);
       }
     }
 
     return null;
   }
 
-  async refundedSoFar(paymentId: string): Promise<number> {
+  async refundedSoFar(paymentId: string): Promise<Cents> {
     const intent = await this.stripe.paymentIntents.retrieve(
       paymentId,
       { expand: ["latest_charge"] },
@@ -201,8 +199,8 @@ export class StripePaymentGateway extends PaymentGateway {
     const charge = intent.latest_charge;
 
     return charge === null || typeof charge === "string"
-      ? 0
-      : fromMinorUnits(charge.amount_refunded);
+      ? NO_CENTS
+      : cents(charge.amount_refunded);
   }
 
   readEvent(payload: Buffer, signature: string): PaymentEvent {
@@ -235,7 +233,7 @@ export class StripePaymentGateway extends PaymentGateway {
           paymentId: intent.id,
           chargeId: idOf(intent.latest_charge),
           bookingId: this.bookingIdOf(intent.metadata),
-          amount: fromMinorUnits(intent.amount_received),
+          amount: cents(intent.amount_received),
         };
       }
       case "charge.refunded": {
@@ -251,7 +249,7 @@ export class StripePaymentGateway extends PaymentGateway {
           type,
           paymentId,
           chargeId: charge.id,
-          amountRefunded: fromMinorUnits(charge.amount_refunded),
+          amountRefunded: cents(charge.amount_refunded),
         };
       }
       case "refund.failed": {
@@ -266,7 +264,7 @@ export class StripePaymentGateway extends PaymentGateway {
               type,
               paymentId,
               refundId: refund.id,
-              amount: fromMinorUnits(refund.amount),
+              amount: cents(refund.amount),
               reason: refund.failure_reason ?? null,
             };
       }

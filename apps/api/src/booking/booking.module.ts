@@ -5,10 +5,12 @@ import { PaymentModule } from "../payment/payment.module";
 import { PrismaModule } from "../prisma/prisma.module";
 import { WaitlistModule } from "../waitlist/waitlist.module";
 import { BookingController } from "./presentation/booking.controller";
+import { RefundFailureController } from "./presentation/refund-failure.controller";
 import { BookingRepository } from "./infrastructure/booking.repository";
 import { RefundFailureRepository } from "./infrastructure/refund-failure.repository";
 import { BookingPaymentHandler } from "./application/booking-payment.handler";
 import { BookingService } from "./application/booking.service";
+import { RefundFailureService } from "./application/refund-failure.service";
 import { BookingJobs } from "./application/ports/booking-jobs";
 import { StayEvents } from "./application/stay-events";
 import { BookingExpiryProcessor } from "./infrastructure/booking-expiry.processor";
@@ -29,11 +31,12 @@ import {
     WaitlistModule,
     BullModule.registerQueue({ name: BOOKING_EXPIRY_QUEUE }),
   ],
-  controllers: [BookingController],
+  controllers: [BookingController, RefundFailureController],
   providers: [
     BookingService,
     BookingRepository,
     RefundFailureRepository,
+    RefundFailureService,
     BookingPaymentHandler,
     StayEvents,
     { provide: BookingJobs, useClass: BookingExpiryQueue },

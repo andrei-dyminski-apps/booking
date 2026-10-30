@@ -11,6 +11,7 @@ import {
   type LeaseTiming,
 } from "./../src/booking/infrastructure/booking-lease";
 import { BookingRepository } from "./../src/booking/infrastructure/booking.repository";
+import { cents } from "./../src/payment/domain/money";
 import { PayoutRepository } from "./../src/payout/infrastructure/payout.repository";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
@@ -66,7 +67,7 @@ describe("PayoutRepository settlement lease (e2e)", () => {
         ownerId: host.id,
         title: "Cabin by the lake",
         description: "Two rooms, a jetty and no neighbours.",
-        pricePerNight: 120,
+        pricePerNightCents: 12_000,
         capacity: 4,
       },
     });
@@ -77,7 +78,8 @@ describe("PayoutRepository settlement lease (e2e)", () => {
         from: parseISO(inDays(10), { in: tz("UTC") }),
         to: parseISO(inDays(12), { in: tz("UTC") }),
         status: "CONFIRMED",
-        amount: 240,
+        amountCents: 24_000,
+        currency: "usd",
       },
     });
 
@@ -219,7 +221,7 @@ describe("The money columns of a paid stay (e2e)", () => {
   let bookingId: string;
   let hostId: string;
 
-  const AMOUNT = 480;
+  const AMOUNT = 48_000;
 
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -257,7 +259,7 @@ describe("The money columns of a paid stay (e2e)", () => {
         ownerId: host.id,
         title: "Cabin by the lake",
         description: "Two rooms, a jetty and no neighbours.",
-        pricePerNight: 120,
+        pricePerNightCents: 12_000,
         capacity: 4,
       },
     });
@@ -269,7 +271,8 @@ describe("The money columns of a paid stay (e2e)", () => {
         from: parseISO(inDays(-10), { in: tz("UTC") }),
         to: parseISO(inDays(-6), { in: tz("UTC") }),
         status: "CONFIRMED",
-        amount: AMOUNT,
+        amountCents: AMOUNT,
+        currency: "usd",
         paymentIntentId: "pi_money",
         chargeId: "ch_money",
         paidAt: new Date(),
@@ -284,46 +287,50 @@ describe("The money columns of a paid stay (e2e)", () => {
     await app.close();
   });
 
-  const refundedAmount = async (): Promise<number | null> =>
+  const refundedAmountCents = async (): Promise<number | null> =>
     (
       await prismaService.booking.findUniqueOrThrow({
         where: { id: bookingId },
       })
-    ).refundedAmount?.toNumber() ?? null;
+    ).refundedAmountCents;
 
   it("keeps a dashboard refund when a cancellation gives nothing back", async () => {
-    await bookingRepository.raiseRefunded(bookingId, null, 100);
+    await bookingRepository.raiseRefunded(bookingId, null, cents(10_000));
 
     await expect(
       bookingRepository.cancel(bookingId, "CONFIRMED", null),
     ).resolves.not.toBeNull();
 
-    expect(await refundedAmount()).toBe(100);
+    expect(await refundedAmountCents()).toBe(10_000);
   });
 
   it("raises the refund total with a cancellation's refund and never lowers it", async () => {
-    await bookingRepository.settleOwedRefund(bookingId, 100);
-    expect(await refundedAmount()).toBe(100);
+    await bookingRepository.settleOwedRefund(bookingId, cents(10_000));
+    expect(await refundedAmountCents()).toBe(10_000);
 
     // The webhook already recorded Stripe's total of the cancellation's own refund.
-    await bookingRepository.raiseRefunded(bookingId, 100, AMOUNT);
-    await bookingRepository.settleOwedRefund(bookingId, 380);
+    await bookingRepository.raiseRefunded(
+      bookingId,
+      cents(10_000),
+      cents(AMOUNT),
+    );
+    await bookingRepository.settleOwedRefund(bookingId, cents(38_000));
 
-    expect(await refundedAmount()).toBe(AMOUNT);
+    expect(await refundedAmountCents()).toBe(AMOUNT);
   });
 
   it("keeps a stay out of the due payouts while a cancellation's refund is owed", async () => {
-    await bookingRepository.cancel(bookingId, "CONFIRMED", AMOUNT);
+    await bookingRepository.cancel(bookingId, "CONFIRMED", cents(AMOUNT));
 
     expect(
       await payoutRepository.findDuePayouts(new Date(), 10, hostId),
     ).toEqual([]);
     expect(await bookingRepository.findOwedRefunds(10)).toEqual([bookingId]);
 
-    await bookingRepository.settleOwedRefund(bookingId, AMOUNT);
+    await bookingRepository.settleOwedRefund(bookingId, cents(AMOUNT));
 
     expect(await bookingRepository.findOwedRefunds(10)).toEqual([]);
-    expect(await refundedAmount()).toBe(AMOUNT);
+    expect(await refundedAmountCents()).toBe(AMOUNT);
   });
 
   it("leaves a stay refunded in full out of the due payouts", async () => {
@@ -331,12 +338,16 @@ describe("The money columns of a paid stay (e2e)", () => {
       await payoutRepository.findDuePayouts(new Date(), 10, hostId),
     ).toEqual([bookingId]);
 
-    await bookingRepository.raiseRefunded(bookingId, null, 100);
+    await bookingRepository.raiseRefunded(bookingId, null, cents(10_000));
     expect(
       await payoutRepository.findDuePayouts(new Date(), 10, hostId),
     ).toEqual([bookingId]);
 
-    await bookingRepository.raiseRefunded(bookingId, 100, AMOUNT);
+    await bookingRepository.raiseRefunded(
+      bookingId,
+      cents(10_000),
+      cents(AMOUNT),
+    );
     expect(
       await payoutRepository.findDuePayouts(new Date(), 10, hostId),
     ).toEqual([]);
@@ -344,18 +355,18 @@ describe("The money columns of a paid stay (e2e)", () => {
 
   it("refuses money columns past what the guest paid, whoever writes them", async () => {
     await expect(
-      bookingRepository.raiseRefunded(bookingId, null, AMOUNT + 1),
+      bookingRepository.raiseRefunded(bookingId, null, cents(AMOUNT + 1)),
     ).rejects.toThrow();
     await expect(
-      bookingRepository.cancel(bookingId, "CONFIRMED", 0),
+      bookingRepository.cancel(bookingId, "CONFIRMED", cents(0)),
     ).rejects.toThrow();
     await expect(
       prismaService.booking.update({
         where: { id: bookingId },
-        data: { paidOutAmount: -1 },
+        data: { paidOutAmountCents: -1 },
       }),
     ).rejects.toThrow();
-    expect(await refundedAmount()).toBeNull();
+    expect(await refundedAmountCents()).toBeNull();
   });
 
   it("moves a dispute forward only", async () => {
@@ -388,7 +399,7 @@ describe("The money columns of a paid stay (e2e)", () => {
   });
 
   it("sets an owed refund aside on its last failed run, and leaves it out of the sweep", async () => {
-    await bookingRepository.cancel(bookingId, "CONFIRMED", AMOUNT);
+    await bookingRepository.cancel(bookingId, "CONFIRMED", cents(AMOUNT));
 
     await expect(
       bookingRepository.recordRefundFailure(bookingId, "refused", 2),
@@ -407,7 +418,7 @@ describe("The money columns of a paid stay (e2e)", () => {
   });
 
   it("leaves a refund owed out of the sweep while a dispute is open", async () => {
-    await bookingRepository.cancel(bookingId, "CONFIRMED", AMOUNT);
+    await bookingRepository.cancel(bookingId, "CONFIRMED", cents(AMOUNT));
     await payoutRepository.setDisputeStatus(bookingId, "OPEN");
 
     await expect(bookingRepository.findOwedRefunds(10)).resolves.toEqual([]);
@@ -420,9 +431,9 @@ describe("The money columns of a paid stay (e2e)", () => {
   });
 
   it("clears the failures of a refund once it is sent", async () => {
-    await bookingRepository.cancel(bookingId, "CONFIRMED", AMOUNT);
+    await bookingRepository.cancel(bookingId, "CONFIRMED", cents(AMOUNT));
     await bookingRepository.recordRefundFailure(bookingId, "refused", 5);
-    await bookingRepository.settleOwedRefund(bookingId, AMOUNT);
+    await bookingRepository.settleOwedRefund(bookingId, cents(AMOUNT));
 
     await expect(
       prismaService.booking.findUniqueOrThrow({ where: { id: bookingId } }),
@@ -445,7 +456,7 @@ describe("The money columns of a paid stay (e2e)", () => {
   });
 
   it("counts no failure of a payout that was sent", async () => {
-    await payoutRepository.recordPayout(bookingId, "tr_money", 432);
+    await payoutRepository.recordPayout(bookingId, "tr_money", cents(43_200));
 
     await expect(
       payoutRepository.recordPayoutFailure(bookingId, "settle failed", 2),
@@ -456,7 +467,7 @@ describe("The money columns of a paid stay (e2e)", () => {
     await prismaService.booking.update({
       where: { id: bookingId },
       data: {
-        refundOwed: 100,
+        refundOwedCents: 10_000,
         cancellingUntil: new Date(Date.now() + 60_000),
       },
     });

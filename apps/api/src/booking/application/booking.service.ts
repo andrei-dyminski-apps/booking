@@ -9,24 +9,34 @@ import {
   UnprocessableEntityException,
 } from "@nestjs/common";
 import {
+  bookingSchema,
   BookingStatus,
   DisputeStatus,
   isCancellableOn,
+  notRefunded,
   NotificationType,
-  refundOnCancel,
+  refundsInFull,
   Role,
   StayParty,
   type Booking,
+  type BookingDetail,
   type BookingPage,
   type BookingPayment,
   type StayNotice,
   type BookingQuery,
   type CreateBookingInput,
+  type StuckStayPage,
+  type StuckStayQuery,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
 import { ownsOrIsAdmin } from "../../auth/ownership";
 import { errorText, type SetAside } from "../../common/job-failure";
 import { readCursor, type Page } from "../../common/paging";
+import { writeOrRefuse } from "../../common/set-aside";
+import {
+  decodeSetAsideCursor,
+  nextSetAsideCursor,
+} from "../../common/set-aside-cursor";
 import { NotificationService } from "../../notification/notification.service";
 import { WaitlistService } from "../../waitlist/waitlist.service";
 import { BookingRepository } from "../infrastructure/booking.repository";
@@ -52,8 +62,13 @@ import {
   type OpenedPayment,
 } from "../../payment/application/ports/payment-gateway";
 import { toIsoDate } from "../../common/iso-date";
-import { CURRENCY } from "../../payment/domain/currency";
-import { roundCents } from "../../payment/domain/money";
+import {
+  addCents,
+  maxCents,
+  minCents,
+  NO_CENTS,
+  type Cents,
+} from "../../payment/domain/money";
 import { isCancellable } from "../domain/booking-status";
 import { BookingJobs } from "./ports/booking-jobs";
 import { StayEvents } from "./stay-events";
@@ -152,8 +167,15 @@ export class BookingService {
     }
   }
 
-  async findOne(id: string, user: AuthenticatedUser): Promise<Booking> {
-    return (await this.getReadable(id, user)).booking;
+  /** The stay with the nights it was quoted by — read only once the caller may read it. */
+  async findOne(id: string, user: AuthenticatedUser): Promise<BookingDetail> {
+    const { booking, nights } = readableBy(
+      user,
+      id,
+      await this.bookingRepository.findDetailWithListingOwner(id),
+    );
+
+    return { ...booking, nights };
   }
 
   /**
@@ -260,7 +282,11 @@ export class BookingService {
     let opened: OpenedPayment;
 
     try {
-      opened = await this.paymentGateway.open(id, booking.amount);
+      opened = await this.paymentGateway.open(
+        id,
+        booking.amountCents,
+        booking.currency,
+      );
     } catch (error) {
       // Not the provider failing: a second request for the same payment, answered once the
       // first one is.
@@ -286,8 +312,8 @@ export class BookingService {
 
     return {
       clientSecret: opened.clientSecret,
-      amount: booking.amount,
-      currency: CURRENCY,
+      amountCents: booking.amountCents,
+      currency: booking.currency,
     };
   }
 
@@ -311,12 +337,12 @@ export class BookingService {
   /**
    * The guest's decision and an admin's, not the owner's: an owner may read the stay (`403`),
    * a stranger may not (`404`). The refund is decided here and written with `CANCELLED`
-   * (`refund_owed`); a job sends it, so a slow Stripe slows a refund, not the answer.
+   * (`refund_owed_cents`); a job sends it, so a slow Stripe slows a refund, not the answer.
    */
   async remove(id: string, user: AuthenticatedUser): Promise<void> {
     await this.mayCancel(id, user);
 
-    const { found, wasHold, cancelled, refundOwed } =
+    const { found, wasHold, cancelled, refundOwedCents } =
       await this.bookingRepository
         .whileCancelling(id, () => this.cancelReadable(id, user))
         .catch((error: unknown) => {
@@ -337,7 +363,7 @@ export class BookingService {
       await this.withdrawPayments([cancelled]);
     }
 
-    if (refundOwed !== null) {
+    if (refundOwedCents !== null) {
       await this.bookingJobs.refundCancellation(id);
     }
 
@@ -361,7 +387,7 @@ export class BookingService {
     found: BookingWithListingOwner;
     wasHold: boolean;
     cancelled: CancelledStay;
-    refundOwed: number | null;
+    refundOwedCents: Cents | null;
   }> {
     const found = await this.getReadable(id, user);
     const { booking } = found;
@@ -378,16 +404,16 @@ export class BookingService {
     }
 
     const wasHold = booking.status === BookingStatus.PENDING_PAYMENT;
-    const refundOwed = this.refundOwedOnCancel(found, user);
+    const refundOwedCents = this.refundOwedOnCancel(found, user);
     const cancelled = await this.bookingRepository.cancel(
       id,
       booking.status,
-      refundOwed,
+      refundOwedCents,
     );
 
     if (cancelled === null) return this.refuseChangedCancellation(id);
 
-    return { found, wasHold, cancelled, refundOwed };
+    return { found, wasHold, cancelled, refundOwedCents };
   }
 
   /** Still active means the hold was paid for in between: a `409` worth retrying. */
@@ -407,7 +433,7 @@ export class BookingService {
   private refundOwedOnCancel(
     { booking, paymentId }: BookingWithListingOwner,
     user: AuthenticatedUser,
-  ): number | null {
+  ): Cents | null {
     if (booking.status !== BookingStatus.CONFIRMED || paymentId === null) {
       return null;
     }
@@ -420,14 +446,14 @@ export class BookingService {
 
     if (booking.dispute === DisputeStatus.LOST) return null;
 
-    const owed = Math.min(
-      refundOnCancel(
-        booking,
-        new Date(),
-        user.role === Role.ADMIN ? "ADMIN" : "GUEST",
-      ),
-      roundCents(booking.amount - (booking.refundedAmount ?? 0)),
-    );
+    // In full means whatever the stay has not been refunded yet.
+    const owed = refundsInFull(
+      booking.from,
+      new Date(),
+      user.role === Role.ADMIN ? "ADMIN" : "GUEST",
+    )
+      ? notRefunded(booking.amountCents, booking.refundedAmountCents)
+      : NO_CENTS;
 
     return owed > 0 ? owed : null;
   }
@@ -487,6 +513,48 @@ export class BookingService {
     return sent;
   }
 
+  /**
+   * The admin's list of the stays whose refund or payout stopped retrying. The payout's half
+   * is read here too — its columns are on the stay — while its retry is `PayoutService`'s.
+   */
+  async findStuckPage(query: StuckStayQuery): Promise<StuckStayPage> {
+    const resource = `bookings-stuck-${query.kind}`;
+    const cursor = readCursor(query.cursor, "newest", (raw) =>
+      decodeSetAsideCursor(resource, raw, bookingSchema.shape.id),
+    );
+    const page = await this.bookingRepository.findStuckPage(
+      query.kind,
+      cursor,
+      query.limit,
+    );
+
+    return {
+      items: page.items,
+      nextCursor: nextSetAsideCursor(resource, page, (row) => ({
+        at: row.failedAt,
+        id: row.booking.id,
+      })),
+    };
+  }
+
+  /**
+   * Hands the debt back and queues its job at once rather than waiting for the sweep. The
+   * debt is still on the row, so the job sends exactly what the cancellation decided.
+   */
+  async retryStuckRefund(id: string): Promise<void> {
+    await writeOrRefuse(
+      this.bookingRepository.handBackRefund(id),
+      () => this.bookingRepository.exists(id),
+      {
+        conflict: `The refund owed on booking ${id} is not set aside`,
+        notFound: `Booking ${id} not found`,
+      },
+    );
+
+    this.logger.log(`The refund owed on booking ${id} was handed back`);
+    await this.bookingJobs.refundCancellation(id);
+  }
+
   /** Whether this failed run set the debt aside. A failure to count it leaves it to retry. */
   private async setAsideRefundAfter(
     id: string,
@@ -529,7 +597,7 @@ export class BookingService {
    */
   private async sendOwedRefund(id: string): Promise<boolean> {
     const found = await this.bookingRepository.findByIdWithListingOwner(id);
-    const owed = found?.booking.refundOwed ?? null;
+    const owed = found?.booking.refundOwedCents ?? null;
 
     if (found === null || owed === null) return false;
 
@@ -545,15 +613,19 @@ export class BookingService {
       return false;
     }
 
-    const refundedBefore = booking.refundedAmount ?? 0;
+    const refundedBefore = booking.refundedAmountCents ?? NO_CENTS;
     const refundedAtProvider =
       await this.paymentGateway.refundedSoFar(paymentId);
-    const amount = Math.min(
+    // Capped at the stay: whatever the provider reports, nothing past it is left to send.
+    const amount = minCents(
       owed,
-      roundCents(booking.amount - Math.max(refundedBefore, refundedAtProvider)),
+      notRefunded(
+        booking.amountCents,
+        maxCents(refundedBefore, refundedAtProvider),
+      ),
     );
 
-    if (amount <= 0) {
+    if (amount === 0) {
       await this.bookingRepository.settleOwedRefund(id, null);
 
       return false;
@@ -568,7 +640,7 @@ export class BookingService {
 
     await this.bookingRepository.settleOwedRefund(
       id,
-      sent > 0 ? roundCents(refundedBefore + sent) : null,
+      sent > 0 ? addCents(refundedBefore, sent) : null,
     );
 
     return sent > 0;
@@ -668,18 +740,29 @@ export class BookingService {
     id: string,
     user: AuthenticatedUser,
   ): Promise<BookingWithListingOwner> {
-    const found = await this.bookingRepository.findByIdWithListingOwner(id);
-
-    if (
-      found === null ||
-      (!ownsOrIsAdmin(user, found.booking.guestId) &&
-        !ownsOrIsAdmin(user, found.listingOwnerId))
-    ) {
-      throw new NotFoundException(`Booking ${id} not found`);
-    }
-
-    return found;
+    return readableBy(
+      user,
+      id,
+      await this.bookingRepository.findByIdWithListingOwner(id),
+    );
   }
+}
+
+/** `getReadable`'s rule over a row already read, whatever else was read beside it. */
+function readableBy<Found extends BookingWithListingOwner>(
+  user: AuthenticatedUser,
+  id: string,
+  found: Found | null,
+): Found {
+  if (
+    found === null ||
+    (!ownsOrIsAdmin(user, found.booking.guestId) &&
+      !ownsOrIsAdmin(user, found.listingOwnerId))
+  ) {
+    throw new NotFoundException(`Booking ${id} not found`);
+  }
+
+  return found;
 }
 
 /**

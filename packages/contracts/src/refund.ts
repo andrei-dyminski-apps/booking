@@ -1,6 +1,7 @@
 import { tz } from "@date-fns/tz";
 import { isBefore, parseISO, subHours } from "date-fns";
 import { BookingStatus, type Booking } from "./booking.js";
+import { minCents, NO_CENTS, subtractCents, type Cents } from "./money.js";
 
 /**
  * Here for the reason `nightlyPrice` is: the API refunds by it and the booking page states
@@ -40,13 +41,29 @@ export function isCancellableOn(
  * guest changing their mind. Whether a payment exists at all is the caller's to know.
  */
 export function refundOnCancel(
-  booking: Pick<Booking, "amount" | "from">,
+  booking: Pick<Booking, "amountCents" | "from">,
   now: Date,
   canceller: Canceller,
-): number {
-  if (canceller === "ADMIN") return booking.amount;
+): Cents {
+  return refundsInFull(booking.from, now, canceller)
+    ? booking.amountCents
+    : NO_CENTS;
+}
 
-  return isBefore(now, freeCancellationUntil(booking.from))
-    ? booking.amount
-    : 0;
+/**
+ * What is left of a stay's payment after the refunds recorded on it: what a cancellation
+ * "in full" gives back, and what the host's share is taken of. Nothing for a stay refunded
+ * in full or past it, rather than a negative amount.
+ */
+export function notRefunded(amount: Cents, refunded: Cents | null): Cents {
+  return subtractCents(amount, minCents(amount, refunded ?? NO_CENTS));
+}
+
+/** The same rule as a yes or no, for a caller that applies it to an amount of its own. */
+export function refundsInFull(
+  from: string,
+  now: Date,
+  canceller: Canceller,
+): boolean {
+  return canceller === "ADMIN" || isBefore(now, freeCancellationUntil(from));
 }

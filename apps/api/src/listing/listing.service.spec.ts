@@ -14,6 +14,7 @@ import {
   type ListingQuery,
   type UpdateListingInput,
 } from "@repo/contracts";
+import { cents } from "../payment/domain/money";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { BookingRepository } from "../booking/infrastructure/booking.repository";
 import type { Page } from "../common/paging";
@@ -28,7 +29,7 @@ const UNKNOWN_ID = "0b6f7f6e-2f4c-4a52-9a5e-8f1f6d2c3b4a";
 const input: CreateListingInput = {
   title: "Loft above the harbour",
   description: "Two rooms under the roof and a wall of glass facing the water.",
-  pricePerNight: 120,
+  pricePerNightCents: cents(12_000),
   capacity: 4,
 };
 
@@ -36,8 +37,8 @@ const input: CreateListingInput = {
 const NO_EXCEPTIONS: ListingPricing = { weekdays: {}, dates: [] };
 
 const weekendPricing: ListingPricing = {
-  weekdays: { fri: 150, sat: 160 },
-  dates: [{ date: "2099-12-31", price: 400 }],
+  weekdays: { fri: cents(15_000), sat: cents(16_000) },
+  dates: [{ date: "2099-12-31", priceCents: cents(40_000) }],
 };
 
 /** The whole of a catalogue query, so a test names only the part it is about. */
@@ -352,16 +353,16 @@ describe("ListingService", () => {
   it("issues a cursor made of the key the ordering sorts by", async () => {
     const first = await service.create(OWNER_ID, {
       ...input,
-      pricePerNight: 1,
+      pricePerNightCents: cents(1),
     });
     await service.create(OWNER_ID, input);
 
     const page = await service.findPage(query({ limit: 1, sort: "priceAsc" }));
 
-    expect(first.pricePerNight).not.toBe(input.pricePerNight);
+    expect(first.pricePerNightCents).not.toBe(input.pricePerNightCents);
     expect(decodeCursor(String(page.nextCursor))).toEqual({
       sort: "priceAsc",
-      pricePerNight: first.pricePerNight,
+      pricePerNightCents: first.pricePerNightCents,
       id: first.id,
     });
   });
@@ -419,7 +420,7 @@ describe("ListingService", () => {
     ).id;
 
     await expect(service.findOne(plain)).resolves.toMatchObject({
-      pricePerNight: input.pricePerNight,
+      pricePerNightCents: input.pricePerNightCents,
       pricing: NO_EXCEPTIONS,
     });
     await expect(service.findOne(priced)).resolves.toMatchObject({
@@ -437,7 +438,10 @@ describe("ListingService", () => {
       pricing: weekendPricing,
     });
 
-    const fridaysOnly: ListingPricing = { weekdays: { fri: 140 }, dates: [] };
+    const fridaysOnly: ListingPricing = {
+      weekdays: { fri: cents(14_000) },
+      dates: [],
+    };
 
     await service.update(id, { pricing: fridaysOnly }, owner);
     await expect(service.findOne(id)).resolves.toMatchObject({

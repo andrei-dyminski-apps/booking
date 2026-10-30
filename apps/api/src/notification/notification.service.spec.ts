@@ -9,6 +9,7 @@ import {
   type NotificationQuery,
   type ServerEvent,
 } from "@repo/contracts";
+import { cents, CURRENCY } from "../payment/domain/money";
 import type { Page } from "../common/paging";
 import { RealtimeService } from "../realtime/realtime.service";
 import type { UnreadCounts } from "../unread/unread.types";
@@ -164,7 +165,8 @@ const refundFailed: NotificationContent = {
     refundId: "re_1",
     paymentId: "pi_1",
     bookingId: null,
-    amount: 100,
+    amountCents: cents(10_000),
+    currency: CURRENCY,
     reason: "expired_or_canceled_card",
   },
 };

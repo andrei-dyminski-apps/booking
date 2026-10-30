@@ -1,6 +1,7 @@
 import { tz } from "@date-fns/tz";
 import { parseISO } from "date-fns";
 import type { ListingPricing, PricedListing } from "@repo/contracts";
+import { cents } from "../payment/domain/money";
 import type {
   Prisma,
   ListingDatePrice as DatePriceRow,
@@ -9,9 +10,8 @@ import type {
 import { toIsoDate } from "../common/iso-date";
 
 /**
- * The exception rows onto the contract. The `Decimal` becomes a `number` here for the
- * reason `toListing` gives, and the date is cut back to its day the way `BookingRepository`
- * cuts a stay's.
+ * The exception rows onto the contract. The date is cut back to its day the way
+ * `BookingRepository` cuts a stay's.
  *
  * It lives beside `ListingRepository` rather than inside it because a second reader needs
  * it: the transaction that takes a hold quotes the stay off these rows, and a row mapping
@@ -25,11 +25,11 @@ export function toPricing(
 ): ListingPricing {
   return {
     weekdays: Object.fromEntries(
-      weekdayRows.map((row) => [row.weekday, row.price.toNumber()]),
+      weekdayRows.map((row) => [row.weekday, cents(row.priceCents)]),
     ),
     dates: dateRows.map((row) => ({
       date: toIsoDate(row.date),
-      price: row.price.toNumber(),
+      priceCents: cents(row.priceCents),
     })),
   };
 }
@@ -51,7 +51,7 @@ export async function readPricedListing(
   const row = await tx.listing.findUnique({
     where: { id: listingId },
     select: {
-      pricePerNight: true,
+      pricePerNightCents: true,
       weekdayPrices: true,
       datePrices: {
         where: {
@@ -67,7 +67,7 @@ export async function readPricedListing(
   return row === null
     ? null
     : {
-        pricePerNight: row.pricePerNight.toNumber(),
+        pricePerNightCents: cents(row.pricePerNightCents),
         pricing: toPricing(row.weekdayPrices, row.datePrices),
       };
 }

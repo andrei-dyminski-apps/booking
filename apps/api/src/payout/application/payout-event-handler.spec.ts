@@ -4,6 +4,7 @@ import { StayEvents } from "../../booking/application/stay-events";
 import { PaymentEventDispatcher } from "../../payment/application/payment-event-dispatcher";
 import { PaymentEventBusyError } from "../../payment/application/payment-event-handler";
 import type { PaymentEvent } from "../../payment/application/ports/payment-gateway";
+import { cents, type Cents } from "../../payment/domain/money";
 import { SettlementInProgressError } from "../domain/payout.errors";
 import { PayoutEventHandler } from "./payout-event-handler";
 import { PayoutService, type SettlementEvent } from "./payout.service";
@@ -29,7 +30,7 @@ class FakePayoutService implements Pick<
     return Promise.resolve();
   }
 
-  settle(bookingId: string): Promise<number | null> {
+  settle(bookingId: string): Promise<Cents | null> {
     if (this.held) {
       return Promise.reject(new SettlementInProgressError(bookingId));
     }
@@ -96,7 +97,7 @@ describe("PayoutEventHandler", () => {
       type: "charge.refunded",
       paymentId: "pi_1",
       chargeId: "ch_1",
-      amountRefunded: 100,
+      amountRefunded: cents(10_000),
     };
     const disputed: PaymentEvent = {
       kind: "disputed",
@@ -122,7 +123,7 @@ describe("PayoutEventHandler", () => {
       paymentId: "pi_1",
       chargeId: "ch_1",
       bookingId: stay.bookingId,
-      amount: 480,
+      amount: cents(48_000),
     });
     await handler.handle({ kind: "other", eventId: "evt_x", type: "x" });
 

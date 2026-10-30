@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { stayPartySchema } from "./booking.js";
 import { reviewKindSchema, reviewSchema } from "./review.js";
+import { CURRENCY, centsSchema, currencySchema } from "./money.js";
 import { PAGING } from "./query.js";
 
 /**
@@ -23,11 +24,11 @@ import { PAGING } from "./query.js";
  * - `PAYMENT_DISPUTED` — the guest of a stay at the recipient's listing disputed the payment
  *   with their bank; the host's payout for it waits until the dispute is decided.
  * - `PAYOUT_SENT` — the recipient's share of a stay at their listing was transferred to
- *   their payout account; `amount` is what was sent.
+ *   their payout account; `amountCents` is what was sent.
  * - `REFUND_FAILED` — told to every admin: a refund the guest's bank could not take came back
  *   to the platform's balance. The money is still the guest's and nothing re-sends it on its
- *   own; the API keeps the failure on record (`refund_failures`) until a person issues the
- *   refund again.
+ *   own; the API keeps the failure on record (`refund_failures`) until a person sends the
+ *   money back some other way and records how (`POST /refund-failures/:id/resolve`).
  * - `PAYMENT_EVENT_FAILED` — told to every admin: the worker gave up on a delivery of the
  *   payment provider after failing it again and again, and set it aside. What it would have
  *   done — a confirmation, a refund recorded, a payout taken back — waits for a person.
@@ -68,7 +69,7 @@ export const NotificationType = notificationTypeSchema.enum;
  * a reference resolved on read: a listing can be retired and renamed afterwards, and what
  * the recipient was told about is what the listing was called then.
  */
-const stayNoticeSchema = z.object({
+export const stayNoticeSchema = z.object({
   bookingId: z.uuid(),
   listingId: z.uuid(),
   listingTitle: z.string(),
@@ -96,10 +97,20 @@ const bookingConfirmedSchema = z.object({
   data: stayNoticeSchema.extend({ recipient: stayPartySchema }),
 });
 
-/** Only the guest paid, so only the guest is told; `amount` is what went back. */
+/**
+ * The currency an amount of a notice is cents of — the stay's, copied with the amount like
+ * the rest of the notice. Defaulted on read, because the notices written before it was
+ * recorded carry none and every one of them was in `CURRENCY`.
+ */
+const noticeCurrencySchema = currencySchema.default(CURRENCY);
+
+/** Only the guest paid, so only the guest is told; `amountCents` is what went back. */
 const paymentRefundedSchema = z.object({
   type: z.literal(NotificationType.PAYMENT_REFUNDED),
-  data: stayNoticeSchema.extend({ amount: z.number() }),
+  data: stayNoticeSchema.extend({
+    amountCents: centsSchema,
+    currency: noticeCurrencySchema,
+  }),
 });
 
 /** Only the host's money waits on a dispute, so only the host is told. */
@@ -108,15 +119,18 @@ const paymentDisputedSchema = z.object({
   data: stayNoticeSchema,
 });
 
-/** `amount` is the host's share as it was transferred, the platform's fee already off. */
+/** `amountCents` is the host's share as it was transferred, the platform's fee already off. */
 const payoutSentSchema = z.object({
   type: z.literal(NotificationType.PAYOUT_SENT),
-  data: stayNoticeSchema.extend({ amount: z.number() }),
+  data: stayNoticeSchema.extend({
+    amountCents: centsSchema,
+    currency: noticeCurrencySchema,
+  }),
 });
 
 /**
- * What an admin needs to issue the refund again: the provider's ids, the amount and the
- * bank's reason. `bookingId` is `null` for a payment no stay of this site names any more.
+ * What an admin needs to send the money back some other way: the provider's ids, the amount
+ * and the bank's reason. `bookingId` is `null` for a payment no stay of this site names any more.
  */
 const refundFailedSchema = z.object({
   type: z.literal(NotificationType.REFUND_FAILED),
@@ -124,7 +138,8 @@ const refundFailedSchema = z.object({
     refundId: z.string(),
     paymentId: z.string(),
     bookingId: z.uuid().nullable(),
-    amount: z.number(),
+    amountCents: centsSchema,
+    currency: noticeCurrencySchema,
     reason: z.string().nullable(),
   }),
 });

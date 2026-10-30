@@ -7,6 +7,7 @@ import {
   type WaitlistEntry,
   type WaitlistSort,
 } from "@repo/contracts";
+import { cents } from "../payment/domain/money";
 import {
   holdsTheSlot,
   overlapping,
@@ -87,11 +88,11 @@ type ClaimedEntry = { id: string };
 
 /** What an entry is answered with — the summary every booking carries, for the same reason. */
 const LISTING_SUMMARY = {
-  listing: { select: { title: true, pricePerNight: true } },
+  listing: { select: { title: true, pricePerNightCents: true } },
 } satisfies Prisma.WaitlistEntryInclude;
 
 type WaitlistEntryRowWithListing = WaitlistEntryRow & {
-  listing: Pick<ListingRow, "title" | "pricePerNight">;
+  listing: Pick<ListingRow, "title" | "pricePerNightCents">;
 };
 
 /** The waiter beside the listing — read for an admin only, see `waiterSchema`. */
@@ -424,7 +425,7 @@ function toWaitlistEntry(row: WaitlistEntryRowWithListing): WaitlistEntry {
     listingId: row.listingId,
     listing: {
       title: row.listing.title,
-      pricePerNight: row.listing.pricePerNight.toNumber(),
+      pricePerNightCents: cents(row.listing.pricePerNightCents),
     },
     from: toIsoDate(row.from),
     to: toIsoDate(row.to),

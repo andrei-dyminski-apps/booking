@@ -53,7 +53,7 @@ describe("WaitlistController (e2e)", () => {
       .send({
         title: "Loft above the harbour",
         description: "Two rooms under the roof and a wall of glass.",
-        pricePerNight: 120,
+        pricePerNightCents: 12_000,
         capacity: 4,
       })
       .expect(201);

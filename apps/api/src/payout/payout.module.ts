@@ -17,6 +17,7 @@ import { PayoutRepository } from "./infrastructure/payout.repository";
 import { StripePayoutGateway } from "./infrastructure/stripe-payout.gateway";
 import { PayoutAccountController } from "./presentation/payout-account.controller";
 import { PayoutWebhookController } from "./presentation/payout-webhook.controller";
+import { StuckPayoutController } from "./presentation/stuck-payout.controller";
 
 /** Nothing imports it: `PayoutEventHandler` registers with the dispatcher and `StayEvents`. */
 @Module({
@@ -27,7 +28,11 @@ import { PayoutWebhookController } from "./presentation/payout-webhook.controlle
     NotificationModule,
     BullModule.registerQueue({ name: HOST_PAYOUT_QUEUE }),
   ],
-  controllers: [PayoutAccountController, PayoutWebhookController],
+  controllers: [
+    PayoutAccountController,
+    PayoutWebhookController,
+    StuckPayoutController,
+  ],
   providers: [
     PayoutService,
     PayoutRepository,

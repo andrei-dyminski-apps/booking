@@ -1,4 +1,8 @@
-import { BadGatewayException } from "@nestjs/common";
+import {
+  BadGatewayException,
+  ConflictException,
+  NotFoundException,
+} from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import {
   BookingStatus,
@@ -14,7 +18,14 @@ import type { AuthenticatedUser } from "../../auth/auth.types";
 import { PaymentNotConfirmedYetError } from "../../booking/domain/booking.errors";
 import type { SetAside } from "../../common/job-failure";
 import { NotificationService } from "../../notification/notification.service";
-import { roundCents, toCents } from "../../payment/domain/money";
+import {
+  addCents,
+  cents,
+  CURRENCY,
+  NO_CENTS,
+  subtractCents,
+  type Cents,
+} from "../../payment/domain/money";
 import type { PayoutAccountHolder, SettledStay } from "../domain/payout.types";
 import { PayoutRepository } from "../infrastructure/payout.repository";
 import {
@@ -45,11 +56,13 @@ const CHARGE_ID = "ch_1";
  * than restated: the rate and the rounding are `hostShare`'s, pinned by its own spec, and
  * what this file checks is what the service does with the share.
  */
-const AMOUNT = 480;
-const SHARE = hostShare(AMOUNT, 0);
-/** The share once 80 of the stay has been refunded, and once 180 has. */
-const SHARE_AFTER_80 = hostShare(AMOUNT, 80);
-const SHARE_AFTER_180 = hostShare(AMOUNT, 180);
+const AMOUNT = cents(48_000);
+const SHARE = hostShare(AMOUNT, NO_CENTS);
+/** 80 of the stay refunded and 180, and the host's share once each has been. */
+const REFUNDED_80 = cents(8_000);
+const REFUNDED_180 = cents(18_000);
+const SHARE_AFTER_80 = hostShare(AMOUNT, REFUNDED_80);
+const SHARE_AFTER_180 = hostShare(AMOUNT, REFUNDED_180);
 
 /** A check-in long enough ago that the payout is due, and one far enough ahead it is not. */
 const PAST = "2026-01-10";
@@ -126,6 +139,10 @@ class FakePayoutRepository implements PublicOf<PayoutRepository> {
     return Promise.resolve(stay === undefined ? null : this.settledOf(stay));
   }
 
+  exists(bookingId: string): Promise<boolean> {
+    return Promise.resolve(this.stays.has(bookingId));
+  }
+
   /** The lock of the real repository: one settlement per booking at a time, in arrival order. */
   private readonly settling = new Map<string, Promise<unknown>>();
 
@@ -133,7 +150,7 @@ class FakePayoutRepository implements PublicOf<PayoutRepository> {
     bookingId: string,
     work: (
       stay: SettledStay | null,
-      recordReversal: (from: number, to: number) => Promise<boolean>,
+      recordReversal: (from: Cents, to: Cents) => Promise<boolean>,
     ) => Promise<T>,
   ): Promise<T> {
     const previous = this.settling.get(bookingId) ?? Promise.resolve();
@@ -210,11 +227,11 @@ class FakePayoutRepository implements PublicOf<PayoutRepository> {
             stay.paid &&
             stay.transferId === null &&
             this.payoutFailures.get(stay.bookingId)?.setAside !== true &&
-            stay.refundOwed === null &&
+            stay.refundOwedCents === null &&
             payoutDueAt(stay.hold.stay.from) <= now &&
             (stay.disputeStatus === null || stay.disputeStatus === "WON") &&
-            (stay.refundedAmount === null ||
-              stay.refundedAmount < stay.amount) &&
+            (stay.refundedAmountCents === null ||
+              stay.refundedAmountCents < stay.amountCents) &&
             this.holders.get(stay.hold.listingOwnerId)?.enabled === true &&
             (hostId === undefined || stay.hold.listingOwnerId === hostId),
         )
@@ -227,7 +244,7 @@ class FakePayoutRepository implements PublicOf<PayoutRepository> {
   recordPayout(
     bookingId: string,
     transferId: string,
-    amount: number,
+    amount: Cents,
   ): Promise<boolean> {
     this.racing?.();
 
@@ -238,21 +255,40 @@ class FakePayoutRepository implements PublicOf<PayoutRepository> {
     }
 
     stay.transferId = transferId;
-    stay.paidOutAmount = amount;
+    stay.paidOutAmountCents = amount;
 
     return Promise.resolve(true);
   }
 
-  recordReversal(
-    bookingId: string,
-    from: number,
-    to: number,
-  ): Promise<boolean> {
+  recordReversal(bookingId: string, from: Cents, to: Cents): Promise<boolean> {
     const stay = this.stays.get(bookingId);
 
-    if (stay?.paidOutAmount !== from) return Promise.resolve(false);
+    if (stay?.paidOutAmountCents !== from) return Promise.resolve(false);
 
-    stay.paidOutAmount = to;
+    stay.paidOutAmountCents = to;
+
+    return Promise.resolve(true);
+  }
+
+  /**
+   * The list's cut too: a dispute lost or a stay refunded in full owes the host nothing,
+   * and an open dispute holds the payout.
+   */
+  handBackPayout(bookingId: string): Promise<boolean> {
+    const stay = this.stays.get(bookingId);
+
+    if (
+      stay === undefined ||
+      !stay.paid ||
+      stay.transferId !== null ||
+      (stay.disputeStatus !== null && stay.disputeStatus !== "WON") ||
+      (stay.refundedAmountCents ?? 0) >= stay.amountCents ||
+      this.payoutFailures.get(bookingId)?.setAside !== true
+    ) {
+      return Promise.resolve(false);
+    }
+
+    this.payoutFailures.delete(bookingId);
 
     return Promise.resolve(true);
   }
@@ -284,10 +320,7 @@ class FakePayoutRepository implements PublicOf<PayoutRepository> {
 class FakePayoutGateway implements PublicOf<PayoutGateway> {
   readonly accounts: PayoutHost[] = [];
   readonly transfers = new Map<string, Payout & { id: string }>();
-  readonly reversals = new Map<
-    string,
-    { transferId: string; amount: number }
-  >();
+  readonly reversals = new Map<string, { transferId: string; amount: Cents }>();
 
   /**
    * What `transfersEnabled` answers for any account. On by default: a spec about a host
@@ -345,19 +378,20 @@ class FakePayoutGateway implements PublicOf<PayoutGateway> {
   }
 
   /** A transfer an earlier run sent, as Stripe would hold it. */
-  sent(id: string, amount: number): void {
+  sent(id: string, amount: Cents): void {
     this.transfers.set(`booking-${BOOKING_ID}-payout`, {
       bookingId: BOOKING_ID,
       accountId: ACCOUNT_ID,
       chargeId: CHARGE_ID,
       amount,
+      currency: CURRENCY,
       description: "sent earlier",
       id,
     });
   }
 
   /** What was sent less every reversal of it, the way Stripe reads `amount_reversed`. */
-  heldOnTransfer(transferId: string): Promise<number> {
+  heldOnTransfer(transferId: string): Promise<Cents> {
     const transfer = [...this.transfers.values()].find(
       ({ id }) => id === transferId,
     );
@@ -368,16 +402,14 @@ class FakePayoutGateway implements PublicOf<PayoutGateway> {
 
     const reversed = [...this.reversals.values()]
       .filter((reversal) => reversal.transferId === transferId)
-      .reduce((sum, { amount }) => sum + amount, 0);
+      .reduce((sum, { amount }) => addCents(sum, amount), NO_CENTS);
 
-    return Promise.resolve(
-      Math.round((transfer.amount - reversed) * 100) / 100,
-    );
+    return Promise.resolve(subtractCents(transfer.amount, reversed));
   }
 
   reverseTransfer(
     transferId: string,
-    amount: number,
+    amount: Cents,
     key: string,
   ): Promise<void> {
     if (this.failingReversals > 0) {
@@ -452,14 +484,15 @@ describe("PayoutService", () => {
     payoutRepository.stays.set(BOOKING_ID, {
       bookingId: BOOKING_ID,
       status: BookingStatus.CONFIRMED,
-      amount: AMOUNT,
-      refundedAmount: null,
-      refundOwed: null,
+      amountCents: AMOUNT,
+      currency: CURRENCY,
+      refundedAmountCents: null,
+      refundOwedCents: null,
       paid: true,
       disputeStatus: null,
       chargeId: CHARGE_ID,
       transferId: null,
-      paidOutAmount: null,
+      paidOutAmountCents: null,
       paymentId: PAYMENT_ID,
       hold: {
         stay: {
@@ -590,7 +623,7 @@ describe("PayoutService", () => {
 
       await service.payDuePayouts(HOST_ID);
 
-      expect(stored()?.paidOutAmount).toBe(SHARE);
+      expect(stored()?.paidOutAmountCents).toBe(SHARE);
     });
   });
 
@@ -610,12 +643,14 @@ describe("PayoutService", () => {
       ]);
       expect(stored()).toMatchObject({
         transferId: "tr_1",
-        paidOutAmount: SHARE,
+        paidOutAmountCents: SHARE,
       });
       const sent = noticesOf(NotificationType.PAYOUT_SENT);
 
       expect(sent.map(({ userId }) => userId)).toEqual([HOST_ID]);
-      expect(sent[0]?.content.data).toMatchObject({ amount: SHARE });
+      expect(sent[0]?.content.data).toMatchObject({
+        amountCents: SHARE,
+      });
     });
 
     it("counts a transfer Stripe refuses, and sets the payout aside after the last attempt", async () => {
@@ -650,6 +685,91 @@ describe("PayoutService", () => {
       expect(payoutRepository.payoutFailures.get(BOOKING_ID)?.attempts).toBe(
         MAX_PAYOUT_ATTEMPTS,
       );
+    });
+
+    it("hands a payout set aside back on an admin's word, and queues it at once", async () => {
+      hostWith(ACCOUNT_ID, true);
+      paidStay(PAST);
+      payoutGateway.refusingTransfers = true;
+
+      for (let run = 1; run <= MAX_PAYOUT_ATTEMPTS; run += 1) {
+        await service.payOut(BOOKING_ID).catch(() => undefined);
+      }
+
+      // The account put right, the payout is retried and goes out with a whole count again.
+      payoutGateway.refusingTransfers = false;
+      await service.retryStuckPayout(BOOKING_ID);
+
+      expect(payoutRepository.payoutFailures.has(BOOKING_ID)).toBe(false);
+      expect(payoutJobs.scheduled).toEqual([
+        { bookingId: BOOKING_ID, runAt: expect.any(Date) as Date },
+      ]);
+      await expect(service.payOut(BOOKING_ID)).resolves.toBe(true);
+    });
+
+    it("refuses to retry a payout that owes the host nothing any more, as the list leaves it out", async () => {
+      hostWith(ACCOUNT_ID, true);
+      paidStay(PAST);
+      payoutGateway.refusingTransfers = true;
+
+      for (let run = 1; run <= MAX_PAYOUT_ATTEMPTS; run += 1) {
+        await service.payOut(BOOKING_ID).catch(() => undefined);
+      }
+
+      const stay = payoutRepository.stays.get(BOOKING_ID);
+
+      if (stay === undefined) throw new Error("The stay is gone");
+
+      stay.disputeStatus = "LOST";
+
+      await expect(service.retryStuckPayout(BOOKING_ID)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(payoutRepository.payoutFailures.get(BOOKING_ID)?.setAside).toBe(
+        true,
+      );
+      expect(payoutJobs.scheduled).toEqual([]);
+    });
+
+    it("refuses to retry a payout an open dispute holds", async () => {
+      hostWith(ACCOUNT_ID, true);
+      paidStay(PAST);
+      payoutGateway.refusingTransfers = true;
+
+      for (let run = 1; run <= MAX_PAYOUT_ATTEMPTS; run += 1) {
+        await service.payOut(BOOKING_ID).catch(() => undefined);
+      }
+
+      const stay = payoutRepository.stays.get(BOOKING_ID);
+
+      if (stay === undefined) throw new Error("The stay is gone");
+
+      stay.disputeStatus = "OPEN";
+
+      await expect(service.retryStuckPayout(BOOKING_ID)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(payoutJobs.scheduled).toEqual([]);
+
+      // Won, the stay owes the host again and the retry goes through.
+      stay.disputeStatus = "WON";
+
+      await service.retryStuckPayout(BOOKING_ID);
+
+      expect(payoutJobs.scheduled).toHaveLength(1);
+    });
+
+    it("refuses to retry a payout not set aside, and a stay that is not there", async () => {
+      hostWith(ACCOUNT_ID, true);
+      paidStay(PAST);
+
+      await expect(service.retryStuckPayout(BOOKING_ID)).rejects.toThrow(
+        ConflictException,
+      );
+      await expect(service.retryStuckPayout(LISTING_ID)).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(payoutJobs.scheduled).toEqual([]);
     });
 
     it("sends nothing before the payout falls due", async () => {
@@ -692,7 +812,7 @@ describe("PayoutService", () => {
 
       await service.payDuePayouts(HOST_ID);
 
-      expect(stored()?.paidOutAmount).toBe(SHARE);
+      expect(stored()?.paidOutAmountCents).toBe(SHARE);
     });
 
     it("asks Stripe again before sending, and holds back a host whose account lapsed", async () => {
@@ -716,7 +836,7 @@ describe("PayoutService", () => {
       });
       await service.payDuePayouts(HOST_ID);
 
-      expect(stored()?.paidOutAmount).toBe(SHARE);
+      expect(stored()?.paidOutAmountCents).toBe(SHARE);
       // The job and the inbox's worker wait on nobody, unlike the refresh above.
       expect(payoutGateway.askedBy).toEqual([
         "background",
@@ -741,7 +861,10 @@ describe("PayoutService", () => {
 
     it("pays nothing out of a refund a cancellation still owes the guest", async () => {
       hostWith(ACCOUNT_ID, true);
-      paidStay(PAST, { status: BookingStatus.CANCELLED, refundOwed: AMOUNT });
+      paidStay(PAST, {
+        status: BookingStatus.CANCELLED,
+        refundOwedCents: AMOUNT,
+      });
 
       await expect(service.payOut(BOOKING_ID)).resolves.toBe(false);
 
@@ -752,12 +875,13 @@ describe("PayoutService", () => {
       hostWith(ACCOUNT_ID, true);
       // The first attempt sent the full share and died before writing it down; a refund of
       // 80 landed since, so the host is owed less now and the retry asks for less.
-      paidStay(PAST, { refundedAmount: 80 });
+      paidStay(PAST, { refundedAmountCents: REFUNDED_80 });
       payoutGateway.transfers.set(`booking-${BOOKING_ID}-payout`, {
         bookingId: BOOKING_ID,
         accountId: ACCOUNT_ID,
         chargeId: CHARGE_ID,
         amount: SHARE,
+        currency: CURRENCY,
         description: "sent earlier",
         id: "tr_earlier",
       });
@@ -769,12 +893,12 @@ describe("PayoutService", () => {
       expect([...payoutGateway.reversals.values()]).toEqual([
         {
           transferId: "tr_earlier",
-          amount: roundCents(SHARE - SHARE_AFTER_80),
+          amount: subtractCents(SHARE, SHARE_AFTER_80),
         },
       ]);
-      expect(stored()?.paidOutAmount).toBe(SHARE_AFTER_80);
+      expect(stored()?.paidOutAmountCents).toBe(SHARE_AFTER_80);
       expect(noticesOf(NotificationType.PAYOUT_SENT)).toMatchObject([
-        { content: { data: { amount: SHARE_AFTER_80 } } },
+        { content: { data: { amountCents: SHARE_AFTER_80 } } },
       ]);
     });
 
@@ -783,14 +907,14 @@ describe("PayoutService", () => {
       paidStay(PAST, { status: BookingStatus.CANCELLED });
 
       await expect(service.payOut(BOOKING_ID)).resolves.toBe(true);
-      expect(stored()?.paidOutAmount).toBe(SHARE);
+      expect(stored()?.paidOutAmountCents).toBe(SHARE);
     });
 
     it("leaves a stay refunded in full out of the sweep for good", async () => {
       hostWith(ACCOUNT_ID, true);
       paidStay(PAST, {
         status: BookingStatus.CANCELLED,
-        refundedAmount: AMOUNT,
+        refundedAmountCents: AMOUNT,
       });
 
       await expect(service.payDuePayouts()).resolves.toBe(0);
@@ -801,7 +925,7 @@ describe("PayoutService", () => {
       hostWith(ACCOUNT_ID, true);
       paidStay(PAST, {
         status: BookingStatus.CANCELLED,
-        refundedAmount: AMOUNT,
+        refundedAmountCents: AMOUNT,
       });
 
       await expect(service.payOut(BOOKING_ID)).resolves.toBe(false);
@@ -814,16 +938,16 @@ describe("PayoutService", () => {
       payoutRepository.racing = () => {
         const stay = stored();
 
-        if (stay !== undefined) stay.refundedAmount = 80;
+        if (stay !== undefined) stay.refundedAmountCents = REFUNDED_80;
       };
 
       await service.payOut(BOOKING_ID);
 
       // The share of the 400 left is less than the share sent, and the difference goes back.
       expect([...payoutGateway.reversals.values()]).toEqual([
-        { transferId: "tr_1", amount: roundCents(SHARE - SHARE_AFTER_80) },
+        { transferId: "tr_1", amount: subtractCents(SHARE, SHARE_AFTER_80) },
       ]);
-      expect(stored()?.paidOutAmount).toBe(SHARE_AFTER_80);
+      expect(stored()?.paidOutAmountCents).toBe(SHARE_AFTER_80);
     });
 
     it("tells the host of a payout whose settlement failed, and settles it on the retry", async () => {
@@ -832,7 +956,7 @@ describe("PayoutService", () => {
       payoutRepository.racing = () => {
         const stay = stored();
 
-        if (stay !== undefined) stay.refundedAmount = 80;
+        if (stay !== undefined) stay.refundedAmountCents = REFUNDED_80;
       };
       payoutGateway.failingReversals = 1;
 
@@ -841,15 +965,15 @@ describe("PayoutService", () => {
       );
 
       expect(noticesOf(NotificationType.PAYOUT_SENT)).toMatchObject([
-        { content: { data: { amount: SHARE } } },
+        { content: { data: { amountCents: SHARE } } },
       ]);
-      expect(stored()?.paidOutAmount).toBe(SHARE);
+      expect(stored()?.paidOutAmountCents).toBe(SHARE);
 
       // The job comes again: nothing is sent twice, and the reversal goes out.
       await expect(service.payOut(BOOKING_ID)).resolves.toBe(false);
 
       expect(payoutGateway.transfers.size).toBe(1);
-      expect(stored()?.paidOutAmount).toBe(SHARE_AFTER_80);
+      expect(stored()?.paidOutAmountCents).toBe(SHARE_AFTER_80);
       expect(noticesOf(NotificationType.PAYOUT_SENT)).toHaveLength(1);
     });
   });
@@ -859,8 +983,8 @@ describe("PayoutService", () => {
       payoutGateway.sent("tr_1", SHARE);
       paidStay(PAST, {
         transferId: "tr_1",
-        paidOutAmount: SHARE,
-        refundedAmount: AMOUNT,
+        paidOutAmountCents: SHARE,
+        refundedAmountCents: AMOUNT,
       });
 
       await service.settle(BOOKING_ID);
@@ -868,19 +992,19 @@ describe("PayoutService", () => {
 
       expect([...payoutGateway.reversals.entries()]).toEqual([
         [
-          `booking-${BOOKING_ID}-reversal-${String(toCents(SHARE))}-0`,
+          `booking-${BOOKING_ID}-reversal-${String(SHARE)}-0`,
           { transferId: "tr_1", amount: SHARE },
         ],
       ]);
-      expect(stored()?.paidOutAmount).toBe(0);
+      expect(stored()?.paidOutAmountCents).toBe(0);
     });
 
     it("takes back the difference once when two settlements race over one stay", async () => {
       payoutGateway.sent("tr_1", SHARE);
       paidStay(PAST, {
         transferId: "tr_1",
-        paidOutAmount: SHARE,
-        refundedAmount: AMOUNT,
+        paidOutAmountCents: SHARE,
+        refundedAmountCents: AMOUNT,
       });
 
       await Promise.all([
@@ -889,20 +1013,20 @@ describe("PayoutService", () => {
       ]);
 
       const reversed = [...payoutGateway.reversals.values()].reduce(
-        (sum, { amount }) => sum + amount,
-        0,
+        (sum, { amount }) => addCents(sum, amount),
+        NO_CENTS,
       );
 
       expect(reversed).toBe(SHARE);
-      expect(stored()?.paidOutAmount).toBe(0);
+      expect(stored()?.paidOutAmountCents).toBe(0);
     });
 
     it("answers what the host is left holding", async () => {
       payoutGateway.sent("tr_1", SHARE);
       paidStay(PAST, {
         transferId: "tr_1",
-        paidOutAmount: SHARE,
-        refundedAmount: 80,
+        paidOutAmountCents: SHARE,
+        refundedAmountCents: REFUNDED_80,
       });
 
       // The share of the 400 left.
@@ -915,42 +1039,42 @@ describe("PayoutService", () => {
       // down: the row still says the whole share.
       payoutGateway.reversals.set("lost", {
         transferId: "tr_1",
-        amount: roundCents(SHARE - SHARE_AFTER_80),
+        amount: subtractCents(SHARE, SHARE_AFTER_80),
       });
       paidStay(PAST, {
         transferId: "tr_1",
-        paidOutAmount: SHARE,
-        refundedAmount: 180,
+        paidOutAmountCents: SHARE,
+        refundedAmountCents: REFUNDED_180,
       });
 
       // Only the difference between the share of the 300 left and what is still held goes back.
       await expect(service.settle(BOOKING_ID)).resolves.toBe(SHARE_AFTER_180);
       expect(
         payoutGateway.reversals.get(
-          `booking-${BOOKING_ID}-reversal-${String(toCents(SHARE_AFTER_80))}-${String(toCents(SHARE_AFTER_180))}`,
+          `booking-${BOOKING_ID}-reversal-${String(SHARE_AFTER_80)}-${String(SHARE_AFTER_180)}`,
         ),
       ).toEqual({
         transferId: "tr_1",
-        amount: roundCents(SHARE_AFTER_80 - SHARE_AFTER_180),
+        amount: subtractCents(SHARE_AFTER_80, SHARE_AFTER_180),
       });
-      expect(stored()?.paidOutAmount).toBe(SHARE_AFTER_180);
+      expect(stored()?.paidOutAmountCents).toBe(SHARE_AFTER_180);
     });
 
     it("only writes down a reversal Stripe already holds", async () => {
       payoutGateway.sent("tr_1", SHARE);
       payoutGateway.reversals.set("lost", {
         transferId: "tr_1",
-        amount: roundCents(SHARE - SHARE_AFTER_80),
+        amount: subtractCents(SHARE, SHARE_AFTER_80),
       });
       paidStay(PAST, {
         transferId: "tr_1",
-        paidOutAmount: SHARE,
-        refundedAmount: 80,
+        paidOutAmountCents: SHARE,
+        refundedAmountCents: REFUNDED_80,
       });
 
       await expect(service.settle(BOOKING_ID)).resolves.toBe(SHARE_AFTER_80);
       expect(payoutGateway.reversals.size).toBe(1);
-      expect(stored()?.paidOutAmount).toBe(SHARE_AFTER_80);
+      expect(stored()?.paidOutAmountCents).toBe(SHARE_AFTER_80);
     });
   });
 
@@ -996,7 +1120,7 @@ describe("PayoutService", () => {
 
     it("leaves a payout already sent alone while the dispute is open", async () => {
       payoutGateway.sent("tr_1", SHARE);
-      paidStay(PAST, { transferId: "tr_1", paidOutAmount: SHARE });
+      paidStay(PAST, { transferId: "tr_1", paidOutAmountCents: SHARE });
 
       await service.handleSettlementEvent(disputed);
 
@@ -1020,7 +1144,7 @@ describe("PayoutService", () => {
 
       expect(stored()).toMatchObject({
         disputeStatus: "WON",
-        paidOutAmount: SHARE,
+        paidOutAmountCents: SHARE,
       });
     });
 
@@ -1034,14 +1158,14 @@ describe("PayoutService", () => {
 
       expect(stored()).toMatchObject({
         disputeStatus: "WON",
-        paidOutAmount: SHARE,
+        paidOutAmountCents: SHARE,
       });
       expect(noticesOf(NotificationType.PAYMENT_DISPUTED)).toEqual([]);
     });
 
     it("takes the whole payout back once a dispute is lost", async () => {
       payoutGateway.sent("tr_1", SHARE);
-      paidStay(PAST, { transferId: "tr_1", paidOutAmount: SHARE });
+      paidStay(PAST, { transferId: "tr_1", paidOutAmountCents: SHARE });
 
       await service.handleSettlementEvent(disputed);
       await service.handleSettlementEvent(closed(false));
@@ -1051,7 +1175,7 @@ describe("PayoutService", () => {
       ]);
       expect(stored()).toMatchObject({
         disputeStatus: "LOST",
-        paidOutAmount: 0,
+        paidOutAmountCents: NO_CENTS,
       });
     });
   });

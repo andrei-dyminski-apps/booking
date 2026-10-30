@@ -1,6 +1,15 @@
 import { tz } from "@date-fns/tz";
 import { addHours, parseISO } from "date-fns";
 import { z } from "zod";
+import { DisputeStatus, type Booking } from "./booking.js";
+import {
+  addCents,
+  BASIS_POINTS,
+  NO_CENTS,
+  shareOf,
+  type Cents,
+} from "./money.js";
+import { notRefunded } from "./refund.js";
 
 /**
  * Here for the reason `refundOnCancel` is: the API transfers by it and the host's screens
@@ -8,24 +17,55 @@ import { z } from "zod";
  * nothing back from anybody.
  */
 
-/** Stripe's fees come out of it. */
-export const PLATFORM_FEE_RATE = 0.15;
+/**
+ * What the platform keeps of a stay, in basis points — 1500 is 15% — so the rate is an
+ * integer like the amounts it is applied to. Stripe's fees come out of it.
+ */
+export const PLATFORM_FEE_BPS = 1_500;
 
 /** A guest who arrives to a place not as described has that day to say so. */
 export const PAYOUT_DELAY_HOURS = 24;
 
 const IN_UTC = { in: tz("UTC") };
 
-/** In whole cents, so 85% of 361.05 is 306.89; rounded half up, in the host's favour. */
-export function hostShare(amount: number, refunded: number): number {
-  const kept = Math.max(
-    0,
-    Math.round(amount * 100) - Math.round(refunded * 100),
+/**
+ * What the host is paid of what the guest kept paying: 85% of 36105 cents is 30689, rounded
+ * half up, in the host's favour. The rounding happens once, here, and the platform keeps
+ * whatever is left of the money, so no cent is lost or invented between the two.
+ */
+export function hostShare(amount: Cents, refunded: Cents): Cents {
+  return shareOf(
+    notRefunded(amount, refunded),
+    BASIS_POINTS - PLATFORM_FEE_BPS,
   );
-  // A whole percentage, so a half that rounds up is an exact half, not binary noise.
-  const hostPercent = Math.round((1 - PLATFORM_FEE_RATE) * 100);
+}
 
-  return Math.round((kept * hostPercent) / 100) / 100;
+/**
+ * What the host should end up holding of a stay: nothing for one never paid or whose
+ * dispute was lost — the bank took the money back from the platform, and the host's share
+ * with it — and otherwise `hostShare` of what the guest kept paying, a refund still owed
+ * counted as gone already, since paying it out would only be taken back. The API transfers
+ * and reverses by it, and the admin's screen of stuck payouts states it.
+ */
+export function owedToHost(
+  stay: Pick<
+    Booking,
+    | "amountCents"
+    | "refundedAmountCents"
+    | "refundOwedCents"
+    | "paid"
+    | "dispute"
+  >,
+): Cents {
+  if (!stay.paid || stay.dispute === DisputeStatus.LOST) return NO_CENTS;
+
+  return hostShare(
+    stay.amountCents,
+    addCents(
+      stay.refundedAmountCents ?? NO_CENTS,
+      stay.refundOwedCents ?? NO_CENTS,
+    ),
+  );
 }
 
 /** Midnight UTC of the check-in day, the clock every rule about a calendar day reads. */

@@ -1,6 +1,13 @@
+import { ConflictException, NotFoundException } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
-import { NotificationType, type NotificationContent } from "@repo/contracts";
+import {
+  NotificationType,
+  type FailedPaymentEvent,
+  type NotificationContent,
+} from "@repo/contracts";
 import { subDays } from "date-fns";
+import type { Page } from "../../common/paging";
+import type { SetAsideCursor } from "../../common/set-aside-cursor";
 import { NotificationService } from "../../notification/notification.service";
 import { PaymentEventRepository } from "../infrastructure/payment-event.repository";
 import {
@@ -26,6 +33,7 @@ type StoredEvent = {
   attempts: number;
   lastError: string | null;
   setAside: boolean;
+  failedAt: Date | null;
 };
 
 class FakePaymentEventRepository implements PublicOf<PaymentEventRepository> {
@@ -40,6 +48,7 @@ class FakePaymentEventRepository implements PublicOf<PaymentEventRepository> {
         attempts: 0,
         lastError: null,
         setAside: false,
+        failedAt: null,
       });
     }
 
@@ -72,6 +81,7 @@ class FakePaymentEventRepository implements PublicOf<PaymentEventRepository> {
     row.attempts += 1;
     row.lastError = error;
     row.setAside = row.attempts >= maxAttempts;
+    if (row.setAside) row.failedAt = new Date();
 
     return Promise.resolve({
       type: row.event.type,
@@ -93,6 +103,58 @@ class FakePaymentEventRepository implements PublicOf<PaymentEventRepository> {
         .slice(0, limit)
         .map(([id]) => id),
     );
+  }
+
+  /** Newest first; a cursor is a place after the row it names. */
+  findFailedPage(
+    cursor: SetAsideCursor | null,
+    limit: number,
+  ): Promise<Page<FailedPaymentEvent>> {
+    const failed = [...this.rows.entries()]
+      .flatMap(([id, row]) =>
+        row.failedAt === null
+          ? []
+          : [
+              {
+                id,
+                type: row.event.type,
+                attempts: row.attempts,
+                lastError: row.lastError,
+                receivedAt: row.receivedAt.toISOString(),
+                failedAt: row.failedAt.toISOString(),
+              },
+            ],
+      )
+      .sort(
+        (left, right) =>
+          right.failedAt.localeCompare(left.failedAt) ||
+          right.id.localeCompare(left.id),
+      );
+    const start =
+      cursor === null ? 0 : failed.findIndex(({ id }) => id === cursor.id) + 1;
+
+    return Promise.resolve({
+      items: failed.slice(start, start + limit),
+      hasMore: failed.length > start + limit,
+    });
+  }
+
+  handBack(eventId: string): Promise<boolean> {
+    const row = this.rows.get(eventId);
+
+    if (row?.failedAt == null || row.processedAt !== null) {
+      return Promise.resolve(false);
+    }
+
+    row.failedAt = null;
+    row.setAside = false;
+    row.attempts = 0;
+
+    return Promise.resolve(true);
+  }
+
+  exists(eventId: string): Promise<boolean> {
+    return Promise.resolve(this.rows.has(eventId));
   }
 
   pruneProcessed(before: Date): Promise<number> {
@@ -369,6 +431,88 @@ describe("PaymentEventDispatcher", () => {
       "evt_recent",
       "evt_pending",
     ]);
+  });
+
+  describe("what was set aside", () => {
+    /** An event its handler kept failing until the dispatcher gave up on it. */
+    const setAside = async (eventId: string): Promise<void> => {
+      await dispatcher.receive(event(eventId));
+      second.failing = true;
+
+      for (let run = 1; run <= MAX_EVENT_ATTEMPTS; run += 1) {
+        await dispatcher.process(eventId).catch(() => undefined);
+      }
+
+      second.failing = false;
+    };
+
+    it("lists the events set aside and nothing still being retried", async () => {
+      await setAside("evt_poison");
+      await dispatcher.receive(event("evt_pending"));
+
+      const page = await dispatcher.failedPage({ limit: 20 });
+
+      expect(page.items).toEqual([
+        expect.objectContaining({
+          id: "evt_poison",
+          type: "customer.created",
+          attempts: MAX_EVENT_ATTEMPTS,
+          lastError: "Error: api_connection_error",
+        }),
+      ]);
+      expect(page.nextCursor).toBeNull();
+    });
+
+    it("pages the list by a cursor of its own", async () => {
+      await setAside("evt_a");
+      await setAside("evt_b");
+
+      const first = await dispatcher.failedPage({ limit: 1 });
+
+      expect(first.nextCursor).not.toBeNull();
+
+      const second = await dispatcher.failedPage({
+        limit: 1,
+        cursor: first.nextCursor ?? undefined,
+      });
+
+      expect(
+        [...first.items, ...second.items].map(({ id }) => id).sort(),
+      ).toEqual(["evt_a", "evt_b"]);
+      expect(second.nextCursor).toBeNull();
+    });
+
+    it("hands an event back with a whole count and queues it at once", async () => {
+      await setAside("evt_poison");
+      paymentEventJobs.queued.length = 0;
+
+      await dispatcher.retry("evt_poison");
+
+      expect(paymentEventRepository.rows.get("evt_poison")).toMatchObject({
+        attempts: 0,
+        failedAt: null,
+      });
+      expect(paymentEventJobs.queued).toEqual(["evt_poison"]);
+
+      await dispatcher.process("evt_poison");
+
+      expect(second.seen).toEqual([event("evt_poison")]);
+      await expect(dispatcher.failedPage({ limit: 20 })).resolves.toEqual({
+        items: [],
+        nextCursor: null,
+      });
+    });
+
+    it("refuses to retry an event not set aside, and one never received", async () => {
+      await dispatcher.receive(event("evt_pending"));
+
+      await expect(dispatcher.retry("evt_pending")).rejects.toThrow(
+        ConflictException,
+      );
+      await expect(dispatcher.retry("evt_unknown")).rejects.toThrow(
+        NotFoundException,
+      );
+    });
   });
 
   it("ignores an event it never recorded", async () => {

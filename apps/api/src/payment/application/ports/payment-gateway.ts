@@ -1,10 +1,19 @@
+import type { Cents, Currency } from "../../domain/money";
+
 /**
  * The guest's payments. An abstract class, so the class itself is the DI token. Amounts are
- * the contract's dollars; only the adapter counts cents.
+ * whole cents, as the provider counts them too.
  */
 export abstract class PaymentGateway {
-  /** Opens the payment of one hold, or answers the one already opened for it. */
-  abstract open(bookingId: string, amount: number): Promise<OpenedPayment>;
+  /**
+   * Opens the payment of one hold, or answers the one already opened for it — in the
+   * currency the stay was quoted in, which the row stores beside its amount.
+   */
+  abstract open(
+    bookingId: string,
+    amount: Cents,
+    currency: Currency,
+  ): Promise<OpenedPayment>;
 
   /**
    * Withdraws a payment whose hold lapsed or was cancelled. One already withdrawn or
@@ -19,12 +28,12 @@ export abstract class PaymentGateway {
    */
   abstract refund(
     paymentId: string,
-    amount: number,
+    amount: Cents,
     key: string,
-  ): Promise<number>;
+  ): Promise<Cents>;
 
   /** Refunded so far as the provider knows it, a dashboard refund whose webhook is late included. */
-  abstract refundedSoFar(paymentId: string): Promise<number>;
+  abstract refundedSoFar(paymentId: string): Promise<Cents>;
 
   /** Throws `InvalidPaymentEventError` for anything the provider did not sign. */
   abstract readEvent(payload: Buffer, signature: string): PaymentEvent;
@@ -52,7 +61,7 @@ export type PaymentEvent =
       /** Read off the payment's metadata; `null` for a payment this site did not open. */
       bookingId: string | null;
       /** What was actually taken — what a late payment gives back. */
-      amount: number;
+      amount: Cents;
     }
   | {
       kind: "refunded";
@@ -61,16 +70,16 @@ export type PaymentEvent =
       paymentId: string;
       chargeId: string;
       /** The charge's refund total so far, not this refund alone. */
-      amountRefunded: number;
+      amountRefunded: Cents;
     }
   | {
-      /** The guest's bank sent a refund back; the money is the guest's and a person re-sends it. */
+      /** The guest's bank sent a refund back; the money is the guest's and a person sends it back. */
       kind: "refundFailed";
       eventId: string;
       type: string;
       paymentId: string;
       refundId: string;
-      amount: number;
+      amount: Cents;
       reason: string | null;
     }
   | {

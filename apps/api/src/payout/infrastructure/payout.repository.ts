@@ -8,10 +8,17 @@ import {
   type LeaseTiming,
 } from "../../booking/infrastructure/booking-lease";
 import {
+  bookingExists,
+  payoutOwed,
+  stuckPayout,
+} from "../../booking/infrastructure/booking.repository";
+import {
+  nullableCentsOf,
   RELEASED_HOLD_INCLUDE,
   toRefundTarget,
 } from "../../booking/infrastructure/stay-rows";
 import type { SetAside } from "../../common/job-failure";
+import type { Cents } from "../../payment/domain/money";
 import { PrismaService } from "../../prisma/prisma.service";
 import { SettlementInProgressError } from "../domain/payout.errors";
 import type { PayoutAccountHolder, SettledStay } from "../domain/payout.types";
@@ -100,14 +107,14 @@ export class PayoutRepository {
 
   /**
    * The stay read under the settlement lease: without it two runs sized from the same
-   * `paid_out_amount` reverse the same money under two different keys. A lease held past
+   * `paid_out_amount_cents` reverse the same money under two different keys. A lease held past
    * the wait is `SettlementInProgressError`, the way `whileCancelling` answers its own.
    */
   async whileSettling<T>(
     bookingId: string,
     work: (
       stay: SettledStay | null,
-      recordReversal: (from: number, to: number) => Promise<boolean>,
+      recordReversal: (from: Cents, to: Cents) => Promise<boolean>,
     ) => Promise<T>,
   ): Promise<T> {
     try {
@@ -149,24 +156,12 @@ export class PayoutRepository {
     hostId?: string,
   ): Promise<string[]> {
     const where: Prisma.BookingWhereInput = {
-      paidAt: { not: null },
-      transferId: null,
+      AND: [payoutOwed(this.prismaService.booking.fields)],
       payoutFailedAt: null,
       // A refund still on its way is sent first; the stay comes back once it is recorded.
-      refundOwed: null,
+      refundOwedCents: null,
       // `from` is a `@db.Date`, compared as a day.
       from: { lte: subHours(now, PAYOUT_DELAY_HOURS) },
-      AND: [
-        { OR: [{ disputeStatus: null }, { disputeStatus: DisputeStatus.WON }] },
-        {
-          OR: [
-            { refundedAmount: null },
-            {
-              refundedAmount: { lt: this.prismaService.booking.fields.amount },
-            },
-          ],
-        },
-      ],
       listing: {
         owner: {
           payoutsEnabledAt: { not: null },
@@ -217,15 +212,42 @@ export class PayoutRepository {
     return { attempts: counted.payoutAttempts, setAside: count > 0 };
   }
 
+  /**
+   * Hands a set-aside payout back with a whole count of attempts. `false` for a stay whose
+   * payout is not set aside — sent since, never stuck, or owing the host nothing any more,
+   * which the list of stuck payouts leaves out too — or that is not there.
+   */
+  async handBackPayout(bookingId: string): Promise<boolean> {
+    const { count } = await this.prismaService.booking.updateMany({
+      where: {
+        AND: [
+          { id: bookingId },
+          stuckPayout(this.prismaService.booking.fields),
+        ],
+      },
+      data: { payoutFailedAt: null, payoutAttempts: 0 },
+    });
+
+    return count > 0;
+  }
+
+  async exists(bookingId: string): Promise<boolean> {
+    return bookingExists(this.prismaService, bookingId);
+  }
+
   /** Only into an empty column. A refund that landed meanwhile does not stop it; `settle` follows. */
   async recordPayout(
     bookingId: string,
     transferId: string,
-    amount: number,
+    amount: Cents,
   ): Promise<boolean> {
     const { count } = await this.prismaService.booking.updateMany({
       where: { id: bookingId, transferId: null },
-      data: { transferId, paidOutAmount: amount, paidOutAt: new Date() },
+      data: {
+        transferId,
+        paidOutAmountCents: amount,
+        paidOutAt: new Date(),
+      },
     });
 
     return count > 0;
@@ -277,12 +299,12 @@ async function readStay(
 async function writeReversal(
   client: Pick<Prisma.TransactionClient, "booking">,
   bookingId: string,
-  from: number,
-  to: number,
+  from: Cents,
+  to: Cents,
 ): Promise<boolean> {
   const { count } = await client.booking.updateMany({
-    where: { id: bookingId, paidOutAmount: from },
-    data: { paidOutAmount: to },
+    where: { id: bookingId, paidOutAmountCents: from },
+    data: { paidOutAmountCents: to },
   });
 
   return count > 0;
@@ -298,7 +320,7 @@ function toSettledStay(row: SettledStayRow): SettledStay {
     disputeStatus: row.disputeStatus,
     chargeId: row.chargeId,
     transferId: row.transferId,
-    paidOutAmount: row.paidOutAmount?.toNumber() ?? null,
+    paidOutAmountCents: nullableCentsOf(row.paidOutAmountCents),
     destination: {
       accountId: row.listing.owner.stripeAccountId,
       enabled: row.listing.owner.payoutsEnabledAt !== null,

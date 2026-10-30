@@ -38,10 +38,6 @@ export const BACKGROUND_REQUEST = {
   maxNetworkRetries: 2,
 } satisfies Stripe.RequestOptions;
 
-export function fromMinorUnits(minor: number): number {
-  return minor / 100;
-}
-
 /** An expandable field, read as the id whether or not it was expanded. */
 export function idOf(field: string | { id: string } | null): string | null {
   return typeof field === "string" ? field : (field?.id ?? null);

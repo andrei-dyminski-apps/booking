@@ -1,5 +1,6 @@
 import type { BookingStatus } from "@repo/contracts";
 import type { ReleasedHold } from "../../booking/domain/booking.types";
+import type { Cents } from "../../payment/domain/money";
 import type { PayoutFacts } from "./payout";
 
 export type PayoutDestination = {
@@ -14,7 +15,7 @@ export type SettledStay = PayoutFacts & {
   chargeId: string | null;
   transferId: string | null;
   /** What the host holds of this stay now; `null` before a transfer. */
-  paidOutAmount: number | null;
+  paidOutAmountCents: Cents | null;
   hold: ReleasedHold;
   destination: PayoutDestination;
 };

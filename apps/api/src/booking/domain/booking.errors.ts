@@ -1,5 +1,6 @@
 import type { CreateBookingInput } from "@repo/contracts";
 import { RetryLaterError } from "../../common/retry-later.error";
+import { formatCents, type Cents } from "../../payment/domain/money";
 import { MAX_CHARGE, MIN_CHARGE } from "./stay-price";
 
 /**
@@ -57,18 +58,18 @@ export class DatesUnavailableError extends Error {
 
 /** Raised under the lock once the quote exists, so nothing is inserted. */
 export class StayTooExpensiveError extends Error {
-  constructor(amount: number) {
+  constructor(amount: Cents) {
     super(
-      `A stay costing ${amount.toFixed(2)} is more than one payment can carry (${MAX_CHARGE.toFixed(2)})`,
+      `A stay costing ${formatCents(amount)} is more than one payment can carry (${formatCents(MAX_CHARGE)})`,
     );
     this.name = "StayTooExpensiveError";
   }
 }
 
 export class StayTooCheapError extends Error {
-  constructor(amount: number) {
+  constructor(amount: Cents) {
     super(
-      `A stay costing ${amount.toFixed(2)} is less than one payment can carry (${MIN_CHARGE.toFixed(2)})`,
+      `A stay costing ${formatCents(amount)} is less than one payment can carry (${formatCents(MIN_CHARGE)})`,
     );
     this.name = "StayTooCheapError";
   }

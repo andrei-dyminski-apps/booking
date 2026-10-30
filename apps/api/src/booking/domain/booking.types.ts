@@ -1,4 +1,10 @@
-import type { Booking, BookingStatus, StayNotice } from "@repo/contracts";
+import type {
+  Booking,
+  BookingStatus,
+  PricedNight,
+  StayNotice,
+} from "@repo/contracts";
+import type { Cents, Currency } from "../../payment/domain/money";
 
 /**
  * The owner of the listing is kept beside the booking rather than inside it: the
@@ -11,6 +17,22 @@ export type BookingWithListingOwner = {
   booking: Booking;
   listingOwnerId: string;
   paymentId: string | null;
+};
+
+/** The same, with the nights the stay's amount adds up from — what `GET /bookings/:id` answers. */
+export type BookingDetailWithListingOwner = BookingWithListingOwner & {
+  nights: PricedNight[];
+};
+
+/**
+ * A stay's money columns in cents of `currency` — what a refund and a payout are worked out
+ * from, and what the payment and the transfer are made in.
+ */
+export type StayMoney = {
+  amountCents: Cents;
+  currency: Currency;
+  refundedAmountCents: Cents | null;
+  refundOwedCents: Cents | null;
 };
 
 /**
@@ -36,12 +58,9 @@ export type CancelledStay = {
 };
 
 /** A stay's money as the payment handlers read it; `SettledStay` extends it. */
-export type RefundTarget = {
+export type RefundTarget = StayMoney & {
   bookingId: string;
   status: BookingStatus;
-  amount: number;
-  refundedAmount: number | null;
-  refundOwed: number | null;
   /** Whatever its status now. */
   paid: boolean;
   confirmationAnnounced: boolean;

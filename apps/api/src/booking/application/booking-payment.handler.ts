@@ -10,7 +10,13 @@ import {
   PaymentGateway,
   type PaymentEvent,
 } from "../../payment/application/ports/payment-gateway";
-import { roundCents } from "../../payment/domain/money";
+import {
+  CURRENCY,
+  formatCents,
+  minCents,
+  NO_CENTS,
+  subtractCents,
+} from "../../payment/domain/money";
 import { toIsoDate } from "../../common/iso-date";
 import { WaitlistService } from "../../waitlist/waitlist.service";
 import { awaitsItsPayment } from "../domain/booking-status";
@@ -149,7 +155,7 @@ export class BookingPaymentHandler
     const ownPayment =
       target.hold.paymentId === null || target.hold.paymentId === paymentId;
 
-    if (ownPayment && target.refundedAmount !== null) return;
+    if (ownPayment && target.refundedAmountCents !== null) return;
 
     await this.paymentGateway.refund(
       paymentId,
@@ -166,12 +172,16 @@ export class BookingPaymentHandler
       ownPayment &&
       (await this.bookingRepository.recordRefund(
         bookingId,
-        Math.min(event.amount, target.amount),
+        minCents(event.amount, target.amountCents),
       ))
     ) {
       await this.notificationService.notify(target.hold.guestId, {
         type: NotificationType.PAYMENT_REFUNDED,
-        data: { ...target.hold.stay, amount: event.amount },
+        data: {
+          ...target.hold.stay,
+          amountCents: event.amount,
+          currency: target.currency,
+        },
       });
     }
   }
@@ -200,20 +210,21 @@ export class BookingPaymentHandler
 
       if (stay === null) return;
 
-      const before = stay.refundedAmount ?? 0;
+      const before = stay.refundedAmountCents ?? NO_CENTS;
 
       if (await this.raiseRefundTotal(event, stay)) {
         await this.notificationService.notify(stay.hold.guestId, {
           type: NotificationType.PAYMENT_REFUNDED,
           data: {
             ...stay.hold.stay,
-            amount: roundCents(amountRefunded - before),
+            amountCents: subtractCents(amountRefunded, before),
+            currency: stay.currency,
           },
         });
       }
 
       if (
-        amountRefunded >= stay.amount &&
+        amountRefunded >= stay.amountCents &&
         stay.status === BookingStatus.CONFIRMED &&
         notBegunYet(stay)
       ) {
@@ -261,26 +272,31 @@ export class BookingPaymentHandler
 
   /**
    * The money is still the guest's, so the stay keeps recording it as refunded — which also
-   * keeps the host's share without it — and a person re-sends it.
+   * keeps the host's share without it — and a person sends it back some other way and records
+   * how (`POST /refund-failures/:id/resolve`).
    */
   private async reportFailedRefund(
     event: Extract<PaymentEvent, { kind: "refundFailed" }>,
   ): Promise<void> {
     const stay = await this.bookingRepository.findRefundTarget(event.paymentId);
+    // The refund's currency is the stay's; a payment no stay names any more is one this
+    // site charged, and every charge is in `CURRENCY`.
     const failure = {
       refundId: event.refundId,
       paymentId: event.paymentId,
       bookingId: stay?.bookingId ?? null,
-      amount: event.amount,
+      amountCents: event.amount,
+      currency: stay?.currency ?? CURRENCY,
       reason: event.reason,
     };
 
     if (!(await this.refundFailureRepository.record(failure))) return;
 
     this.logger.error(
-      `Refund ${event.refundId} of ${String(event.amount)} on payment ${event.paymentId}` +
+      `Refund ${event.refundId} of ${formatCents(event.amount)} on payment ${event.paymentId}` +
         ` (booking ${failure.bookingId ?? "unknown"}) failed: ${event.reason ?? "no reason given"}.` +
-        " The money is back on the platform balance and still owed to the guest — issue it again by hand.",
+        " The money is back on the platform balance and still owed to the guest — send it back" +
+        " outside Stripe and record how (POST /refund-failures/:id/resolve).",
     );
     await this.notificationService.notifyAdmins({
       type: NotificationType.REFUND_FAILED,
@@ -296,12 +312,12 @@ export class BookingPaymentHandler
     { paymentId, amountRefunded }: Extract<PaymentEvent, { kind: "refunded" }>,
     stay: RefundTarget,
   ): Promise<boolean> {
-    if (amountRefunded <= (stay.refundedAmount ?? 0)) return false;
+    if (amountRefunded <= (stay.refundedAmountCents ?? NO_CENTS)) return false;
 
     if (
       await this.bookingRepository.raiseRefunded(
         stay.bookingId,
-        stay.refundedAmount,
+        stay.refundedAmountCents,
         amountRefunded,
       )
     ) {
@@ -310,7 +326,7 @@ export class BookingPaymentHandler
 
     const now = await this.bookingRepository.findRefundTarget(paymentId);
 
-    if ((now?.refundedAmount ?? 0) >= amountRefunded) return false;
+    if ((now?.refundedAmountCents ?? NO_CENTS) >= amountRefunded) return false;
 
     throw new Error(
       `The refund total of booking ${stay.bookingId} moved while it was being raised`,

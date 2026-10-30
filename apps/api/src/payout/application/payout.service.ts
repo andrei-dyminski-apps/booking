@@ -17,9 +17,15 @@ import type { AuthenticatedUser } from "../../auth/auth.types";
 import { awaitsItsPayment } from "../../booking/domain/booking-status";
 import { PaymentNotConfirmedYetError } from "../../booking/domain/booking.errors";
 import { errorText, type SetAside } from "../../common/job-failure";
+import { writeOrRefuse } from "../../common/set-aside";
 import { NotificationService } from "../../notification/notification.service";
 import type { PaymentEvent } from "../../payment/application/ports/payment-gateway";
-import { roundCents, toCents } from "../../payment/domain/money";
+import {
+  formatCents,
+  minCents,
+  subtractCents,
+  type Cents,
+} from "../../payment/domain/money";
 import { mayPayOut, owedToHost } from "../domain/payout";
 import { SettlementInProgressError } from "../domain/payout.errors";
 import type { PayoutAccountHolder, SettledStay } from "../domain/payout.types";
@@ -286,6 +292,7 @@ export class PayoutService {
       accountId: destination.accountId,
       chargeId: stay.chargeId,
       amount,
+      currency: stay.currency,
       description: describeStay(stay.hold.stay),
     });
 
@@ -311,13 +318,33 @@ export class PayoutService {
       type: NotificationType.PAYOUT_SENT,
       data: {
         ...stay.hold.stay,
-        amount: (settlement.settled ? settlement.held : null) ?? sent.amount,
+        amountCents:
+          (settlement.settled ? settlement.held : null) ?? sent.amount,
+        currency: stay.currency,
       },
     });
 
     if (!settlement.settled) throw settlement.error;
 
     return true;
+  }
+
+  /**
+   * Hands the payout back and queues its job at once rather than waiting an hour for the
+   * sweep. The usual order is the host's account put right first, then the payout retried.
+   */
+  async retryStuckPayout(bookingId: string): Promise<void> {
+    await writeOrRefuse(
+      this.payoutRepository.handBackPayout(bookingId),
+      () => this.payoutRepository.exists(bookingId),
+      {
+        conflict: `The payout of booking ${bookingId} is not stuck: it is not set aside, an open dispute holds it, or a lost dispute or a full refund leaves nothing to send`,
+        notFound: `Booking ${bookingId} not found`,
+      },
+    );
+
+    this.logger.log(`The payout of booking ${bookingId} was handed back`);
+    await this.payoutJobs.schedulePayout(bookingId, new Date());
   }
 
   /** One failure is logged and left to the next run. */
@@ -356,39 +383,41 @@ export class PayoutService {
    * figure says how much, because a reversal whose write was lost is already off the
    * transfer. The key names both ends of the step, so a repeat is the same reversal.
    */
-  async settle(bookingId: string): Promise<number | null> {
+  async settle(bookingId: string): Promise<Cents | null> {
     return this.payoutRepository.whileSettling(
       bookingId,
       async (stay, recordReversal) => {
         if (
           stay?.transferId == null ||
-          stay.paidOutAmount === null ||
+          stay.paidOutAmountCents === null ||
           stay.disputeStatus === DisputeStatus.OPEN
         ) {
-          return stay?.paidOutAmount ?? null;
+          return stay?.paidOutAmountCents ?? null;
         }
 
         const owed = owedToHost(stay);
 
-        if (stay.paidOutAmount <= owed) return stay.paidOutAmount;
+        if (stay.paidOutAmountCents <= owed) return stay.paidOutAmountCents;
 
         const held = await this.payoutGateway.heldOnTransfer(stay.transferId);
 
         if (held > owed) {
+          const excess = subtractCents(held, owed);
+
           await this.payoutGateway.reverseTransfer(
             stay.transferId,
-            roundCents(held - owed),
-            `booking-${bookingId}-reversal-${String(toCents(held))}-${String(toCents(owed))}`,
+            excess,
+            `booking-${bookingId}-reversal-${String(held)}-${String(owed)}`,
           );
           this.logger.log(
-            `Took back ${String(roundCents(held - owed))} of the payout of booking ${bookingId}`,
+            `Took back ${formatCents(excess)} of the payout of booking ${bookingId}`,
           );
         }
 
-        const left = Math.min(held, owed);
+        const left = minCents(held, owed);
 
         // Written from outside the lease; the next settlement reads Stripe's figure again.
-        if (!(await recordReversal(stay.paidOutAmount, left))) {
+        if (!(await recordReversal(stay.paidOutAmountCents, left))) {
           this.logger.warn(
             `The payout of booking ${bookingId} changed outside the settlement lock while it was being reversed`,
           );

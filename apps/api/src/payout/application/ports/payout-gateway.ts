@@ -1,6 +1,7 @@
 import type { PaymentEvent } from "../../../payment/application/ports/payment-gateway";
+import type { Cents, Currency } from "../../../payment/domain/money";
 
-/** Hosts are paid through a connected account and a transfer into it. US dollars, like `PaymentGateway`. */
+/** Hosts are paid through a connected account and a transfer into it. Whole cents, like `PaymentGateway`. */
 export abstract class PayoutGateway {
   /** Named after the user, so a repeat within 24 hours gets the same account. */
   abstract createRecipientAccount(host: PayoutHost): Promise<string>;
@@ -17,12 +18,12 @@ export abstract class PayoutGateway {
   abstract transfer(payout: Payout): Promise<SentTransfer>;
 
   /** What was sent less every reversal, one whose write was lost included. */
-  abstract heldOnTransfer(transferId: string): Promise<number>;
+  abstract heldOnTransfer(transferId: string): Promise<Cents>;
 
   /** A second call with the same `key` is the same reversal. */
   abstract reverseTransfer(
     transferId: string,
-    amount: number,
+    amount: Cents,
     key: string,
   ): Promise<void>;
 
@@ -47,13 +48,15 @@ export type Payout = {
   accountId: string;
   /** The transfer waits for this charge's funds rather than drawing on the platform's. */
   chargeId: string;
-  amount: number;
+  amount: Cents;
+  /** The stay's, so the host is paid in what the guest was charged in. */
+  currency: Currency;
   description: string;
 };
 
 export type SentTransfer = {
   id: string;
-  amount: number;
+  amount: Cents;
 };
 
 /** A thin event carries only the account; what changed is asked of the provider afresh. */

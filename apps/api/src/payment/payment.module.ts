@@ -17,6 +17,7 @@ import {
 } from "./infrastructure/payment.config";
 import { createStripeClient, STRIPE_CLIENT } from "./infrastructure/stripe";
 import { StripePaymentGateway } from "./infrastructure/stripe-payment.gateway";
+import { PaymentEventController } from "./presentation/payment-event.controller";
 import { PaymentWebhookController } from "./presentation/payment-webhook.controller";
 
 /**
@@ -29,7 +30,7 @@ import { PaymentWebhookController } from "./presentation/payment-webhook.control
     NotificationModule,
     BullModule.registerQueue({ name: PAYMENT_EVENT_QUEUE }),
   ],
-  controllers: [PaymentWebhookController],
+  controllers: [PaymentWebhookController, PaymentEventController],
   providers: [
     PaymentEventRepository,
     PaymentEventDispatcher,

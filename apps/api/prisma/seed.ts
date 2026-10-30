@@ -2,7 +2,9 @@ import { tz, TZDate } from "@date-fns/tz";
 import { PrismaPg } from "@prisma/adapter-pg";
 import * as argon2 from "argon2";
 import { addDays, format } from "date-fns";
-import { pricedNights, stayTotal } from "@repo/contracts";
+import { cents, type PricedListing } from "@repo/contracts";
+import { quoteStay } from "../src/booking/domain/stay-price";
+import { stayMoneyData } from "../src/booking/infrastructure/stay-rows";
 import {
   BookingStatus,
   ConversationSide,
@@ -58,10 +60,10 @@ const users = {
 type UserKey = keyof typeof users;
 
 /**
- * Prices are the currency itself, to the cent: 120 is a hundred and twenty a night. The
+ * Prices are whole cents, as every amount is: 12_000 is a hundred and twenty a night. The
  * owner holds most of the catalogue and the second host the last two listings.
  *
- * `pricePerNight` is the default; a few listings carry the exceptions as well — dearer
+ * `pricePerNightCents` is the default; a few listings carry the exceptions as well — dearer
  * weekends, a cheaper midweek, a few dates priced on their own — so the listing page has
  * a stay whose nights do not all cost the same to quote. The dates are days from the run,
  * for the reason `inDays` below gives.
@@ -70,22 +72,22 @@ const listings: Array<{
   owner: UserKey;
   title: string;
   description: string;
-  pricePerNight: number;
+  pricePerNightCents: number;
   capacity: number;
   weekdayPrices?: Partial<Record<Weekday, number>>;
-  datePrices?: Array<{ inDays: number; price: number }>;
+  datePrices?: Array<{ inDays: number; priceCents: number }>;
 }> = [
   {
     owner: "owner",
     title: "Loft above the harbour",
     description:
       "Two rooms under the roof, a wall of glass facing the water and a kitchen that fits four.",
-    pricePerNight: 120,
+    pricePerNightCents: 12_000,
     capacity: 4,
-    weekdayPrices: { fri: 150, sat: 150 },
+    weekdayPrices: { fri: 15_000, sat: 15_000 },
     datePrices: [
-      { inDays: 30, price: 199 },
-      { inDays: 31, price: 199 },
+      { inDays: 30, priceCents: 19_900 },
+      { inDays: 31, priceCents: 19_900 },
     ],
   },
   {
@@ -93,16 +95,16 @@ const listings: Array<{
     title: "Cottage at the edge of the pines",
     description:
       "A wood stove, a long table and nothing within earshot but the forest road.",
-    pricePerNight: 85,
+    pricePerNightCents: 8_500,
     capacity: 6,
-    weekdayPrices: { mon: 70, tue: 70, wed: 70, thu: 70 },
+    weekdayPrices: { mon: 7_000, tue: 7_000, wed: 7_000, thu: 7_000 },
   },
   {
     owner: "owner",
     title: "Studio on the market square",
     description:
       "One room, one window over the awnings, and every tram line within a minute's walk.",
-    pricePerNight: 54,
+    pricePerNightCents: 5_400,
     capacity: 2,
   },
   {
@@ -110,7 +112,7 @@ const listings: Array<{
     title: "Farmhouse with the long table",
     description:
       "Six bedrooms, a kitchen built for a crowd and a field that ends at the river.",
-    pricePerNight: 210,
+    pricePerNightCents: 21_000,
     capacity: 12,
   },
   {
@@ -118,7 +120,7 @@ const listings: Array<{
     title: "Attic room off the canal",
     description:
       "A bed under the beams, a desk at the window and the water two floors down.",
-    pricePerNight: 39,
+    pricePerNightCents: 3_900,
     capacity: 1,
   },
   {
@@ -126,17 +128,17 @@ const listings: Array<{
     title: "Beach house on stilts",
     description:
       "A deck facing west, an outdoor shower and sand from the bottom step onwards.",
-    pricePerNight: 165,
+    pricePerNightCents: 16_500,
     capacity: 8,
-    weekdayPrices: { sat: 195, sun: 195 },
-    datePrices: [{ inDays: 45, price: 250 }],
+    weekdayPrices: { sat: 19_500, sun: 19_500 },
+    datePrices: [{ inDays: 45, priceCents: 25_000 }],
   },
   {
     owner: "host",
     title: "Vineyard cottage",
     description:
       "Two rooms at the end of a row of vines, with the press house for a neighbour.",
-    pricePerNight: 98,
+    pricePerNightCents: 9_800,
     capacity: 3,
   },
   {
@@ -144,7 +146,7 @@ const listings: Array<{
     title: "Cabin at the tree line",
     description:
       "A stove, a drying rack for boots and the last road before the path takes over.",
-    pricePerNight: 72,
+    pricePerNightCents: 7_200,
     capacity: 4,
   },
 ];
@@ -162,11 +164,13 @@ function inDays(days: number): Date {
 }
 
 /**
- * What a demo stay costs, by the rule the API quotes a hold by (`nightlyPrice` in the
- * contract) and from the same demo prices the listings are written with — so a seeded
- * stay's amount is the one the listing page would have quoted for it.
+ * A demo stay's money columns, by the `quoteStay` a hold is created with and from the same
+ * demo prices the listings are written with — so a seeded stay's nights and amount are the
+ * ones the listing page would have quoted for it. Written through `stayMoneyData`, as
+ * `create` writes them, so a stay one payment could not carry is refused here too rather
+ * than seeded as a booking the API would never take.
  */
-function amountOf(index: number, from: Date, to: Date): number {
+function moneyOf(index: number, from: Date, to: Date) {
   const listing = listings[index];
 
   if (listing === undefined) {
@@ -174,23 +178,23 @@ function amountOf(index: number, from: Date, to: Date): number {
   }
 
   const day = (date: Date) => format(date, "yyyy-MM-dd", { in: tz("UTC") });
+  const priced: PricedListing = {
+    pricePerNightCents: cents(listing.pricePerNightCents),
+    pricing: {
+      weekdays: Object.fromEntries(
+        Object.entries(listing.weekdayPrices ?? {}).map(([weekday, price]) => [
+          weekday,
+          cents(price),
+        ]),
+      ),
+      dates: (listing.datePrices ?? []).map((entry) => ({
+        date: day(inDays(entry.inDays)),
+        priceCents: cents(entry.priceCents),
+      })),
+    },
+  };
 
-  return stayTotal(
-    pricedNights(
-      {
-        pricePerNight: listing.pricePerNight,
-        pricing: {
-          weekdays: listing.weekdayPrices ?? {},
-          dates: (listing.datePrices ?? []).map((entry) => ({
-            date: day(inDays(entry.inDays)),
-            price: entry.price,
-          })),
-        },
-      },
-      day(from),
-      day(to),
-    ),
-  );
+  return stayMoneyData(quoteStay(priced, day(from), day(to)));
 }
 
 /**
@@ -363,15 +367,15 @@ async function main(): Promise<void> {
           ownerId: idOf(owner),
           weekdayPrices: {
             create: Object.values(Weekday).flatMap((weekday) => {
-              const price = weekdayPrices[weekday];
+              const priceCents = weekdayPrices[weekday];
 
-              return price === undefined ? [] : [{ weekday, price }];
+              return priceCents === undefined ? [] : [{ weekday, priceCents }];
             }),
           },
           datePrices: {
             create: datePrices.map((entry) => ({
               date: inDays(entry.inDays),
-              price: entry.price,
+              priceCents: entry.priceCents,
             })),
           },
         },
@@ -379,26 +383,29 @@ async function main(): Promise<void> {
     ),
   );
 
-  await prisma.booking.createMany({
-    data: bookings.map((booking) => {
-      const listing = rooms[booking.listing];
+  // One `create` per stay rather than a `createMany`, which writes no nested rows — and
+  // the nights are one. In turn rather than at once, so the stays are written in the order
+  // they are listed and every seed orders them by `created_at` the same way.
+  for (const booking of bookings) {
+    const listing = rooms[booking.listing];
 
-      if (listing === undefined) {
-        throw new Error(`No demo listing at index ${booking.listing}`);
-      }
+    if (listing === undefined) {
+      throw new Error(`No demo listing at index ${booking.listing}`);
+    }
 
-      return {
+    await prisma.booking.create({
+      data: {
         listingId: listing.id,
         guestId: idOf(booking.guest),
         from: booking.from,
         to: booking.to,
-        amount: amountOf(booking.listing, booking.from, booking.to),
+        ...moneyOf(booking.listing, booking.from, booking.to),
         // Confirmed, not holds: a PENDING_PAYMENT booking would lapse 15 minutes after
         // the seed runs and disappear from the demo.
         status: BookingStatus.CONFIRMED,
-      };
-    }),
-  });
+      },
+    });
+  }
 
   await prisma.waitlistEntry.createMany({
     data: waitlist.map((entry) => {
@@ -430,7 +437,7 @@ async function main(): Promise<void> {
         guestId: idOf("guest"),
         from: past.from,
         to: past.to,
-        amount: amountOf(past.listing, past.from, past.to),
+        ...moneyOf(past.listing, past.from, past.to),
         status: BookingStatus.CONFIRMED,
       },
     });

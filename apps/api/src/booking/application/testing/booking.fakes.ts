@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import {
   bookingQuerySchema,
   BookingStatus,
+  pricedNights,
   Role,
   type BookedRange,
   type Booking,
@@ -13,10 +14,15 @@ import {
   type CreateBookingInput,
   type ListingSummary,
   type NotificationContent,
+  type RefundFailure as RefundFailureView,
+  type RefundFailureStatus,
+  type StuckKind,
+  type StuckStay,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../../auth/auth.types";
 import type { SetAside } from "../../../common/job-failure";
 import type { Page } from "../../../common/paging";
+import type { SetAsideCursor } from "../../../common/set-aside-cursor";
 import { NotificationService } from "../../../notification/notification.service";
 import { PaymentEventDispatcher } from "../../../payment/application/payment-event-dispatcher";
 import {
@@ -25,6 +31,13 @@ import {
   type OpenedPayment,
   type PaymentEvent,
 } from "../../../payment/application/ports/payment-gateway";
+import {
+  addCents,
+  cents,
+  NO_CENTS,
+  type Cents,
+  CURRENCY,
+} from "../../../payment/domain/money";
 import { WaitlistService } from "../../../waitlist/waitlist.service";
 import type { FreedNights } from "../../../waitlist/waitlist.types";
 import { ACTIVE_STATUSES, holdExpiry } from "../../domain/booking-status";
@@ -37,6 +50,7 @@ import {
 } from "../../domain/booking.errors";
 import type {
   BookingCursor,
+  BookingDetailWithListingOwner,
   BookingWithListingOwner,
   CancelledStay,
   ConfirmedStay,
@@ -69,7 +83,7 @@ export const OTHER_LISTING_ID = "3a4b5c6d-7e8f-4091-8a2b-3c4d5e6f7a8b";
 /** What the repository resolves beside every stay; no rule in this service reads it. */
 export const listing: ListingSummary = {
   title: "Loft above the harbour",
-  pricePerNight: 120,
+  pricePerNightCents: cents(12_000),
 };
 
 export const input: CreateBookingInput = {
@@ -79,7 +93,7 @@ export const input: CreateBookingInput = {
 };
 
 /** What every stay the fake takes costs; the quote itself is `quoteStay`'s and the e2e's. */
-export const AMOUNT = 480;
+export const AMOUNT = cents(48_000);
 
 export const IN_UTC = { in: tz("UTC") };
 
@@ -225,6 +239,33 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
     return Promise.resolve(this.rows.get(id) ?? null);
   }
 
+  /** Every night at the listing's default price — `AMOUNT` for the stay of `input`. */
+  findDetailWithListingOwner(
+    id: string,
+  ): Promise<BookingDetailWithListingOwner | null> {
+    const found = this.rows.get(id);
+
+    return Promise.resolve(
+      found === undefined
+        ? null
+        : {
+            ...found,
+            nights: pricedNights(
+              {
+                pricePerNightCents: listing.pricePerNightCents,
+                pricing: { weekdays: {}, dates: [] },
+              },
+              found.booking.from,
+              found.booking.to,
+            ),
+          },
+    );
+  }
+
+  exists(id: string): Promise<boolean> {
+    return Promise.resolve(this.rows.has(id));
+  }
+
   hasStayedWith(guestId: string, ownerId: string): Promise<boolean> {
     return Promise.resolve(
       [...this.rows.values()].some(
@@ -283,9 +324,10 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
       from: booking.from,
       to: booking.to,
       status: BookingStatus.PENDING_PAYMENT,
-      amount: AMOUNT,
-      refundedAmount: null,
-      refundOwed: null,
+      amountCents: AMOUNT,
+      currency: CURRENCY,
+      refundedAmountCents: null,
+      refundOwedCents: null,
       paid: false,
       dispute: null,
       expiresAt: holdExpiry(new Date()).toISOString(),
@@ -309,7 +351,7 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
   async cancel(
     id: string,
     status: BookingStatus,
-    refundOwed: number | null,
+    refundOwedCents: Cents | null,
   ): Promise<CancelledStay | null> {
     await this.racing?.(id);
 
@@ -324,15 +366,15 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
     }
 
     found.booking.status = BookingStatus.CANCELLED;
-    found.booking.refundOwed = refundOwed;
+    found.booking.refundOwedCents = refundOwedCents;
 
     return { paymentId: found.paymentId };
   }
 
-  /** The failed runs of an owed refund by booking, and whether it was set aside. */
+  /** The failed runs of an owed refund by booking, and when it was set aside. */
   readonly refundFailures = new Map<
     string,
-    { attempts: number; setAside: boolean }
+    { attempts: number; setAside: boolean; setAsideAt?: Date }
   >();
 
   /** The fewest failures first, leaving out what was set aside or waits on a dispute. */
@@ -341,14 +383,14 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
       this.refundFailures.get(id)?.attempts ?? 0;
 
     return Promise.resolve(
-      this.allBookings()
+      [...this.rows.values()]
         .filter(
-          (booking) =>
-            booking.refundOwed !== null &&
+          ({ booking }) =>
+            booking.refundOwedCents !== null &&
             booking.dispute !== "OPEN" &&
             this.refundFailures.get(booking.id)?.setAside !== true,
         )
-        .map((booking) => booking.id)
+        .map(({ booking }) => booking.id)
         .sort((left, right) => attemptsOf(left) - attemptsOf(right))
         .slice(0, limit),
     );
@@ -364,28 +406,101 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
       setAside: false,
     };
 
-    if (this.rows.get(id)?.booking.refundOwed == null || failure.setAside) {
+    if (
+      this.rows.get(id)?.booking.refundOwedCents == null ||
+      failure.setAside
+    ) {
       return Promise.resolve(null);
     }
 
     failure.attempts += 1;
     failure.setAside = failure.attempts >= maxAttempts;
+    if (failure.setAside) failure.setAsideAt = this.tick();
     this.refundFailures.set(id, failure);
 
-    return Promise.resolve({ ...failure });
+    return Promise.resolve({
+      attempts: failure.attempts,
+      setAside: failure.setAside,
+    });
+  }
+
+  /** A distinct moment per call, so a list ordered by when rows were set aside has an order. */
+  private clock = Date.parse("2026-10-25T12:00:00.000Z");
+
+  private tick(): Date {
+    this.clock += 1_000;
+
+    return new Date(this.clock);
+  }
+
+  /**
+   * The set-aside debts, newest first. A payout is never stuck here: the payout's columns
+   * are `payout.service.spec.ts`'s, and what `GET /bookings/stuck` reads of them is e2e's.
+   */
+  findStuckPage(
+    kind: StuckKind,
+    cursor: SetAsideCursor | null,
+    limit: number,
+  ): Promise<Page<StuckStay>> {
+    const stuck = [...this.rows.values()]
+      .flatMap((found) => {
+        const failure = this.refundFailures.get(found.booking.id);
+
+        return kind === "refund" &&
+          failure?.setAsideAt !== undefined &&
+          found.booking.refundOwedCents !== null
+          ? [
+              {
+                kind,
+                booking: found.booking,
+                attempts: failure.attempts,
+                lastError: "refused",
+                failedAt: failure.setAsideAt.toISOString(),
+              },
+            ]
+          : [];
+      })
+      .sort((left, right) => compare(right.failedAt, left.failedAt));
+    const start =
+      cursor === null
+        ? 0
+        : stuck.findIndex((row) => row.booking.id === cursor.id) + 1;
+
+    return Promise.resolve({
+      items: stuck.slice(start, start + limit),
+      hasMore: stuck.length > start + limit,
+    });
+  }
+
+  handBackRefund(id: string): Promise<boolean> {
+    const failure = this.refundFailures.get(id);
+
+    if (
+      failure?.setAside !== true ||
+      this.rows.get(id)?.booking.refundOwedCents == null
+    ) {
+      return Promise.resolve(false);
+    }
+
+    this.refundFailures.delete(id);
+
+    return Promise.resolve(true);
   }
 
   /** The total only upwards, and the debt cleared with it. */
-  settleOwedRefund(id: string, total: number | null): Promise<void> {
+  settleOwedRefund(id: string, total: Cents | null): Promise<void> {
     const found = this.rows.get(id);
 
     if (found === undefined) return Promise.resolve();
 
-    if (total !== null && (found.booking.refundedAmount ?? 0) < total) {
-      found.booking.refundedAmount = total;
+    if (
+      total !== null &&
+      (found.booking.refundedAmountCents ?? NO_CENTS) < total
+    ) {
+      found.booking.refundedAmountCents = total;
     }
 
-    found.booking.refundOwed = null;
+    found.booking.refundOwedCents = null;
     this.refundFailures.delete(id);
 
     return Promise.resolve();
@@ -436,13 +551,13 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
     id: string,
     paymentId: string,
     _chargeId: string | null,
-    amount: number,
+    amount: Cents,
   ): Promise<ConfirmedStay | null> {
     const found = this.rows.get(id);
 
     if (
       found?.booking.status !== BookingStatus.PENDING_PAYMENT ||
-      found.booking.amount !== amount ||
+      found.booking.amountCents !== amount ||
       (found.paymentId !== null && found.paymentId !== paymentId)
     ) {
       return Promise.resolve(null);
@@ -483,12 +598,16 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
   }
 
   private refundTargetOf(found: BookingWithListingOwner): RefundTarget {
+    const { amountCents, currency, refundedAmountCents, refundOwedCents } =
+      found.booking;
+
     return {
+      amountCents,
+      currency,
+      refundedAmountCents,
+      refundOwedCents,
       bookingId: found.booking.id,
       status: found.booking.status,
-      amount: found.booking.amount,
-      refundedAmount: found.booking.refundedAmount,
-      refundOwed: found.booking.refundOwed,
       paid: found.booking.paid,
       confirmationAnnounced: this.announced.has(found.booking.id),
       hold: holdOf(found),
@@ -496,30 +615,30 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
   }
 
   /** Only upwards and only for a paid stay, from exactly what the caller read. */
-  raiseRefunded(id: string, from: number | null, to: number): Promise<boolean> {
+  raiseRefunded(id: string, from: Cents | null, to: Cents): Promise<boolean> {
     const found = this.rows.get(id);
 
     if (
       found === undefined ||
       !found.booking.paid ||
-      found.booking.refundedAmount !== from
+      found.booking.refundedAmountCents !== from
     ) {
       return Promise.resolve(false);
     }
 
-    found.booking.refundedAmount = to;
+    found.booking.refundedAmountCents = to;
 
     return Promise.resolve(true);
   }
 
-  recordRefund(id: string, amount: number): Promise<boolean> {
+  recordRefund(id: string, amount: Cents): Promise<boolean> {
     const found = this.rows.get(id);
 
-    if (found === undefined || found.booking.refundedAmount !== null) {
+    if (found === undefined || found.booking.refundedAmountCents !== null) {
       return Promise.resolve(false);
     }
 
-    found.booking.refundedAmount = amount;
+    found.booking.refundedAmountCents = amount;
 
     return Promise.resolve(true);
   }
@@ -636,7 +755,7 @@ export function holdOf({
 export class FakePaymentGateway implements PublicOf<PaymentGateway> {
   readonly opened = new Map<string, OpenedPayment>();
   readonly withdrawn: string[] = [];
-  readonly refunds = new Map<string, { paymentId: string; amount: number }>();
+  readonly refunds = new Map<string, { paymentId: string; amount: Cents }>();
 
   /** Set to have every refund fail, as a provider that cannot be reached would. */
   refusing = false;
@@ -672,7 +791,7 @@ export class FakePaymentGateway implements PublicOf<PaymentGateway> {
     return Promise.resolve();
   }
 
-  refund(paymentId: string, amount: number, key: string): Promise<number> {
+  refund(paymentId: string, amount: Cents, key: string): Promise<Cents> {
     if (this.refusing) return Promise.reject(new Error("api_connection_error"));
 
     const sent = this.refunds.get(key) ?? { paymentId, amount };
@@ -683,15 +802,15 @@ export class FakePaymentGateway implements PublicOf<PaymentGateway> {
   }
 
   /** Refunds made from the dashboard whose webhook has not arrived yet, by payment. */
-  readonly refundedUnreported = new Map<string, number>();
+  readonly refundedUnreported = new Map<string, Cents>();
 
-  refundedSoFar(paymentId: string): Promise<number> {
+  refundedSoFar(paymentId: string): Promise<Cents> {
     const issued = [...this.refunds.values()]
       .filter((refund) => refund.paymentId === paymentId)
-      .reduce((total, refund) => total + refund.amount, 0);
+      .reduce((total, refund) => addCents(total, refund.amount), NO_CENTS);
 
     return Promise.resolve(
-      issued + (this.refundedUnreported.get(paymentId) ?? 0),
+      addCents(issued, this.refundedUnreported.get(paymentId) ?? NO_CENTS),
     );
   }
 
@@ -708,7 +827,7 @@ export class FakeStayEventsListener implements Required<StayEventsListener> {
   readonly scheduled: string[] = [];
 
   /** Each refund announced, with the refund total the stay recorded by then. */
-  readonly settled: { bookingId: string; refunded: number | null }[] = [];
+  readonly settled: { bookingId: string; refunded: Cents | null }[] = [];
 
   constructor(
     private readonly bookingRepository: Pick<
@@ -743,7 +862,7 @@ export class FakeStayEventsListener implements Required<StayEventsListener> {
 
     this.settled.push({
       bookingId,
-      refunded: found?.booking.refundedAmount ?? null,
+      refunded: found?.booking.refundedAmountCents ?? null,
     });
   }
 }
@@ -829,12 +948,74 @@ export class FakeNotificationService implements Pick<
 export class FakeRefundFailureRepository implements PublicOf<RefundFailureRepository> {
   readonly failures = new Map<string, RefundFailure>();
 
+  /** When each was written, a second apart, and how each was resolved. */
+  private readonly failedAt = new Map<string, string>();
+  readonly resolutions = new Map<string, string>();
+
   record(failure: RefundFailure): Promise<boolean> {
     if (this.failures.has(failure.refundId)) return Promise.resolve(false);
 
     this.failures.set(failure.refundId, failure);
+    this.failedAt.set(
+      failure.refundId,
+      new Date(
+        Date.parse("2026-10-25T12:00:00.000Z") + this.failures.size * 1_000,
+      ).toISOString(),
+    );
 
     return Promise.resolve(true);
+  }
+
+  /** Newest first; the stay is the join's, which e2e covers, so it is left `null` here. */
+  findPage(
+    status: RefundFailureStatus,
+    cursor: SetAsideCursor | null,
+    limit: number,
+  ): Promise<Page<RefundFailureView>> {
+    const matching = [...this.failures.values()]
+      .filter(
+        ({ refundId }) =>
+          this.resolutions.has(refundId) === (status === "RESOLVED"),
+      )
+      .map((failure): RefundFailureView => {
+        const resolution = this.resolutions.get(failure.refundId) ?? null;
+
+        return {
+          refundId: failure.refundId,
+          paymentId: failure.paymentId,
+          amountCents: failure.amountCents,
+          currency: failure.currency,
+          reason: failure.reason,
+          failedAt: this.failedAt.get(failure.refundId) ?? "",
+          resolvedAt: resolution === null ? null : "2026-10-26T12:00:00.000Z",
+          resolution,
+          stay: null,
+        };
+      })
+      .sort((left, right) => compare(right.failedAt, left.failedAt));
+    const start =
+      cursor === null
+        ? 0
+        : matching.findIndex(({ refundId }) => refundId === cursor.id) + 1;
+
+    return Promise.resolve({
+      items: matching.slice(start, start + limit),
+      hasMore: matching.length > start + limit,
+    });
+  }
+
+  resolve(refundId: string, resolution: string): Promise<boolean> {
+    if (!this.failures.has(refundId) || this.resolutions.has(refundId)) {
+      return Promise.resolve(false);
+    }
+
+    this.resolutions.set(refundId, resolution);
+
+    return Promise.resolve(true);
+  }
+
+  exists(refundId: string): Promise<boolean> {
+    return Promise.resolve(this.failures.has(refundId));
   }
 }
 

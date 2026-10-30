@@ -24,8 +24,10 @@ import {
 import {
   Role,
   type Booking,
+  type BookingDetail,
   type BookingPage,
   type BookingPayment,
+  type StuckStayPage,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
 import { CurrentUser } from "../../auth/decorators/current-user.decorator";
@@ -33,11 +35,14 @@ import { Roles } from "../../auth/decorators/roles.decorator";
 import { ApiErrorDto } from "../../common/dto/api-error.dto";
 import { BookingService } from "../application/booking.service";
 import {
+  BookingDetailDto,
   BookingDto,
   BookingPageDto,
   BookingPaymentDto,
   BookingQueryDto,
   CreateBookingDto,
+  StuckStayPageDto,
+  StuckStayQueryDto,
 } from "./dto/booking.dto";
 
 /**
@@ -72,8 +77,44 @@ export class BookingController {
     return this.bookingService.findPage(user, query);
   }
 
+  /**
+   * The stays whose owed refund or host payout stopped retrying. Declared before `:id`,
+   * which would otherwise take `stuck` for an id and refuse it as no uuid.
+   */
+  @Get("stuck")
+  @Roles(Role.ADMIN)
+  @ApiOkResponse({ type: StuckStayPageDto })
+  @ApiBadRequestResponse({
+    description:
+      "The cursor was not issued by this list, or was issued under the other `kind`",
+    type: ApiErrorDto,
+  })
+  findStuck(@Query() query: StuckStayQueryDto): Promise<StuckStayPage> {
+    return this.bookingService.findStuckPage(query);
+  }
+
+  /**
+   * The refund half of `POST /bookings/:id/stuck/:kind/retry`; the payout half is
+   * `StuckPayoutController`'s, since only the payout module may send a transfer.
+   */
+  @Post(":id/stuck/refund/retry")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @Roles(Role.ADMIN)
+  @ApiNoContentResponse()
+  @ApiNotFoundResponse({
+    description: "The booking does not exist",
+    type: ApiErrorDto,
+  })
+  @ApiConflictResponse({
+    description: "The booking owes no refund that was set aside",
+    type: ApiErrorDto,
+  })
+  retryStuckRefund(@Param("id", ParseUUIDPipe) id: string): Promise<void> {
+    return this.bookingService.retryStuckRefund(id);
+  }
+
   @Get(":id")
-  @ApiOkResponse({ type: BookingDto })
+  @ApiOkResponse({ type: BookingDetailDto })
   @ApiNotFoundResponse({
     description: "The booking does not exist, or the caller may not read it",
     type: ApiErrorDto,
@@ -81,7 +122,7 @@ export class BookingController {
   findOne(
     @Param("id", ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
-  ): Promise<Booking> {
+  ): Promise<BookingDetail> {
     return this.bookingService.findOne(id, user);
   }
 
@@ -154,7 +195,7 @@ export class BookingController {
 
   /**
    * Cancelled when it answers; a refund the cancellation owes is sent after it, by a job,
-   * and the booking says so in `refundOwed` until it has gone out.
+   * and the booking says so in `refundOwedCents` until it has gone out.
    */
   @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)

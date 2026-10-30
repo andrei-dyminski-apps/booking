@@ -1,18 +1,23 @@
 import { BookingStatus, type Booking, type BookingSort } from "@repo/contracts";
+import { CURRENCY, cents } from "../../payment/domain/money";
 import { encodeParts } from "../../common/paging";
 import { decodeCursor, encodeCursor } from "./booking-cursor";
 
 const booking: Booking = {
   id: "9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
   listingId: "6d0f2c1e-1a2b-4c3d-8e5f-9a0b1c2d3e4f",
-  listing: { title: "Loft above the harbour", pricePerNight: 120.5 },
+  listing: {
+    title: "Loft above the harbour",
+    pricePerNightCents: cents(12_050),
+  },
   guestId: "7e1a3d2f-2b3c-4d5e-9f6a-0b1c2d3e4f50",
   from: "2026-09-01",
   to: "2026-09-05",
   status: BookingStatus.PENDING_PAYMENT,
-  amount: 482,
-  refundedAmount: null,
-  refundOwed: null,
+  amountCents: cents(48_200),
+  currency: CURRENCY,
+  refundedAmountCents: null,
+  refundOwedCents: null,
   paid: false,
   dispute: null,
   expiresAt: "2026-08-20T12:15:00.000Z",

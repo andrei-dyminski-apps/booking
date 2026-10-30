@@ -4,6 +4,7 @@ import { App } from "supertest/types";
 import {
   Role,
   apiErrorSchema,
+  bookingDetailSchema,
   bookingPageSchema,
   bookingSchema,
   type Booking,
@@ -11,6 +12,7 @@ import {
   type CreateBookingInput,
   type CreateListingInput,
 } from "@repo/contracts";
+import { cents } from "./../src/payment/domain/money";
 import { AppModule } from "./../src/app.module";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
@@ -28,7 +30,7 @@ import {
 const listingInput: CreateListingInput = {
   title: "Loft above the harbour",
   description: "Two rooms under the roof and a wall of glass facing the water.",
-  pricePerNight: 120,
+  pricePerNightCents: cents(12_000),
   capacity: 4,
 };
 
@@ -124,7 +126,7 @@ describe("BookingController (e2e)", () => {
 
     expect(bookingSchema.parse(created.body).listing).toEqual({
       title: listingInput.title,
-      pricePerNight: listingInput.pricePerNight,
+      pricePerNightCents: listingInput.pricePerNightCents,
     });
 
     await owner.delete(`/listings/${input.listingId}`).expect(204);
@@ -413,6 +415,23 @@ describe("BookingController (e2e)", () => {
       .query({ limit: "1", cursor, sort: "oldest" })
       .expect(400);
     await guest.get("/bookings").query({ cursor: "not-a-cursor" }).expect(400);
+  });
+
+  it("records each night of a stay at its price, adding up to the amount, in the site's currency", async () => {
+    const created = bookingSchema.parse(
+      (await guest.post("/bookings").send(input).expect(201)).body,
+    );
+    const read = bookingDetailSchema.parse(
+      (await guest.get(`/bookings/${created.id}`).expect(200)).body,
+    );
+
+    expect(read.currency).toBe("usd");
+    expect(read.nights.map(({ date }) => date)).toEqual(
+      [...Array(4).keys()].map((night) => inDays(10 + night)),
+    );
+    expect(
+      read.nights.reduce((total, night) => total + night.priceCents, 0),
+    ).toBe(created.amountCents);
   });
 
   it("shows one booking to its guest, to the owner of the listing and to an admin", async () => {

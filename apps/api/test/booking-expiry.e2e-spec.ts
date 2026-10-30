@@ -72,7 +72,7 @@ describe("Booking hold expiry (e2e)", () => {
       data: {
         title: "Cabin by the lake",
         description: "One room, a stove and a jetty ten steps from the door.",
-        pricePerNight: 80,
+        pricePerNightCents: 8000,
         capacity: 2,
         ownerId: owner.id,
       },
