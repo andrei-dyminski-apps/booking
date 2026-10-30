@@ -10,6 +10,7 @@ export { conversationsApi } from "./conversations";
 export { listingsApi } from "./listings";
 export { lookupsApi } from "./lookups";
 export { notificationsApi } from "./notifications";
+export { payoutsApi } from "./payouts";
 export { reviewsApi } from "./reviews";
 export { usersApi } from "./users";
 export { waitlistApi } from "./waitlist";

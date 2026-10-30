@@ -5,21 +5,26 @@ export { proxy } from "#_app/proxy";
 /**
  * The one thing that cannot move there with it. Next.js parses this object out of the
  * source of this very file while building — before a single import is evaluated — so it
- * has to be spelled here and spelled with literals: a re-export is refused outright, and
- * `ROUTES.profile` would be an unresolved name at that moment.
+ * has to be spelled here and spelled with literals.
  *
- * `/:path*` matches the route itself and everything under it, so a nested page is
- * guarded the day it appears.
+ * Every page, because every page carries the Content-Security-Policy and its nonce; which
+ * of them a stranger is sent away from is decided in the function (`PROTECTED`). Left out
+ * are the BFF, Next's own static files and the router's prefetches, none of which is a
+ * document a policy applies to. `api` is the segment, not the prefix: `/apiary` would be a
+ * page like any other.
+ *
+ * A prefetch therefore skips the cookie gate as well, and costs a render instead of a
+ * redirect: the page behind it still calls `requireUser`, and the shell only links a
+ * protected section for somebody signed in.
  */
 export const config = {
   matcher: [
-    "/profile/:path*",
-    "/bookings/:path*",
-    "/waitlist/:path*",
-    "/messages/:path*",
-    "/dashboard/:path*",
-    "/admin/:path*",
-    "/guests/:path*",
-    "/notifications/:path*",
+    {
+      source: "/((?!api(?:/|$)|_next/static|_next/image|favicon.ico).*)",
+      missing: [
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" },
+      ],
+    },
   ],
 };

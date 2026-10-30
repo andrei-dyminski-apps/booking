@@ -44,8 +44,10 @@ export async function createBookingAction(
     };
   }
 
+  let id: string;
+
   try {
-    await bookingsApi.create(parsed.data);
+    id = (await bookingsApi.create(parsed.data)).id;
   } catch (error) {
     // Somebody else holds some of these nights, and the calendar the visitor chose them
     // from did not know: it is read again, so the taken nights are drawn and the form
@@ -72,5 +74,7 @@ export async function createBookingAction(
   // clears is the router cache in their browser, which would otherwise show the list as
   // it was a moment before they added to it.
   refresh();
-  redirect(ROUTES.bookings);
+  // To the stay's own page, which is where it is paid for: its form asks for the payment's
+  // secret from the browser, so nothing about the payment travels through this redirect.
+  redirect(ROUTES.booking(id));
 }

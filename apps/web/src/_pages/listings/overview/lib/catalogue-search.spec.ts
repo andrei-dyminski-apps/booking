@@ -340,7 +340,7 @@ describe("activeFilters", () => {
       guests: "3",
     });
 
-    expect(price?.label).toBe("From 120.50 a night");
+    expect(price?.label).toBe("From $120.50 a night");
     expect(price?.href).toBe("/listings?guests=3");
   });
 

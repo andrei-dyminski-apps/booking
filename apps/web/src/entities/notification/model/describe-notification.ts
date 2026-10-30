@@ -5,7 +5,7 @@ import {
   type Notification,
 } from "@repo/contracts";
 import { ROUTES } from "#shared/config";
-import { filtersHref, formatDay } from "#shared/lib";
+import { filtersHref, formatDay, formatMoney } from "#shared/lib";
 
 /** A notification as a person reads it: what happened, the detail, and where to look. */
 export type NotificationText = {
@@ -56,6 +56,87 @@ export function describeNotification(
           : "A booking request lapsed",
         detail: `${data.listingTitle} · ${stayDates(data)}`,
         href: asGuest ? ROUTES.bookings : listingStays(data.listingId),
+      };
+    }
+    case NotificationType.BOOKING_CONFIRMED: {
+      const { data } = notification;
+      const asGuest = data.recipient === StayParty.GUEST;
+
+      return {
+        title: asGuest ? "Your stay is confirmed" : "A stay was paid for",
+        detail: `${data.listingTitle} · ${stayDates(data)}`,
+        href: asGuest
+          ? ROUTES.booking(data.bookingId)
+          : listingStays(data.listingId),
+      };
+    }
+    case NotificationType.PAYMENT_REFUNDED: {
+      const { data } = notification;
+
+      return {
+        title: "Your payment was refunded",
+        detail: `${formatMoney(data.amount)} · ${data.listingTitle}`,
+        href: ROUTES.booking(data.bookingId),
+      };
+    }
+    case NotificationType.PAYMENT_DISPUTED: {
+      const { data } = notification;
+
+      return {
+        title: "A payment was disputed",
+        detail: `${data.listingTitle} · ${stayDates(data)} · the payout waits for the outcome`,
+        href: ROUTES.booking(data.bookingId),
+      };
+    }
+    case NotificationType.PAYOUT_SENT: {
+      const { data } = notification;
+
+      return {
+        title: "You were paid for a stay",
+        detail: `${formatMoney(data.amount)} · ${data.listingTitle} · ${stayDates(data)}`,
+        href: ROUTES.payouts,
+      };
+    }
+    // The four below are told to every admin: money that waits for a person. The stay's
+    // own page is where an admin reads its payment; a failure that names none has nowhere
+    // on this site to lead, so it leads back to the feed.
+    case NotificationType.REFUND_FAILED: {
+      const { data } = notification;
+
+      return {
+        title: "A refund did not reach the guest",
+        detail: `${formatMoney(data.amount)} · ${data.reason ?? "no reason given"} · ${data.refundId}`,
+        href:
+          data.bookingId === null
+            ? ROUTES.notifications
+            : ROUTES.booking(data.bookingId),
+      };
+    }
+    case NotificationType.PAYMENT_EVENT_FAILED: {
+      const { data } = notification;
+
+      return {
+        title: "A payment event was set aside",
+        detail: `${data.eventType} · ${data.eventId} · ${data.error}`,
+        href: ROUTES.notifications,
+      };
+    }
+    case NotificationType.CANCELLATION_REFUND_FAILED: {
+      const { data } = notification;
+
+      return {
+        title: "A cancellation's refund is stuck",
+        detail: data.error,
+        href: ROUTES.booking(data.bookingId),
+      };
+    }
+    case NotificationType.PAYOUT_FAILED: {
+      const { data } = notification;
+
+      return {
+        title: "A host's payout is stuck",
+        detail: data.error,
+        href: ROUTES.booking(data.bookingId),
       };
     }
     case NotificationType.REVIEW_RECEIVED: {

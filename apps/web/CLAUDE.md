@@ -23,6 +23,8 @@ apps/web/
     listings/[id]/loading.tsx
     bookings/page.tsx
     bookings/loading.tsx
+    bookings/[id]/page.tsx    # one stay: its payment, its status until the webhook lands, cancelling
+    bookings/[id]/loading.tsx
     waitlist/page.tsx         # one's own ranges, those on one's listings; an admin's, all of them
     waitlist/loading.tsx
     messages/page.tsx         # the caller's threads; a guest's and a host's, never an admin's
@@ -35,6 +37,8 @@ apps/web/
     dashboard/listings/new/loading.tsx  # the form's skeleton, not the dashboard's grid
     dashboard/listings/[id]/page.tsx
     dashboard/listings/[id]/loading.tsx
+    dashboard/payouts/page.tsx  # Stripe's embedded onboarding, then the host's payouts
+    dashboard/payouts/loading.tsx
     admin/page.tsx            # every listing on offer, editable — the admin's section
     admin/loading.tsx
     admin/listings/[id]/page.tsx
@@ -51,7 +55,7 @@ apps/web/
     error.tsx                 # the boundary under the shell; "use client" + re-export
     global-error.tsx          # the boundary above it, for a shell that cannot render
     api/[...path]/route.ts    # the BFF: one line, the four methods of the proxy
-  proxy.ts                    # what Next.js 16 calls middleware; re-export + the matcher
+  proxy.ts                    # what Next.js 16 calls middleware; re-export + the matcher (every page)
   src/
     _app/                     # the shell, in segments — the app layer has no `ui`
       layout/root-layout.tsx  # <html>, <body>, metadata, the fonts
@@ -72,9 +76,10 @@ apps/web/
       layout/count-badge.tsx  # the pill both unread counts are drawn in
       layout/global-error.tsx # the document a failed shell render is replaced with
       layout/index.ts
-      providers/providers.tsx # theme + toaster, the only client boundary around the tree
+      providers/providers.tsx # theme, toaster and the TanStack Query client: the only client boundary around the tree
       providers/index.ts
-      proxy/proxy.ts          # the cookie gate in front of the protected routes
+      proxy/proxy.ts          # the cookie gate in front of the protected routes, and the CSP nonce of every page
+      proxy/content-security-policy.ts  # the policy, with the request's nonce
       proxy/index.ts
       bff/api-proxy.ts        # the browser's only way to the API; re-scopes the session
       bff/index.ts
@@ -123,22 +128,30 @@ apps/web/
         listing/lib/months.ts             # the booked ranges laid out as month grids; whether a stay calls for the waitlist
         listing/lib/months.spec.ts
         listing/index.ts
-      bookings/ui/bookings-page.tsx       # one page: a user's Trips and Hosting, an admin's everything
-      bookings/ui/side-tabs.tsx           # …the two halves of a user's stays, as links over `?side=HOST`
-      bookings/ui/bookings-toolbar.tsx    # one row: the filters, the ordering, the chips
-      bookings/ui/bookings-filters-dialog.tsx  # every filter, in a modal
-      bookings/ui/booking-card.tsx
-      bookings/ui/booking-status-badge.tsx
-      bookings/ui/cancel-booking-button.tsx
-      bookings/ui/review-booking-button.tsx  # one half of a finished stay, in a dialog
-      bookings/ui/rating-field.tsx        # …its rating, picked as stars: a radio per star
-      bookings/ui/bookings-skeleton.tsx
-      bookings/api/read-bookings-page.ts  # the personal read, and the cursor it refuses
-      bookings/api/cancel-booking-action.ts
-      bookings/api/review-booking-action.ts
-      bookings/lib/bookings-search.ts     # searchParams onto the contract's query
-      bookings/lib/bookings-search.spec.ts
-      bookings/index.ts
+      bookings/                         # a group, not a slice: the /bookings routes
+        overview/ui/bookings-page.tsx       # one page: a user's Trips and Hosting, an admin's everything
+        overview/ui/side-tabs.tsx           # …the two halves of a user's stays, as links over `?side=HOST`
+        overview/ui/bookings-toolbar.tsx    # one row: the filters, the ordering, the chips
+        overview/ui/bookings-filters-dialog.tsx  # every filter, in a modal
+        overview/ui/booking-card.tsx
+        overview/ui/cancel-booking-button.tsx
+        overview/ui/review-booking-button.tsx  # one half of a finished stay, in a dialog
+        overview/ui/rating-field.tsx        # …its rating, picked as stars: a radio per star
+        overview/ui/bookings-skeleton.tsx
+        overview/api/read-bookings-page.ts  # the personal read, and the cursor it refuses
+        overview/api/cancel-booking-action.ts
+        overview/api/review-booking-action.ts
+        overview/lib/bookings-search.ts     # searchParams onto the contract's query
+        overview/lib/bookings-search.spec.ts
+        overview/index.ts
+        booking/ui/booking-page.tsx       # one stay; the publishable key handed to its guest's hold
+        booking/ui/booking-live.tsx       # the booking in the query cache, polled until the webhook moves it
+        booking/ui/payment-form.tsx       # opens the payment from the browser, Stripe Elements; success starts the poll and declares nothing; a Stripe.js that never loaded says so
+        booking/ui/cancel-stay-button.tsx # the cancel as a mutation over the action, open with the reason on a refusal
+        booking/ui/booking-skeleton.tsx
+        booking/api/booking-query.ts      # the query keys and the browser's read, shared by the poll and the cancel
+        booking/api/cancel-stay-action.ts # cancels, then frees the nights in the Data Cache
+        booking/index.ts
       waitlist/ui/waitlist-page.tsx       # one page: a user's own ranges and the ones on their listings, an admin's everything
       waitlist/ui/side-tabs.tsx           # …the two halves of a user's waitlist, as links over `?side=HOST`
       waitlist/ui/own-entries.tsx         # the ranges the caller waits for, answered whole
@@ -165,6 +178,7 @@ apps/web/
         conversation/index.ts
       dashboard/                        # a group, not a slice: the /dashboard routes
         overview/ui/listings-page.tsx     # a user's own listings, read by the session
+        overview/ui/payouts-notice.tsx    # "Set up payouts", streamed; degrades to nothing
         overview/ui/listings-skeleton.tsx
         overview/index.ts
         listing-new/ui/new-listing-page.tsx
@@ -176,6 +190,10 @@ apps/web/
         listing-edit/ui/edit-listing-skeleton.tsx
         listing-edit/api/own-listing.ts   # the row of this screen, or a 404
         listing-edit/index.ts
+        payouts/ui/payouts-page.tsx       # the account's status, read on the server
+        payouts/ui/payouts-panel.tsx      # Connect embedded components, made after hydration
+        payouts/ui/payouts-skeleton.tsx
+        payouts/index.ts
       admin/                            # a group, not a slice: the /admin routes
         overview/ui/listings-page.tsx     # every offered listing, filtered in the URL
         overview/ui/listings-toolbar.tsx
@@ -234,12 +252,22 @@ apps/web/
       delete-review/ui/delete-review-button.tsx  # the admin's, on a listing's reviews and a guest's
       delete-review/api/delete-review-action.ts
       delete-review/index.ts
+      cancel-booking/model/may-cancel.ts  # whether "Cancel" is offered — every rule the API refuses by: a begun stay, a lapsed hold, an open dispute
+      cancel-booking/model/may-cancel.spec.ts
+      cancel-booking/model/cancellation-refund.ts  # what cancelling gives back, worded for the guest, an admin or nobody
+      cancel-booking/model/cancellation-refund.spec.ts
+      cancel-booking/ui/cancel-stay-warning.tsx  # the dialog's warning; each page sends the request its own way
+      cancel-booking/index.ts
       logout/ui/logout-button.tsx         # the browser's call: only it holds a refresh token
       logout/index.ts
       listing-search/model/listing-filters.ts  # the catalogue query's chips, orderings, labels
       listing-search/ui/listing-filter-fields.tsx  # …and its boxes: both listings dialogs
       listing-search/index.ts
     entities/                 # a domain model a second page also needs
+      booking/model/status-labels.ts  # the four statuses named once: the filter, the card and the stay's page
+      booking/model/hold.ts   # whether a hold still keeps its nights, and whether it waits on the viewer's payment
+      booking/ui/booking-status-badge.tsx
+      booking/index.ts
       listing/ui/listing-card.tsx  # a listing to whoever may edit it: the dashboard and the admin's
       listing/index.ts
       user/model/roles.ts     # the roles named for a person: both admin screens read them
@@ -252,6 +280,7 @@ apps/web/
       conversation/model/sides.ts  # "You" or the other person's name: the list and the thread both say who wrote
       conversation/index.ts
       notification/model/describe-notification.ts  # every kind as a title, a detail and a link
+      notification/model/describe-notification.spec.ts
       notification/ui/notification-item.tsx  # one row, marking itself read on the way out
       notification/index.ts
     shared/                   # no domain knowledge: transport, routes, config
@@ -266,6 +295,7 @@ apps/web/
       api/reviews.ts          # reviewsApi — a listing's (public), a guest's (scoped), write, remove
       api/keyset-page.ts      # a stale cursor onto null, the one both paged reads share
       api/notifications.ts    # notificationsApi — the caller's feed and its two marks
+      api/payouts.ts          # payoutsApi — the caller's payout account and its component session
       api/waitlist.ts         # waitlistApi — the caller's own, read whole, join and leave; the demand, paged
       api/server-events.ts    # the tab's one EventSource on /api/events, shared by listeners
       api/index.ts
@@ -273,6 +303,7 @@ apps/web/
       config/routes.ts        # ROUTES — every path of this application
       config/cache-tags.ts    # the names the cached public reads are stored under
       config/cache-lifetimes.ts  # the one lifetime the API's own clock decides
+      config/stripe.ts        # stripePublishableKey() — read on the server, handed to the form; the tokens Stripe's iframes are drawn in
       config/index.ts
       lib/form-errors.ts      # zod issues, API errors and field state onto one shape
       lib/use-action-form.ts  # the contract, react-hook-form and a Server Action, tied
@@ -335,10 +366,10 @@ The rules of the methodology, as they apply here:
   where the check can see it.
 - **Pages are grouped by the segment of their route** once it is shared: `_pages/admin/*`
   holds the `/admin` screens, `_pages/dashboard/*` the `/dashboard` ones, and
-  `_pages/listings/*` and `_pages/messages/*` a list and the row it opens. Inside a group
+  `_pages/listings/*`, `_pages/messages/*` and `_pages/bookings/*` a list and the row it opens. Inside a group
   a slice is named by the rest of its route, and `overview` is the group's own root in
   each — `/admin`, `/dashboard`, `/listings`, `/messages` themselves. A bare `[id]` is
-  named by what it opens: `listings/listing`, `messages/conversation`, as `/admin/users/[id]`
+  named by what it opens: `listings/listing`, `messages/conversation`, `bookings/booking`, as `/admin/users/[id]`
   is `admin/user`. The group already says whose screen it is, so the files inside do not
   repeat it: `admin/users/ui/users-page.tsx`, not `admin-users-page.tsx`, and
   `messages/overview/ui/conversations-page.tsx`, not `messages-page.tsx`. Two groups have no shared segment and share a purpose
@@ -640,14 +671,15 @@ Two cookie scopes shape everything below: the access token is scoped to `/` and 
 refresh token to `/api/auth`. So a page render sees a visitor's access token and never
 their refresh token, and only the browser can turn an expired session into a live one.
 
-- **`proxy.ts` is a gate, not the check.** It answers one question — is there an access
-  cookie — and redirects to `/login?next=…` when there is not. It cannot do more: the
+- **`proxy.ts` is a gate, not the check.** For a protected route it answers one question —
+  is there an access cookie — and redirects to `/login?next=…` when there is not. It cannot do more: the
   cookie is httpOnly and only the API holds the secret that would verify it. The page
   behind it therefore still reads `/auth/me` and still handles a 401.
-- **The matcher is a literal in `proxy.ts`.** Next.js parses it out of that file while
-  building, before any import is evaluated: a re-exported `config` is refused outright and
-  `ROUTES.profile` would be an unresolved name. The function itself lives in
-  `src/_app/proxy` like the rest of the shell. A new protected route is a line there.
+- **The matcher is a literal in `proxy.ts`, and it is every page.** Next.js parses it out
+  of that file while building, before any import is evaluated, so it cannot name `ROUTES`.
+  It covers every page because every page carries the Content-Security-Policy and its
+  nonce (below); which pages a stranger is sent away from is `PROTECTED` in
+  `src/_app/proxy/proxy.ts`. A new protected route is a line there.
 - **A page with nothing to show a stranger calls `requireUser(next)`**, not `currentUser`
   followed by a `redirect` of its own. Where to come back to is an argument because a
   server render is not told its own path.
@@ -739,7 +771,7 @@ this side decided.
   scoped to the caller, and an admin has no listings of their own to put on it.
 - **The proxy cannot help.** It sees an httpOnly cookie it cannot open, so the gate in
   front of `/dashboard` is the same "is there an access token" it performs for `/profile`.
-  A new protected route is still a line in the matcher of `proxy.ts`.
+  A new protected route is still a line in `PROTECTED`.
 - **The header offers, it does not permit** (`_app/layout/header.tsx`). The link is
   rendered for the role that has a use for it; the section behind it answers the same way
   whether or not the link was there. So does a button inside a page: the "Cancel" on a
@@ -951,7 +983,7 @@ The catalogue's filters live in the address bar and nowhere else. There is no fi
 in a component, because there is nothing for it to hold: the server renders from
 `searchParams`, and every control on the screen either submits a form or is a link.
 
-**The stays screen is the same shape over a different list** (`_pages/bookings`), and what
+**The stays screen is the same shape over a different list** (`_pages/bookings/overview`), and what
 the two share sits in `shared`. In `shared/ui`: the box of a search form (`FilterField`),
 the `GET` form of the dialog (`FilterForm`), the chips that take a filter off
 (`FilterChips`), the ordering box (`SortSelect`), the forwards-only pager (`Pager`) and
@@ -1215,12 +1247,91 @@ Where a mutation goes:
 | Opens a session                                         | Server Action                 |
 | Changes something the server renders                    | Server Action                 |
 | Needs a credential scoped away from the page (a logout) | the client, over `shared/api` |
-| Lives in a client screen with optimistic UI or polling  | the client, over `shared/api` |
+| Lives in a client screen that polls                     | the client, over `shared/api` |
 
 A Server Action is the default, and it is what the `api/` segment of a page slice holds.
-The client path is for what a round trip cannot express — an optimistic update with a
-rollback, a poll for a webhook that has not landed yet — and it goes through
-`shared/api` like every other call.
+The client path is for what a round trip cannot express — a poll for a webhook that has
+not landed yet — and it goes through `shared/api` like every other call. A write on such a
+screen is still an action, run as a mutation so the query cache hears of it.
+
+**The stay's own page (`_pages/bookings/booking`) is that client path, and the only one.**
+It is what brought TanStack Query in (`_app/providers`), and the reasons are two:
+
+- **A payment is confirmed by Stripe's webhook, not by the browser that paid.**
+  `confirmPayment` succeeding in the browser — or the bank sending the visitor back with
+  `redirect_status` — only starts `refetchInterval` on the booking, which stops once the
+  status moves. Declaring the stay paid off the browser's word would be trusting a URL
+  anybody can type. The poll is bounded by the hold itself: unpaid, it lapses and `EXPIRED`
+  is a change of status too. It also runs while a cancellation's refund is owed, until the
+  job sends it. Either wait slows down past its first minute (`pollDelay`) — a webhook or a
+  refund that late is stuck, and a tab left open must not ask every two seconds forever.
+  The form asks Stripe for the intent's status before it draws the boxes: the API answers
+  the same secret while the hold is pending, so a reload between a payment confirmed in
+  place and its webhook would otherwise offer "Pay" for an intent already paid. Such an
+  intent starts the poll instead. What Stripe appends on the way back from a bank —
+  `redirect_status` and the intent's id and secret — is read once and taken out of the URL
+  (`history.replaceState`) whatever the status says, so a reload does not repeat a bank's
+  old answer and the secret stays out of the history.
+- **A hold whose payment is on its way is not offered "Cancel" on this page — a courtesy of
+  the tab, not a rule about the booking.** `paid` is state of the tab (`bankAnswer`, or
+  `onPaid`), and neither the server nor the list knows it: until the webhook lands the row
+  is a plain `PENDING_PAYMENT`. So the list, a second tab and a reload that lost the state
+  offer the button anyway, and `mayCancel` cannot carry the condition. Pressing it is safe
+  — the API cancels the hold, tries to withdraw the intent and, when it has already
+  succeeded, refunds it in full from its webhook and tells the guest (the "unheld" path,
+  covered by `refunds a payment that lands on a cancelled hold` in
+  `apps/api/test/payment.e2e-spec.ts`). What the hidden button spares is a `Cancelled`
+  badge followed by a `Payment refunded` notice, nothing that is owed.
+- **`processing` counts as paid, and only because every method offered is instant.** A
+  `redirect_status` or an intent in `processing` takes the form away until the webhook
+  (`bankAnswerOf`, `PAID`). The API opens the intent with `INSTANT_PAYMENT_METHODS` alone,
+  for which `processing` is a moment before `succeeded`; a method that settles over days
+  could still fail after it and leave the guest with no form for the rest of the hold. So a
+  method like that added on the API's side is a change to this page first.
+- **Cancelling there goes through the same cache, and is not optimistic.** A cancellation
+  decides a refund, so the page says `Cancelled` only once the API has: the dialog stays open
+  while the request is on its way and with the reason in it on a refusal, as the list's
+  does, and a success reads the booking again. The request itself is `cancelStayAction`,
+  run as the mutation: a browser call can invalidate nothing in the Data Cache, and an
+  action that only invalidated would be an endpoint for emptying the catalogue's cache in a
+  loop. So the action cancels, and frees the nights — its listing's availability, the
+  catalogue, the router — only after a cancellation it made itself, for the listing the
+  API's answer names. A refusal is returned rather than thrown, since what an action throws
+  reaches the browser with its message hidden. What the two
+  dialogs share — to whom "Cancel" is offered, the refund it is worded with, the warning —
+  is `features/cancel-booking`; how the request is sent stays with each page, and so does
+  whatever only the page knows (the tab's `paid`, above). Whether a hold
+  still keeps its nights, and whether it waits on the viewer to pay, is `entities/booking`
+  (`isHoldOpen`, `awaitsPaymentFrom`): the list's "Pay", the page's form and the offer to
+  cancel all read the deadline there, so a hold past it is offered neither anywhere.
+
+**A host's payouts are Stripe's embedded components** (`_pages/dashboard/payouts`): the
+onboarding form until the account can receive transfers, then the payouts list, with the
+notification banner above both. The Connect instance is made in an effect — it injects a
+script and reads `window` — and fetches its own client secret through the BFF
+(`payoutsApi.session`) whenever its session runs out, so the secret is never part of a
+server render. The status the page opens on is read on the server, off the row; while
+onboarding is unfinished the panel asks the API to check with Stripe
+(`payoutsApi.refresh`) when it opens and when the form is left, and re-renders the page once
+the answer is that the account is enabled.
+The dashboard shows a "Set up payouts" notice above the listings until the account is
+enabled — bookings are taken either way.
+
+**The site sends a `Content-Security-Policy`** (`src/_app/proxy/content-security-policy.ts`,
+set by the proxy on every page): everything from this origin, plus Stripe's hosts for
+scripts, frames, API calls and images, and a script nonce minted per request instead of
+`'unsafe-inline'`. Next.js puts the nonce on its own scripts by reading the policy off the
+request; the root layout reads `x-nonce` and hands it to `next-themes`, the one inline
+script of this site's own. Every page renders per request already — the shell reads the
+session — so the nonce costs no static page. A new third-party origin is a line in the
+policy, and a new inline script needs the nonce, or the browser refuses it.
+
+The secret Elements pays with is asked for by the form, from the browser
+(`bookingsApi.payment`, `POST /bookings/:id/payment`), never by a render: opening it is a
+write at Stripe, and a render runs again on every refresh. The page hands the form only
+`stripePublishableKey()` — a runtime variable of this server like `API_ORIGIN`, so
+switching Stripe accounts is a restart. A new hold lands on this page:
+`createBookingAction` redirects there.
 
 How the result is made visible, by what kind of data it is:
 
@@ -1274,7 +1385,7 @@ apps/web/.next/cache`, or a new deploy). After a re-seed that is the listings an
   carry `next: { revalidate: HOLD_SWEEP_REVALIDATE, tags }` — a minute, which is the
   interval of the sweep behind that queue rather than a number picked for the feel of it.
 - **That minute is named in `shared/config/cache-lifetimes.ts`**, and for the same reason
-  the tags next door are: it is `SWEEP_INTERVAL_MS` of `apps/api/src/booking/booking-expiry.queue.ts`
+  the tags next door are: it is `SWEEP_INTERVAL_MS` of `apps/api/src/booking/infrastructure/booking-expiry.queue.ts`
   read from this side, and nothing across the wire checks that the two still agree — a
   literal at each call site is one more place to miss when that interval changes. Only a
   lifetime the API's own clock decides goes in there. A number chosen by this side for one
@@ -1295,7 +1406,7 @@ A mutation nobody can undo — deleting a row, revoking access, anything the API
 with a `DELETE` — asks first, in an `AlertDialog` from `@repo/ui`
 (`features/delete-listing/ui/delete-listing-button.tsx`,
 `features/delete-review/ui/delete-review-button.tsx`,
-`_pages/bookings/ui/cancel-booking-button.tsx` and `_pages/admin/user/ui/block-button.tsx`). Not a second
+`_pages/bookings/overview/ui/cancel-booking-button.tsx` and `_pages/admin/user/ui/block-button.tsx`). Not a second
 button that takes the place of the first: a modal takes the focus and refuses a click
 outside itself, which is what stops the confirmation being hit by the hand that was
 already moving.
@@ -1502,7 +1613,7 @@ component:
 - A parser of untrusted input — `shared/lib/next-path.ts` (where a visitor is sent after
   signing in), the `Set-Cookie` reader inside `shared/api/session-cookies.ts` (what
   becomes a cookie of this origin) and the two searches — `_pages/listings/overview/lib/catalogue-search.ts`
-  and `_pages/bookings/lib/bookings-search.ts`
+  and `_pages/bookings/overview/lib/bookings-search.ts`
   (`searchParams` onto the contract's query: what a blank box means, what a repeated
   parameter means, that the link the page writes parses back to the search it came from,
   that the address it redirects to is one it would leave alone — a canonical form that is

@@ -2,6 +2,8 @@ export { badgeCount } from "./badge-count";
 export {
   addDays,
   dayLabelOrAny,
+  dayOf,
+  dayStart,
   formatDate,
   formatDay,
   formatMoment,

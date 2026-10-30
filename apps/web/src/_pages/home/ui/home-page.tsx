@@ -81,7 +81,7 @@ const HIGHLIGHTS: {
   {
     title: "A hold, then a stay",
     description:
-      "Booking takes the nights off the calendar for fifteen minutes. There is nothing to pay with yet, so the hold lapses on its own and they go back on offer.",
+      "Booking takes the nights off the calendar for fifteen minutes while you pay. Paid, the stay is confirmed; unpaid, the hold lapses on its own and the nights go back on offer.",
     icon: ClockIcon,
   },
   {

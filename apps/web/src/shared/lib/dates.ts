@@ -36,6 +36,20 @@ export function today(): string {
   return format(new Date(), DAY_FORMAT, IN_UTC);
 }
 
+/**
+ * The day an instant falls on, in UTC — `today()` for a moment handed over rather than read
+ * off this runtime's clock, so a client component can move on from the server's.
+ */
+export function dayOf(moment: string): string {
+  return format(parseISO(moment), DAY_FORMAT, IN_UTC);
+}
+
+/** The instant a day begins: midnight UTC, the moment it names. */
+export function dayStart(day: string): Date {
+  // A plain `Date`: a `TZDate` spells even its ISO string its own way.
+  return new Date(startOf(day).getTime());
+}
+
 export function addDays(day: string, days: number): string {
   return format(addDaysTo(startOf(day), days), DAY_FORMAT);
 }

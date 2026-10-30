@@ -1,9 +1,11 @@
 import { z } from "zod";
 import {
   bookingPageSchema,
+  bookingPaymentSchema,
   bookingSchema,
   type Booking,
   type BookingPage,
+  type BookingPayment,
   type BookingQuery,
   type CreateBookingInput,
 } from "@repo/contracts";
@@ -37,6 +39,17 @@ export const bookingsApi = {
       path: `/bookings/${encodeURIComponent(id)}`,
       schema: bookingSchema,
       read,
+    }),
+
+  /**
+   * What the guest pays for a hold with — the PaymentIntent's secret. A `POST`: the first
+   * call opens the intent at Stripe, and every call after it answers the same one.
+   */
+  payment: (id: string): Promise<BookingPayment> =>
+    apiRequest({
+      method: "POST",
+      path: `/bookings/${encodeURIComponent(id)}/payment`,
+      schema: bookingPaymentSchema,
     }),
 
   create: (input: CreateBookingInput): Promise<Booking> =>
