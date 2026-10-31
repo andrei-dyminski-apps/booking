@@ -1,7 +1,8 @@
 import {
   HostAccountStatus,
+  BASIS_POINTS,
   PAYOUT_DELAY_HOURS,
-  PLATFORM_FEE_RATE,
+  PLATFORM_FEE_BPS,
   Role,
 } from "@repo/contracts";
 import { payoutsApi, requireRole } from "#shared/api";
@@ -23,7 +24,9 @@ export const PayoutsPage = async () => {
   await requireRole(Role.USER, ROUTES.payouts);
 
   const { status } = await payoutsApi.account();
-  const feePercent = Math.round(PLATFORM_FEE_RATE * 100);
+  // Divided once, by the basis points in a percent: a rate taken as a fraction and then
+  // multiplied back is 14.499999999999998 for 1450.
+  const feePercent = PLATFORM_FEE_BPS / (BASIS_POINTS / 100);
 
   return (
     <div className="flex flex-col gap-6">

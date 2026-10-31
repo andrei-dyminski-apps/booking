@@ -7,7 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookingStatus,
   freeCancellationUntil,
-  type Booking,
+  type BookingDetail,
   type User,
 } from "@repo/contracts";
 import {
@@ -28,6 +28,7 @@ import {
   formatMoment,
   formatMoney,
   nightsBetween,
+  nightsBreakdown,
 } from "#shared/lib";
 import { bookingKey, readBooking } from "../api/booking-query";
 import { CancelStayButton } from "./cancel-stay-button";
@@ -83,7 +84,7 @@ export const BookingLive = ({
   bankAnswer,
   now,
 }: {
-  initial: Booking;
+  initial: BookingDetail;
   viewer: User;
   /** The server's clock at the render, which the refund note and `mayCancel` start from. */
   now: string;
@@ -131,7 +132,7 @@ export const BookingLive = ({
       const data = query.state.data;
       const waiting =
         ((paid || lapsed) && data?.status === BookingStatus.PENDING_PAYMENT) ||
-        (data?.refundOwed ?? null) !== null;
+        (data?.refundOwedCents ?? null) !== null;
 
       if (!waiting) {
         waitingSince.current = null;
@@ -229,7 +230,7 @@ export const BookingLive = ({
             {countOf(nights, "night")}
           </span>
           <span className="font-medium text-foreground">
-            {formatMoney(booking.amount)}
+            {formatMoney(booking.amountCents, booking.currency)}
           </span>
         </CardDescription>
         <CardAction>
@@ -238,6 +239,14 @@ export const BookingLive = ({
       </CardHeader>
 
       <CardContent className="flex flex-col gap-4">
+        {/* What each night was charged at when the hold was taken — a stay taken before the
+            nights were recorded has none, and shows its total alone. */}
+        {booking.nights.length > 0 && (
+          <p className="text-sm text-muted-foreground">
+            {nightsBreakdown(booking.nights, booking.currency)}
+          </p>
+        )}
+
         {pending && paid && (
           <p
             role="status"
@@ -282,17 +291,17 @@ export const BookingLive = ({
           </p>
         )}
 
-        {booking.refundedAmount !== null && (
+        {booking.refundedAmountCents !== null && (
           <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-            {formatMoney(booking.refundedAmount)} was refunded to the card it
-            was paid with.
+            {formatMoney(booking.refundedAmountCents, booking.currency)} was
+            refunded to the card it was paid with.
           </p>
         )}
 
-        {booking.refundOwed !== null && (
+        {booking.refundOwedCents !== null && (
           <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-            A refund of {formatMoney(booking.refundOwed)} is on its way to the
-            card it was paid with.
+            A refund of {formatMoney(booking.refundOwedCents, booking.currency)}{" "}
+            is on its way to the card it was paid with.
           </p>
         )}
       </CardContent>

@@ -95,13 +95,19 @@ export const BookingCard = ({
             the payment charges, and one an owner's later change of price does not restate.
           */}
           <span className="font-medium text-foreground">
-            {formatMoney(booking.amount)}
+            {formatMoney(booking.amountCents, booking.currency)}
           </span>
-          {booking.refundedAmount !== null && (
-            <span>{formatMoney(booking.refundedAmount)} refunded</span>
+          {booking.refundedAmountCents !== null && (
+            <span>
+              {formatMoney(booking.refundedAmountCents, booking.currency)}{" "}
+              refunded
+            </span>
           )}
-          {booking.refundOwed !== null && (
-            <span>{formatMoney(booking.refundOwed)} refund on its way</span>
+          {booking.refundOwedCents !== null && (
+            <span>
+              {formatMoney(booking.refundOwedCents, booking.currency)} refund on
+              its way
+            </span>
           )}
         </CardDescription>
         <CardAction className="flex items-center gap-2">

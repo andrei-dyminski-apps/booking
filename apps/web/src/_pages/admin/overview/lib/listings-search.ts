@@ -2,6 +2,7 @@ import { listingQuerySchema, type ListingQuery } from "@repo/contracts";
 import {
   listingFilterChips,
   listingSortOptions,
+  parseListingQuery,
   withoutListingFilters,
   type ListingFilterValues,
 } from "#features/listing-search";
@@ -10,7 +11,6 @@ import {
   filtersHref,
   searchParamsHref,
   singleParam,
-  toFieldErrors,
   type FieldErrors,
 } from "#shared/lib";
 import type { FilterChip, SortOption } from "#shared/ui";
@@ -57,7 +57,7 @@ export function readListingsSearch(
   };
 
   const cursor = singleParam(params.cursor);
-  const parsed = listingQuerySchema.safeParse({ ...values, cursor });
+  const { query, errors } = parseListingQuery(values, cursor);
   const owner = listingQuerySchema.shape.ownerId.safeParse(values.ownerId);
   const ownerId = owner.success ? (owner.data ?? null) : null;
 
@@ -65,15 +65,7 @@ export function readListingsSearch(
   const canonical =
     href === searchParamsHref(ROUTES.admin, params) ? null : href;
 
-  return parsed.success
-    ? { query: parsed.data, ownerId, errors: {}, values, canonical }
-    : {
-        query: null,
-        ownerId,
-        errors: toFieldErrors(parsed.error.issues),
-        values,
-        canonical,
-      };
+  return { query, ownerId, errors, values, canonical };
 }
 
 /** A link to the admin's listings carrying these filters, and the next page when a cursor is handed over. */

@@ -30,14 +30,17 @@ import { cn } from "@repo/ui/lib/utils";
  * re-renders on every keystroke, and that has to be this line rather than the form around
  * it — the same reason `FormField` reads its own state through `useFormState({ name })`.
  */
-export const CharacterCount = <Values extends FieldValues>({
+export const CharacterCount = <
+  Values extends FieldValues,
+  Output extends FieldValues = Values,
+>({
   id,
   control,
   name,
   limit,
 }: {
   id: string;
-  control: Control<Values>;
+  control: Control<Values, unknown, Output>;
   name: Path<Values>;
   limit: number;
 }) => {

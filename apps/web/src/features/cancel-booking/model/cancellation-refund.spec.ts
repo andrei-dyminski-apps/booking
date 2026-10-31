@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BookingStatus, Role } from "@repo/contracts";
+import { BookingStatus, CURRENCY, cents, Role } from "@repo/contracts";
 import { cancellationRefundNote } from "./cancellation-refund";
 
 const GUEST = { id: "guest", role: Role.USER };
@@ -8,8 +8,9 @@ const ADMIN = { id: "admin", role: Role.ADMIN };
 
 const stay = {
   status: BookingStatus.CONFIRMED,
-  amount: 361.05,
-  refundedAmount: null,
+  amountCents: cents(36_105),
+  currency: CURRENCY,
+  refundedAmountCents: null,
   paid: true,
   dispute: null,
   from: "2026-11-10",
@@ -41,11 +42,15 @@ describe("cancellationRefundNote", () => {
 
   it("promises only what a dashboard refund left of the payment", () => {
     expect(
-      cancellationRefundNote({ ...stay, refundedAmount: 100 }, GUEST, INSIDE),
+      cancellationRefundNote(
+        { ...stay, refundedAmountCents: cents(10_000) },
+        GUEST,
+        INSIDE,
+      ),
     ).toMatch(/refunds the remaining \$261\.05;/);
     expect(
       cancellationRefundNote(
-        { ...stay, refundedAmount: 361.05 },
+        { ...stay, refundedAmountCents: cents(36_105) },
         ADMIN,
         INSIDE,
       ),
@@ -54,11 +59,10 @@ describe("cancellationRefundNote", () => {
     );
   });
 
-  it("counts a refund total a hair under the amount as the whole of it", () => {
-    // 0.7 - 0.4 is 0.29999999999999993 in binary floating point.
+  it("counts a refund total past the amount as the whole of it, never a negative rest", () => {
     expect(
       cancellationRefundNote(
-        { ...stay, amount: 0.3, refundedAmount: 0.7 - 0.4 },
+        { ...stay, refundedAmountCents: cents(36_106) },
         GUEST,
         INSIDE,
       ),

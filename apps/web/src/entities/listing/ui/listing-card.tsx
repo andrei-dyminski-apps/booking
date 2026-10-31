@@ -41,7 +41,7 @@ export const ListingCard = ({
       </CardDescription>
       <CardAction>
         <Badge variant="outline" className="h-6">
-          {formatMoney(listing.pricePerNight)} a night
+          {formatMoney(listing.pricePerNightCents)} a night
         </Badge>
       </CardAction>
     </CardHeader>

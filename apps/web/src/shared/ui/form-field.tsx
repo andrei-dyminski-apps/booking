@@ -68,7 +68,10 @@ export type FormControl<Name extends string> = UseFormRegisterReturn<Name> & {
  * beside it gives: a label pointing at a bare `from` would follow whatever else on the
  * page ends up carrying that id.
  */
-export const FormField = <Values extends FieldValues>({
+export const FormField = <
+  Values extends FieldValues,
+  Output extends FieldValues = Values,
+>({
   form,
   name,
   label,
@@ -77,7 +80,8 @@ export const FormField = <Values extends FieldValues>({
   options,
   children,
 }: {
-  form: UseFormReturn<Values>;
+  /** `Output` is what the schema parses the boxes into; a field only reads the boxes. */
+  form: UseFormReturn<Values, unknown, Output>;
   name: Path<Values>;
   label: string;
   description?: string;

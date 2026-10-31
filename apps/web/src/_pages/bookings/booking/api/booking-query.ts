@@ -1,4 +1,4 @@
-import type { Booking } from "@repo/contracts";
+import type { BookingDetail } from "@repo/contracts";
 import { bookingsApi } from "#shared/api";
 
 /** The one key the stay's page caches its booking under; the poll and the cancel share it. */
@@ -12,5 +12,5 @@ export const bookingPaymentKey = (id: string) =>
   ["booking-payment", id] as const;
 
 /** Read through the BFF like every browser request, and never from a cache. */
-export const readBooking = (id: string): Promise<Booking> =>
+export const readBooking = (id: string): Promise<BookingDetail> =>
   bookingsApi.get(id, { cache: "no-store" });

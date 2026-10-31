@@ -136,55 +136,62 @@ The three catalogue routes are the first cached reads in the application: `GET /
 Every route below except `/`, the four public `/auth/*` ones, the three reading routes
 of the catalogue and a listing's reviews is behind the global `JwtAuthGuard` and answers `401` without a session.
 
-| Method   | Path                          | What it does                                                                                           |
-| -------- | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `POST`   | `/auth/register`              | register and open a session; `400` — failed the schema, `409` — email is taken                         |
-| `POST`   | `/auth/login`                 | log in; `401` — wrong email or password, `403` — the account is blocked                                |
-| `POST`   | `/auth/refresh`               | rotate the token pair; `401` — missing, spent or forged token, cookies cleared                         |
-| `POST`   | `/auth/logout`                | end the session, `204`; answers the same without one                                                   |
-| `GET`    | `/auth/me`                    | the current user; `401` — no session, the user is gone or blocked                                      |
-| `GET`    | `/listings`                   | the catalogue: filters (`ownerId` among them), an ordering and a cursor; public                        |
-| `GET`    | `/listings/mine`              | the caller's own listings; USER only                                                                   |
-| `GET`    | `/listings/:id`               | a single listing, `404` if missing or retired; public                                                  |
-| `GET`    | `/listings/:id/availability`  | the nights already taken, for a `from`/`to` window; public                                             |
-| `POST`   | `/listings`                   | create, the owner taken from the session; USER only                                                    |
-| `PATCH`  | `/listings/:id`               | edit; the owner or ADMIN, `403` otherwise                                                              |
-| `DELETE` | `/listings/:id`               | retire, `204`; out of the catalogue, booked stays keep their record                                    |
-| `GET`    | `/bookings`                   | one page of the stays the caller may see: `side`, filters, an ordering and a cursor                    |
-| `GET`    | `/bookings/:id`               | a single booking; the guest, the owner of the listing or an admin                                      |
-| `POST`   | `/bookings`                   | a 15-minute hold, priced by the server; USER only, `403` — own listing, `409` — dates taken            |
-| `POST`   | `/bookings/:id/payment`       | opens (or answers again) the hold's PaymentIntent secret; its guest only, `409` — not awaiting payment |
-| `DELETE` | `/bookings/:id`               | cancel, `204`; the guest or an admin, a paid stay's refund sent right after by a job (`refundOwed`)    |
-| `POST`   | `/payments/webhook`           | Stripe's deliveries: signature checked, recorded, `200` at once, handled by a worker; public           |
-| `GET`    | `/payouts/account`            | the caller's payout account as the row says it; USER only                                              |
-| `POST`   | `/payouts/account/refresh`    | asks Stripe where an unfinished onboarding stands and writes it down; USER only                        |
-| `POST`   | `/payouts/account/session`    | a session for Stripe's embedded components, opening the account the first time; USER only              |
-| `POST`   | `/payouts/webhook`            | Stripe's thin events about hosts' accounts, into the same inbox; public                                |
-| `GET`    | `/waitlist`                   | the date ranges the caller waits for, check-in still ahead, earliest first; USER only                  |
-| `POST`   | `/waitlist`                   | wait for held nights; `409` — the nights are free, `403` — own listing, own stay or a full list        |
-| `GET`    | `/waitlist/demand`            | ranges waited for on the caller's listings — or every one, with who waits, for an admin; keyset pages  |
-| `DELETE` | `/waitlist/:id`               | leave, `204`; `404` — not the caller's, or already told the nights came free                           |
-| `GET`    | `/conversations`              | every thread the caller is a side of, newest message first; `listingId`, a cursor; USER only           |
-| `POST`   | `/conversations`              | a guest's message about a listing: opens the thread or continues it; USER only                         |
-| `GET`    | `/conversations/:id`          | one thread as the caller's side reads it; `404` for anybody but its two sides                          |
-| `GET`    | `/conversations/:id/messages` | one page of the thread, the newest message first, a cursor                                             |
-| `POST`   | `/conversations/:id/messages` | a reply from either side; a retired listing does not close the thread                                  |
-| `POST`   | `/conversations/:id/read`     | the caller's side has seen the thread up to `upTo`, the newest message shown; `204`                    |
-| `GET`    | `/users`                      | one page of accounts: role, status, name and address filters, a cursor; ADMIN only                     |
-| `GET`    | `/users/:id`                  | one account with its stay and listing counts; ADMIN only                                               |
-| `PATCH`  | `/users/:id`                  | change the role and/or block; ADMIN only, `403` on the caller's own account                            |
-| `GET`    | `/lookups/owners`             | accounts with a listing on offer, by `q` — a part of the address or a whole id; ADMIN                  |
-| `GET`    | `/lookups/guests`             | the guests of the caller's stays, by `q`; USER (their listings') or ADMIN                              |
-| `GET`    | `/lookups/listings`           | the listings of the caller's stays on `side`, retired included, by `q` — a part of the title           |
-| `GET`    | `/listings/:id/reviews`       | the guests' reviews of a listing, a page and a summary; `404` if retired; public                       |
-| `GET`    | `/guests/:id/reviews`         | the hosts' reviews of a guest; the guest, a host they booked with or ADMIN, else `404`                 |
-| `POST`   | `/bookings/:id/reviews`       | review a confirmed stay that is over; the guest or the owner, `409` — not yet or twice                 |
-| `DELETE` | `/reviews/:id`                | remove a review, `204`; ADMIN only                                                                     |
-| `GET`    | `/notifications`              | one page of the caller's notifications, newest first, with a cursor                                    |
-| `GET`    | `/notifications/unread-count` | how many of them are unread                                                                            |
-| `POST`   | `/notifications/:id/read`     | mark one read, answers the unread count; `404` — not one of the caller's                               |
-| `POST`   | `/notifications/read`         | mark all read, answers the unread count                                                                |
-| `GET`    | `/events`                     | the caller's event stream (Server-Sent Events): a `sync`, then whatever happens                        |
+| Method   | Path                               | What it does                                                                                                   |
+| -------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `POST`   | `/auth/register`                   | register and open a session; `400` — failed the schema, `409` — email is taken                                 |
+| `POST`   | `/auth/login`                      | log in; `401` — wrong email or password, `403` — the account is blocked                                        |
+| `POST`   | `/auth/refresh`                    | rotate the token pair; `401` — missing, spent or forged token, cookies cleared                                 |
+| `POST`   | `/auth/logout`                     | end the session, `204`; answers the same without one                                                           |
+| `GET`    | `/auth/me`                         | the current user; `401` — no session, the user is gone or blocked                                              |
+| `GET`    | `/listings`                        | the catalogue: filters (`ownerId` among them), an ordering and a cursor; public                                |
+| `GET`    | `/listings/mine`                   | the caller's own listings; USER only                                                                           |
+| `GET`    | `/listings/:id`                    | a single listing, `404` if missing or retired; public                                                          |
+| `GET`    | `/listings/:id/availability`       | the nights already taken, for a `from`/`to` window; public                                                     |
+| `POST`   | `/listings`                        | create, the owner taken from the session; USER only                                                            |
+| `PATCH`  | `/listings/:id`                    | edit; the owner or ADMIN, `403` otherwise                                                                      |
+| `DELETE` | `/listings/:id`                    | retire, `204`; out of the catalogue, booked stays keep their record                                            |
+| `GET`    | `/bookings`                        | one page of the stays the caller may see: `side`, filters, an ordering and a cursor                            |
+| `GET`    | `/bookings/stuck`                  | the stays whose owed refund or payout stopped retrying, by `kind` (`refund` or `payout`), a cursor; ADMIN only |
+| `GET`    | `/bookings/:id`                    | a single booking; the guest, the owner of the listing or an admin                                              |
+| `POST`   | `/bookings`                        | a 15-minute hold, priced by the server; USER only, `403` — own listing, `409` — dates taken                    |
+| `POST`   | `/bookings/:id/payment`            | opens (or answers again) the hold's PaymentIntent secret; its guest only, `409` — not awaiting payment         |
+| `DELETE` | `/bookings/:id`                    | cancel, `204`; the guest or an admin, a paid stay's refund sent right after by a job (`refundOwedCents`)       |
+| `POST`   | `/bookings/:id/stuck/refund/retry` | hand a set-aside refund back and queue it, `204`; ADMIN only, `409` — not set aside                            |
+| `POST`   | `/bookings/:id/stuck/payout/retry` | hand a set-aside payout back and queue it, `204`; ADMIN only, `409` — not set aside                            |
+| `POST`   | `/payments/webhook`                | Stripe's deliveries: signature checked, recorded, `200` at once, handled by a worker; public                   |
+| `GET`    | `/payment-events/failed`           | the webhook events the worker gave up on, newest first, a cursor; ADMIN only                                   |
+| `POST`   | `/payment-events/:id/retry`        | hand a set-aside event back to the worker, `204`; ADMIN only, `409` — not set aside                            |
+| `GET`    | `/refund-failures`                 | the refunds a guest's bank sent back, by `status` (`OPEN` or `RESOLVED`), a cursor; ADMIN only                 |
+| `POST`   | `/refund-failures/:id/resolve`     | record how the money went back outside Stripe, `204`; ADMIN only, `409` — resolved already                     |
+| `GET`    | `/payouts/account`                 | the caller's payout account as the row says it; USER only                                                      |
+| `POST`   | `/payouts/account/refresh`         | asks Stripe where an unfinished onboarding stands and writes it down; USER only                                |
+| `POST`   | `/payouts/account/session`         | a session for Stripe's embedded components, opening the account the first time; USER only                      |
+| `POST`   | `/payouts/webhook`                 | Stripe's thin events about hosts' accounts, into the same inbox; public                                        |
+| `GET`    | `/waitlist`                        | the date ranges the caller waits for, check-in still ahead, earliest first; USER only                          |
+| `POST`   | `/waitlist`                        | wait for held nights; `409` — the nights are free, `403` — own listing, own stay or a full list                |
+| `GET`    | `/waitlist/demand`                 | ranges waited for on the caller's listings — or every one, with who waits, for an admin; keyset pages          |
+| `DELETE` | `/waitlist/:id`                    | leave, `204`; `404` — not the caller's, or already told the nights came free                                   |
+| `GET`    | `/conversations`                   | every thread the caller is a side of, newest message first; `listingId`, a cursor; USER only                   |
+| `POST`   | `/conversations`                   | a guest's message about a listing: opens the thread or continues it; USER only                                 |
+| `GET`    | `/conversations/:id`               | one thread as the caller's side reads it; `404` for anybody but its two sides                                  |
+| `GET`    | `/conversations/:id/messages`      | one page of the thread, the newest message first, a cursor                                                     |
+| `POST`   | `/conversations/:id/messages`      | a reply from either side; a retired listing does not close the thread                                          |
+| `POST`   | `/conversations/:id/read`          | the caller's side has seen the thread up to `upTo`, the newest message shown; `204`                            |
+| `GET`    | `/users`                           | one page of accounts: role, status, name and address filters, a cursor; ADMIN only                             |
+| `GET`    | `/users/:id`                       | one account with its stay and listing counts; ADMIN only                                                       |
+| `PATCH`  | `/users/:id`                       | change the role and/or block; ADMIN only, `403` on the caller's own account                                    |
+| `GET`    | `/lookups/owners`                  | accounts with a listing on offer, by `q` — a part of the address or a whole id; ADMIN                          |
+| `GET`    | `/lookups/guests`                  | the guests of the caller's stays, by `q`; USER (their listings') or ADMIN                                      |
+| `GET`    | `/lookups/listings`                | the listings of the caller's stays on `side`, retired included, by `q` — a part of the title                   |
+| `GET`    | `/listings/:id/reviews`            | the guests' reviews of a listing, a page and a summary; `404` if retired; public                               |
+| `GET`    | `/guests/:id/reviews`              | the hosts' reviews of a guest; the guest, a host they booked with or ADMIN, else `404`                         |
+| `POST`   | `/bookings/:id/reviews`            | review a confirmed stay that is over; the guest or the owner, `409` — not yet or twice                         |
+| `DELETE` | `/reviews/:id`                     | remove a review, `204`; ADMIN only                                                                             |
+| `GET`    | `/notifications`                   | one page of the caller's notifications, newest first, with a cursor                                            |
+| `GET`    | `/notifications/unread-count`      | how many of them are unread                                                                                    |
+| `POST`   | `/notifications/:id/read`          | mark one read, answers the unread count; `404` — not one of the caller's                                       |
+| `POST`   | `/notifications/read`              | mark all read, answers the unread count                                                                        |
+| `GET`    | `/events`                          | the caller's event stream (Server-Sent Events): a `sync`, then whatever happens                                |
 
 The three lookups fill in the id filters of the admin's listings and of the stays: `q` is at
 least three characters, matched anywhere in the name regardless of case — or, when it is a
@@ -250,13 +257,13 @@ Overlapping dates on the same listing are rejected; back-to-back bookings (check
 everything about it is in the query string, so a filtered catalogue is a link somebody can
 send:
 
-| Parameter              | What it narrows                                              |
-| ---------------------- | ------------------------------------------------------------ |
-| `from`, `to`           | free for those nights — both or neither, check-out exclusive |
-| `minPrice`, `maxPrice` | the nightly price, to the cent like the column               |
-| `guests`               | listings that hold at least that many                        |
-| `sort`                 | `newest` (the default), `oldest`, `priceAsc`, `priceDesc`    |
-| `cursor`, `limit`      | the page: a cursor from the previous answer, at most 50 rows |
+| Parameter                        | What it narrows                                              |
+| -------------------------------- | ------------------------------------------------------------ |
+| `from`, `to`                     | free for those nights — both or neither, check-out exclusive |
+| `minPriceCents`, `maxPriceCents` | the nightly price, in whole cents like the column            |
+| `guests`                         | listings that hold at least that many                        |
+| `sort`                           | `newest` (the default), `oldest`, `priceAsc`, `priceDesc`    |
+| `cursor`, `limit`                | the page: a cursor from the previous answer, at most 50 rows |
 
 The answer is `{ items, nextCursor }`, and `nextCursor` is `null` on the last page.
 
@@ -276,7 +283,7 @@ The answer is `{ items, nextCursor }`, and `nextCursor` is `null` on the last pa
   because the tiebreaker follows the direction of the key: `price ASC, id ASC` and
   `price DESC, id DESC` are exact reverses, so one btree read forwards and backwards
   answers both — two columns disagreeing about direction would need an index apiece. Hence
-  two indexes rather than four (`created_at DESC, id DESC` and `price_per_night, id`), both
+  two indexes rather than four (`created_at DESC, id DESC` and `price_per_night_cents, id`), both
   partial on `deleted_at IS NULL` — the condition every read of that table already carries,
   which keeps the retired rows out of the index that serves the catalogue. `@@index` can
   express neither the `WHERE` nor the direction, so they are raw-SQL migrations like the
@@ -381,7 +388,7 @@ refused afterwards is cancelling it a second time.
 Stripe, through a **PaymentIntent and Elements** — a payment form of the site's own rather
 than a redirect to Checkout. The cycle:
 
-1. **The server prices the stay.** The hold's `amount` is quoted inside the same locking
+1. **The server prices the stay.** The hold's `amountCents` is quoted inside the same locking
    transaction that takes the nights, by `nightlyPrice` from `@repo/contracts` — the rule the
    listing page quoted the guest by — and stored on the booking. Nothing about money is
    ever read from a request.
@@ -406,7 +413,7 @@ What else moves money:
   hours before check-in, and nothing after (`refundOnCancel` in `@repo/contracts`, the rule
   the page states). An admin's cancellation refunds in full. Neither may cancel a stay
   once its check-in day has come. The
-  cancellation answers at once and writes what it owes on the booking (`refundOwed`); a
+  cancellation answers at once and writes what it owes on the booking (`refundOwedCents`); a
   job sends the refund, and a sweep of its own sends any refund Stripe refused until it
   goes through. A refund the guest's bank sends back is kept on record (`refund_failures`)
   and every admin is notified, to issue it again.
@@ -416,7 +423,7 @@ What else moves money:
 
 - **Hosts are paid by Stripe Connect, after the stay begins.** The guest pays the site;
   `PAYOUT_DELAY_HOURS` (24) after check-in the host's share — what is left after refunds,
-  less `PLATFORM_FEE_RATE` (15%), both in `@repo/contracts` — is transferred to their
+  less `PLATFORM_FEE_BPS` (1500 basis points, 15%), both in `@repo/contracts` — is transferred to their
   connected account, funded by the guest's own charge. A host sets payouts up on
   `/dashboard/payouts` (Stripe's embedded onboarding); until then their listings take
   bookings as usual and the payouts wait, going out as soon as Stripe reports the account

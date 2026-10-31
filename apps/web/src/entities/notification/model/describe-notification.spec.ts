@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NotificationType, StayParty } from "@repo/contracts";
+import { CURRENCY, cents, NotificationType, StayParty } from "@repo/contracts";
 import { describeNotification } from "./describe-notification";
 
 /**
@@ -48,12 +48,12 @@ describe("describeNotification", () => {
     const refunded = describeNotification({
       ...stored,
       type: NotificationType.PAYMENT_REFUNDED,
-      data: { ...stay, amount: 361.05 },
+      data: { ...stay, amountCents: cents(36_105), currency: CURRENCY },
     });
     const paidOut = describeNotification({
       ...stored,
       type: NotificationType.PAYOUT_SENT,
-      data: { ...stay, amount: 324.95 },
+      data: { ...stay, amountCents: cents(32_495), currency: CURRENCY },
     });
 
     expect(refunded.detail).toMatch(/^.*361\.05 · Cabin by the lake$/);
@@ -62,7 +62,7 @@ describe("describeNotification", () => {
     expect(paidOut.href).toBe("/dashboard/payouts");
   });
 
-  it("leads a failed refund to its stay, or back to the feed when no stay names it", () => {
+  it("leads a bounced refund to its tab of the payments screen, whether or not a stay names it", () => {
     const failed = (bookingId: string | null) =>
       describeNotification({
         ...stored,
@@ -71,17 +71,18 @@ describe("describeNotification", () => {
           refundId: "re_1",
           paymentId: "pi_1",
           bookingId,
-          amount: 120,
+          amountCents: cents(12_000),
+          currency: CURRENCY,
           reason: null,
         },
       });
 
-    expect(failed(BOOKING_ID).href).toBe(`/bookings/${BOOKING_ID}`);
+    expect(failed(BOOKING_ID).href).toBe("/admin/payments?list=bounced");
     expect(failed(BOOKING_ID).detail).toContain("no reason given");
-    expect(failed(null).href).toBe("/notifications");
+    expect(failed(null).href).toBe("/admin/payments?list=bounced");
   });
 
-  it("leads the stuck money of a stay to the stay, and a set-aside event to the feed", () => {
+  it("leads stuck money and a set-aside event to their tabs of the payments screen", () => {
     expect(
       describeNotification({
         ...stored,
@@ -91,8 +92,15 @@ describe("describeNotification", () => {
     ).toEqual({
       title: "A host's payout is stuck",
       detail: "insufficient balance",
-      href: `/bookings/${BOOKING_ID}`,
+      href: "/admin/payments?list=stuck-payouts",
     });
+    expect(
+      describeNotification({
+        ...stored,
+        type: NotificationType.CANCELLATION_REFUND_FAILED,
+        data: { bookingId: BOOKING_ID, error: "card_declined" },
+      }).href,
+    ).toBe("/admin/payments?list=stuck-refunds");
     expect(
       describeNotification({
         ...stored,
@@ -103,6 +111,6 @@ describe("describeNotification", () => {
           error: "timeout",
         },
       }).href,
-    ).toBe("/notifications");
+    ).toBe("/admin/payments");
   });
 });

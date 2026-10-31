@@ -13,6 +13,7 @@ import {
 // the module is imported, so a host, an admin or a paid stay never load Stripe.js at all.
 import { loadStripe } from "@stripe/stripe-js/pure";
 import type { PaymentIntent, Stripe } from "@stripe/stripe-js";
+import type { Cents, Currency } from "@repo/contracts";
 import { Button } from "@repo/ui/components/button";
 import { FieldError } from "@repo/ui/components/field";
 import { Skeleton } from "@repo/ui/components/skeleton";
@@ -155,7 +156,8 @@ export const PaymentForm = ({
     >
       <PaymentFields
         clientSecret={payment.data.clientSecret}
-        amount={payment.data.amount}
+        amountCents={payment.data.amountCents}
+        currency={payment.data.currency}
         declined={declined}
         onPaid={onPaid}
       />
@@ -194,12 +196,14 @@ const RetryNotice = ({
  */
 const PaymentFields = ({
   clientSecret,
-  amount,
+  amountCents,
+  currency,
   declined,
   onPaid,
 }: {
   clientSecret: string;
-  amount: number;
+  amountCents: Cents;
+  currency: Currency;
   declined: boolean;
   onPaid: () => void;
 }) => {
@@ -291,7 +295,7 @@ const PaymentFields = ({
         disabled={stripe === null || elements === null || pending}
         className="w-full sm:w-auto sm:self-start"
       >
-        Pay {formatMoney(amount)}
+        Pay {formatMoney(amountCents, currency)}
       </Button>
     </form>
   );

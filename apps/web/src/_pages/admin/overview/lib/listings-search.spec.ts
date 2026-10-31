@@ -45,8 +45,8 @@ describe("readListingsSearch", () => {
       ownerId: OWNER_ID,
       from: "2030-01-10",
       to: "2030-01-12",
-      minPrice: 50,
-      maxPrice: 120.5,
+      minPriceCents: 5_000,
+      maxPriceCents: 12_050,
       guests: 3,
       sort: "priceAsc",
     });

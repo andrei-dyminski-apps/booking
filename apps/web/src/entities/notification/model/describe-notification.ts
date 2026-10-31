@@ -4,7 +4,7 @@ import {
   StayParty,
   type Notification,
 } from "@repo/contracts";
-import { ROUTES } from "#shared/config";
+import { ROUTES, setAsideHref } from "#shared/config";
 import { filtersHref, formatDay, formatMoney } from "#shared/lib";
 
 /** A notification as a person reads it: what happened, the detail, and where to look. */
@@ -75,7 +75,7 @@ export function describeNotification(
 
       return {
         title: "Your payment was refunded",
-        detail: `${formatMoney(data.amount)} · ${data.listingTitle}`,
+        detail: `${formatMoney(data.amountCents, data.currency)} · ${data.listingTitle}`,
         href: ROUTES.booking(data.bookingId),
       };
     }
@@ -93,23 +93,20 @@ export function describeNotification(
 
       return {
         title: "You were paid for a stay",
-        detail: `${formatMoney(data.amount)} · ${data.listingTitle} · ${stayDates(data)}`,
+        detail: `${formatMoney(data.amountCents, data.currency)} · ${data.listingTitle} · ${stayDates(data)}`,
         href: ROUTES.payouts,
       };
     }
-    // The four below are told to every admin: money that waits for a person. The stay's
-    // own page is where an admin reads its payment; a failure that names none has nowhere
-    // on this site to lead, so it leads back to the feed.
+    // The four below are told to every admin: money that waits for a person. Each leads to
+    // the tab of the admin's payments screen that lists it, where it is acted on — the stay
+    // is one link further, from the row.
     case NotificationType.REFUND_FAILED: {
       const { data } = notification;
 
       return {
         title: "A refund did not reach the guest",
-        detail: `${formatMoney(data.amount)} · ${data.reason ?? "no reason given"} · ${data.refundId}`,
-        href:
-          data.bookingId === null
-            ? ROUTES.notifications
-            : ROUTES.booking(data.bookingId),
+        detail: `${formatMoney(data.amountCents, data.currency)} · ${data.reason ?? "no reason given"} · ${data.refundId}`,
+        href: setAsideHref("bounced"),
       };
     }
     case NotificationType.PAYMENT_EVENT_FAILED: {
@@ -118,7 +115,7 @@ export function describeNotification(
       return {
         title: "A payment event was set aside",
         detail: `${data.eventType} · ${data.eventId} · ${data.error}`,
-        href: ROUTES.notifications,
+        href: setAsideHref("events"),
       };
     }
     case NotificationType.CANCELLATION_REFUND_FAILED: {
@@ -127,7 +124,7 @@ export function describeNotification(
       return {
         title: "A cancellation's refund is stuck",
         detail: data.error,
-        href: ROUTES.booking(data.bookingId),
+        href: setAsideHref("stuck-refunds"),
       };
     }
     case NotificationType.PAYOUT_FAILED: {
@@ -136,7 +133,7 @@ export function describeNotification(
       return {
         title: "A host's payout is stuck",
         detail: data.error,
-        href: ROUTES.booking(data.bookingId),
+        href: setAsideHref("stuck-payouts"),
       };
     }
     case NotificationType.REVIEW_RECEIVED: {

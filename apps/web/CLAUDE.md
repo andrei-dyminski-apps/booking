@@ -47,6 +47,8 @@ apps/web/
     admin/users/loading.tsx
     admin/users/[id]/page.tsx # one account: its role, its block, its stays and listings
     admin/users/[id]/loading.tsx
+    admin/payments/page.tsx   # what the money paths set aside: a tab per list, retried or resolved
+    admin/payments/loading.tsx
     guests/[id]/reviews/page.tsx  # what hosts said about a guest; the API decides who may look
     guests/[id]/reviews/loading.tsx
     notifications/page.tsx    # the account's whole feed; the bell shows its top
@@ -223,6 +225,20 @@ apps/web/
         user/ui/user-skeleton.tsx
         user/api/update-user-actions.ts
         user/index.ts
+        payments/ui/payments-page.tsx     # four lists of the API behind one set of tabs, `?list=`
+        payments/ui/list-tabs.tsx         # …the tabs, and the open/resolved halves of the bounced refunds
+        payments/ui/failed-event-card.tsx # an event the worker gave up on: which, why, since when
+        payments/ui/refund-failure-card.tsx  # a refund the bank sent back, and the stay it belonged to
+        payments/ui/stuck-stay-card.tsx   # a stay whose owed refund or host payout stopped retrying
+        payments/ui/retry-button.tsx      # no confirmation: the jobs are idempotent
+        payments/ui/resolve-refund-button.tsx  # the note of how the money went back, in a dialog
+        payments/ui/last-error.tsx
+        payments/ui/payments-skeleton.tsx
+        payments/api/read-set-aside.ts    # the list the view names, `no-store`, a stale cursor onto null
+        payments/api/set-aside-actions.ts # retry an event, retry a stuck stay, resolve a bounced refund
+        payments/lib/payments-search.ts   # `?list=`, `?status=` and the cursor onto the view and its query
+        payments/lib/payments-search.spec.ts
+        payments/index.ts
       fallback/                         # a group, not a slice: the screens drawn instead of a page
         not-found/ui/not-found-page.tsx   # the screen behind every notFound()
         not-found/index.ts
@@ -244,6 +260,7 @@ apps/web/
       save-listing/ui/listing-form-skeleton.tsx  # its wait, box for box; each screen frames it
       save-listing/ui/listing-form-card.tsx  # …the card both are drawn in; the title and line are the screen's
       save-listing/lib/to-number.ts       # a number box's text onto the contract's number
+      save-listing/model/listing-form-schema.ts  # the boxes, prices typed in the currency, onto createListingSchema in cents
       save-listing/api/save-listing-action.ts
       save-listing/index.ts
       delete-listing/ui/delete-listing-button.tsx  # the owner's edit screen and the admin's
@@ -296,11 +313,13 @@ apps/web/
       api/keyset-page.ts      # a stale cursor onto null, the one both paged reads share
       api/notifications.ts    # notificationsApi — the caller's feed and its two marks
       api/payouts.ts          # payoutsApi — the caller's payout account and its component session
+      api/payment-events.ts   # paymentEventsApi — the admin's: the events set aside, and a retry
+      api/refund-failures.ts  # refundFailuresApi — the admin's: the bounced refunds, and a resolve
       api/waitlist.ts         # waitlistApi — the caller's own, read whole, join and leave; the demand, paged
       api/server-events.ts    # the tab's one EventSource on /api/events, shared by listeners
       api/index.ts
       config/api-url.ts       # apiOrigin() and BFF_BASE_PATH
-      config/routes.ts        # ROUTES — every path of this application
+      config/routes.ts        # ROUTES — every path of this application; the admin payments tabs and their links
       config/cache-tags.ts    # the names the cached public reads are stored under
       config/cache-lifetimes.ts  # the one lifetime the API's own clock decides
       config/stripe.ts        # stripePublishableKey() — read on the server, handed to the form; the tokens Stripe's iframes are drawn in
@@ -310,7 +329,7 @@ apps/web/
       lib/next-path.ts        # a `?next=` that cannot leave this site
       lib/search-params.ts    # searchParams onto a URL and back: the domain-free half
       lib/dates.ts            # a calendar day is a YYYY-MM-DD string, read as UTC
-      lib/money.ts            # a price onto the screen, in one place
+      lib/money.ts            # cents onto the screen and typed text back into cents, in one place
       lib/not-found.ts        # a 404 from the API, and an id a URL cannot carry
       lib/plural.ts           # a count and the noun it counts, made to agree
       lib/lookup-option.ts    # a picked row as one line: the name, and the hint beside it
@@ -598,13 +617,25 @@ is the wrong shape for a list that keeps growing.
   a singular to be missed — the same argument as the formatter below. The irregular form
   is an argument rather than a guess, and the function is where `Intl.PluralRules` goes
   when i18n arrives.
-- **Money is the currency itself, exact to the cent** (`shared/lib/money.ts`). Nothing is
-  converted on the way to the screen — what the formatter adds is the second decimal a
-  stored `120` does not carry and the rounding a multiplication needs, because three
-  nights at 120.35 is `361.05000000000007` in binary floating point. It names its locale
-  so the server and the browser agree on the separators. Every value that travels back to
-  the API keeps the scale the contract gives it, and a box that takes a price steps in
-  cents rather than leaving the browser to allow a third decimal the action would refuse.
+- **Money travels in cents and is shown in the currency, and `shared/lib/money.ts` is the
+  only edge between the two.** Every amount the contract carries is a branded `Cents`
+  whose field says so (`amountCents`, `pricePerNightCents`); `formatMoney(cents, currency)`
+  is the way out — the decimals come from `Intl` for the currency rather than an assumed
+  hundred, and the locale is named so the server and the browser agree on the separators —
+  and `centsFromInput(text)` the way back in, shifting the digits of `120.35` rather than
+  multiplying, so it is `12035` and not `12034.999999999998`. A plain number cannot reach a
+  `Cents` parameter, so a dollar figure where cents are meant does not compile. A booking
+  is formatted in its own `currency`, and so is a notice's amount (the notice copies the
+  stay's); a listing's prices in `CURRENCY`. Nothing else in the app multiplies or divides
+  an amount by a hundred.
+- **A box that takes a price holds the text as typed**, and the schema converts it: the
+  listing form runs `listingFormSchema` (`features/save-listing/model`), which turns each
+  price into cents and pipes into `createListingSchema`, so every rule and every word is
+  still the contract's and the action is handed cents. The boxes keep the contract's names,
+  so a refusal from either side lands under the right one. The catalogue's filters are
+  `?minPrice=100` in the currency — a link a person can read — and `parseListingQuery`
+  (`features/listing-search`) asks the contract for `minPriceCents`, putting its refusals
+  back under `minPrice`.
 - The error body is part of the contract too (`apiErrorSchema`): do not read
   `message`/`errors` out of an `unknown` body by hand.
 - Parse the API response with a schema (`bookingListSchema.parse(...)`) instead of casting
@@ -806,15 +837,29 @@ this side decided.
   the range a hold was last refused for — nights past the window could otherwise never
   reach the waitlist. Only free nights are a `409` from the waitlist; a full list is a
   `403`, which leaves the shared availability cache alone.
-- **The admin's section is `/admin`**, two screens: every listing on offer, each one
+- **The admin's section is `/admin`**, three screens: every listing on offer, each one
   edited and retired through the same `save-listing` and `delete-listing` features the
-  owner runs, and `/admin/users`, the accounts, each leading to `/admin/users/[id]` — where
+  owner runs; `/admin/users`, the accounts, each leading to `/admin/users/[id]` — where
   a role is changed and an account blocked, and its stays and listings are one link away
-  (`/bookings?guestId=`, `/admin?ownerId=`) rather than listed again. Both
-  write actions send their author back to the section of their own role
-  (`listingsSectionFor` in `shared/config/routes.ts`), read off the session rather than
-  bound by the page — an action is an endpoint, and a destination it was handed would be
-  one more value to distrust. The admin's own account page carries no controls:
+  (`/bookings?guestId=`, `/admin?ownerId=`) rather than listed again; and
+  `/admin/payments`, what the money paths set aside (`_pages/admin/payments`). That one is
+  four lists of the API behind tabs — the provider's events the worker gave up on, the
+  refunds a guest's bank sent back, the stays whose owed refund or host payout stopped
+  retrying — each its own route with its own cursor, so `?list=` picks a list rather than
+  filtering one, and an unknown value lands on the default the way an unknown `?side=`
+  does. An event and a stuck stay are retried with no confirmation, since every job behind
+  them is idempotent; a bounced refund is resolved with a note in a dialog, because the
+  same card refuses it again and the money goes back outside Stripe. The four admin
+  notices lead to their tabs (`describeNotification`), and the stay of a row is one link
+  further. The tab names and the one builder of the screen's address live in
+  `shared/config/routes.ts` (`SET_ASIDE_LISTS`, `setAsideHref` — the list, the status and
+  the cursor) rather than in the page, because the notification entity links to them and
+  may not import a page; the page writes every link through the same function, so a
+  notice cannot lead to an address the page redirects away from. The two listing write
+  actions, `save-listing`'s and `delete-listing`'s, send their author back to the section
+  of their own role (`listingsSectionFor` in `shared/config/routes.ts`), read off the
+  session rather than bound by the page — an action is an endpoint, and a destination it
+  was handed would be one more value to distrust. The admin's own account page carries no controls:
   the API refuses a change to the caller's own account, and controls that could only
   reach that `403` are not worth drawing.
 - **One link is current in the navigation**, the deepest one containing the path —

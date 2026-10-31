@@ -1,7 +1,8 @@
-import { listingQuerySchema, type ListingQuery } from "@repo/contracts";
+import type { ListingQuery } from "@repo/contracts";
 import {
   listingFilterChips,
   listingSortOptions,
+  parseListingQuery,
   withoutListingFilters,
   type ListingFilterValues,
 } from "#features/listing-search";
@@ -10,7 +11,6 @@ import {
   filtersHref,
   searchParamsHref,
   singleParam,
-  toFieldErrors,
   type FieldErrors,
 } from "#shared/lib";
 import type { FilterChip, SortOption } from "#shared/ui";
@@ -69,20 +69,13 @@ export function readCatalogueSearch(
   };
 
   const cursor = singleParam(params.cursor);
-  const parsed = listingQuerySchema.safeParse({ ...values, cursor });
+  const { query, errors } = parseListingQuery(values, cursor);
 
   const href = catalogueHref(values, cursor === "" ? undefined : cursor);
   const canonical =
     href === searchParamsHref(ROUTES.catalogue, params) ? null : href;
 
-  return parsed.success
-    ? { query: parsed.data, errors: {}, values, canonical }
-    : {
-        query: null,
-        errors: toFieldErrors(parsed.error.issues),
-        values,
-        canonical,
-      };
+  return { query, errors, values, canonical };
 }
 
 /**

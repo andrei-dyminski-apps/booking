@@ -111,7 +111,7 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
           </h1>
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary" className="h-6">
-              {formatMoney(listing.pricePerNight)} a night
+              {formatMoney(listing.pricePerNightCents)} a night
             </Badge>
             <Badge variant="outline" className="h-6">
               <UsersIcon />

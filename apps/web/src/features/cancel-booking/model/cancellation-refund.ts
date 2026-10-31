@@ -4,6 +4,7 @@ import {
   DisputeStatus,
   freeCancellationUntil,
   isCancellableOn,
+  notRefunded,
   refundOnCancel,
   Role,
   type Booking,
@@ -29,8 +30,9 @@ export function cancellationRefundNote(
   booking: Pick<
     Booking,
     | "status"
-    | "amount"
-    | "refundedAmount"
+    | "amountCents"
+    | "currency"
+    | "refundedAmountCents"
     | "paid"
     | "dispute"
     | "from"
@@ -54,20 +56,16 @@ export function cancellationRefundNote(
     return "The bank has returned the payment after a dispute: cancelling refunds nothing more.";
   }
 
-  // In whole cents, as `hostShare` subtracts: a refund total summed in binary floating point
-  // can sit a hair under the amount, and "the remaining 0.00" is not a refund.
-  const leftCents =
-    Math.round(booking.amount * 100) -
-    Math.round((booking.refundedAmount ?? 0) * 100);
+  const left = notRefunded(booking.amountCents, booking.refundedAmountCents);
 
-  if (leftCents <= 0) {
+  if (left === 0) {
     return "The stay has been refunded in full already: cancelling refunds nothing more.";
   }
 
   const whatComesBack =
-    booking.refundedAmount === null
+    booking.refundedAmountCents === null
       ? "the stay in full"
-      : `the remaining ${formatMoney(leftCents / 100)}`;
+      : `the remaining ${formatMoney(left, booking.currency)}`;
 
   if (admin) {
     return refundOnCancel(booking, parseISO(now), "ADMIN") > 0

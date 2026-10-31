@@ -375,7 +375,14 @@ is the transition a hold could not make on its own. The details are "Payments" i
 - [ ] Helmet.
 - [ ] Bring Swagger up to a complete description with examples and auth.
 - [ ] Observability: structured logs (pino), a request-logging interceptor, `/health` (`@nestjs/terminus`).
-- [ ] **The admin's side of what the money paths set aside.** The API already keeps all of
+- [x] **The admin's side of what the money paths set aside.** The API half is done (see
+      "Payments" in `apps/api/CLAUDE.md`), with two departures from the routes below: the
+      failed events are `GET /payment-events/failed`, a path rather than a one-value
+      `status`, and the stuck retry is two literal routes, `.../stuck/refund/retry` in the
+      booking module and `.../stuck/payout/retry` in the payout module, because only the
+      payout module may send a transfer. Both retries queue the job at once instead of
+      waiting for the sweep. The screen is `/admin/payments`, a tab per list, and the four
+      notices lead to their tabs (see "Roles" in `apps/web/CLAUDE.md`). The API already keeps all of
       it and tells every admin (`PAYMENT_EVENT_FAILED`, `REFUND_FAILED`,
       `CANCELLATION_REFUND_FAILED`, `PAYOUT_FAILED`), but the only way to act on any of it
       today is SQL. Three pairs of routes behind `@Roles(Role.ADMIN)`, and a screen under
@@ -424,12 +431,17 @@ is the transition a hold could not make on its own. The details are "Payments" i
       cards (fine for a fifteen-minute hold), and the methods without manual capture —
       iDEAL, Bancontact, EPS, MB WAY, Zip — have to stay on immediate capture, so
       `INSTANT_PAYMENT_METHODS` splits in two.
-- [ ] **Money as whole cents inside the API.** The contract speaks dollars as a `number`
-      exact to the cent, and the API does arithmetic on it, which is why `roundCents` sits
-      after nearly every subtraction. Carrying an integer of cents (or a small `Money`
-      value) through `domain/` and converting at the two edges — the contract and Stripe —
-      would remove that class of mistake rather than guard against it each time. The
-      columns stay `numeric(10, 2)`; only the in-memory type changes.
+- [x] **Money as whole cents, named by its unit.** The contract used to speak dollars as a
+      `number` exact to the cent, and the API did arithmetic on it, which is why
+      `roundCents` sat after nearly every subtraction. Now every amount is a whole number of
+      cents from the database to Stripe: the columns are `integer` and named `*_cents`, the
+      contract's fields `*Cents`, and both sides parse them into `Cents`, a branded type of
+      `@repo/contracts` (`store_money_in_cents`, which also moved the inbox's payloads and
+      the stored notices). The platform's fee is basis points, the host's share rounded once
+      and the fee the rest. A booking stores its `currency` and the nights its amount adds
+      up from (`booking_nights`, answered by `GET /bookings/:id`). Turning cents into the
+      currency itself is `apps/web`'s job alone, at one edge — `formatMoney` out,
+      `centsFromInput` in. Details are "Payments" in `apps/api/CLAUDE.md`.
 - [ ] **JSON-LD across the whole site** — the structured data a catalogue is actually read
       by, and the one SEO question this project has so far answered with nothing. Semantic
       markup is not that answer: wrapping the rows in a `<ul role="list">` bought a screen

@@ -37,7 +37,7 @@ describe("readCatalogueSearch", () => {
     expect(query).toEqual({ limit: 20, sort: "newest" });
   });
 
-  it("coerces the numbers the way the contract does", () => {
+  it("reads the prices in the currency and asks the contract in cents", () => {
     const { query } = readCatalogueSearch({
       minPrice: "50",
       maxPrice: "200.50",
@@ -47,8 +47,8 @@ describe("readCatalogueSearch", () => {
     expect(query).toEqual({
       limit: 20,
       sort: "newest",
-      minPrice: 50,
-      maxPrice: 200.5,
+      minPriceCents: 5_000,
+      maxPriceCents: 20_050,
       guests: 3,
     });
   });
@@ -94,17 +94,25 @@ describe("readCatalogueSearch", () => {
     expect(errors.minPrice).toHaveLength(1);
   });
 
+  it("reports a price finer than a cent under the box it was typed into", () => {
+    const { query, errors } = readCatalogueSearch({ minPrice: "10.005" });
+
+    expect(query).toBeNull();
+    expect(errors.minPrice).toEqual(["A price may not be finer than a cent"]);
+    expect(errors.minPriceCents).toBeUndefined();
+  });
+
   it("takes a price at the ceiling and refuses the cent above it", () => {
     // The top of the range is where the cent rule and the ceiling meet, and a filter is
     // the one place a visitor types a price without a form to bound it. A refusal at
-    // 999999.99 would be a box they cannot correct; one at 1000000.01 is the contract.
+    // 999999.99 would be a box they cannot correct; one at 1000000.00 is the contract.
     const { query, errors } = readCatalogueSearch({ maxPrice: "999999.99" });
 
     expect(errors.maxPrice).toBeUndefined();
-    expect(query?.maxPrice).toBe(999_999.99);
+    expect(query?.maxPriceCents).toBe(99_999_999);
 
     expect(
-      readCatalogueSearch({ maxPrice: "1000000.01" }).errors.maxPrice,
+      readCatalogueSearch({ maxPrice: "1000000" }).errors.maxPrice,
     ).toHaveLength(1);
   });
 
