@@ -14,7 +14,8 @@
     "railway": "scripts/railway-power.sh",
     "railway:stop": "scripts/railway-power.sh stop",
     "railway:start": "scripts/railway-power.sh start",
-    "railway:status": "scripts/railway-power.sh status"
+    "railway:status": "scripts/railway-power.sh status",
+    "db:seed:railway": "railway ssh --service @repo/api -- pnpm --filter @repo/api db:seed"
   },
   "devDependencies": {
     "prettier": "^3.7.4",
