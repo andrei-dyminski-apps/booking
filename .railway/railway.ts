@@ -26,7 +26,7 @@ export default defineRailway(() => {
     start: "node apps/api/dist/main",
     healthcheck: "/",
     preDeploy: "pnpm --filter @repo/api db:deploy",
-    replicas: { "europe-west4-drams3a": 1 },
+    replicas: { "us-east4-eqdc4a": 1 },
     networking: { privateNetworkEndpoint: "repoapi" },
   });
 
