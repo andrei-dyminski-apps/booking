@@ -53,6 +53,23 @@ export class LookupRepository {
     );
   }
 
+  /**
+   * Every account a stay was ever taken against, its listing retired or not — what an
+   * admin's `?hostId=` over stays can match, where `findOwners` would miss a host whose
+   * listings are all gone while their stays still wait on money.
+   */
+  findHostsOfEveryone(
+    query: LookupQuery,
+    cursor: LookupCursor | null,
+  ): Promise<Page<LookupOption>> {
+    return this.findAccounts(
+      { listings: { some: { bookings: { some: {} } } } },
+      WITH_ADDRESS,
+      query,
+      cursor,
+    );
+  }
+
   /** Every account that ever took a stay — an admin's `?guestId=` reads them all. */
   findGuestsOfEveryone(
     query: LookupQuery,

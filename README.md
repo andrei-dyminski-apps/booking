@@ -181,6 +181,7 @@ of the catalogue and a listing's reviews is behind the global `JwtAuthGuard` and
 | `GET`    | `/users/:id`                       | one account with its stay and listing counts; ADMIN only                                                       |
 | `PATCH`  | `/users/:id`                       | change the role and/or block; ADMIN only, `403` on the caller's own account                                    |
 | `GET`    | `/lookups/owners`                  | accounts with a listing on offer, by `q` — a part of the address or a whole id; ADMIN                          |
+| `GET`    | `/lookups/hosts`                   | accounts a stay was taken against, retired listings included, by `q` — as `/lookups/owners`; ADMIN             |
 | `GET`    | `/lookups/guests`                  | the guests of the caller's stays, by `q`; USER (their listings') or ADMIN                                      |
 | `GET`    | `/lookups/listings`                | the listings of the caller's stays on `side`, retired included, by `q` — a part of the title                   |
 | `GET`    | `/listings/:id/reviews`            | the guests' reviews of a listing, a page and a summary; `404` if retired; public                               |

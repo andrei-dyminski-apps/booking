@@ -22,7 +22,8 @@ export {
   type FieldErrors,
   type FormErrors,
 } from "./form-errors";
-export { lookupOptionText } from "./lookup-option";
+export { lookupOptionText } from "./filter-labels/lookup-option";
+export { shortId } from "./filter-labels/short-id";
 export {
   centsFromInput,
   formatMoney,

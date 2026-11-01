@@ -34,6 +34,13 @@ export class LookupService {
     );
   }
 
+  /** The hosts of every stay, retired listings included — the admin's alone as well. */
+  hosts(query: LookupQuery): Promise<LookupPage> {
+    return this.page(LookupKind.hosts, query, (cursor) =>
+      this.lookupRepository.findHostsOfEveryone(query, cursor),
+    );
+  }
+
   /**
    * The guests of the caller's listings. A `USER` with none is answered an empty page
    * rather than a `403`: hosting is not a role, so nothing tells this route beforehand

@@ -2,11 +2,13 @@ import { Injectable } from "@nestjs/common";
 import {
   RefundFailureStatus,
   type RefundFailure as RefundFailureView,
+  type RefundFailureQuery,
 } from "@repo/contracts";
 import type { Prisma } from "../../generated/prisma/client";
 import { toIsoDate } from "../../common/iso-date";
 import type { Page } from "../../common/paging";
 import type { SetAsideCursor } from "../../common/set-aside-cursor";
+import { setAsideWithin } from "../../common/set-aside-window";
 import {
   cents,
   currencySchema,
@@ -38,6 +40,19 @@ const STAY_INCLUDE = {
   },
 } satisfies Prisma.RefundFailureInclude;
 
+/** What the admin's list of bounced refunds narrows by, past its status. */
+export type RefundFailureFilters = Pick<
+  RefundFailureQuery,
+  | "refundId"
+  | "paymentId"
+  | "bookingId"
+  | "listingId"
+  | "guestId"
+  | "hostId"
+  | "from"
+  | "to"
+>;
+
 type RefundFailureRow = Prisma.RefundFailureGetPayload<{
   include: typeof STAY_INCLUDE;
 }>;
@@ -62,6 +77,7 @@ export class RefundFailureRepository {
     status: RefundFailureStatus,
     cursor: SetAsideCursor | null,
     limit: number,
+    filters: RefundFailureFilters,
   ): Promise<Page<RefundFailureView>> {
     const rows = await this.prismaService.refundFailure.findMany({
       where: {
@@ -69,6 +85,30 @@ export class RefundFailureRepository {
           status === RefundFailureStatus.OPEN
             ? { resolvedAt: null }
             : { resolvedAt: { not: null } },
+          {
+            refundId: filters.refundId,
+            paymentId: filters.paymentId,
+            bookingId: filters.bookingId,
+            failedAt: setAsideWithin(filters),
+          },
+          // Only a filter that names the stay's side joins it: an orphaned refund has no stay
+          // and is left out by any of them, kept by none.
+          filters.listingId === undefined &&
+          filters.guestId === undefined &&
+          filters.hostId === undefined
+            ? {}
+            : {
+                booking: {
+                  is: {
+                    listingId: filters.listingId,
+                    guestId: filters.guestId,
+                    // Only when a host is named: an empty filter on the relation still joins it.
+                    ...(filters.hostId === undefined
+                      ? {}
+                      : { listing: { ownerId: filters.hostId } }),
+                  },
+                },
+              },
           cursor === null
             ? {}
             : {

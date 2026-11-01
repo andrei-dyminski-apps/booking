@@ -226,6 +226,8 @@ apps/web/
         user/index.ts
         payments/ui/payments-page.tsx     # four lists of the API behind one set of tabs, `?list=`
         payments/ui/list-tabs.tsx         # …the tabs, and the open/resolved halves of the bounced refunds
+        payments/ui/payments-toolbar.tsx  # the filters of the tab and their chips; no ordering, newest first only
+        payments/ui/payments-filters-dialog.tsx  # each tab's boxes: an event by id and type, a stay by itself, its listing and people; the days
         payments/ui/failed-event-card.tsx # an event the worker gave up on: which, why, since when
         payments/ui/refund-failure-card.tsx  # a refund the bank sent back, and the stay it belonged to
         payments/ui/stuck-stay-card.tsx   # a stay whose owed refund or host payout stopped retrying
@@ -235,7 +237,7 @@ apps/web/
         payments/ui/payments-skeleton.tsx
         payments/api/read-set-aside.ts    # the list the view names, `no-store`, a stale cursor onto null
         payments/api/set-aside-actions.ts # retry an event, retry a stuck stay, resolve a bounced refund
-        payments/lib/payments-search.ts   # `?list=`, `?status=` and the cursor onto the view and its query
+        payments/lib/payments-search.ts   # `?list=`, `?status=`, the tab's filters and the cursor onto the view and its query
         payments/lib/payments-search.spec.ts
         payments/index.ts
       fallback/                         # a group, not a slice: the screens drawn instead of a page
@@ -333,7 +335,8 @@ apps/web/
       lib/money.ts            # cents onto the screen and typed text back into cents, in one place
       lib/not-found.ts        # a 404 from the API, and an id a URL cannot carry
       lib/plural.ts           # a count and the noun it counts, made to agree
-      lib/lookup-option.ts    # a picked row as one line: the name, and the hint beside it
+      lib/filter-labels/lookup-option.ts  # a picked row as one line: the name, and the hint beside it
+      lib/filter-labels/short-id.ts       # an id no lookup named, cut to its first block for a chip; a refused value left whole
       lib/server-events/use-server-events.ts  # useServerEvents(listener) — a subscription per component
       lib/server-events/use-latest-count.ts   # one unread count off the stream, the newest revision winning
       lib/server-events/use-refresh-on-events.ts  # router.refresh() on the events a screen names, never piled up
@@ -850,13 +853,22 @@ this side decided.
   refunds a guest's bank sent back, the stays whose owed refund or host payout stopped
   retrying — each its own route with its own cursor, so `?list=` picks a list rather than
   filtering one, and an unknown value lands on the default the way an unknown `?side=`
-  does. An event and a stuck stay are retried with no confirmation, since every job behind
+  does. Inside a tab the list is filtered like the stays — a dialog, chips, one search at
+  one address — by what its query in `@repo/contracts` takes: an event by its id and a part
+  of its type, a bounced refund by its refund and payment ids, a refund or a stuck stay by
+  the stay and its listing, guest and host (filled in by name), and every tab by the days
+  it was set aside, either end alone. Switching tabs drops the filters; switching the half
+  of the bounced refunds keeps them, since a refund a notice named may be resolved since.
+  An event and a stuck stay are retried with no confirmation, since every job behind
   them is idempotent; a bounced refund is resolved with a note in a dialog, because the
   same card refuses it again and the money goes back outside Stripe. The four admin
-  notices lead to their tabs (`describeNotification`), and the stay of a row is one link
-  further. The tab names and the one builder of the screen's address live in
-  `shared/config/routes.ts` (`SET_ASIDE_LISTS`, `setAsideHref` — the list, the status and
-  the cursor) rather than in the page, because the notification entity links to them and
+  notices lead to their tabs filtered down to their own row (`describeNotification`: the
+  event's id, the refund's id, the stuck stay's id), and the stay of a row is one link
+  further. A row dealt with between the notice and the click leaves that filter empty, and
+  the page says so rather than "nothing matches" (`NoLongerWaitingNotice`), pointing to
+  where the row is now: the other half of the bounced refunds, or the stay. The tab names and the one builder of the screen's address live in
+  `shared/config/routes.ts` (`SET_ASIDE_LISTS`, `SET_ASIDE_FILTERS_OF`, `setAsideHref` —
+  the list, its filters and the cursor) rather than in the page, because the notification entity links to them and
   may not import a page; the page writes every link through the same function, so a
   notice cannot lead to an address the page redirects away from. The two listing write
   actions, `save-listing`'s and `delete-listing`'s, send their author back to the section
@@ -1075,7 +1087,8 @@ worth naming: the stays are personal, so that read is `no-store` and carries no 
 `listingId` is also reached by a link on a card, which fills the box in through the URL.
 
 **An id filter is filled in by name** (`shared/ui/lookup-field/`) — `ownerId` on the
-admin's listings, `listingId` and `guestId` on the stays. Nobody remembers a uuid, so the
+admin's listings, `listingId` and `guestId` on the stays, and those two with `hostId` on
+the admin's payments (`/lookups/hosts`, not `owners`: a stay outlives its listing). Nobody remembers a uuid, so the
 box is a combobox over `/lookups/*`: three characters of a name or a title are a
 search, a whole uuid is the one row it names, and what is picked travels in a hidden input
 as the id it always was — the URL, the contract, the chips and the canonical address do not

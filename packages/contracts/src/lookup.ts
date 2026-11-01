@@ -71,10 +71,17 @@ export const lookupPageSchema = z.object({
 /**
  * What a filter box can look up, one value per route of `/lookups`. Each answers with the
  * rows its filter can actually match for the caller — the owners of what is on offer, the
- * guests and the listings of the stays the caller may read — so a suggestion is never a
- * filter that empties the list by construction.
+ * hosts of every stay, retired listings included, and the guests and the listings of the
+ * stays the caller may read — so a suggestion is never a filter that empties the list by
+ * construction. `owners` and `hosts` are two sets on purpose: a list of what is on offer
+ * cannot match an owner whose listings are all retired, and a list of stays can.
  */
-export const lookupKindSchema = z.enum(["owners", "guests", "listings"]);
+export const lookupKindSchema = z.enum([
+  "owners",
+  "hosts",
+  "guests",
+  "listings",
+]);
 
 export const LookupKind = lookupKindSchema.enum;
 

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { bookingSchema } from "./booking.js";
 import { stayNoticeSchema } from "./notification.js";
 import { centsSchema, currencySchema } from "./money.js";
-import { PAGING } from "./query.js";
+import { blank, PAGING } from "./query.js";
 
 /*
  * What the money paths set aside for a person, and what an admin does about it. Every admin
@@ -14,6 +14,47 @@ import { PAGING } from "./query.js";
  */
 
 export const setAsideSortSchema = z.enum(["newest"]);
+
+/**
+ * The window over the moment a row was set aside — calendar days in UTC, both ends
+ * included. Unlike the stays' window either end may come alone: "set aside since Monday"
+ * is a whole question about a queue, where a stay's half window was not.
+ */
+const SET_ASIDE_WINDOW = {
+  from: blank(z.iso.date().optional()),
+  to: blank(z.iso.date().optional()),
+};
+
+const windowInOrder = (query: { from?: string; to?: string }) =>
+  query.from === undefined || query.to === undefined || query.from <= query.to;
+
+const WINDOW_IN_ORDER = {
+  error: "The last day must not be earlier than the first",
+  path: ["to"],
+};
+
+/** An id of the provider's (`evt_…`, `re_…`, `pi_…`), matched whole. */
+const providerId = (what: string) =>
+  blank(
+    z
+      .string()
+      .trim()
+      .min(1, { error: `Type the ${what}'s id` })
+      .max(255, { error: `A ${what}'s id is never longer than 255 characters` })
+      .optional(),
+  );
+
+/**
+ * The stay a bounced refund or a stuck payment belongs to, by itself or by the listing,
+ * the guest and the host it names. Each narrows; a refund no stay names any more matches
+ * none of them.
+ */
+const STAY_FILTERS = {
+  bookingId: blank(z.uuid().optional()),
+  listingId: blank(z.uuid().optional()),
+  guestId: blank(z.uuid().optional()),
+  hostId: blank(z.uuid().optional()),
+};
 
 /**
  * A webhook event the inbox's worker gave up on. Not its payload: what the event says is the
@@ -28,9 +69,27 @@ export const failedPaymentEventSchema = z.object({
   failedAt: z.iso.datetime(),
 });
 
-export const failedPaymentEventQuerySchema = z.object({
-  ...PAGING,
-});
+/**
+ * `eventId` is matched whole — it is what a notice names — and `type` by any part of it,
+ * in any case: `dispute` finds both of the dispute events.
+ */
+export const failedPaymentEventQuerySchema = z
+  .object({
+    eventId: providerId("event"),
+    type: blank(
+      z
+        .string()
+        .trim()
+        .min(1, { error: "Type at least one character of the type" })
+        .max(100, {
+          error: "An event type is never longer than 100 characters",
+        })
+        .optional(),
+    ),
+    ...SET_ASIDE_WINDOW,
+    ...PAGING,
+  })
+  .refine(windowInOrder, WINDOW_IN_ORDER);
 
 export const failedPaymentEventPageSchema = z.object({
   items: z.array(failedPaymentEventSchema),
@@ -63,10 +122,16 @@ export const refundFailureSchema = z.object({
   stay: stayNoticeSchema.nullable(),
 });
 
-export const refundFailureQuerySchema = z.object({
-  status: refundFailureStatusSchema.default(RefundFailureStatus.OPEN),
-  ...PAGING,
-});
+export const refundFailureQuerySchema = z
+  .object({
+    status: blank(refundFailureStatusSchema.default(RefundFailureStatus.OPEN)),
+    refundId: providerId("refund"),
+    paymentId: providerId("payment"),
+    ...STAY_FILTERS,
+    ...SET_ASIDE_WINDOW,
+    ...PAGING,
+  })
+  .refine(windowInOrder, WINDOW_IN_ORDER);
 
 export const refundFailurePageSchema = z.object({
   items: z.array(refundFailureSchema),
@@ -112,10 +177,14 @@ export const stuckStaySchema = z.object({
   failedAt: z.iso.datetime(),
 });
 
-export const stuckStayQuerySchema = z.object({
-  kind: stuckKindSchema,
-  ...PAGING,
-});
+export const stuckStayQuerySchema = z
+  .object({
+    kind: stuckKindSchema,
+    ...STAY_FILTERS,
+    ...SET_ASIDE_WINDOW,
+    ...PAGING,
+  })
+  .refine(windowInOrder, WINDOW_IN_ORDER);
 
 export const stuckStayPageSchema = z.object({
   items: z.array(stuckStaySchema),

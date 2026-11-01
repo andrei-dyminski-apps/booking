@@ -54,6 +54,7 @@ type Row = { option: LookupOption; stayOwners: string[]; guests: string[] };
  */
 class FakeLookupRepository implements PublicOf<LookupRepository> {
   readonly owners: LookupOption[] = [];
+  readonly hosts: LookupOption[] = [];
   readonly guests: Row[] = [];
   readonly listings: Row[] = [];
 
@@ -62,6 +63,13 @@ class FakeLookupRepository implements PublicOf<LookupRepository> {
     cursor: LookupCursor | null,
   ): Promise<Page<LookupOption>> {
     return page(this.owners, q, cursor);
+  }
+
+  findHostsOfEveryone(
+    q: LookupQuery,
+    cursor: LookupCursor | null,
+  ): Promise<Page<LookupOption>> {
+    return page(this.hosts, q, cursor);
   }
 
   findGuestsOfEveryone(
@@ -275,6 +283,14 @@ describe("LookupService", () => {
       const cursor = encodeCursor(LookupKind.guests, option("a@example.com"));
 
       await expect(service.owners(query({ cursor }))).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
+
+    it("tells the owners' cursor from the hosts', both of them accounts by name", async () => {
+      const cursor = encodeCursor(LookupKind.owners, option("a@example.com"));
+
+      await expect(service.hosts(query({ cursor }))).rejects.toBeInstanceOf(
         BadRequestException,
       );
     });

@@ -13,7 +13,9 @@ export {
   DEFAULT_SET_ASIDE_LIST,
   listingsSectionFor,
   ROUTES,
+  SET_ASIDE_FILTERS_OF,
   SET_ASIDE_LISTS,
   setAsideHref,
+  type SetAsideFilterKey,
   type SetAsideList,
 } from "./routes";

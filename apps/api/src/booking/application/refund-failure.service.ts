@@ -34,6 +34,7 @@ export class RefundFailureService {
       query.status,
       cursor,
       query.limit,
+      query,
     );
 
     return {

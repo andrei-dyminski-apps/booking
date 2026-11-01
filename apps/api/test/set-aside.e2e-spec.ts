@@ -157,6 +157,44 @@ describe("What the money paths set aside (e2e)", () => {
       });
     });
 
+    it("narrows by the event's id, a part of its type and the days it was set aside", async () => {
+      await prismaService.paymentEvent.create({
+        data: {
+          id: "evt_dispute",
+          type: "charge.dispute.created",
+          payload: {
+            kind: "other",
+            eventId: "evt_dispute",
+            type: "charge.dispute.created",
+          },
+          attempts: 24,
+          failedAt: new Date("2026-10-27T08:00:00.000Z"),
+        },
+      });
+
+      const ids = async (search: string) =>
+        failedPaymentEventPageSchema
+          .parse(
+            (await admin.get(`/payment-events/failed?${search}`).expect(200))
+              .body,
+          )
+          .items.map(({ id }) => id);
+
+      expect(await ids("eventId=evt_failed")).toEqual(["evt_failed"]);
+      expect(await ids("eventId=evt_pending")).toEqual([]);
+      expect(await ids("type=DISPUTE")).toEqual(["evt_dispute"]);
+      // `_` is a character of the type, not a wildcard of `LIKE`.
+      expect(await ids("type=customer_created")).toEqual([]);
+      expect(await ids("from=2026-10-26")).toEqual(["evt_dispute"]);
+      expect(await ids("to=2026-10-25")).toEqual(["evt_failed"]);
+      expect(await ids("from=2026-10-25&to=2026-10-25")).toEqual([
+        "evt_failed",
+      ]);
+      await admin
+        .get("/payment-events/failed?from=2026-10-26&to=2026-10-25")
+        .expect(400);
+    });
+
     it("hands an event back to the worker with a whole count", async () => {
       await admin.post("/payment-events/evt_failed/retry").expect(204);
 
@@ -215,6 +253,65 @@ describe("What the money paths set aside (e2e)", () => {
         },
       });
       expect(page.items[1]?.stay).toBeNull();
+    });
+
+    it("narrows by the refund, the payment, the stay and its people, and the days", async () => {
+      const { listingId, guestId, listing } =
+        await prismaService.booking.findUniqueOrThrow({
+          where: { id: bookingId },
+          include: { listing: true },
+        });
+      const refundIds = async (search: string) =>
+        refundFailurePageSchema
+          .parse(
+            (await admin.get(`/refund-failures?${search}`).expect(200)).body,
+          )
+          .items.map(({ refundId }) => refundId);
+
+      expect(await refundIds("refundId=re_orphan")).toEqual(["re_orphan"]);
+      expect(await refundIds("paymentId=pi_stay")).toEqual(["re_stay"]);
+      expect(await refundIds(`bookingId=${bookingId}`)).toEqual(["re_stay"]);
+      expect(await refundIds(`listingId=${listingId}`)).toEqual(["re_stay"]);
+      expect(await refundIds(`guestId=${guestId}`)).toEqual(["re_stay"]);
+      expect(await refundIds(`hostId=${listing.ownerId}`)).toEqual(["re_stay"]);
+      expect(await refundIds(`hostId=${randomUUID()}`)).toEqual([]);
+      expect(await refundIds("from=2026-10-25")).toEqual(["re_stay"]);
+      expect(await refundIds("to=2026-10-24")).toEqual(["re_orphan"]);
+      // An open refund is not on the resolved half, whatever names it.
+      expect(await refundIds("status=RESOLVED&refundId=re_orphan")).toEqual([]);
+      await admin.get("/refund-failures?listingId=not-a-uuid").expect(400);
+    });
+
+    it("pages a narrowed list under the same filters", async () => {
+      await prismaService.refundFailure.create({
+        data: {
+          refundId: "re_stay_again",
+          paymentId: "pi_stay",
+          bookingId,
+          amountCents: 4000,
+          currency: "usd",
+          reason: null,
+          failedAt: new Date("2026-10-23T12:00:00.000Z"),
+        },
+      });
+
+      const page = async (search: string) =>
+        refundFailurePageSchema.parse(
+          (
+            await admin
+              .get(`/refund-failures?limit=1&bookingId=${bookingId}${search}`)
+              .expect(200)
+          ).body,
+        );
+      const first = await page("");
+      const second = await page(`&cursor=${first.nextCursor ?? ""}`);
+
+      expect(first.items.map(({ refundId }) => refundId)).toEqual(["re_stay"]);
+      // The orphan between them in time is not the stay's, so the list ends here.
+      expect(second.items.map(({ refundId }) => refundId)).toEqual([
+        "re_stay_again",
+      ]);
+      expect(second.nextCursor).toBeNull();
     });
 
     it("pages by a cursor of its own", async () => {
@@ -351,6 +448,82 @@ describe("What the money paths set aside (e2e)", () => {
       await admin
         .get(`/bookings/stuck?kind=refund&cursor=${forged}`)
         .expect(400);
+    });
+
+    it("narrows the stuck stays by the stay, its people and the days", async () => {
+      await prismaService.booking.update({
+        where: { id: bookingId },
+        data: {
+          refundOwedCents: 48_000,
+          refundAttempts: 30,
+          refundFailedAt: new Date("2026-10-25T12:00:00.000Z"),
+        },
+      });
+
+      const { listingId, guestId, listing } =
+        await prismaService.booking.findUniqueOrThrow({
+          where: { id: bookingId },
+          include: { listing: true },
+        });
+      const stuckIds = async (search: string) =>
+        stuckStayPageSchema
+          .parse(
+            (
+              await admin
+                .get(`/bookings/stuck?kind=refund&${search}`)
+                .expect(200)
+            ).body,
+          )
+          .items.map(({ booking }) => booking.id);
+
+      expect(await stuckIds(`bookingId=${bookingId}`)).toEqual([bookingId]);
+      expect(await stuckIds(`bookingId=${randomUUID()}`)).toEqual([]);
+      expect(await stuckIds(`listingId=${listingId}`)).toEqual([bookingId]);
+      expect(await stuckIds(`guestId=${guestId}`)).toEqual([bookingId]);
+      expect(await stuckIds(`hostId=${listing.ownerId}`)).toEqual([bookingId]);
+      expect(await stuckIds(`guestId=${listing.ownerId}`)).toEqual([]);
+      expect(await stuckIds("from=2026-10-25&to=2026-10-25")).toEqual([
+        bookingId,
+      ]);
+      expect(await stuckIds("from=2026-10-26")).toEqual([]);
+    });
+
+    it("narrows the stuck payouts the same way, by the day the payout was set aside", async () => {
+      await prismaService.booking.update({
+        where: { id: bookingId },
+        data: {
+          payoutAttempts: 24,
+          payoutFailedAt: new Date("2026-10-26T12:00:00.000Z"),
+          // The refund's stamp is another day, and no window over payouts reads it.
+          refundAttempts: 30,
+          refundFailedAt: new Date("2026-10-25T12:00:00.000Z"),
+        },
+      });
+
+      const { listingId, listing } =
+        await prismaService.booking.findUniqueOrThrow({
+          where: { id: bookingId },
+          include: { listing: true },
+        });
+      const stuckIds = async (search: string) =>
+        stuckStayPageSchema
+          .parse(
+            (
+              await admin
+                .get(`/bookings/stuck?kind=payout&${search}`)
+                .expect(200)
+            ).body,
+          )
+          .items.map(({ booking }) => booking.id);
+
+      expect(await stuckIds(`bookingId=${bookingId}`)).toEqual([bookingId]);
+      expect(await stuckIds(`listingId=${listingId}`)).toEqual([bookingId]);
+      expect(await stuckIds(`hostId=${listing.ownerId}`)).toEqual([bookingId]);
+      expect(await stuckIds(`hostId=${randomUUID()}`)).toEqual([]);
+      expect(await stuckIds("from=2026-10-26&to=2026-10-26")).toEqual([
+        bookingId,
+      ]);
+      expect(await stuckIds("to=2026-10-25")).toEqual([]);
     });
 
     it("leaves out a payout set aside that nothing is owed on any more", async () => {

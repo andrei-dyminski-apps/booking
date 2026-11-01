@@ -127,6 +127,7 @@ export class PaymentEventDispatcher {
     const page = await this.paymentEventRepository.findFailedPage(
       cursor,
       query.limit,
+      query,
     );
 
     return {

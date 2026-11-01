@@ -8,6 +8,7 @@ import {
   type BookingSort,
   type CreateBookingInput,
   type StuckKind,
+  type StuckStayQuery,
 } from "@repo/contracts";
 import { z } from "zod";
 import {
@@ -30,6 +31,7 @@ import {
 } from "../../common/paging";
 import type { SetAside } from "../../common/job-failure";
 import type { SetAsideCursor } from "../../common/set-aside-cursor";
+import { setAsideWithin } from "../../common/set-aside-window";
 import { readPricedListing } from "../../listing/listing-pricing";
 import { toIsoDate } from "../../common/iso-date";
 import { PrismaService } from "../../prisma/prisma.service";
@@ -121,6 +123,12 @@ function withListingOwner(
     paymentId: row.paymentIntentId,
   };
 }
+
+/** What the admin's list of stuck stays narrows by, past its kind. */
+export type StuckStayFilters = Pick<
+  StuckStayQuery,
+  "bookingId" | "listingId" | "guestId" | "hostId" | "from" | "to"
+>;
 
 /**
  * Every query the module makes, and the whole of its knowledge about how a stay is stored:
@@ -445,6 +453,7 @@ export class BookingRepository {
     kind: StuckKind,
     cursor: SetAsideCursor | null,
     limit: number,
+    filters: StuckStayFilters,
   ): Promise<Page<StuckStayRow>> {
     const isRefund = kind === "refund";
     const column = isRefund ? "refundFailedAt" : "payoutFailedAt";
@@ -464,6 +473,15 @@ export class BookingRepository {
           isRefund
             ? STUCK_REFUND
             : stuckPayout(this.prismaService.booking.fields),
+          {
+            id: filters.bookingId,
+            listingId: filters.listingId,
+            guestId: filters.guestId,
+            [column]: setAsideWithin(filters),
+            ...(filters.hostId === undefined
+              ? {}
+              : { listing: { ownerId: filters.hostId } }),
+          },
           after,
         ],
       },

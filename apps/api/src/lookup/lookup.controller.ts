@@ -36,6 +36,22 @@ export class LookupController {
   }
 
   /**
+   * The accounts a stay was taken against, retired listings included: the admin's
+   * `?hostId=` on `/admin/payments`, where a stay outlives the listing it names.
+   */
+  @Get("hosts")
+  @Roles(Role.ADMIN)
+  @ApiOkResponse({ type: LookupPageDto })
+  @ApiBadRequestResponse({
+    description:
+      "The search is too short, or the cursor was not issued by this lookup",
+    type: ApiErrorDto,
+  })
+  hosts(@Query() query: LookupQueryDto): Promise<LookupPage> {
+    return this.lookupService.hosts(query);
+  }
+
+  /**
    * The guests of the stays the caller may read: `?guestId=` on `/bookings`. Open to every
    * role, because any account may host — one with no listings is answered an empty page.
    */
