@@ -289,6 +289,8 @@ apps/web/
       listing/index.ts
       user/model/roles.ts     # the roles named for a person: both admin screens read them
       user/api/any-user.ts    # the account with its counts, or a 404: its page and `?ownerId=`
+      user/ui/user-joined.tsx  # "Joined <date>" behind a calendar: the account's card and page
+      user/ui/user-blocked-since.tsx  # …and "Blocked since", beside it for a blocked account
       user/index.ts
       review/ui/review-card.tsx  # one review, with a slot for what the screen may do to it
       review/ui/rating-stars.tsx
@@ -358,6 +360,8 @@ apps/web/
       ui/live-refresh.tsx     # router.refresh() on the event types a list names: the feed, the threads
       ui/refused-search-notice.tsx  # …and for a search the contract refuses
       ui/no-matches-notice.tsx  # …and for an answer the filters emptied
+      ui/date-range.tsx       # first → last day behind a calendar: stays, the waitlist, the admin's
+      ui/night-count.tsx      # …and how many nights that spans, behind a moon
       ui/index.ts
 ```
 
@@ -1520,7 +1524,7 @@ rather than in `src/shared`.
 component that knows this application's `FieldErrors`, or one whose whole job is to
 navigate with `useRouter`. The test is the dependency, not the size — anything that would
 have to import from `#shared/*` or from `next/*` is not a primitive and does not go into
-the package. Seventeen are exported from there: `PageHeading` — the title and the line
+the package. Nineteen are exported from there: `PageHeading` — the title and the line
 under it at the top of a list screen —, `BackLink` — the ghost arrow link above a detail
 screen's heading, back to the list it was opened from —, `ButtonLink` — a `<Link>`
 wearing the button classes, the one spelling of "a link that looks like a button" (see
@@ -1530,7 +1534,9 @@ personal list when the event stream says it changed, and `FilterField`, `FilterS
 `LookupField`, `FilterForm`, `FiltersDialog`, `FilterChips`, `SortSelect`, `Pager`,
 `StalePageNotice`, `RefusedSearchNotice` and `NoMatchesNotice`, the parts every list
 screen — the catalogue, the stays and the admin's listings and users — searches and pages
-with. Two more are internal to the boxes and not exported: `HintLabel`, the label with its
+with. `DateRange` and `NightCount` draw a range of days and the nights it spans — on the
+stay's page and card, the waitlist's card and the admin's stuck stays and bounced refunds.
+Two more are internal to the boxes and not exported: `HintLabel`, the label with its
 description as a hint beside it, and `CharacterCount`, the room left in a bounded
 `FormField`. A component only one screen uses stays in that screen's slice, exactly as
 "pages first" says.

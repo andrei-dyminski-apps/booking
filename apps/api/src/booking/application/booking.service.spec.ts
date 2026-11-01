@@ -941,6 +941,7 @@ describe("BookingService", () => {
           expect.objectContaining({
             kind: "refund",
             booking: expect.objectContaining({ id }) as Booking,
+            owedCents: AMOUNT,
             attempts: MAX_REFUND_ATTEMPTS,
           }),
         ]);

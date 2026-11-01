@@ -17,7 +17,6 @@ import {
   type RefundFailure as RefundFailureView,
   type RefundFailureStatus,
   type StuckKind,
-  type StuckStay,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../../auth/auth.types";
 import type { SetAside } from "../../../common/job-failure";
@@ -57,6 +56,7 @@ import type {
   CreatedBooking,
   RefundTarget,
   ReleasedHold,
+  StuckStayRow,
 } from "../../domain/booking.types";
 import { BookingRepository } from "../../infrastructure/booking.repository";
 import {
@@ -441,7 +441,7 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
     kind: StuckKind,
     cursor: SetAsideCursor | null,
     limit: number,
-  ): Promise<Page<StuckStay>> {
+  ): Promise<Page<StuckStayRow>> {
     const stuck = [...this.rows.values()]
       .flatMap((found) => {
         const failure = this.refundFailures.get(found.booking.id);

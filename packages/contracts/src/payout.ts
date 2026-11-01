@@ -45,7 +45,7 @@ export function hostShare(amount: Cents, refunded: Cents): Cents {
  * dispute was lost — the bank took the money back from the platform, and the host's share
  * with it — and otherwise `hostShare` of what the guest kept paying, a refund still owed
  * counted as gone already, since paying it out would only be taken back. The API transfers
- * and reverses by it, and the admin's screen of stuck payouts states it.
+ * and reverses by it, and the list of stuck stays states it as `owedCents`.
  */
 export function owedToHost(
   stay: Pick<

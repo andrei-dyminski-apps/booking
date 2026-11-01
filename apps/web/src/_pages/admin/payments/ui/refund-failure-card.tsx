@@ -11,8 +11,8 @@ import {
   CardTitle,
 } from "@repo/ui/components/card";
 import { ROUTES } from "#shared/config";
-import { formatDay, formatMoment, formatMoney } from "#shared/lib";
-import { ButtonLink } from "#shared/ui";
+import { formatMoment, formatMoney } from "#shared/lib";
+import { ButtonLink, DateRange } from "#shared/ui";
 import { ResolveRefundButton } from "./resolve-refund-button";
 
 /**
@@ -29,8 +29,13 @@ export const RefundFailureCard = ({ failure }: { failure: RefundFailure }) => (
       </CardTitle>
       <CardDescription className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <span>Came back {formatMoment(failure.failedAt)} UTC</span>
-        <span className="font-mono break-all">{failure.refundId}</span>
-        <span className="font-mono break-all">{failure.paymentId}</span>
+        <span>
+          Refund <span className="font-mono break-all">{failure.refundId}</span>
+        </span>
+        <span>
+          Payment{" "}
+          <span className="font-mono break-all">{failure.paymentId}</span>
+        </span>
       </CardDescription>
       <CardAction>
         <Badge
@@ -53,15 +58,15 @@ export const RefundFailureCard = ({ failure }: { failure: RefundFailure }) => (
           No stay names this payment any more.
         </p>
       ) : (
-        <p>
-          <span className="text-muted-foreground">Stay: </span>
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-muted-foreground">Stay:</span>
           <Link
             href={ROUTES.booking(failure.stay.bookingId)}
             className="hover:underline"
           >
-            {failure.stay.listingTitle}, {formatDay(failure.stay.from)} –{" "}
-            {formatDay(failure.stay.to)}
+            {failure.stay.listingTitle}
           </Link>
+          <DateRange from={failure.stay.from} to={failure.stay.to} />
         </p>
       )}
       {failure.resolvedAt !== null && (

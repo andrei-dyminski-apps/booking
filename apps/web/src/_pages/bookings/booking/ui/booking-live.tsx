@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { differenceInMilliseconds, isBefore, parseISO } from "date-fns";
-import { CalendarIcon, Loader2Icon, MoonIcon } from "lucide-react";
+import { Loader2Icon } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookingStatus,
@@ -22,14 +22,12 @@ import {
 import { cancellationRefundNote, mayCancel } from "#features/cancel-booking";
 import { BookingStatusBadge } from "#entities/booking";
 import {
-  countOf,
   dayStart,
-  formatDay,
   formatMoment,
   formatMoney,
-  nightsBetween,
   nightsBreakdown,
 } from "#shared/lib";
+import { DateRange, NightCount } from "#shared/ui";
 import { bookingKey, readBooking } from "../api/booking-query";
 import { CancelStayButton } from "./cancel-stay-button";
 import { PaymentForm } from "./payment-form";
@@ -140,9 +138,11 @@ export const BookingLive = ({
         return false;
       }
 
-      waitingSince.current ??= Date.now();
+      const now = Date.now();
 
-      return pollDelay(Date.now() - waitingSince.current);
+      waitingSince.current ??= now;
+
+      return pollDelay(now - waitingSince.current);
     },
   });
 
@@ -164,7 +164,6 @@ export const BookingLive = ({
     window.history.replaceState(null, "", `${url.pathname}${url.search}`);
   }, []);
 
-  const nights = nightsBetween(booking.from, booking.to);
   const pending = booking.status === BookingStatus.PENDING_PAYMENT;
   const { expiresAt } = booking;
 
@@ -220,15 +219,11 @@ export const BookingLive = ({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-1.5">
-          <CalendarIcon className="size-4" />
-          {formatDay(booking.from)} → {formatDay(booking.to)}
+        <CardTitle>
+          <DateRange from={booking.from} to={booking.to} />
         </CardTitle>
         <CardDescription className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <span className="flex items-center gap-1.5">
-            <MoonIcon className="size-3.5" />
-            {countOf(nights, "night")}
-          </span>
+          <NightCount from={booking.from} to={booking.to} />
           <span className="font-medium text-foreground">
             {formatMoney(booking.amountCents, booking.currency)}
           </span>

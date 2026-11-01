@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { CalendarCheckIcon, CalendarIcon, WarehouseIcon } from "lucide-react";
+import { CalendarCheckIcon, WarehouseIcon } from "lucide-react";
 import { Role, type ManagedUserDetail } from "@repo/contracts";
 import { Badge } from "@repo/ui/components/badge";
 import {
@@ -10,16 +10,15 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
-import { anyUser, ROLE_LABELS } from "#entities/user";
+import {
+  anyUser,
+  ROLE_LABELS,
+  UserBlockedSince,
+  UserJoined,
+} from "#entities/user";
 import { requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import {
-  countOf,
-  filtersHref,
-  formatDate,
-  formatMoment,
-  requireId,
-} from "#shared/lib";
+import { countOf, filtersHref, requireId } from "#shared/lib";
 import { BackLink, ButtonLink } from "#shared/ui";
 import { BlockButton } from "./block-button";
 import { RoleForm } from "./role-form";
@@ -58,13 +57,8 @@ export const UserPage = async ({ params }: PageProps<"/admin/users/[id]">) => {
             <Badge variant="outline">{ROLE_LABELS[user.role]}</Badge>
           </div>
           <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-            <span className="flex items-center gap-1.5">
-              <CalendarIcon className="size-3.5" />
-              Joined {formatDate(user.createdAt)}
-            </span>
-            {user.blockedAt !== null && (
-              <span>Blocked since {formatMoment(user.blockedAt)} UTC</span>
-            )}
+            <UserJoined createdAt={user.createdAt} />
+            <UserBlockedSince blockedAt={user.blockedAt} />
           </p>
         </div>
       </div>

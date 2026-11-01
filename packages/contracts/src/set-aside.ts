@@ -98,10 +98,15 @@ export const stuckKindSchema = z.enum(["refund", "payout"]);
 
 export const StuckKind = stuckKindSchema.enum;
 
-/** The stay whole, since the screen links to it and the money on it is what is stuck. */
+/**
+ * The stay whole, since the screen links to it, and `owedCents` — what the job would send:
+ * the refund a cancellation owes the guest, or what the host is owed (`owedToHost`). The API
+ * states it so the screen draws a figure instead of knowing the rule behind it.
+ */
 export const stuckStaySchema = z.object({
   kind: stuckKindSchema,
   booking: bookingSchema,
+  owedCents: centsSchema,
   attempts: z.int().min(0),
   lastError: z.string().nullable(),
   failedAt: z.iso.datetime(),

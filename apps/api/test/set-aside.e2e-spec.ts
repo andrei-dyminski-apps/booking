@@ -285,6 +285,25 @@ describe("What the money paths set aside (e2e)", () => {
           refundAttempts: 30,
           refundLastError: "Error: api_connection_error",
           refundFailedAt: new Date("2026-10-25T12:00:00.000Z"),
+        },
+      });
+
+      // A stay owed a refund is no payout to retry, so the payout is another stay's.
+      const { listingId, guestId } =
+        await prismaService.booking.findUniqueOrThrow({
+          where: { id: bookingId },
+        });
+      const payout = await prismaService.booking.create({
+        data: {
+          listingId,
+          guestId,
+          from: parseISO(inDays(-20), { in: tz("UTC") }),
+          to: parseISO(inDays(-16), { in: tz("UTC") }),
+          status: "CONFIRMED",
+          amountCents: 48_000,
+          currency: "usd",
+          paidAt: new Date(),
+          refundedAmountCents: 12_000,
           payoutAttempts: 24,
           payoutLastError: "Error: The transfer was refused",
           payoutFailedAt: new Date("2026-10-26T12:00:00.000Z"),
@@ -301,6 +320,7 @@ describe("What the money paths set aside (e2e)", () => {
       expect(refunds.items).toEqual([
         expect.objectContaining({
           kind: "refund",
+          owedCents: 48_000,
           attempts: 30,
           lastError: "Error: api_connection_error",
           failedAt: "2026-10-25T12:00:00.000Z",
@@ -310,9 +330,17 @@ describe("What the money paths set aside (e2e)", () => {
         id: bookingId,
         refundOwedCents: 48_000,
       });
+      // 85% of the 36 000 cents the guest kept paying.
       expect(payouts.items).toEqual([
-        expect.objectContaining({ kind: "payout", attempts: 24 }),
+        expect.objectContaining({
+          kind: "payout",
+          owedCents: 30_600,
+          attempts: 24,
+          lastError: "Error: The transfer was refused",
+          failedAt: "2026-10-26T12:00:00.000Z",
+        }),
       ]);
+      expect(payouts.items[0]?.booking.id).toBe(payout.id);
       await admin.get("/bookings/stuck").expect(400);
 
       // A cursor naming an id no stay could have is refused before the query sees it.
@@ -342,9 +370,18 @@ describe("What the money paths set aside (e2e)", () => {
 
       expect(await listPayouts()).toHaveLength(1);
 
+      // A refund still on its way is sent first; the payout waits for it to be recorded.
       await prismaService.booking.update({
         where: { id: bookingId },
-        data: { refundedAmountCents: 48_000 },
+        data: { refundOwedCents: 1 },
+      });
+
+      expect(await listPayouts()).toEqual([]);
+      await admin.post(`/bookings/${bookingId}/stuck/payout/retry`).expect(409);
+
+      await prismaService.booking.update({
+        where: { id: bookingId },
+        data: { refundOwedCents: null, refundedAmountCents: 48_000 },
       });
 
       expect(await listPayouts()).toEqual([]);

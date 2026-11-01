@@ -1,10 +1,5 @@
 import Link from "next/link";
-import {
-  NO_CENTS,
-  owedToHost,
-  StuckKind,
-  type StuckStay,
-} from "@repo/contracts";
+import { StuckKind, type StuckStay } from "@repo/contracts";
 import {
   Card,
   CardAction,
@@ -16,8 +11,8 @@ import {
 } from "@repo/ui/components/card";
 import { BookingStatusBadge } from "#entities/booking";
 import { ROUTES } from "#shared/config";
-import { countOf, formatDay, formatMoment, formatMoney } from "#shared/lib";
-import { ButtonLink } from "#shared/ui";
+import { countOf, formatMoment, formatMoney } from "#shared/lib";
+import { ButtonLink, DateRange } from "#shared/ui";
 import { retryStuckAction } from "../api/set-aside-actions";
 import { LastError } from "./last-error";
 import { RetryButton } from "./retry-button";
@@ -39,9 +34,7 @@ export const StuckStayCard = ({ stuck }: { stuck: StuckStay }) => {
           </Link>
         </CardTitle>
         <CardDescription className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <span>
-            {formatDay(booking.from)} – {formatDay(booking.to)}
-          </span>
+          <DateRange from={booking.from} to={booking.to} />
           <span>{owed(stuck)}</span>
           <span>
             Set aside {formatMoment(stuck.failedAt)} UTC after{" "}
@@ -69,15 +62,11 @@ export const StuckStayCard = ({ stuck }: { stuck: StuckStay }) => {
   );
 };
 
-/**
- * What the job would send: the refund the cancellation owes, or what the host is owed — by
- * `owedToHost`, the rule the payout itself is computed by, so a refund still owed, an unpaid
- * stay and a lost dispute count here as they do there.
- */
-function owed({ kind, booking }: StuckStay): string {
-  if (kind === StuckKind.refund) {
-    return `${formatMoney(booking.refundOwedCents ?? NO_CENTS, booking.currency)} owed to the guest`;
-  }
+/** What the job would send, as the API states it: the refund owed to the guest, or the host's share. */
+function owed({ kind, owedCents, booking }: StuckStay): string {
+  const amount = formatMoney(owedCents, booking.currency);
 
-  return `${formatMoney(owedToHost(booking), booking.currency)} owed to the host`;
+  return kind === StuckKind.refund
+    ? `${amount} owed to the guest`
+    : `${amount} owed to the host`;
 }

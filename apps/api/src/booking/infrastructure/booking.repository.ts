@@ -8,7 +8,6 @@ import {
   type BookingSort,
   type CreateBookingInput,
   type StuckKind,
-  type StuckStay,
 } from "@repo/contracts";
 import { z } from "zod";
 import {
@@ -51,6 +50,7 @@ import type {
   CreatedBooking,
   RefundTarget,
   ReleasedHold,
+  StuckStayRow,
 } from "../domain/booking.types";
 import { quoteStay } from "../domain/stay-price";
 import { LeaseBusyError, whileLeased, type LeaseTiming } from "./booking-lease";
@@ -445,8 +445,9 @@ export class BookingRepository {
     kind: StuckKind,
     cursor: SetAsideCursor | null,
     limit: number,
-  ): Promise<Page<StuckStay>> {
-    const column = kind === "refund" ? "refundFailedAt" : "payoutFailedAt";
+  ): Promise<Page<StuckStayRow>> {
+    const isRefund = kind === "refund";
+    const column = isRefund ? "refundFailedAt" : "payoutFailedAt";
     const after: Prisma.BookingWhereInput =
       cursor === null
         ? {}
@@ -460,7 +461,7 @@ export class BookingRepository {
     const rows = await this.prismaService.booking.findMany({
       where: {
         AND: [
-          kind === "refund"
+          isRefund
             ? STUCK_REFUND
             : stuckPayout(this.prismaService.booking.fields),
           after,
@@ -473,22 +474,29 @@ export class BookingRepository {
 
     return {
       items: rows.slice(0, limit).flatMap((row) => {
-        const failedAt =
-          kind === "refund" ? row.refundFailedAt : row.payoutFailedAt;
+        const { failedAt, attempts, lastError } = isRefund
+          ? {
+              failedAt: row.refundFailedAt,
+              attempts: row.refundAttempts,
+              lastError: row.refundLastError,
+            }
+          : {
+              failedAt: row.payoutFailedAt,
+              attempts: row.payoutAttempts,
+              lastError: row.payoutLastError,
+            };
 
-        return failedAt === null
-          ? []
-          : [
-              {
-                kind,
-                booking: toBooking(row),
-                attempts:
-                  kind === "refund" ? row.refundAttempts : row.payoutAttempts,
-                lastError:
-                  kind === "refund" ? row.refundLastError : row.payoutLastError,
-                failedAt: failedAt.toISOString(),
-              },
-            ];
+        if (failedAt === null) return [];
+
+        return [
+          {
+            kind,
+            booking: toBooking(row),
+            attempts,
+            lastError,
+            failedAt: failedAt.toISOString(),
+          },
+        ];
       }),
       hasMore: rows.length > limit,
     };
@@ -905,7 +913,8 @@ export function overlapping(
  * A paid stay whose host may still be sent a transfer — the coarse cut `findDuePayouts` and
  * `stuckPayout` both read, written once so the sweep and the admin's list cannot drift. A
  * stay refunded in full or a dispute lost left the host nothing to send, and nothing leaves
- * while a dispute is open; the exact amount is the service's rule.
+ * while a dispute is open; the exact amount is the service's rule. A refund still on its way
+ * is sent first, and the stay comes back once it is recorded.
  */
 export function payoutOwed(
   fields: Prisma.BookingFieldRefs,
@@ -913,6 +922,7 @@ export function payoutOwed(
   return {
     paidAt: { not: null },
     transferId: null,
+    refundOwedCents: null,
     AND: [
       { OR: [{ disputeStatus: null }, { disputeStatus: DisputeStatus.WON }] },
       {
@@ -940,7 +950,8 @@ export async function bookingExists(
  * A payout set aside that is still owed — what `GET /bookings/stuck?kind=payout` lists and
  * what `PayoutRepository.handBackPayout` hands back, written once so a retry is refused for
  * exactly the stays the list leaves out: one a retry would only find owing nothing again,
- * or held by an open dispute. A dispute won brings the row back to the list.
+ * held by an open dispute or waiting on a refund still owed. A dispute won, or the refund
+ * recorded, brings the row back to the list.
  */
 export function stuckPayout(
   fields: Prisma.BookingFieldRefs,

@@ -89,6 +89,7 @@ src/
     domain/                # pure functions: statuses and transitions, the date range, quoteStay
       booking.types.ts     # the shapes the layers share: a stay with its owner, a released hold, a refund target, the cursor
       booking.errors.ts    # what the repository throws instead of a Prisma code; the service turns them into HTTP
+      stuck-stay.ts        # owedOnStuck — what the job would send for a stay set aside, stated by GET /bookings/stuck
     application/
       booking.service.ts   # HTTP and the jobs meet here; sees neither Prisma, Stripe nor BullMQ
       ports/booking-jobs.ts  # BookingJobs — the release, withdrawal and refund jobs, as the service asks for them
@@ -543,8 +544,9 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
     money goes back outside Stripe and the API records how. `resolution` and `resolved_at`
     are written together or not at all (`refund_failures_resolution_with_resolved_at`), and
     only into an open row, so a second resolution is a `409` and the first one stands.
-  - `GET /bookings/stuck?kind=refund|payout`, the stay whole beside the attempts and the
-    last error; declared before `GET /bookings/:id`, which would take `stuck` for an id.
+  - `GET /bookings/stuck?kind=refund|payout`, the stay whole beside `owedCents`, the
+    attempts and the last error; declared before `GET /bookings/:id`, which would take
+    `stuck` for an id.
     The retry is split by who may send the money: `POST /bookings/:id/stuck/refund/retry`
     is `BookingController`'s, `POST /bookings/:id/stuck/payout/retry` is
     `StuckPayoutController`'s in the payout module, because `booking` cannot import
@@ -554,9 +556,10 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
     (`writeOrRefuse`). A payout's retry hands back exactly what its list shows —
     `stuckPayout` in `booking.repository.ts` is the one condition both read, so a stay a
     lost dispute or a full refund left owing nothing is a `409` rather than a retry that
-    would only find that out again, and so is one an open dispute holds until it is won.
-    Its cut is `payoutOwed`, the same one `findDuePayouts` reads, so the list never shows a
-    stay the sweep would pass over.
+    would only find that out again, and so is one an open dispute holds until it is won,
+    or one a refund still owed holds until the refund is recorded — that refund is sent
+    first. Its cut is `payoutOwed`, the same one `findDuePayouts` reads, so the list never
+    shows a stay the sweep would pass over.
 - **The per-booking leases** (`infrastructure/booking-lease.ts`): `cancelling_until` for a
   cancellation, its refund job and the payment webhooks (`whileCancelling`, sixty seconds,
   three of waiting), and `settling_until` for the settlement of the host's payout
@@ -630,10 +633,12 @@ platform, and the host is paid their share by a transfer once the stay has begun
   cent is lost or invented between the two) and `payoutDueAt` (`PAYOUT_DELAY_HOURS` after
   midnight UTC of check-in) live in `packages/contracts/src/payout.ts`, because the host's
   screen states them — and so does `owedToHost` (nothing for an unpaid stay or a lost
-  dispute, a refund owed counted as refunded, `hostShare` of the rest), because the admin's
-  screen of stuck payouts states what the job would send. `domain/payout.ts` applies it to
-  the row's facts and adds what only the API decides: nothing leaves while a dispute is
-  open (`mayPayOut`).
+  dispute, a refund owed counted as refunded, `hostShare` of the rest), because
+  `GET /bookings/stuck` states what the job would send as `owedCents` (the refund owed for
+  `kind=refund`, `owedToHost` for `kind=payout`; `owedOnStuck` in
+  `booking/domain/stuck-stay.ts`, applied by `BookingService`) — the admin's screen draws
+  the figure and does not apply the rule. `domain/payout.ts` applies it to the row's facts
+  and adds what only the API decides: nothing leaves while a dispute is open (`mayPayOut`).
 - **A host is an Accounts v2 recipient**, opened by the first
   `POST /payouts/account/session` under `user-<id>-account` and written only into the empty
   `users.stripe_account_id`. Onboarding is Stripe's embedded component on the frontend.

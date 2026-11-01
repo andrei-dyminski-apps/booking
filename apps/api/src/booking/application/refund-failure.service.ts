@@ -25,7 +25,8 @@ export class RefundFailureService {
   ) {}
 
   async findPage(query: RefundFailureQuery): Promise<RefundFailurePage> {
-    const resource = resourceOf(query.status);
+    // The status is in the tag: a cursor of the open list names no place among the resolved.
+    const resource = `refund-failures-${query.status}`;
     const cursor = readCursor(query.cursor, "newest", (raw) =>
       decodeSetAsideCursor(resource, raw, refundFailureSchema.shape.refundId),
     );
@@ -59,7 +60,3 @@ export class RefundFailureService {
     );
   }
 }
-
-/** The status is in the tag: a cursor of the open list names no place among the resolved. */
-const resourceOf = (status: RefundFailureQuery["status"]): string =>
-  `refund-failures-${status}`;

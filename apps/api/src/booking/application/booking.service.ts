@@ -70,6 +70,7 @@ import {
   type Cents,
 } from "../../payment/domain/money";
 import { isCancellable } from "../domain/booking-status";
+import { owedOnStuck } from "../domain/stuck-stay";
 import { BookingJobs } from "./ports/booking-jobs";
 import { StayEvents } from "./stay-events";
 import { notifyBothSides } from "./stay-notices";
@@ -529,7 +530,10 @@ export class BookingService {
     );
 
     return {
-      items: page.items,
+      items: page.items.map((row) => ({
+        ...row,
+        owedCents: owedOnStuck(row.kind, row.booking),
+      })),
       nextCursor: nextSetAsideCursor(resource, page, (row) => ({
         at: row.failedAt,
         id: row.booking.id,

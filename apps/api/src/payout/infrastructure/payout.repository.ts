@@ -158,8 +158,6 @@ export class PayoutRepository {
     const where: Prisma.BookingWhereInput = {
       AND: [payoutOwed(this.prismaService.booking.fields)],
       payoutFailedAt: null,
-      // A refund still on its way is sent first; the stay comes back once it is recorded.
-      refundOwedCents: null,
       // `from` is a `@db.Date`, compared as a day.
       from: { lte: subHours(now, PAYOUT_DELAY_HOURS) },
       listing: {

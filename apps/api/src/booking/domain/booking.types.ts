@@ -3,6 +3,7 @@ import type {
   BookingStatus,
   PricedNight,
   StayNotice,
+  StuckStay,
 } from "@repo/contracts";
 import type { Cents, Currency } from "../../payment/domain/money";
 
@@ -92,3 +93,9 @@ export type CreatedBooking = BookingWithListingOwner & {
 export type BookingCursor =
   | { sort: "newest" | "oldest"; createdAt: Date; id: string }
   | { sort: "checkInAsc" | "checkInDesc"; from: Date; id: string };
+
+/**
+ * A stay set aside as the repository reads it: the row's facts, without what the job would
+ * send — that figure is a rule (`owedOnStuck`), which the service applies.
+ */
+export type StuckStayRow = Omit<StuckStay, "owedCents">;

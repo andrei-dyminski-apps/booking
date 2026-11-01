@@ -22,7 +22,9 @@ export const FailedEventCard = ({ event }: { event: FailedPaymentEvent }) => (
     <CardHeader>
       <CardTitle className="font-mono break-all">{event.type}</CardTitle>
       <CardDescription className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        <span className="font-mono break-all">{event.id}</span>
+        <span>
+          Event <span className="font-mono break-all">{event.id}</span>
+        </span>
         <span>Received {formatMoment(event.receivedAt)} UTC</span>
         <span>
           Set aside {formatMoment(event.failedAt)} UTC after{" "}

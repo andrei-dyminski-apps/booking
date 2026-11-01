@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { CalendarIcon, MoonIcon } from "lucide-react";
 import {
   BookingStatus,
   isReviewable,
@@ -21,14 +20,8 @@ import {
 import { cancellationRefundNote, mayCancel } from "#features/cancel-booking";
 import { awaitsPaymentFrom, BookingStatusBadge } from "#entities/booking";
 import { ROUTES } from "#shared/config";
-import {
-  countOf,
-  formatDay,
-  formatMoment,
-  formatMoney,
-  nightsBetween,
-} from "#shared/lib";
-import { ButtonLink } from "#shared/ui";
+import { formatMoment, formatMoney } from "#shared/lib";
+import { ButtonLink, DateRange, NightCount } from "#shared/ui";
 import { listingStaysHref } from "../lib/bookings-search";
 import { CancelBookingButton } from "./cancel-booking-button";
 import { ReviewBookingButton } from "./review-booking-button";
@@ -61,7 +54,6 @@ export const BookingCard = ({
   /** The server's clock at the render: the offer to cancel, its refund, a hold's deadline. */
   now: string;
 }) => {
-  const nights = nightsBetween(booking.from, booking.to);
   const review = reviewHalf(booking, viewer, side, today);
   // A host and an admin see other people's stays; on the guest's side the list is one
   // person's, the viewer's own.
@@ -82,14 +74,8 @@ export const BookingCard = ({
           </Link>
         </CardTitle>
         <CardDescription className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <span className="flex items-center gap-1.5">
-            <CalendarIcon className="size-3.5" />
-            {formatDay(booking.from)} → {formatDay(booking.to)}
-          </span>
-          <span className="flex items-center gap-1.5">
-            <MoonIcon className="size-3.5" />
-            {countOf(nights, "night")}
-          </span>
+          <DateRange from={booking.from} to={booking.to} />
+          <NightCount from={booking.from} to={booking.to} />
           {/*
             What this stay costs, as the API quoted it when the hold was taken — the amount
             the payment charges, and one an owner's later change of price does not restate.
