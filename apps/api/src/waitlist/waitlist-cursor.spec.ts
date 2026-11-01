@@ -1,11 +1,15 @@
-import type { WaitlistDemandEntry } from "@repo/contracts";
+import { type WaitlistDemandEntry } from "@repo/contracts";
+import { cents } from "../payment/domain/money";
 import { encodeParts } from "../common/paging";
 import { decodeCursor, encodeCursor } from "./waitlist-cursor";
 
 const entry: WaitlistDemandEntry = {
   id: "9b8a7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
   listingId: "6d0f2c1e-1a2b-4c3d-8e5f-9a0b1c2d3e4f",
-  listing: { title: "Loft above the harbour", pricePerNight: 120 },
+  listing: {
+    title: "Loft above the harbour",
+    pricePerNightCents: cents(12_000),
+  },
   from: "2026-09-01",
   to: "2026-09-05",
   createdAt: "2026-08-20T12:00:00.000Z",

@@ -4,6 +4,7 @@ import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { cleanupOpenApiDoc } from "nestjs-zod";
 import { AppModule } from "./app.module";
 import { ACCESS_TOKEN_COOKIE } from "./auth/cookies";
+import { useBodyParsers } from "./common/body-parsers";
 import { assertConnectionUrlsMatchCompose } from "./common/env-consistency";
 
 async function bootstrap() {
@@ -12,7 +13,13 @@ async function bootstrap() {
   // rather than as the two lines of .env that stopped matching.
   assertConnectionUrlsMatchCompose();
 
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // The parsers are registered by hand so that only the signed webhooks keep their raw
+  // bytes — see `useBodyParsers`.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bodyParser: false,
+  });
+
+  useBodyParsers(app);
 
   // Behind a proxy every request arrives from the proxy's address, and the rate limiter
   // would then put all clients in one bucket — one attacker locking everyone else out.

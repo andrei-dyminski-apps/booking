@@ -13,7 +13,7 @@ import {
   type Notification,
 } from "@repo/contracts";
 import { AppModule } from "./../src/app.module";
-import { BookingService } from "./../src/booking/booking.service";
+import { BookingService } from "./../src/booking/application/booking.service";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
@@ -53,7 +53,7 @@ describe("WaitlistController (e2e)", () => {
       .send({
         title: "Loft above the harbour",
         description: "Two rooms under the roof and a wall of glass.",
-        pricePerNight: 120,
+        pricePerNightCents: 12_000,
         capacity: 4,
       })
       .expect(201);

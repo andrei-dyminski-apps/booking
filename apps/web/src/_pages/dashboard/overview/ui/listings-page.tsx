@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { PlusIcon, WarehouseIcon } from "lucide-react";
 import { Role } from "@repo/contracts";
 import {
@@ -12,6 +13,7 @@ import { ListingCard } from "#entities/listing";
 import { listingsApi, requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
 import { ButtonLink, PageHeading } from "#shared/ui";
+import { PayoutsNotice } from "./payouts-notice";
 
 /**
  * A user's listings: what `GET /listings/mine` returns is decided by the session rather
@@ -40,6 +42,13 @@ export const ListingsPage = async () => {
           New listing
         </ButtonLink>
       </div>
+
+      {/* Bookings are taken either way; what waits on this is the host's own money. */}
+      {listings.length > 0 && (
+        <Suspense fallback={null}>
+          <PayoutsNotice />
+        </Suspense>
+      )}
 
       {listings.length === 0 ? (
         <Empty className="border">

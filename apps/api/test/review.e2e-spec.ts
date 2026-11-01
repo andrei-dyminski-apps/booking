@@ -13,6 +13,7 @@ import {
   type CreateListingInput,
   type CreateReviewInput,
 } from "@repo/contracts";
+import { cents } from "./../src/payment/domain/money";
 import { AppModule } from "./../src/app.module";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
@@ -29,7 +30,7 @@ import {
 const listingInput: CreateListingInput = {
   title: "Loft above the harbour",
   description: "Two rooms under the roof and a wall of glass facing the water.",
-  pricePerNight: 120,
+  pricePerNightCents: cents(12_000),
   capacity: 4,
 };
 
@@ -91,9 +92,8 @@ describe("ReviewController (e2e)", () => {
   });
 
   /**
-   * A stay written straight into the table: the API books nothing in the past and confirms
-   * nothing until the payment step exists, and a finished, paid stay is what a review is
-   * about. The dates are relative to the day the suite runs, like every fixture here.
+   * A stay written straight into the table: the API books nothing in the past, confirms a
+   * stay only on Stripe's webhook, and a finished, paid stay is what a review is about. The dates are relative to the day the suite runs, like every fixture here.
    */
   const stay = async (
     overrides: { status?: BookingStatus; from?: number; to?: number } = {},
@@ -105,6 +105,8 @@ describe("ReviewController (e2e)", () => {
         from: new Date(inDays(overrides.from ?? -6)),
         to: new Date(inDays(overrides.to ?? -2)),
         status: overrides.status ?? BookingStatus.CONFIRMED,
+        amountCents: 48_000,
+        currency: "usd",
         expiresAt:
           overrides.status === BookingStatus.PENDING_PAYMENT
             ? new Date(Date.now() + 60_000)

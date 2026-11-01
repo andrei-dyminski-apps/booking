@@ -1,4 +1,5 @@
 import {
+  BanknoteIcon,
   BuildingIcon,
   CalendarCheckIcon,
   HomeIcon,
@@ -8,6 +9,7 @@ import {
   ShieldIcon,
   UserIcon,
   UsersIcon,
+  WalletIcon,
   type LucideIcon,
 } from "lucide-react";
 import { Role, type User } from "@repo/contracts";
@@ -87,12 +89,20 @@ export function navigationFor(user: User | null): NavItem[] {
         hint: "Your listings",
         icon: LayoutDashboardIcon,
       },
+      // Inside the dashboard's path, and the deepest link containing the path is the
+      // current one — so the payouts screen lights this link rather than both.
+      {
+        href: ROUTES.payouts,
+        label: "Payouts",
+        hint: "What your stays paid you",
+        icon: WalletIcon,
+      },
     );
   }
 
-  // The admin's section is two screens rather than one, because they answer two different
-  // questions — what is on offer, and who may use the site — and an admin reaches for each
-  // on its own.
+  // The admin's section is three screens rather than one, because they answer three
+  // different questions — what is on offer, who may use the site, and what money waits for
+  // a person — and an admin reaches for each on its own.
   if (user.role === Role.ADMIN) {
     items.push(
       {
@@ -106,6 +116,12 @@ export function navigationFor(user: User | null): NavItem[] {
         label: "Users",
         hint: "Accounts and roles",
         icon: UsersIcon,
+      },
+      {
+        href: ROUTES.adminPayments,
+        label: "Payments",
+        hint: "Money that waits for a person",
+        icon: BanknoteIcon,
       },
     );
   }

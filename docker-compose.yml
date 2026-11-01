@@ -43,5 +43,56 @@ services:
       timeout: 3s
       retries: 10
 
+  # Stripe's webhook, brought to a machine Stripe cannot reach: `stripe listen` holds a
+  # connection open to Stripe and replays every event of the test account to the API on the
+  # host, signed with a secret of its own — the whsec_ it prints at start, which goes into
+  # STRIPE_PAYMENT_WEBHOOK_SECRET. The secret stays the same across restarts for one API key.
+  #
+  # Behind a profile, so `docker compose up -d` without Stripe keys still brings up the
+  # database and Redis: `docker compose --profile stripe up -d` starts this one as well.
+  stripe:
+    image: stripe/stripe-cli:v1.55.1
+    profiles: ["stripe"]
+    restart: unless-stopped
+    # The key goes in through the environment, not the command line, where `docker inspect`
+    # and `ps` would print it.
+    environment:
+      STRIPE_API_KEY: ${STRIPE_SECRET_KEY:-}
+    command:
+      - listen
+      - --forward-to
+      - http://host.docker.internal:${API_PORT:-3001}/payments/webhook
+      # Events in the latest API version rather than the account's default, which is
+      # whatever version the account was opened with. The API pins the version its SDK is
+      # typed against (STRIPE_API_VERSION) and warns about an event in another; while the
+      # installed `stripe` is current the two are the same. After Stripe releases a newer
+      # version they drift until the SDK is updated, and that warning is what says so.
+      - --latest
+      # The events the API acts on; the rest would be acknowledged and ignored.
+      - --events
+      - payment_intent.succeeded,charge.refunded,refund.failed,charge.dispute.created,charge.dispute.closed
+    # The API runs on the host, not in this network; on Linux the name needs declaring.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # The news about hosts' payout accounts: thin events, which Stripe sends in another format
+  # to a route of its own. `stripe listen` has one `--forward-to` per process (v1.55 has no
+  # separate thin flag), so they get a process of their own — signed with the same whsec_,
+  # which is why the API needs no second secret locally.
+  stripe-payouts:
+    image: stripe/stripe-cli:v1.55.1
+    profiles: ["stripe"]
+    restart: unless-stopped
+    environment:
+      STRIPE_API_KEY: ${STRIPE_SECRET_KEY:-}
+    command:
+      - listen
+      - --forward-to
+      - http://host.docker.internal:${API_PORT:-3001}/payouts/webhook
+      - --events
+      - v2.core.account[configuration.recipient].capability_status_updated,v2.core.account[requirements].updated
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   db-data:

@@ -1,4 +1,5 @@
-import type { Listing, ListingSort } from "@repo/contracts";
+import { type Listing, type ListingSort } from "@repo/contracts";
+import { cents } from "../payment/domain/money";
 import { encodeParts } from "../common/paging";
 import { decodeCursor, encodeCursor } from "./catalogue-cursor";
 
@@ -7,7 +8,7 @@ const listing: Listing = {
   ownerId: "7e1a3d2f-2b3c-4d5e-9f6a-0b1c2d3e4f50",
   title: "Loft above the harbour",
   description: "Two rooms under the roof and a wall of glass facing the water.",
-  pricePerNight: 120.5,
+  pricePerNightCents: cents(12_050),
   capacity: 4,
   createdAt: "2026-08-20T12:00:00.000Z",
   updatedAt: "2026-08-20T12:00:00.000Z",
@@ -36,12 +37,12 @@ describe("catalogue cursor", () => {
     });
     expect(decodeCursor(encodeCursor(listing, "priceAsc"))).toEqual({
       sort: "priceAsc",
-      pricePerNight: listing.pricePerNight,
+      pricePerNightCents: listing.pricePerNightCents,
       id: listing.id,
     });
     expect(decodeCursor(encodeCursor(listing, "priceDesc"))).toEqual({
       sort: "priceDesc",
-      pricePerNight: listing.pricePerNight,
+      pricePerNightCents: listing.pricePerNightCents,
       id: listing.id,
     });
   });
@@ -65,7 +66,7 @@ describe("catalogue cursor", () => {
       // A sort nobody offers, the halves the wrong way round, a fifth field, one half
       // alone, and an id that is not one: each parses as base64 and none of them is a
       // place in the catalogue.
-      raw("cheapest", listing.pricePerNight, listing.id),
+      raw("cheapest", listing.pricePerNightCents, listing.id),
       raw(listing.id, listing.createdAt, "newest"),
       raw("newest", listing.createdAt, listing.id, "extra"),
       raw("newest", listing.createdAt),
@@ -99,9 +100,9 @@ describe("catalogue cursor", () => {
    */
   it("refuses a key the column it names could not hold", () => {
     for (const sort of ["newest", "oldest"] satisfies ListingSort[]) {
-      expect(decodeCursor(raw(sort, listing.pricePerNight, listing.id))).toBe(
-        null,
-      );
+      expect(
+        decodeCursor(raw(sort, listing.pricePerNightCents, listing.id)),
+      ).toBe(null);
       expect(decodeCursor(raw(sort, "2026-08-20", listing.id))).toBeNull();
     }
 
@@ -109,7 +110,7 @@ describe("catalogue cursor", () => {
       expect(decodeCursor(raw(sort, listing.createdAt, listing.id))).toBe(null);
       expect(decodeCursor(raw(sort, 0, listing.id))).toBeNull();
       expect(decodeCursor(raw(sort, 1.5, listing.id))).toBeNull();
-      expect(decodeCursor(raw(sort, "1000000.01", listing.id))).toBeNull();
+      expect(decodeCursor(raw(sort, "100000000", listing.id))).toBeNull();
     }
   });
 
@@ -121,12 +122,12 @@ describe("catalogue cursor", () => {
    */
   it("refuses a price it did not spell itself", () => {
     for (const key of [
-      "1.205e2",
-      " 120.50 ",
-      "120.500",
-      "120.5",
-      "120",
-      "+120.50",
+      "1.205e4",
+      " 12050 ",
+      "12050.0",
+      "012050",
+      "+12050",
+      "0x2f12",
     ]) {
       expect(decodeCursor(raw("priceAsc", key, listing.id))).toBeNull();
     }

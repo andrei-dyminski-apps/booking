@@ -23,12 +23,12 @@ import { StayQuote } from "./stay-quote";
 
 /**
  * The form phase 4's locking transaction has been waiting for: this is the only thing on
- * this site that creates a booking, and until the payment step exists the hold it takes
- * lives out its fifteen minutes and lapses.
+ * this site that creates a booking. The hold it takes keeps the nights for fifteen minutes,
+ * and the action sends the guest on to the stay's own page to pay for it.
  *
  * The price is worked out beside the submit as the dates change (`StayQuote`), by the rule
- * the payment of phase 6 charges by too. Nothing about it is sent: the API reads the
- * prices off the listing, which is why `createBookingSchema` has no amount on it at all.
+ * the payment charges by too. Nothing about it is sent: the API quotes the stay off the
+ * listing's prices, which is why `createBookingSchema` has no amount on it at all.
  *
  * `createBookingSchema` is also what refuses a check-out before the check-in and a stay in
  * the past, here as well as in the action. `listingId` is one of its fields, so the form
@@ -131,10 +131,10 @@ export const BookingForm = ({
         {message !== null && <FieldError>{message}</FieldError>}
 
         <FieldDescription>
-          A hold keeps the nights for fifteen minutes. There is nothing to pay
-          with yet, so it lapses on its own and the nights go back on offer.
-          Nights somebody else holds can be waited for instead: you are told
-          when they come free, and the first to book takes them.
+          A hold keeps the nights for fifteen minutes while you pay for them on
+          the next page; unpaid, they go back on offer. Nights somebody else
+          holds can be waited for instead: you are told when they come free, and
+          the first to book takes them.
         </FieldDescription>
       </FieldGroup>
     </form>

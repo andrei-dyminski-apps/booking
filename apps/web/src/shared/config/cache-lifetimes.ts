@@ -13,7 +13,7 @@
  * back on offer. Nothing on this side mutates when it does — the API releases it from a
  * queue — so the reads that show free nights expire on their own instead.
  *
- * A minute is that queue's `SWEEP_INTERVAL_MS` (`apps/api/src/booking/booking-expiry.queue.ts`),
+ * A minute is that queue's `SWEEP_INTERVAL_MS` (`apps/api/src/booking/infrastructure/booking-expiry.queue.ts`),
  * so this is the freshness the API itself promises rather than a number picked for the
  * feel of it. The two move together: a slower sweep here would serve nights the API has
  * already released, and a faster one would refetch for an answer that cannot have changed.

@@ -13,6 +13,8 @@ pnpm check-types
 
 For changes in `apps/api`, additionally `pnpm test`.
 
+Run `pnpm test:e2e` yourself whenever a change can reach the database, the queue or the HTTP surface — do not hold back or ask first. The database it wipes is the local development one from `docker-compose.yml`, which holds only demo data the seed writes back (`pnpm --filter @repo/api db:seed`). This does not extend to a reset the Prisma CLI guards (see "Resetting the local dev database" in `apps/api/CLAUDE.md`), nor to any deployed database.
+
 4. Code formatting is done by `pnpm lint:fix` from the root — Prettier is wired into ESLint through the `prettier/prettier` rule. `pnpm format` remains for `.md`, which ESLint does not parse. Do not align code by hand and do not argue with Prettier.
 
 ## Style
@@ -26,6 +28,7 @@ For changes in `apps/api`, additionally `pnpm test`.
 - The conversation with the user is in Russian — it is not part of the tree. Commit messages follow "Git" below.
 - TypeScript strict in every package, `apps/api` included: no `any`, no `@ts-ignore`, no `!` to silence `noUncheckedIndexedAccess`. If a type is not inferred — describe it explicitly.
 - Do not add new dependencies without need; first check whether something suitable is already in the repository.
+- A dependency that is added goes in at its latest published version, checked against the npm registry at the time (`npm view <pkg> version`, or the package page on npmjs.com) rather than taken from memory or from an older example. The same holds for its companion packages (`@types/*`, a framework adapter), which have to agree with it. A version is held back only for a reason written down next to it — `@nestjs/bullmq` pinned to `11.x` in `apps/api/CLAUDE.md` is the model.
 - Date arithmetic goes through `date-fns` v4, with the zone passed as the `in` option (`{ in: tz("UTC") }` from `@date-fns/tz` for the contract's `YYYY-MM-DD` days): `parseISO`, `addDays`, `eachDayOfInterval`, `differenceInCalendarDays`, `getISODay`, `format(day, "yyyy-MM-dd")`. Do not hand-roll it with `86_400_000`, `Date.parse(...T00:00:00.000Z)`, `toISOString().slice(0, 10)` or a `getUTCDay` shift.
 
 ## Git

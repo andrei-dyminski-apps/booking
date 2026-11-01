@@ -12,7 +12,7 @@ import { FieldError } from "@repo/ui/components/field";
 import { Input } from "@repo/ui/components/input";
 import { fieldMessages, messagesOf, WEEKDAY_NAMES } from "#shared/lib";
 import { FormField, HintFieldSet } from "#shared/ui";
-import { toNumber } from "../lib/to-number";
+import type { ListingFormValues } from "../model/listing-form-schema";
 
 /**
  * The exceptions to the default price, as two groups of boxes inside the listing form: a
@@ -27,7 +27,7 @@ export const PricingFields = ({
   pending,
   earliest,
 }: {
-  form: UseFormReturn<CreateListingInput>;
+  form: UseFormReturn<ListingFormValues, unknown, CreateListingInput>;
   pending: boolean;
   /** Today in UTC, from the server: the first day a date price may be set for. */
   earliest: string;
@@ -61,7 +61,6 @@ export const PricingFields = ({
               form={form}
               name={`pricing.weekdays.${weekday}`}
               label={WEEKDAY_NAMES[weekday]}
-              options={{ setValueAs: toNumber }}
             >
               {(control) => (
                 <Input
@@ -109,9 +108,8 @@ export const PricingFields = ({
 
                 <FormField
                   form={form}
-                  name={`pricing.dates.${index}.price`}
+                  name={`pricing.dates.${index}.priceCents`}
                   label="Price"
-                  options={{ setValueAs: toNumber }}
                 >
                   {(control) => (
                     <Input
@@ -161,7 +159,7 @@ export const PricingFields = ({
               // The new row starts at the default price, which is what the night costs
               // until it is changed — an empty box would be a refusal waiting to happen.
               append(
-                { date: "", price: form.getValues("pricePerNight") },
+                { date: "", priceCents: form.getValues("pricePerNightCents") },
                 { shouldFocus: true },
               );
             }}

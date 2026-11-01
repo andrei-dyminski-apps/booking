@@ -1,0 +1,54 @@
+import { BullModule } from "@nestjs/bullmq";
+import { Module } from "@nestjs/common";
+import { NotificationModule } from "../notification/notification.module";
+import { PrismaModule } from "../prisma/prisma.module";
+import { PaymentEventDispatcher } from "./application/payment-event-dispatcher";
+import { PaymentEventJobs } from "./application/ports/payment-event-jobs";
+import { PaymentGateway } from "./application/ports/payment-gateway";
+import { PaymentEventProcessor } from "./infrastructure/payment-event.processor";
+import {
+  PAYMENT_EVENT_QUEUE,
+  PaymentEventQueue,
+} from "./infrastructure/payment-event.queue";
+import { PaymentEventRepository } from "./infrastructure/payment-event.repository";
+import {
+  loadPaymentConfig,
+  PAYMENT_CONFIG,
+} from "./infrastructure/payment.config";
+import { createStripeClient, STRIPE_CLIENT } from "./infrastructure/stripe";
+import { StripePaymentGateway } from "./infrastructure/stripe-payment.gateway";
+import { PaymentEventController } from "./presentation/payment-event.controller";
+import { PaymentWebhookController } from "./presentation/payment-webhook.controller";
+
+/**
+ * The guest's half of the money and the provider's front door. It knows no stay: `booking`
+ * and `payout` depend on it and register their handlers with the dispatcher.
+ */
+@Module({
+  imports: [
+    PrismaModule,
+    NotificationModule,
+    BullModule.registerQueue({ name: PAYMENT_EVENT_QUEUE }),
+  ],
+  controllers: [PaymentWebhookController, PaymentEventController],
+  providers: [
+    PaymentEventRepository,
+    PaymentEventDispatcher,
+    { provide: PaymentEventJobs, useClass: PaymentEventQueue },
+    PaymentEventProcessor,
+    { provide: PAYMENT_CONFIG, useFactory: loadPaymentConfig },
+    {
+      provide: STRIPE_CLIENT,
+      useFactory: createStripeClient,
+      inject: [PAYMENT_CONFIG],
+    },
+    { provide: PaymentGateway, useClass: StripePaymentGateway },
+  ],
+  exports: [
+    PaymentGateway,
+    PaymentEventDispatcher,
+    PAYMENT_CONFIG,
+    STRIPE_CLIENT,
+  ],
+})
+export class PaymentModule {}

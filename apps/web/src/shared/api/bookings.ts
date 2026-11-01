@@ -1,11 +1,19 @@
 import { z } from "zod";
 import {
+  bookingDetailSchema,
   bookingPageSchema,
+  bookingPaymentSchema,
   bookingSchema,
+  stuckStayPageSchema,
   type Booking,
+  type BookingDetail,
   type BookingPage,
+  type BookingPayment,
   type BookingQuery,
   type CreateBookingInput,
+  type StuckKind,
+  type StuckStayPage,
+  type StuckStayQuery,
 } from "@repo/contracts";
 import { apiRequest, queryString, type ReadOptions } from "./http-client";
 
@@ -31,12 +39,24 @@ export const bookingsApi = {
       read,
     }),
 
-  get: (id: string, read: ReadOptions): Promise<Booking> =>
+  /** One stay with the nights its amount adds up from. */
+  get: (id: string, read: ReadOptions): Promise<BookingDetail> =>
     apiRequest({
       method: "GET",
       path: `/bookings/${encodeURIComponent(id)}`,
-      schema: bookingSchema,
+      schema: bookingDetailSchema,
       read,
+    }),
+
+  /**
+   * What the guest pays for a hold with — the PaymentIntent's secret. A `POST`: the first
+   * call opens the intent at Stripe, and every call after it answers the same one.
+   */
+  payment: (id: string): Promise<BookingPayment> =>
+    apiRequest({
+      method: "POST",
+      path: `/bookings/${encodeURIComponent(id)}/payment`,
+      schema: bookingPaymentSchema,
     }),
 
   create: (input: CreateBookingInput): Promise<Booking> =>
@@ -51,6 +71,23 @@ export const bookingsApi = {
     apiRequest({
       method: "DELETE",
       path: `/bookings/${encodeURIComponent(id)}`,
+      schema: z.void(),
+    }),
+
+  /** The stays whose owed refund or host payout stopped retrying — the admin's alone. */
+  stuck: (query: StuckStayQuery, read: ReadOptions): Promise<StuckStayPage> =>
+    apiRequest({
+      method: "GET",
+      path: `/bookings/stuck${queryString(query)}`,
+      schema: stuckStayPageSchema,
+      read,
+    }),
+
+  /** Hands the stuck refund or payout back to its job, which sends it at once. */
+  retryStuck: (id: string, kind: StuckKind): Promise<void> =>
+    apiRequest({
+      method: "POST",
+      path: `/bookings/${encodeURIComponent(id)}/stuck/${kind}/retry`,
       schema: z.void(),
     }),
 };

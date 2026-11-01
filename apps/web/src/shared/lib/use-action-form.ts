@@ -41,17 +41,28 @@ import { NO_FORM_ERRORS, type FormErrors } from "./form-errors";
  * markup — `method="post"`, or the browser falls back to a `GET` of its own URL and writes
  * every box into the address bar. See `register-form.tsx`, where that is a password.
  */
-export function useActionForm<Values extends FieldValues>({
+export function useActionForm<
+  Values extends FieldValues,
+  Output extends FieldValues = Values,
+>({
   action,
   schema,
   defaultValues,
   bound,
   onSuccess,
 }: {
-  /** Already bound to whatever the screen decides — an id, a `?next=`. */
-  action: (state: FormErrors, values: Values) => Promise<FormErrors>;
-  /** The contract schema. The action validates against the same one. */
-  schema: ZodType<Values, Values>;
+  /**
+   * Already bound to whatever the screen decides — an id, a `?next=`. It is handed what the
+   * schema parsed the boxes into, which is the boxes themselves unless the schema converts.
+   */
+  action: (state: FormErrors, values: Output) => Promise<FormErrors>;
+  /**
+   * The contract schema. The action validates against the same one. A form whose boxes hold
+   * something else than the contract — a price typed in the currency, sent in cents — hands
+   * a schema that converts and then pipes into the contract's (`Output`), so every rule and
+   * every word is still the contract's.
+   */
+  schema: ZodType<Output, Values>;
   /**
    * Every box of the form, and nothing else: these keys are also what tells a message the
    * server sent back apart from one about a field this form does not draw.
@@ -71,16 +82,16 @@ export function useActionForm<Values extends FieldValues>({
    * `NO_FORM_ERRORS` of an action that does not redirect. An action that ends in a redirect
    * never gets here: the navigation takes the place of its answer.
    */
-  onSuccess?: (form: UseFormReturn<Values>) => void;
+  onSuccess?: (form: UseFormReturn<Values, unknown, Output>) => void;
 }): {
-  form: UseFormReturn<Values>;
+  form: UseFormReturn<Values, unknown, Output>;
   /** The `onSubmit` of the `<form>`: validate, then hand the values to the action. */
   submit: (event?: BaseSyntheticEvent) => Promise<void>;
   pending: boolean;
   /** What the whole form was refused for, when it was not one field's fault. */
   message: string | null;
 } {
-  const form = useForm<Values>({
+  const form = useForm<Values, unknown, Output>({
     resolver: zodResolver(schema),
     // What the form holds, which is not the same as what it draws: the bound values go in
     // so the schema has the whole payload to judge, and only `defaultValues` goes into
@@ -103,7 +114,7 @@ export function useActionForm<Values extends FieldValues>({
     succeeded.current = onSuccess;
   });
 
-  const [errors, dispatch, pending] = useActionState<FormErrors, Values>(
+  const [errors, dispatch, pending] = useActionState<FormErrors, Output>(
     async (state, values) => {
       const answer = await action(state, values);
 

@@ -16,6 +16,7 @@ import {
   type WaitlistDemandQuery,
   type WaitlistEntry,
 } from "@repo/contracts";
+import { cents } from "../payment/domain/money";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import type { Page } from "../common/paging";
 import { NotificationService } from "../notification/notification.service";
@@ -97,7 +98,10 @@ class FakeWaitlistRepository implements PublicOf<WaitlistRepository> {
       ...joined,
       id: randomUUID(),
       userId,
-      listing: { title: "Loft above the harbour", pricePerNight: 120 },
+      listing: {
+        title: "Loft above the harbour",
+        pricePerNightCents: cents(12_000),
+      },
       createdAt: new Date().toISOString(),
     };
 

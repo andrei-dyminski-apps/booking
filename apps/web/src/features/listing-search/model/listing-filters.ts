@@ -1,10 +1,25 @@
-import { listingSortSchema, type ListingSort } from "@repo/contracts";
-import { countOf, dayLabelOrAny, formatMoney } from "#shared/lib";
+import {
+  centsSchema,
+  listingQuerySchema,
+  listingSortSchema,
+  type ListingQuery,
+  type ListingSort,
+} from "@repo/contracts";
+import {
+  centsFromInput,
+  countOf,
+  dayLabelOrAny,
+  formatMoney,
+  toFieldErrors,
+  type FieldErrors,
+} from "#shared/lib";
 import type { FilterChip, SortOption } from "#shared/ui";
 
 /**
  * The boxes of a search over `listingQuerySchema` — text, because that is what a URL
- * carries. Two screens put that question: the catalogue, and the admin's listings, which
+ * carries. The prices are in the currency itself, as a visitor types and reads them —
+ * `?minPrice=100` — and become the contract's `minPriceCents` only on the way to the parse
+ * (`parseListingQuery`). Two screens put that question: the catalogue, and the admin's listings, which
  * add `ownerId` on top. What both ask is here; the route, the extra field and the reading
  * of `searchParams` stay in each page's slice.
  *
@@ -151,7 +166,44 @@ function guestsLabel(value: string): string {
 
 /** A price on its way to a screen, like everywhere else — or the text as it arrived. */
 function priceLabel(value: string): string {
-  const amount = Number(value);
+  const amount = centsSchema.safeParse(centsFromInput(value));
 
-  return Number.isFinite(amount) ? formatMoney(amount) : value;
+  return amount.success ? formatMoney(amount.data) : value;
 }
+
+/**
+ * The boxes put to `listingQuerySchema`, as both listings screens read their URL. The prices
+ * typed in the currency become the contract's cents on the way in (`centsFromInput`), and
+ * what the schema refuses about `minPriceCents` comes back under the `minPrice` box it was
+ * typed into — the one name a visitor knows.
+ */
+export function parseListingQuery(
+  values: ListingFilterValues & { ownerId?: string },
+  cursor: string,
+):
+  | { query: ListingQuery; errors: FieldErrors }
+  | { query: null; errors: FieldErrors } {
+  const { minPrice, maxPrice, ...rest } = values;
+  const parsed = listingQuerySchema.safeParse({
+    ...rest,
+    minPriceCents: centsFromInput(minPrice),
+    maxPriceCents: centsFromInput(maxPrice),
+    cursor,
+  });
+
+  if (parsed.success) return { query: parsed.data, errors: {} };
+
+  return {
+    query: null,
+    errors: Object.fromEntries(
+      Object.entries(toFieldErrors(parsed.error.issues)).map(
+        ([field, messages]) => [BOX_OF_QUERY_FIELD[field] ?? field, messages],
+      ),
+    ),
+  };
+}
+
+const BOX_OF_QUERY_FIELD: Partial<Record<string, keyof ListingFilterValues>> = {
+  minPriceCents: "minPrice",
+  maxPriceCents: "maxPrice",
+};

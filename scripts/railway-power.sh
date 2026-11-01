@@ -9,7 +9,8 @@
 # stop in reverse, so the API never runs without its database and queue.
 set -euo pipefail
 
-DEFAULT_SERVICES=(Postgres Redis api)
+# The API is named after its package in .railway/railway.ts.
+DEFAULT_SERVICES=(Postgres Redis @repo/api)
 
 # The global CLI on purpose: the `railway` devDependency is the IaC SDK for .railway/railway.ts,
 # and `pnpm run` puts its node_modules/.bin first on PATH.
@@ -33,12 +34,17 @@ stop_services() {
   done
 }
 
+# `down` removes the latest deployment, and Railway refuses to redeploy a removed one, so a
+# service stopped here comes back from its source: the image for Postgres and Redis, the
+# latest commit of the tracked branch for the API. Plain `redeploy` goes first for a service
+# that was never stopped.
 start_services() {
   local service
   for service in "${services[@]}"; do
     echo "Starting $service"
-    if ! run redeploy --service "$service" --yes; then
-      echo "Could not redeploy $service: open it in the dashboard and redeploy its last deployment." >&2
+    if ! run redeploy --service "$service" --yes &&
+      ! run redeploy --service "$service" --from-source --yes; then
+      echo "Could not start $service: open it in the dashboard and deploy it." >&2
     fi
   done
 }

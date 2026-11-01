@@ -5,26 +5,28 @@ import { dayMessage, isDay, today } from "./day.js";
 import { blank, PAGING } from "./query.js";
 
 /**
- * What a single night may cost, in the currency itself. High enough that no real nightly
- * rate reaches it, low enough that a misplaced decimal point still does — which is the
- * only thing a ceiling on a price can usefully catch.
+ * What a single night may cost, in cents — just under a million in the currency itself.
+ * High enough that no real nightly rate reaches it, low enough that a misplaced decimal
+ * point still does — which is the only thing a ceiling on a price can usefully catch. It is
+ * Stripe's ceiling for one charge (`MAX_CHARGE` in the API), so a night at the ceiling is
+ * still a stay one payment can carry.
  *
  * The column carries the same number as a `CHECK` constraint
  * (`listings_price_within_contract`), and that is what keeps the two ends honest: this
  * schema guards every price that arrives over HTTP, and the constraint guards the writes
  * that never pass through it — the seed, a migration, an import — so a row this schema
  * would refuse to read back cannot be stored in the first place. Raising the ceiling means
- * raising both, in one change; `numeric(10, 2)` has room for two orders of magnitude more
- * than this and needs no migration of its own until that runs out.
+ * raising both, in one change.
  */
-const MAX_PRICE = 1_000_000;
+const MAX_PRICE = 99_999_999;
 
 /**
- * The same number as a person reads it. The locale is named rather than left to the
- * runtime for the reason the frontend's own formatter names one: a message assembled on
- * the server and a message assembled in the browser have to come out identically.
+ * The same number as a person reads it, in the currency itself. The locale is named rather
+ * than left to the runtime for the reason the frontend's own formatter names one: a message
+ * assembled on the server and a message assembled in the browser have to come out
+ * identically.
  */
-const MAX_PRICE_LABEL = MAX_PRICE.toLocaleString("en-US");
+const MAX_PRICE_LABEL = (MAX_PRICE / 100).toLocaleString("en-US");
 
 /**
  * How many guests a listing may sleep. It is a bound on two fields rather than one — the
@@ -34,40 +36,19 @@ const MAX_PRICE_LABEL = MAX_PRICE.toLocaleString("en-US");
 const MAX_CAPACITY = 50;
 
 /**
- * How many decimal places a price may be exact to — the `2` of `numeric(10, 2)`, and the
- * cent the rules below refuse to go finer than.
- */
-const SCALE = 2;
-
-/**
- * A price as the currency itself writes it: `120`, `120.5` and `120.50` are one amount and
- * `120.505` is not one at all. Anything finer than a cent is refused here rather than
- * rounded, because rounding it would store a price nobody typed and answer a form that
- * asked for one with a silent correction.
- *
- * The comparison goes through the decimal spelling rather than through `amount * 100`,
- * because the input is a `number` and `120.35 * 100` is `12034.999999999998` in binary
- * floating point — so that form needs a tolerance to tell a rounding error from a third
- * decimal, and the tolerance is a number picked against the ceiling of the day: the error
- * of a double grows with the value it holds, and one chosen for a price of ten thousand
- * has to be chosen again the next time the ceiling moves. `toFixed` needs none. It is the
- * amount as the cent scale writes it, and a double that survives the round trip through it
- * is the nearest one to a two-decimal number — which is exactly what the column stores.
- */
-const cents = (amount: number): boolean =>
-  Number(amount.toFixed(SCALE)) === amount;
-
-/**
  * The two rules every price on this contract obeys, as checks rather than as a wrapper
  * schema: `.check(...MONEY)` leaves each of them a plain number schema, so the one the
  * catalogue coerces out of a query string and the one a body carries stay the kinds they
  * are and the API still reads a price off `listingSchema.shape` to validate a cursor with.
+ *
+ * A price is a whole number of cents. A fraction is refused rather than rounded, because
+ * rounding it would store a price nobody sent.
  */
 const MONEY = [
   z.lte(MAX_PRICE, {
     error: `A price may not be above ${MAX_PRICE_LABEL}`,
   }),
-  z.refine<number>(cents, {
+  z.refine<number>(Number.isSafeInteger, {
     error: "A price may not be finer than a cent",
   }),
 ];
@@ -109,16 +90,15 @@ const nightPrice = (subject: string) =>
       ),
     })
     .positive({ error: `${subject} must be more than zero` })
-    .check(...MONEY);
+    .check(...MONEY)
+    .brand<"Cents">();
 
 /**
  * A place to stay, owned by exactly one account.
  *
- * `pricePerNight` is an amount of the currency itself — 120.50 is a hundred and twenty
- * fifty — and it is exact to the cent: `MONEY` above refuses a third decimal instead of
- * rounding one away. Everything that multiplies it (a stay of several nights) rounds to
- * the cent at the moment it is shown or charged rather than carrying the error onwards.
- * The ceiling is what a single night may cost.
+ * `pricePerNightCents` is in whole cents of `CURRENCY` — 12050 is a hundred and twenty
+ * fifty — like every amount of money on this contract; `money.ts` says why. The ceiling is
+ * what a single night may cost.
  */
 export const listingSchema = z.object({
   id: z.uuid(),
@@ -135,7 +115,7 @@ export const listingSchema = z.object({
     .max(2000, {
       error: "A description may not be longer than 2000 characters",
     }),
-  pricePerNight: nightPrice("A price per night"),
+  pricePerNightCents: nightPrice("A price per night"),
   capacity: z
     .int({
       error: numberMessage(
@@ -209,7 +189,7 @@ const datePriceSchema = z.object({
       "A date must be written as YYYY-MM-DD",
     ),
   }),
-  price: nightPrice("A price for the date"),
+  priceCents: nightPrice("A price for the date"),
 });
 
 /**
@@ -246,7 +226,7 @@ const datePrices = <Entry extends typeof datePriceSchema>(entry: Entry) =>
 /**
  * Every exception to a listing's default price. What a night costs is decided in one
  * order, and it is part of what these fields mean: a price for that very date, then one
- * for its day of the week, then `pricePerNight`. The most specific rule wins because it is
+ * for its day of the week, then `pricePerNightCents`. The most specific rule wins because it is
  * the one somebody set deliberately for that night — a holiday is a Friday too.
  * `nightlyPrice` (`pricing.ts`) is that order as code, the one both sides price a night by.
  *
@@ -278,7 +258,7 @@ const listingPricingInputSchema = listingPricingSchema.extend({
  */
 export const listingSummarySchema = listingSchema.pick({
   title: true,
-  pricePerNight: true,
+  pricePerNightCents: true,
 });
 
 /**
@@ -366,18 +346,20 @@ export const listingQuerySchema = z
     ownerId: blank(z.uuid().optional()),
     from: blank(z.iso.date().optional()),
     to: blank(z.iso.date().optional()),
-    minPrice: blank(
+    minPriceCents: blank(
       z.coerce
         .number()
         .nonnegative()
         .check(...MONEY)
+        .brand<"Cents">()
         .optional(),
     ),
-    maxPrice: blank(
+    maxPriceCents: blank(
       z.coerce
         .number()
         .positive()
         .check(...MONEY)
+        .brand<"Cents">()
         .optional(),
     ),
     guests: blank(z.coerce.number().int().min(1).max(MAX_CAPACITY).optional()),
@@ -400,12 +382,12 @@ export const listingQuerySchema = z
   )
   .refine(
     (query) =>
-      query.minPrice === undefined ||
-      query.maxPrice === undefined ||
-      query.minPrice <= query.maxPrice,
+      query.minPriceCents === undefined ||
+      query.maxPriceCents === undefined ||
+      query.minPriceCents <= query.maxPriceCents,
     {
       error: "The lowest price must not be above the highest",
-      path: ["maxPrice"],
+      path: ["maxPriceCents"],
     },
   );
 

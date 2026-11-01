@@ -40,6 +40,81 @@ model Booking {
   /// to the `EXCLUDE` constraint and to nothing else.
   expiresAt DateTime? @map("expires_at")
 
+  /// What the stay costs, quoted under the hold's `FOR UPDATE` lock by `nightlyPrice` from
+  /// `@repo/contracts`, and what the payment charges. A copy, so a later price change does
+  /// not restate this stay. It and the money columns below are held by raw-SQL `CHECK`s
+  /// (`bookings_amount_positive`, `bookings_*_within_amount`): above zero, and nothing
+  /// refunded, owed or paid out beyond it. Every money column of a stay is in whole cents
+  /// and says so in its name, the way the contract's fields do.
+  amountCents Int @map("amount_cents")
+
+  /// What `amount_cents` and the columns below are cents of — ISO 4217, lower case, as Stripe
+  /// spells it. Stored with the stay rather than read off the site's `CURRENCY`, so a record
+  /// of money says on its own what it was paid in. `bookings_currency_supported` (raw SQL)
+  /// keeps it to the currencies the contract knows.
+  currency String @db.Char(3)
+
+  /// What each night of the stay cost when it was quoted — `amount_cents` is their sum,
+  /// written by the same insert. See `BookingNight`.
+  nights BookingNight[]
+
+  /// The Stripe PaymentIntent of this hold — opened under a key named after the booking, so
+  /// a second request for the payment gets the same one. `null` until the form asks for it.
+  paymentIntentId String? @unique @map("payment_intent_id")
+
+  /// When a payment confirmed the stay; never cleared, so a redelivery of that payment is
+  /// told from one that arrived for a hold already gone. `null` for the seed's stays.
+  paidAt DateTime? @map("paid_at")
+
+  /// When both sides were told of the confirmation and the payout was scheduled; a rerun
+  /// of the payment event repeats the two only while it is empty.
+  confirmationAnnouncedAt DateTime? @map("confirmation_announced_at")
+
+  /// What went back to the guest; `null` when no refund was ever asked of Stripe.
+  refundedAmountCents Int? @map("refunded_amount_cents")
+
+  /// What a cancellation decided to give back and has not sent yet — written with
+  /// `CANCELLED`, cleared by the `refund-cancellation` job. Counted as refunded by the host's
+  /// share, so nothing is paid out of money owed to the guest.
+  refundOwedCents Int? @map("refund_owed_cents")
+
+  /// Failed runs of the owed refund, the latest error, and when it was set aside after
+  /// `MAX_REFUND_ATTEMPTS` — the sweep then leaves it to a person, as the payment inbox
+  /// does. Clearing `refund_failed_at` and `refund_attempts` hands it back — what
+  /// `POST /bookings/:id/stuck/refund/retry` does. `GET /bookings/stuck` reads the set-aside
+  /// rows of either kind through a partial index of its own (`bookings_refund_failed_idx`,
+  /// `bookings_payout_failed_idx`, raw SQL in `admin_set_aside_lists`).
+  refundAttempts  Int       @default(0) @map("refund_attempts")
+  refundLastError String?   @map("refund_last_error")
+  refundFailedAt  DateTime? @map("refund_failed_at")
+
+  /// The same three for the host's transfer (`MAX_PAYOUT_ATTEMPTS`).
+  payoutAttempts  Int       @default(0) @map("payout_attempts")
+  payoutLastError String?   @map("payout_last_error")
+  payoutFailedAt  DateTime? @map("payout_failed_at")
+
+  /// The payment's Charge, which the host's transfer names as its `source_transaction`.
+  chargeId String? @map("charge_id")
+
+  /// The transfer that paid the host, one per stay, written only into an empty column.
+  transferId String? @unique @map("transfer_id")
+
+  /// What the host holds of this stay now: the transfer less any reversal since.
+  paidOutAmountCents Int? @map("paid_out_amount_cents")
+
+  /// When the transfer went out. Never cleared by a reversal.
+  paidOutAt DateTime? @map("paid_out_at")
+
+  /// Where a dispute of the payment stands; `null` while nobody disputed it.
+  disputeStatus DisputeStatus? @map("dispute_status")
+
+  /// Until when a cancellation holds the stay — `BookingRepository.whileCancelling`. A lease
+  /// rather than a lock held by a transaction, because the work under it calls Stripe.
+  cancellingUntil DateTime? @map("cancelling_until")
+
+  /// Until when a settlement of the host's payout holds the stay — `whileSettling`.
+  settlingUntil DateTime? @map("settling_until")
+
   /// Restrict, not Cascade: the bookings of other people are not something a listing may
   /// quietly take down with it. What an owner asks for is answered without ever reaching
   /// this key — `DELETE /listings/:id` retires the listing and leaves the row where it
@@ -47,6 +122,8 @@ model Booking {
   listing Listing  @relation(fields: [listingId], references: [id], onDelete: Restrict)
   guest   User     @relation(fields: [guestId], references: [id], onDelete: Cascade)
   reviews Review[]
+
+  refundFailures RefundFailure[]
 
   @@index([listingId, from, to])
   /// Serves both halves of hold expiry: the repeatable sweep, which asks for every lapsed
@@ -83,6 +160,13 @@ enum BookingStatus {
   CONFIRMED
   CANCELLED
   EXPIRED
+}
+
+/// The three moments of a dispute this API acts on: opened, and closed one way or the other.
+enum DisputeStatus {
+  OPEN
+  WON
+  LOST
 }
 
 /// What one side of a finished stay said about the other. `kind` is both what the review
@@ -124,31 +208,46 @@ enum ReviewKind {
   GUEST
 }
 
-/// A place to stay. `price_per_night` is an amount of the currency itself, exact to the
-/// cent: `numeric(10, 2)` rather than a float, because a float stores neither 120.10 nor
-/// the sum of a stay's nights exactly and the error accumulates across them. The contract
-/// refuses anything finer than a cent, so the two scales agree — and the ceiling agrees
-/// too, which the type alone cannot say: the column holds a hundred times what `MAX_PRICE`
-/// in `@repo/contracts` allows, so the number itself is written as the `CHECK` constraint
-/// `listings_price_within_contract` (the raw-SQL migration `bound_prices_to_the_contract`)
-/// and a write that bypasses the API cannot leave a price the API would then refuse to
-/// read back.
+/// One night of a stay and what it cost when the hold was quoted — the breakdown behind
+/// `bookings.amount_cents`, written in the same transaction from the same `pricedNights`
+/// call, so the two cannot disagree. Kept because a total alone cannot answer what a
+/// receipt, a partial refund or a dispute asks: which night cost what. A later change of
+/// the listing's prices restates none of it, which is the point of a copy.
+///
+/// Cascade: the nights are a part of the booking rather than a record of their own.
+model BookingNight {
+  bookingId  String   @map("booking_id") @db.Uuid
+  date       DateTime @db.Date
+  priceCents Int      @map("price_cents")
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@id([bookingId, date])
+  @@map("booking_nights")
+}
+
+/// A place to stay. `price_per_night_cents` is in whole cents — 12050 is 120.50 — the unit Stripe
+/// charges in, so an integer column holds every price exactly and a stay's nights add up
+/// without binary noise. The ceiling is `MAX_PRICE` in `@repo/contracts`, which the type
+/// alone cannot say, so the number is written as the `CHECK` constraint
+/// `listings_price_within_contract` (raw SQL, last set by `store_money_in_cents`) and a
+/// write that bypasses the API cannot leave a price the API would then refuse to read back.
 model Listing {
-  id            String    @id @default(uuid()) @db.Uuid
-  ownerId       String    @map("owner_id") @db.Uuid
-  title         String
-  description   String
-  pricePerNight Decimal   @map("price_per_night") @db.Decimal(10, 2)
-  capacity      Int
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+  id                 String    @id @default(uuid()) @db.Uuid
+  ownerId            String    @map("owner_id") @db.Uuid
+  title              String
+  description        String
+  pricePerNightCents Int       @map("price_per_night_cents")
+  capacity           Int
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
   /// When the owner retired it. The row outlives that moment because the bookings above
   /// point at it and a guest's stay has to keep naming where it was: `Restrict` would
   /// refuse the delete outright, and refusing is not an answer an owner with one finished
   /// stay in their history can ever get past. A retired listing is not in the catalogue,
   /// not on its owner's dashboard and not bookable — `ListingRepository` is where all
   /// three of those are one `where`.
-  deletedAt     DateTime? @map("deleted_at")
+  deletedAt          DateTime? @map("deleted_at")
 
   /// Restrict, not Cascade, for the reason the booking above is: a cascade from `users`
   /// would have to delete listings that bookings restrict, so it would promise an account
@@ -156,12 +255,12 @@ model Listing {
   /// listings first. Nothing in the API reaches that path any more — retiring is what
   /// `DELETE /listings/:id` does — so what the constraint guards now is the hard delete
   /// of the seed, the test cleanup and whatever account deletion turns out to be.
-  owner         User           @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  owner         User            @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   bookings      Booking[]
   conversations Conversation[]
   waitlist      WaitlistEntry[]
 
-  /// The exceptions to `price_per_night`, which stays the default: a price for a day of
+  /// The exceptions to `price_per_night_cents`, which stays the default: a price for a day of
   /// the week and a price for one date. Which of the three a night costs is decided by
   /// `nightlyPrice` in `@repo/contracts`, not by the database.
   weekdayPrices ListingWeekdayPrice[]
@@ -177,7 +276,7 @@ model Listing {
   /// The indexes the catalogue reads by are not here, and cannot be: both are partial on
   /// `deleted_at IS NULL` — the condition every read of this table outside a stay carries
   /// — and each is ordered by a pair the keyset cursor of `GET /listings` names,
-  /// `created_at DESC, id DESC` and `price_per_night, id`. One per key rather than one per
+  /// `created_at DESC, id DESC` and `price_per_night_cents, id`. One per key rather than one per
   /// value of `sort`: the tiebreaker follows the direction of the key, so each btree is
   /// read backwards for the other direction. `@@index` spells neither the WHERE nor the
   /// sort, so they are raw-SQL migrations (`index_offered_listings_for_the_catalogue`,
@@ -204,13 +303,13 @@ enum Weekday {
 /// Cascade, unlike the listing's other relations: a price is a property of the listing
 /// rather than a record of somebody else's, and nothing in the API hard-deletes a listing
 /// anyway — only the seed and the test cleanup do, and they should not have to name this
-/// table to do it. The price obeys the same `CHECK` as `listings.price_per_night`
+/// table to do it. The price obeys the same `CHECK` as `listings.price_per_night_cents`
 /// (`listing_weekday_prices_price_within_contract`, raw SQL in the migration that made the
 /// table), for the reason given there.
 model ListingWeekdayPrice {
-  listingId String  @map("listing_id") @db.Uuid
-  weekday   Weekday
-  price     Decimal @db.Decimal(10, 2)
+  listingId  String  @map("listing_id") @db.Uuid
+  weekday    Weekday
+  priceCents Int     @map("price_cents")
 
   listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
 
@@ -224,9 +323,9 @@ model ListingWeekdayPrice {
 /// through. Past rows are not deleted on a timer: they stop being read the day they pass,
 /// and the next save of the listing's prices replaces the set, past rows included.
 model ListingDatePrice {
-  listingId String   @map("listing_id") @db.Uuid
-  date      DateTime @db.Date
-  price     Decimal  @db.Decimal(10, 2)
+  listingId  String   @map("listing_id") @db.Uuid
+  date       DateTime @db.Date
+  priceCents Int      @map("price_cents")
 
   listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
 
@@ -257,6 +356,14 @@ model User {
   /// thing whoever reopens the account asks. Blocking is what the API offers instead of
   /// deleting a user: the rows are kept, and so is everything that points at them.
   blockedAt DateTime? @map("blocked_at")
+
+  /// The Stripe connected account the user is paid out to as a host (an Accounts v2
+  /// recipient), opened the first time they open the payouts screen and never replaced.
+  stripeAccountId String? @unique @map("stripe_account_id")
+
+  /// When that account became able to receive transfers, as Stripe last reported it — what
+  /// selects a payout, read locally so the sweep asks Stripe nothing.
+  payoutsEnabledAt DateTime? @map("payouts_enabled_at")
 
   refreshTokens RefreshToken[]
   listings      Listing[]
@@ -375,6 +482,14 @@ enum NotificationType {
   BOOKING_REQUESTED
   BOOKING_CANCELLED
   BOOKING_EXPIRED
+  BOOKING_CONFIRMED
+  PAYMENT_REFUNDED
+  PAYMENT_DISPUTED
+  PAYOUT_SENT
+  REFUND_FAILED
+  PAYMENT_EVENT_FAILED
+  CANCELLATION_REFUND_FAILED
+  PAYOUT_FAILED
   REVIEW_RECEIVED
   WAITLIST_AVAILABLE
 }
@@ -442,4 +557,75 @@ model WaitlistEntry {
   @@index([from, id])
   @@index([createdAt(sort: Desc), id(sort: Desc)])
   @@map("waitlist_entries")
+}
+
+/// The inbox of the payment provider's webhooks — every event delivered, keyed by the
+/// provider's own event id. The webhook verifies a delivery, writes it here and answers `200`
+/// at once; a BullMQ worker handles it afterwards (`PaymentEventDispatcher`) and stamps
+/// `processed_at`. Stripe delivers at least once, so a second delivery of an event already
+/// here records nothing, and the handlers are idempotent on their own: a run that died half
+/// way is finished by the next one rather than repeated. A sweep re-queues what a lost job
+/// left unprocessed, through the partial index of the migration.
+///
+/// `payload` is the event as the gateway read it (`PaymentEvent`), parsed back against a
+/// schema on the way out, not the provider's raw body.
+///
+/// No relation to a booking: an event can name a booking whose guest has since deleted
+/// their account, and the record of the money outlives that row.
+model PaymentEvent {
+  id          String    @id
+  type        String
+  payload     Json
+  receivedAt  DateTime  @default(now()) @map("received_at")
+  processedAt DateTime? @map("processed_at")
+
+  /// How many runs of the worker failed this event so far — every attempt of every job.
+  attempts  Int       @default(0)
+  /// What the latest failed run threw, cut to `MAX_ERROR_LENGTH`.
+  lastError String?   @map("last_error")
+  /// When the worker gave up on the event (`MAX_EVENT_ATTEMPTS`): the sweep leaves it alone
+  /// and the admins are told. Clearing it, with `attempts`, hands it back to the sweep.
+  failedAt  DateTime? @map("failed_at")
+
+  /// What the daily prune deletes by: processed events past `EVENT_RETENTION_DAYS`.
+  @@index([processedAt])
+  /// `GET /payment-events/failed` reads `payment_events_failed_idx`, partial on `failed_at IS
+  /// NOT NULL` and therefore raw SQL (`admin_set_aside_lists`), like the sweep's index.
+  @@map("payment_events")
+}
+
+/// A refund the guest's bank sent back (`refund.failed`): the money is on the platform's
+/// balance again and still the guest's, and nothing re-sends it on its own. Kept here until a
+/// person sends the money back some other way and records how (`POST
+/// /refund-failures/:id/resolve` writes `resolved_at` and `resolution`); the admins are told
+/// when the row is written. Keyed by the provider's refund id, so a redelivery of the event writes nothing.
+model RefundFailure {
+  refundId    String    @id @map("refund_id")
+  paymentId   String    @map("payment_id")
+  bookingId   String?   @map("booking_id") @db.Uuid
+  amountCents Int       @map("amount_cents")
+  /// What `amount_cents` is cents of — the stay's currency, as `bookings.currency`.
+  /// `refund_failures_currency_supported` (raw SQL) keeps it to the ones the contract knows.
+  currency    String    @db.Char(3)
+  /// The bank's reason as the provider words it; `null` when it gives none.
+  reason      String?
+  failedAt    DateTime  @default(now()) @map("failed_at")
+  resolvedAt  DateTime? @map("resolved_at")
+  /// How the money went back, as whoever resolved it put it. Written with `resolved_at` and
+  /// never without it — the raw-SQL CHECK `refund_failures_resolution_with_resolved_at`.
+  resolution  String?
+
+  /// SetNull, not Cascade: money still owed to a guest must not vanish with whatever deletes
+  /// a booking row — today only the cleanups, since there is no account deletion, and a
+  /// guest's bookings would go with their account if one came — so the row outlives the stay
+  /// and keeps `payment_id`. A `null` already means no row names the payment any more; a
+  /// failure written while its stay is being deleted fails on the key, and the event's retry
+  /// finds no stay and writes `null`.
+  booking Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  /// What the delete of a booking looks up to null its failures.
+  @@index([bookingId])
+  /// `GET /refund-failures`, newest first — the keyset of `common/set-aside-cursor.ts`.
+  @@index([failedAt(sort: Desc), refundId(sort: Desc)])
+  @@map("refund_failures")
 }

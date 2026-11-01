@@ -6,9 +6,13 @@ import {
   stayTotal,
   type CreateBookingInput,
   type PricedListing,
-  type PricedNight,
 } from "@repo/contracts";
-import { countOf, formatMoney, isDay, nightsBetween } from "#shared/lib";
+import {
+  formatMoney,
+  isDay,
+  nightsBetween,
+  nightsBreakdown,
+} from "#shared/lib";
 
 /**
  * What the dates in the booking form cost, night by night — a weekend or a date priced on
@@ -36,13 +40,8 @@ export const StayQuote = ({
 
   return (
     <p className="text-sm">
-      {byPrice(nights)
-        .map(
-          ({ price, count }) =>
-            `${countOf(count, "night")} × ${formatMoney(price)}`,
-        )
-        .join(" + ")}{" "}
-      = <span className="font-semibold">{formatMoney(stayTotal(nights))}</span>
+      {nightsBreakdown(nights)} ={" "}
+      <span className="font-semibold">{formatMoney(stayTotal(nights))}</span>
     </p>
   );
 };
@@ -55,20 +54,3 @@ export const StayQuote = ({
  * one.
  */
 const QUOTED_NIGHTS = 366;
-
-/**
- * The nights of a stay grouped by what they cost, in the order the prices first appear —
- * `2 nights × 120.00 + 1 night × 150.00` reads as a sum, where one line per night would be
- * a list as long as the stay.
- */
-function byPrice(
-  nights: readonly PricedNight[],
-): { price: number; count: number }[] {
-  const counts = new Map<number, number>();
-
-  for (const { price } of nights) {
-    counts.set(price, (counts.get(price) ?? 0) + 1);
-  }
-
-  return [...counts].map(([price, count]) => ({ price, count }));
-}

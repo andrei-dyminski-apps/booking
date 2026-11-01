@@ -1,4 +1,3 @@
-import { CalendarIcon } from "lucide-react";
 import type { ManagedUser, User } from "@repo/contracts";
 import { Badge } from "@repo/ui/components/badge";
 import {
@@ -9,9 +8,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
-import { ROLE_LABELS } from "#entities/user";
+import { ROLE_LABELS, UserBlockedSince, UserJoined } from "#entities/user";
 import { ROUTES } from "#shared/config";
-import { formatDate, formatMoment } from "#shared/lib";
 import { ButtonLink } from "#shared/ui";
 
 /**
@@ -31,13 +29,8 @@ export const UserCard = ({
       <CardTitle className="break-words">{user.name}</CardTitle>
       <CardDescription className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <span className="break-all">{user.email}</span>
-        <span className="flex items-center gap-1.5">
-          <CalendarIcon className="size-3.5" />
-          Joined {formatDate(user.createdAt)}
-        </span>
-        {user.blockedAt !== null && (
-          <span>Blocked since {formatMoment(user.blockedAt)} UTC</span>
-        )}
+        <UserJoined createdAt={user.createdAt} />
+        <UserBlockedSince blockedAt={user.blockedAt} />
       </CardDescription>
       <CardAction className="flex items-center gap-2">
         {user.id === viewer.id && <Badge variant="secondary">You</Badge>}

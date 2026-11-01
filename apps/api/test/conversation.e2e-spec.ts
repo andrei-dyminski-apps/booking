@@ -12,6 +12,7 @@ import {
   type Conversation,
   type CreateListingInput,
 } from "@repo/contracts";
+import { cents } from "./../src/payment/domain/money";
 import { AppModule } from "./../src/app.module";
 import { resetDatabase } from "./database";
 import { EventStream } from "./event-stream";
@@ -27,7 +28,7 @@ import {
 const listingInput: CreateListingInput = {
   title: "Loft above the harbour",
   description: "Two rooms under the roof and a wall of glass facing the water.",
-  pricePerNight: 120,
+  pricePerNightCents: cents(12_000),
   capacity: 4,
 };
 

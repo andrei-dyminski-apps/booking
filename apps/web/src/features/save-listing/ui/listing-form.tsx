@@ -1,11 +1,7 @@
 "use client";
 
 import { useId, type ReactNode } from "react";
-import {
-  createListingSchema,
-  type CreateListingInput,
-  type ListingDetail,
-} from "@repo/contracts";
+import { createListingSchema, type ListingDetail } from "@repo/contracts";
 import { Button } from "@repo/ui/components/button";
 import {
   FieldError,
@@ -19,6 +15,10 @@ import { useActionForm } from "#shared/lib";
 import { ButtonLink, FormField } from "#shared/ui";
 import { saveListingAction } from "../api/save-listing-action";
 import { toNumber } from "../lib/to-number";
+import {
+  listingFormSchema,
+  listingFormValues,
+} from "../model/listing-form-schema";
 import { PricingFields } from "./pricing-fields";
 
 /**
@@ -27,7 +27,9 @@ import { PricingFields } from "./pricing-fields";
  *
  * `createListingSchema` validates it here and again in the action, so a title of two
  * characters or a price with three decimals is refused in the box it was typed into. The
- * schema wants numbers and a box hands over text, which is what `toNumber` is for.
+ * schema wants numbers and a box hands over text: a capacity goes through `toNumber`, and a
+ * price — typed in the currency, sent in cents — through `listingFormSchema`, which
+ * converts it before the contract judges it.
  *
  * The exceptions to the default price are part of the same form and the same save: the
  * form always sends the whole set, which is what a `PATCH` carrying `pricing` replaces the
@@ -57,20 +59,10 @@ export const ListingForm = ({
   extraAction?: ReactNode;
 }) => {
   const formId = useId();
-  const { form, submit, pending, message } = useActionForm<CreateListingInput>({
+  const { form, submit, pending, message } = useActionForm({
     action: saveListingAction.bind(null, listing?.id ?? null),
-    schema: createListingSchema,
-    defaultValues: {
-      title: listing?.title ?? "",
-      description: listing?.description ?? "",
-      pricePerNight: listing?.pricePerNight,
-      capacity: listing?.capacity,
-      pricing: {
-        weekdays: listing?.pricing.weekdays ?? {},
-        dates:
-          listing?.pricing.dates.filter(({ date }) => date >= earliest) ?? [],
-      },
-    },
+    schema: listingFormSchema,
+    defaultValues: listingFormValues(listing, earliest),
   });
 
   return (
@@ -105,10 +97,9 @@ export const ListingForm = ({
 
           <FormField
             form={form}
-            name="pricePerNight"
+            name="pricePerNightCents"
             label="Default price per night"
             description="To the cent: 120.50 is a hundred and twenty fifty. A night costs this unless a price below says otherwise."
-            options={{ setValueAs: toNumber }}
           >
             {(control) => (
               <Input

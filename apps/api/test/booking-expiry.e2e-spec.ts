@@ -2,12 +2,12 @@ import { INestApplication } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { App } from "supertest/types";
 import { AppModule } from "./../src/app.module";
-import { BookingRepository } from "./../src/booking/booking.repository";
+import { BookingJobs } from "./../src/booking/application/ports/booking-jobs";
+import { BookingRepository } from "./../src/booking/infrastructure/booking.repository";
 import {
-  BookingExpiryQueue,
   EXPIRE_HOLD_JOB,
   SWEEP_LAPSED_HOLDS_JOB,
-} from "./../src/booking/booking-expiry.queue";
+} from "./../src/booking/infrastructure/booking-expiry.queue";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
@@ -32,7 +32,7 @@ describe("Booking hold expiry (e2e)", () => {
   let app: INestApplication<App>;
   let prismaService: PrismaService;
   let bookingRepository: BookingRepository;
-  let expiryQueue: BookingExpiryQueue;
+  let bookingJobs: BookingJobs;
   let guestId: string;
   let ownerId: string;
   let listingId: string;
@@ -49,7 +49,7 @@ describe("Booking hold expiry (e2e)", () => {
 
     prismaService = app.get(PrismaService);
     bookingRepository = app.get(BookingRepository);
-    expiryQueue = app.get(BookingExpiryQueue);
+    bookingJobs = app.get(BookingJobs);
 
     await resetDatabase(app);
     await resetQueue(app);
@@ -72,7 +72,7 @@ describe("Booking hold expiry (e2e)", () => {
       data: {
         title: "Cabin by the lake",
         description: "One room, a stove and a jetty ten steps from the door.",
-        pricePerNight: 80,
+        pricePerNightCents: 8000,
         capacity: 2,
         ownerId: owner.id,
       },
@@ -120,7 +120,7 @@ describe("Booking hold expiry (e2e)", () => {
   it("releases the hold its own job names, and frees the slot with it", async () => {
     const id = await lapsedHold();
 
-    await expiryQueue.scheduleExpiry(id, new Date(Date.now() - 1000));
+    await bookingJobs.scheduleExpiry(id, new Date(Date.now() - 1000));
     await waitUntil(async () => (await statusOf(id)) === "EXPIRED");
 
     // The deadline stays on the row: `status` is what says the slot was let go of, and
@@ -168,7 +168,7 @@ describe("Booking hold expiry (e2e)", () => {
    */
   it("is a no-op for a booking that is no longer a pending hold", async () => {
     const cancelled = await lapsedHold();
-    await bookingRepository.cancel(cancelled);
+    await bookingRepository.cancel(cancelled, "PENDING_PAYMENT", null);
 
     await expect(bookingRepository.expireHold(cancelled)).resolves.toEqual([]);
     expect(await statusOf(cancelled)).toBe("CANCELLED");

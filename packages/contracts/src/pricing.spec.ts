@@ -5,39 +5,40 @@ import {
   stayTotal,
   type PricedListing,
 } from "./pricing.js";
+import { cents } from "./money.js";
 
 /** 14 October 2030 is a Monday, so the week below runs Monday to Sunday. */
 const listing: PricedListing = {
-  pricePerNight: 120.35,
+  pricePerNightCents: cents(12_035),
   pricing: {
-    weekdays: { fri: 150, sat: 160 },
-    dates: [{ date: "2030-10-19", price: 400 }],
+    weekdays: { fri: cents(15_000), sat: cents(16_000) },
+    dates: [{ date: "2030-10-19", priceCents: cents(40_000) }],
   },
 };
 
 describe("nightlyPrice", () => {
   it("charges the default on a day nothing else names", () => {
-    expect(nightlyPrice(listing, "2030-10-14")).toBe(120.35);
+    expect(nightlyPrice(listing, "2030-10-14")).toBe(12_035);
   });
 
   it("charges the weekday's price on the day it falls on, counting the week from Monday", () => {
-    expect(nightlyPrice(listing, "2030-10-18")).toBe(150);
+    expect(nightlyPrice(listing, "2030-10-18")).toBe(15_000);
     // Sunday ends the week — the day an off-by-one would move.
-    expect(nightlyPrice(listing, "2030-10-20")).toBe(120.35);
+    expect(nightlyPrice(listing, "2030-10-20")).toBe(12_035);
   });
 
   it("puts a date's own price ahead of its weekday's", () => {
-    // A Saturday, and Saturdays cost 160.
-    expect(nightlyPrice(listing, "2030-10-19")).toBe(400);
+    // A Saturday, and Saturdays cost 16_000.
+    expect(nightlyPrice(listing, "2030-10-19")).toBe(40_000);
   });
 });
 
 describe("pricedNights", () => {
   it("prices every night of the stay and not the check-out day", () => {
     expect(pricedNights(listing, "2030-10-17", "2030-10-20")).toEqual([
-      { date: "2030-10-17", price: 120.35 },
-      { date: "2030-10-18", price: 150 },
-      { date: "2030-10-19", price: 400 },
+      { date: "2030-10-17", priceCents: 12_035 },
+      { date: "2030-10-18", priceCents: 15_000 },
+      { date: "2030-10-19", priceCents: 40_000 },
     ]);
   });
 
@@ -54,12 +55,12 @@ describe("pricedNights", () => {
 });
 
 describe("stayTotal", () => {
-  it("adds the nights up exact to the cent", () => {
-    const nights = [120.35, 120.35, 120.35].map((price, n) => ({
+  it("adds the nights up in cents", () => {
+    const nights = [12_035, 12_035, 12_035].map((price, n) => ({
       date: `2030-10-1${String(n)}`,
-      price,
+      priceCents: cents(price),
     }));
 
-    expect(stayTotal(nights)).toBe(361.05);
+    expect(stayTotal(nights)).toBe(36_105);
   });
 });

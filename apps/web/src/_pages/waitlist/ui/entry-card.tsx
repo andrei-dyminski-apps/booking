@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { CalendarIcon, MoonIcon } from "lucide-react";
 import type { WaitlistEntry } from "@repo/contracts";
 import {
   Card,
@@ -10,7 +9,7 @@ import {
   CardTitle,
 } from "@repo/ui/components/card";
 import { ROUTES } from "#shared/config";
-import { countOf, formatDay, nightsBetween } from "#shared/lib";
+import { DateRange, NightCount } from "#shared/ui";
 
 /**
  * One range waited for: the listing, the dates and the nights. Both sides draw it, and
@@ -37,14 +36,8 @@ export const EntryCard = ({
         </Link>
       </CardTitle>
       <CardDescription className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        <span className="flex items-center gap-1.5">
-          <CalendarIcon className="size-3.5" />
-          {formatDay(entry.from)} → {formatDay(entry.to)}
-        </span>
-        <span className="flex items-center gap-1.5">
-          <MoonIcon className="size-3.5" />
-          {countOf(nightsBetween(entry.from, entry.to), "night")}
-        </span>
+        <DateRange from={entry.from} to={entry.to} />
+        <NightCount from={entry.from} to={entry.to} />
         {detail}
       </CardDescription>
       {action !== undefined && <CardAction>{action}</CardAction>}

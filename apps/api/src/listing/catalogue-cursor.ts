@@ -14,7 +14,7 @@ import { decodeParts, encodeParts } from "../common/paging";
  * tiebreaker for two rows level on that key. A cursor that carried only the key would
  * either repeat those two or drop them.
  *
- * The sort is in it as well, and it is what makes the pair readable: `120.00` is a price
+ * The sort is in it as well, and it is what makes the pair readable: `12000` is a price
  * under one ordering and nothing at all under another. It is also what lets the API refuse
  * a cursor handed back with a different `sort` — see `readCursor` in `src/common/paging.ts`.
  * Changing what the catalogue is ordered by starts the list again, and answering the
@@ -26,7 +26,7 @@ import { decodeParts, encodeParts } from "../common/paging";
  */
 export type CatalogueCursor =
   | { sort: "newest" | "oldest"; createdAt: Date; id: string }
-  | { sort: "priceAsc" | "priceDesc"; pricePerNight: number; id: string };
+  | { sort: "priceAsc" | "priceDesc"; pricePerNightCents: number; id: string };
 
 /**
  * The envelope — the base64 spelling, the separator and the resource tag — belongs to
@@ -71,11 +71,13 @@ export function decodeCursor(raw: string): CatalogueCursor | null {
     }
     case "priceAsc":
     case "priceDesc": {
-      const price = CENTS.transform(Number)
-        .pipe(listingSchema.shape.pricePerNight)
+      const price = WHOLE_CENTS.transform(Number)
+        .pipe(listingSchema.shape.pricePerNightCents)
         .safeParse(key);
 
-      return price.success ? { sort, pricePerNight: price.data, id } : null;
+      return price.success
+        ? { sort, pricePerNightCents: price.data, id }
+        : null;
     }
   }
 }
@@ -92,19 +94,16 @@ function sortKey(listing: Listing, sort: ListingSort): string {
       return listing.createdAt;
     case "priceAsc":
     case "priceDesc":
-      // `toFixed(2)` rather than `String`, so that one price has one spelling: 120 and
-      // 120.5 are the same amount as 120.00 and 120.50, and a cursor that could be written
-      // three ways is a cursor `CENTS` would have to read three ways.
-      return listing.pricePerNight.toFixed(2);
+      return String(listing.pricePerNightCents);
   }
 }
 
 /**
  * The one spelling `encodeCursor` writes for a price, and therefore the only one read back:
- * the amount to exactly two decimals, the scale the column stores and the contract refuses
- * to go finer than. `z.coerce.number()` in its place would also take `1e4`, ` 120.00 `,
- * `120.000` and `0x78` — every one of them a value this API never issued, and the branch
- * above it refuses a timestamp that is off by a character. A cursor is untrusted input, so
- * the two keys are read to the same standard rather than one of them being read leniently.
+ * whole cents in plain digits, no leading zero. `z.coerce.number()` in its place would also
+ * take `1.2e4`, ` 12000 `, `12000.0` and `0x2ee0` — every one of them a value this API never
+ * issued, and the branch above it refuses a timestamp that is off by a character. A cursor
+ * is untrusted input, so the two keys are read to the same standard rather than one of them
+ * being read leniently.
  */
-const CENTS = z.string().regex(/^\d+\.\d{2}$/);
+const WHOLE_CENTS = z.string().regex(/^(0|[1-9]\d*)$/);
