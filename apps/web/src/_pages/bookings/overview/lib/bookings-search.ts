@@ -12,6 +12,7 @@ import {
   dayLabelOrAny,
   filtersHref,
   searchParamsHref,
+  shortId,
   singleParam,
   toFieldErrors,
   type FieldErrors,
@@ -329,13 +330,4 @@ function statusLabel(value: string): string {
   const parsed = bookingStatusSchema.safeParse(value);
 
   return parsed.success ? BOOKING_STATUS_LABELS[parsed.data] : value;
-}
-
-/**
- * Enough of an id to recognise it by and to tell two of them apart, which is all a chip
- * can do with one nothing on this page resolves to a name. Anything the contract refused
- * is left whole — it is not an id, and cutting it would hide what was typed.
- */
-function shortId(value: string): string {
-  return value.length > 8 ? `${value.slice(0, 8)}…` : value;
 }

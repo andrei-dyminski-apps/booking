@@ -98,15 +98,15 @@ export function describeNotification(
       };
     }
     // The four below are told to every admin: money that waits for a person. Each leads to
-    // the tab of the admin's payments screen that lists it, where it is acted on — the stay
-    // is one link further, from the row.
+    // the tab of the admin's payments screen that lists it, filtered down to the row it is
+    // about, where it is acted on — the stay is one link further, from the row.
     case NotificationType.REFUND_FAILED: {
       const { data } = notification;
 
       return {
         title: "A refund did not reach the guest",
         detail: `${formatMoney(data.amountCents, data.currency)} · ${data.reason ?? "no reason given"} · ${data.refundId}`,
-        href: setAsideHref("bounced"),
+        href: setAsideHref("bounced", { refundId: data.refundId }),
       };
     }
     case NotificationType.PAYMENT_EVENT_FAILED: {
@@ -115,7 +115,7 @@ export function describeNotification(
       return {
         title: "A payment event was set aside",
         detail: `${data.eventType} · ${data.eventId} · ${data.error}`,
-        href: setAsideHref("events"),
+        href: setAsideHref("events", { eventId: data.eventId }),
       };
     }
     case NotificationType.CANCELLATION_REFUND_FAILED: {
@@ -124,7 +124,7 @@ export function describeNotification(
       return {
         title: "A cancellation's refund is stuck",
         detail: data.error,
-        href: setAsideHref("stuck-refunds"),
+        href: setAsideHref("stuck-refunds", { bookingId: data.bookingId }),
       };
     }
     case NotificationType.PAYOUT_FAILED: {
@@ -133,7 +133,7 @@ export function describeNotification(
       return {
         title: "A host's payout is stuck",
         detail: data.error,
-        href: setAsideHref("stuck-payouts"),
+        href: setAsideHref("stuck-payouts", { bookingId: data.bookingId }),
       };
     }
     case NotificationType.REVIEW_RECEIVED: {

@@ -181,6 +181,7 @@ of the catalogue and a listing's reviews is behind the global `JwtAuthGuard` and
 | `GET`    | `/users/:id`                       | one account with its stay and listing counts; ADMIN only                                                       |
 | `PATCH`  | `/users/:id`                       | change the role and/or block; ADMIN only, `403` on the caller's own account                                    |
 | `GET`    | `/lookups/owners`                  | accounts with a listing on offer, by `q` — a part of the address or a whole id; ADMIN                          |
+| `GET`    | `/lookups/hosts`                   | accounts a stay was taken against, retired listings included, by `q` — as `/lookups/owners`; ADMIN             |
 | `GET`    | `/lookups/guests`                  | the guests of the caller's stays, by `q`; USER (their listings') or ADMIN                                      |
 | `GET`    | `/lookups/listings`                | the listings of the caller's stays on `side`, retired included, by `q` — a part of the title                   |
 | `GET`    | `/listings/:id/reviews`            | the guests' reviews of a listing, a page and a summary; `404` if retired; public                               |
@@ -701,6 +702,18 @@ Service names narrow any of the three to those services:
 ```sh
 pnpm railway:start api
 ```
+
+### Seeding the deployed database
+
+The deployment is a portfolio demo, so its database can be reset to the demo data. Migrations are applied by the API's `preDeploy` step; the seed is not, and runs inside the API's container, where the private `DATABASE_URL` works and the database needs no public address:
+
+```sh
+pnpm db:seed:railway
+```
+
+The script is `railway ssh --service @repo/api -- pnpm --filter @repo/api db:seed`, so it needs the Railway CLI logged in and linked (see above), a running deployment of the API, and an SSH key registered with Railway (`railway ssh keys`). It asks for no confirmation. The seed runs from the dev dependencies (`prisma`, `ts-node`) that the image keeps unless `RAILPACK_PRUNE_DEPS` is turned on for the service.
+
+The seed deletes every review, booking, conversation, listing and user before writing, so anything visitors created goes too, and the demo logins (`password123`) come back. Payment events and refund failures are not touched — they carry no foreign key that would stop the delete, so a reseed neither fails on them nor clears them. The stays are dated from the day the seed runs — run it again when the demo bookings have aged into the past.
 
 ## Build cache
 

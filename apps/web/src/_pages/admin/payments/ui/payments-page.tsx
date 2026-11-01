@@ -1,25 +1,43 @@
 import { redirect } from "next/navigation";
 import { CircleCheckIcon } from "lucide-react";
-import { RefundFailureStatus, Role } from "@repo/contracts";
+import { LookupKind, RefundFailureStatus, Role } from "@repo/contracts";
 import {
   Empty,
+  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
 } from "@repo/ui/components/empty";
-import { requireRole } from "#shared/api";
-import { PageHeading, Pager, StalePageNotice } from "#shared/ui";
+import { lookupsApi, requireRole } from "#shared/api";
+import {
+  ROUTES,
+  setAsideHref,
+  type SetAsideFilterKey,
+  type SetAsideList,
+} from "#shared/config";
+import { lookupOptionText } from "#shared/lib";
+import {
+  ButtonLink,
+  NoMatchesNotice,
+  PageHeading,
+  Pager,
+  RefusedSearchNotice,
+  StalePageNotice,
+} from "#shared/ui";
 import { readSetAsidePage, type SetAsidePage } from "../api/read-set-aside";
 import {
+  activeFilters,
   firstPageHref,
   nextPageHref,
   readPaymentsSearch,
   viewHref,
+  type ActiveFilter,
   type SetAsideView,
 } from "../lib/payments-search";
 import { FailedEventCard } from "./failed-event-card";
 import { ListTabs, StatusTabs } from "./list-tabs";
+import { PaymentsToolbar } from "./payments-toolbar";
 import { RefundFailureCard } from "./refund-failure-card";
 import { StuckStayCard } from "./stuck-stay-card";
 
@@ -44,17 +62,30 @@ const DESCRIPTIONS: Record<SetAsideView["list"], string> = {
 export const PaymentsPage = async ({
   searchParams,
 }: PageProps<"/admin/payments">) => {
-  const { view, canonical } = readPaymentsSearch(await searchParams);
+  const search = readPaymentsSearch(await searchParams);
+  const { list, values, errors, view, canonical } = search;
 
-  // Back to the very tab and page after a sign-in, as the admin's listings come back with
-  // their filters: a notice links straight to a tab. The view's own address, which is also
-  // where `canonical` would send it.
-  await requireRole(Role.ADMIN, viewHref(view));
+  // Back to the very tab, filters and page after a sign-in, as the admin's listings come
+  // back with theirs: a notice links straight to its row. The view's own address, which is
+  // also where `canonical` would send it.
+  await requireRole(Role.ADMIN, viewHref(search));
 
   // One view, one address — see `canonical` in `bookings-search.ts`.
   if (canonical !== null) redirect(canonical);
 
-  const result = await readSetAsidePage(view);
+  // A question the contract refuses is not put to the API at all. The names of the rows the
+  // id filters name are read beside the list — the chips read them, and so do the boxes.
+  const [result, listing, guest, host] = await Promise.all([
+    view === null ? null : readSetAsidePage(view),
+    lookupsApi.optionOf(LookupKind.listings, values.listingId),
+    lookupsApi.optionOf(LookupKind.guests, values.guestId),
+    lookupsApi.optionOf(LookupKind.hosts, values.hostId),
+  ]);
+  const filters = activeFilters(list, values, {
+    listing: listing && lookupOptionText(listing),
+    guest: guest && lookupOptionText(guest),
+    host: host && lookupOptionText(host),
+  });
 
   return (
     <div className="flex flex-col gap-6">
@@ -64,26 +95,36 @@ export const PaymentsPage = async ({
       />
 
       <div className="flex flex-col gap-3">
-        <ListTabs current={view.list} />
-        <p className="text-sm text-muted-foreground">
-          {DESCRIPTIONS[view.list]}
-        </p>
-        {view.list === "bounced" && <StatusTabs current={view.query.status} />}
+        <ListTabs current={list} />
+        <p className="text-sm text-muted-foreground">{DESCRIPTIONS[list]}</p>
+        {list === "bounced" && <StatusTabs values={values} />}
       </div>
 
-      {result === null ? (
-        <StalePageNotice firstPageHref={firstPageHref(view)} />
+      <PaymentsToolbar
+        list={list}
+        values={values}
+        errors={errors}
+        filters={filters}
+        listing={listing}
+        guest={guest}
+        host={host}
+      />
+
+      {view === null ? (
+        <RefusedSearchNotice />
+      ) : result === null ? (
+        <StalePageNotice firstPageHref={firstPageHref(search)} />
       ) : (
         <>
-          <SetAsideItems result={result} view={view} />
+          <SetAsideItems result={result} view={view} filters={filters} />
           <Pager
             nextHref={
               result.page.nextCursor !== null
-                ? nextPageHref(view, result.page.nextCursor)
+                ? nextPageHref(search, result.page.nextCursor)
                 : null
             }
             firstHref={
-              view.query.cursor !== undefined ? firstPageHref(view) : null
+              search.cursor !== undefined ? firstPageHref(search) : null
             }
           />
         </>
@@ -95,21 +136,33 @@ export const PaymentsPage = async ({
 const SetAsideItems = ({
   result,
   view,
+  filters,
 }: {
   result: SetAsidePage;
   view: SetAsideView;
+  filters: ActiveFilter[];
 }) => {
   if (result.page.items.length === 0) {
-    return (
-      <Empty className="border">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <CircleCheckIcon />
-          </EmptyMedia>
-          <EmptyTitle>Nothing here</EmptyTitle>
-          <EmptyDescription>{emptyDescription(view)}</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+    if (filters.length === 0) {
+      return (
+        <Empty className="border">
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <CircleCheckIcon />
+            </EmptyMedia>
+            <EmptyTitle>Nothing here</EmptyTitle>
+            <EmptyDescription>{emptyDescription(view)}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      );
+    }
+
+    const [only, ...others] = filters;
+
+    return others.length === 0 && only?.key === namedRowKey(view.list) ? (
+      <NoLongerWaitingNotice view={view} />
+    ) : (
+      <NoMatchesNotice />
     );
   }
 
@@ -161,5 +214,106 @@ function emptyDescription(view: SetAsideView): string {
       return "No owed refund is stuck.";
     case "stuck-payouts":
       return "No host payout is stuck.";
+  }
+}
+
+/** The filter an admin notice opens its tab with: the id of the one row it is about. */
+function namedRowKey(list: SetAsideList): SetAsideFilterKey {
+  switch (list) {
+    case "events":
+      return "eventId";
+    case "bounced":
+      return "refundId";
+    case "stuck-refunds":
+    case "stuck-payouts":
+      return "bookingId";
+  }
+}
+
+/**
+ * The one row a notice named, gone from the tab the notice opens filtered down to it —
+ * somebody dealt with it between the notice and the click. Said as that rather than as a
+ * search that found nothing, with where the row is now. Worded as an "if": the same address
+ * is reached by an id typed into the box, which may name no row at all.
+ */
+const NoLongerWaitingNotice = ({ view }: { view: SetAsideView }) => {
+  const { title, description, link } = noLongerWaiting(view);
+
+  return (
+    <Empty className="border">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <CircleCheckIcon />
+        </EmptyMedia>
+        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyDescription>{description}</EmptyDescription>
+      </EmptyHeader>
+      {link !== null && (
+        <EmptyContent>
+          <ButtonLink href={link.href} variant="outline" size="sm">
+            {link.label}
+          </ButtonLink>
+        </EmptyContent>
+      )}
+    </Empty>
+  );
+};
+
+function noLongerWaiting(view: SetAsideView): {
+  title: string;
+  description: string;
+  link: { href: string; label: string } | null;
+} {
+  switch (view.list) {
+    case "events":
+      return {
+        title: "This event is no longer set aside",
+        description:
+          "If a notice named it, it was retried since and has gone through or is back with the worker — a run that fails again sets it aside here once more.",
+        link: null,
+      };
+    case "bounced": {
+      const { refundId, status } = view.query;
+
+      return status === RefundFailureStatus.OPEN
+        ? {
+            title: "This refund is not open",
+            description:
+              "If a notice named it, it was resolved since, and the resolved ones keep how the money went back.",
+            link: {
+              href: setAsideHref("bounced", {
+                refundId,
+                status: RefundFailureStatus.RESOLVED,
+              }),
+              label: "Look among the resolved",
+            },
+          }
+        : {
+            title: "This refund is not resolved",
+            description:
+              "If a notice named it, it is still waiting for a person among the open ones.",
+            link: {
+              href: setAsideHref("bounced", { refundId }),
+              label: "Look among the open",
+            },
+          };
+    }
+    case "stuck-refunds":
+    case "stuck-payouts": {
+      const { bookingId } = view.query;
+
+      return {
+        title:
+          view.list === "stuck-refunds"
+            ? "This stay's refund is no longer stuck"
+            : "This stay's payout is no longer stuck",
+        description:
+          "If a notice named it, it has left the list since — retried and sent or on its way, or nothing is owed any more. The stay shows where its money stands.",
+        link:
+          bookingId === undefined
+            ? null
+            : { href: ROUTES.booking(bookingId), label: "Open the stay" },
+      };
+    }
   }
 }

@@ -1,12 +1,23 @@
 import { Injectable } from "@nestjs/common";
-import type { FailedPaymentEvent } from "@repo/contracts";
+import type {
+  FailedPaymentEvent,
+  FailedPaymentEventQuery,
+} from "@repo/contracts";
 import { z } from "zod";
 import type { Prisma } from "../../generated/prisma/client";
 import type { Page } from "../../common/paging";
 import type { SetAsideCursor } from "../../common/set-aside-cursor";
+import { setAsideWithin } from "../../common/set-aside-window";
+import { escapeLike } from "../../prisma/escape-like";
 import { PrismaService } from "../../prisma/prisma.service";
 import type { PaymentEvent } from "../application/ports/payment-gateway";
 import { cents } from "../domain/money";
+
+/** What the admin's list of set-aside events narrows by. */
+export type FailedPaymentEventFilters = Pick<
+  FailedPaymentEventQuery,
+  "eventId" | "type" | "from" | "to"
+>;
 
 /** The webhook inbox — see `PaymentEvent` in the schema. */
 @Injectable()
@@ -89,18 +100,33 @@ export class PaymentEventRepository {
   async findFailedPage(
     cursor: SetAsideCursor | null,
     limit: number,
+    filters: FailedPaymentEventFilters,
   ): Promise<Page<FailedPaymentEvent>> {
     const rows = await this.prismaService.paymentEvent.findMany({
       where: {
-        failedAt: cursor === null ? { not: null } : { lte: cursor.at },
-        ...(cursor === null
-          ? {}
-          : {
-              OR: [
-                { failedAt: { lt: cursor.at } },
-                { failedAt: cursor.at, id: { lt: cursor.id } },
-              ],
-            }),
+        AND: [
+          {
+            id: filters.eventId,
+            failedAt: { not: null, ...setAsideWithin(filters) },
+          },
+          filters.type === undefined
+            ? {}
+            : {
+                type: {
+                  contains: escapeLike(filters.type),
+                  mode: "insensitive",
+                },
+              },
+          cursor === null
+            ? {}
+            : {
+                failedAt: { lte: cursor.at },
+                OR: [
+                  { failedAt: { lt: cursor.at } },
+                  { failedAt: cursor.at, id: { lt: cursor.id } },
+                ],
+              },
+        ],
       },
       select: {
         id: true,

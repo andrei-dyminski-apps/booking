@@ -527,6 +527,7 @@ export class BookingService {
       query.kind,
       cursor,
       query.limit,
+      query,
     );
 
     return {

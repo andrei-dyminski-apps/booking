@@ -1,7 +1,10 @@
-import type { RefundFailureStatus } from "@repo/contracts";
 import type { SetAsideList } from "#shared/config";
 import { ButtonLink } from "#shared/ui";
-import { listTabs, statusTabs } from "../lib/payments-search";
+import {
+  listTabs,
+  statusTabs,
+  type FilterValues,
+} from "../lib/payments-search";
 
 /**
  * The four lists as links, the way the stays screen draws its two sides: each is an address
@@ -24,10 +27,13 @@ export const ListTabs = ({ current }: { current: SetAsideList }) => (
   </nav>
 );
 
-/** The open bounced refunds and the resolved ones, kept as the record of how each went back. */
-export const StatusTabs = ({ current }: { current: RefundFailureStatus }) => (
+/**
+ * The open bounced refunds and the resolved ones, kept as the record of how each went back.
+ * The filters on the screen go along to the other half.
+ */
+export const StatusTabs = ({ values }: { values: FilterValues }) => (
   <nav aria-label="Bounced refunds" className="flex flex-wrap gap-2">
-    {statusTabs(current).map((tab) => (
+    {statusTabs(values).map((tab) => (
       <ButtonLink
         key={tab.status}
         href={tab.href}

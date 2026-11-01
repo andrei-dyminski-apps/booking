@@ -10,6 +10,7 @@ import { ROUTES } from "#shared/config";
 import {
   filtersHref,
   searchParamsHref,
+  shortId,
   singleParam,
   type FieldErrors,
 } from "#shared/lib";
@@ -108,9 +109,4 @@ export function activeFilters(
         ];
 
   return [...owner, ...listingFilterChips(values, listingsHref)];
-}
-
-/** The first block of a uuid — enough to tell two apart on a chip. */
-function shortId(id: string): string {
-  return id.length > 8 ? `${id.slice(0, 8)}…` : id;
 }

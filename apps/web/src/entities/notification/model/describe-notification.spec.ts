@@ -62,7 +62,7 @@ describe("describeNotification", () => {
     expect(paidOut.href).toBe("/dashboard/payouts");
   });
 
-  it("leads a bounced refund to its tab of the payments screen, whether or not a stay names it", () => {
+  it("leads a bounced refund to its own row on the payments screen, whether or not a stay names it", () => {
     const failed = (bookingId: string | null) =>
       describeNotification({
         ...stored,
@@ -77,12 +77,16 @@ describe("describeNotification", () => {
         },
       });
 
-    expect(failed(BOOKING_ID).href).toBe("/admin/payments?list=bounced");
+    expect(failed(BOOKING_ID).href).toBe(
+      "/admin/payments?list=bounced&refundId=re_1",
+    );
     expect(failed(BOOKING_ID).detail).toContain("no reason given");
-    expect(failed(null).href).toBe("/admin/payments?list=bounced");
+    expect(failed(null).href).toBe(
+      "/admin/payments?list=bounced&refundId=re_1",
+    );
   });
 
-  it("leads stuck money and a set-aside event to their tabs of the payments screen", () => {
+  it("leads stuck money and a set-aside event to their own rows on the payments screen", () => {
     expect(
       describeNotification({
         ...stored,
@@ -92,7 +96,7 @@ describe("describeNotification", () => {
     ).toEqual({
       title: "A host's payout is stuck",
       detail: "insufficient balance",
-      href: "/admin/payments?list=stuck-payouts",
+      href: `/admin/payments?list=stuck-payouts&bookingId=${BOOKING_ID}`,
     });
     expect(
       describeNotification({
@@ -100,7 +104,7 @@ describe("describeNotification", () => {
         type: NotificationType.CANCELLATION_REFUND_FAILED,
         data: { bookingId: BOOKING_ID, error: "card_declined" },
       }).href,
-    ).toBe("/admin/payments?list=stuck-refunds");
+    ).toBe(`/admin/payments?list=stuck-refunds&bookingId=${BOOKING_ID}`);
     expect(
       describeNotification({
         ...stored,
@@ -111,6 +115,6 @@ describe("describeNotification", () => {
           error: "timeout",
         },
       }).href,
-    ).toBe("/admin/payments");
+    ).toBe("/admin/payments?eventId=evt_1");
   });
 });

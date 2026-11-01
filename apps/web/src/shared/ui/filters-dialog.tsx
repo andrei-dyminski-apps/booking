@@ -51,9 +51,10 @@ export const FiltersDialog = ({
   /**
    * The ordering on the screen. It is the toolbar's control rather than one of the boxes,
    * but the form still has to carry it: a form submits every field it has, and without
-   * this one the list would fall back to its default order.
+   * this one the list would fall back to its default order. Left out by a list with one
+   * ordering, which then has no box to carry and no `sort=` in what a submit sends.
    */
-  sort: string;
+  sort?: string;
   /** The same search with every filter taken off. */
   clearHref: string;
   submitLabel: string;
@@ -89,7 +90,9 @@ export const FiltersDialog = ({
         >
           <div className="grid gap-4">{children}</div>
 
-          <input type="hidden" name="sort" defaultValue={sort} />
+          {sort !== undefined && (
+            <input type="hidden" name="sort" defaultValue={sort} />
+          )}
 
           <DialogFooter>
             {/*

@@ -42,6 +42,8 @@ pnpm --filter @repo/api db:deploy     # prisma migrate deploy — production onl
 The deployed Railway services are stopped and started again by `pnpm railway:stop` /
 `pnpm railway:start` (`pnpm railway:status`, `pnpm railway` for a menu) — see "Deployment"
 in `README.md`. Both act on a live deployment: run them only when the user asks.
+`pnpm db:seed:railway` reseeds the deployed database — the seed deletes every demo table
+first — so it is run only when the user asks, too.
 
 Tests:
 

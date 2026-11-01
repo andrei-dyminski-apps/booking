@@ -24,8 +24,8 @@ export type LookupCursor = {
 };
 
 /**
- * One tag per kind: an account is ordered by its name in two lookups, and without the tag
- * a cursor of the guests would read as a good place among the owners.
+ * One tag per kind: an account is ordered by its name in three lookups, and without the
+ * tag a cursor of the guests would read as a good place among the owners.
  *
  * The accounts' tags say `by-name` because accounts were once ordered by their address. A
  * cursor issued then names a place in an ordering that no longer exists, and under the old

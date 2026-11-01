@@ -104,6 +104,7 @@ describe("LookupController (e2e)", () => {
   it("opens each lookup to the roles whose filter it fills in", async () => {
     await request(app.getHttpServer()).get("/lookups/owners?q=e2e").expect(401);
     await owner.get("/lookups/owners?q=e2e").expect(403);
+    await owner.get("/lookups/hosts?q=e2e").expect(403);
     // Any account may host, so the guests of its listings are its to ask for — an account
     // with no stays against them is answered an empty page, not a refusal.
     expect((await lookup(guest, "guests", "e2e")).items).toEqual([]);
@@ -127,6 +128,26 @@ describe("LookupController (e2e)", () => {
     ]);
     // The guest and the admin offer nothing, so neither is an owner to filter by.
     expect(labels(await lookup(admin, "owners", "e2e@"))).toEqual([]);
+  });
+
+  it("offers the hosts of every stay, an owner with nothing left on offer included", async () => {
+    // The other owner's listing has no stay, so its owner hosts nothing to filter by.
+    expect(labels(await lookup(admin, "hosts", "OWNER"))).toEqual([
+      hostCredentials.name,
+    ]);
+
+    await owner.delete(`/listings/${loftId}`).expect(204);
+
+    // Nothing of the host's is on offer any more, and their stays still name them.
+    expect(labels(await lookup(admin, "owners", "OWNER"))).toEqual([
+      otherOwner.name,
+    ]);
+    expect((await lookup(admin, "hosts", "OWNER")).items).toEqual([
+      expect.objectContaining({
+        label: hostCredentials.name,
+        hint: hostCredentials.email,
+      }),
+    ]);
   });
 
   it("matches an id whole, and never a part of one", async () => {
