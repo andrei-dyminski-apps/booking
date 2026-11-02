@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   createBookingSchema,
   type BookedRange,
+  type CancellationPolicy,
   type CreateBookingInput,
   type PricedListing,
 } from "@repo/contracts";
@@ -19,6 +20,7 @@ import { createBookingAction } from "../api/create-booking-action";
 import { joinWaitlistAction } from "../api/join-waitlist-action";
 import { callsForWaitlist } from "../lib/months";
 import { BookingSubmit } from "./booking-submit";
+import { CancellationQuote } from "./cancellation-quote";
 import { StayQuote } from "./stay-quote";
 
 /**
@@ -28,7 +30,8 @@ import { StayQuote } from "./stay-quote";
  *
  * The price is worked out beside the submit as the dates change (`StayQuote`), by the rule
  * the payment charges by too. Nothing about it is sent: the API quotes the stay off the
- * listing's prices, which is why `createBookingSchema` has no amount on it at all.
+ * listing's prices, which is why `createBookingSchema` has no amount on it at all. What a
+ * cancellation of those dates would give back is dated under them (`CancellationQuote`).
  *
  * `createBookingSchema` is also what refuses a check-out before the check-in and a stay in
  * the past, here as well as in the action. `listingId` is one of its fields, so the form
@@ -48,6 +51,9 @@ export const BookingForm = ({
   prices,
   earliest,
   booked,
+  policy,
+  listingUpdatedAt,
+  now,
 }: {
   listingId: string;
   /** The default price and the exceptions to it, off the listing being booked. */
@@ -56,6 +62,16 @@ export const BookingForm = ({
   earliest: string;
   /** The nights the calendar draws as taken — what decides between a hold and the waitlist. */
   booked: readonly BookedRange[];
+  /** The listing's cancellation policy, which the hold copies when it is taken. */
+  policy: CancellationPolicy;
+  /**
+   * The version of the listing this render read — its prices and its policy. The action
+   * sends it as the one the guest was shown, and the API refuses the hold if the listing
+   * has been saved since.
+   */
+  listingUpdatedAt: string;
+  /** The server's clock at the render — what the grace period of the quote counts from. */
+  now: string;
 }) => {
   const [refused, setRefused] = useState<BookedRange | null>(null);
   const { form, submit, pending, message } = useActionForm<CreateBookingInput>({
@@ -63,7 +79,7 @@ export const BookingForm = ({
       const waits = callsForWaitlist(values.from, values.to, booked, refused);
       const answer = waits
         ? await joinWaitlistAction(listingId, state, values)
-        : await createBookingAction(listingId, state, values);
+        : await createBookingAction(listingId, listingUpdatedAt, state, values);
 
       if (answer.stale) {
         setRefused(waits ? null : { from: values.from, to: values.to });
@@ -127,6 +143,8 @@ export const BookingForm = ({
             <StayQuote control={form.control} prices={prices} />
           </div>
         </div>
+
+        <CancellationQuote control={form.control} policy={policy} now={now} />
 
         {message !== null && <FieldError>{message}</FieldError>}
 

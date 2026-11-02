@@ -16,6 +16,7 @@ const booking: Booking = {
   status: BookingStatus.PENDING_PAYMENT,
   amountCents: cents(48_200),
   currency: CURRENCY,
+  cancellationPolicy: "FLEXIBLE",
   refundedAmountCents: null,
   refundOwedCents: null,
   paid: false,

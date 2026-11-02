@@ -7,6 +7,7 @@ import {
   bookingDetailSchema,
   bookingPageSchema,
   bookingSchema,
+  listingSchema,
   type Booking,
   type BookingPage,
   type CreateBookingInput,
@@ -228,6 +229,56 @@ describe("BookingController (e2e)", () => {
 
     expect(error.errors).toBeUndefined();
     expect(error.message).toContain(input.listingId);
+  });
+
+  it("refuses a hold on terms other than the ones the guest was shown, and takes it on the ones they were", async () => {
+    const versionOf = (body: unknown): string =>
+      listingSchema.parse(body).updatedAt;
+    const shown = versionOf(
+      (await guest.get(`/listings/${input.listingId}`).expect(200)).body,
+    );
+    const policySaved = versionOf(
+      (
+        await owner
+          .patch(`/listings/${input.listingId}`)
+          .send({ cancellationPolicy: "NON_REFUNDABLE" })
+          .expect(200)
+      ).body,
+    );
+
+    const refused = await guest
+      .post("/bookings")
+      .send({ ...input, listingUpdatedAt: shown })
+      .expect(412);
+
+    expect(apiErrorSchema.parse(refused.body).message).toContain("has changed");
+
+    // A price is a term as much as the policy: the same version covers both.
+    const priceSaved = versionOf(
+      (
+        await owner
+          .patch(`/listings/${input.listingId}`)
+          .send({ pricePerNightCents: cents(15_000) })
+          .expect(200)
+      ).body,
+    );
+
+    await guest
+      .post("/bookings")
+      .send({ ...input, listingUpdatedAt: policySaved })
+      .expect(412);
+
+    const created = bookingSchema.parse(
+      (
+        await guest
+          .post("/bookings")
+          .send({ ...input, listingUpdatedAt: priceSaved })
+          .expect(201)
+      ).body,
+    );
+
+    expect(created.cancellationPolicy).toBe("NON_REFUNDABLE");
+    expect(created.amountCents).toBe(4 * 15_000);
   });
 
   // The overlap is a pair of strict inequalities, and this is what says so now that the

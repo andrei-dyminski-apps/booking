@@ -82,11 +82,6 @@ const bookingRequestedSchema = z.object({
   data: stayNoticeSchema,
 });
 
-const bookingCancelledSchema = z.object({
-  type: z.literal(NotificationType.BOOKING_CANCELLED),
-  data: stayNoticeSchema.extend({ recipient: stayPartySchema }),
-});
-
 const bookingExpiredSchema = z.object({
   type: z.literal(NotificationType.BOOKING_EXPIRED),
   data: stayNoticeSchema.extend({ recipient: stayPartySchema }),
@@ -103,6 +98,21 @@ const bookingConfirmedSchema = z.object({
  * recorded carry none and every one of them was in `CURRENCY`.
  */
 const noticeCurrencySchema = currencySchema.default(CURRENCY);
+
+/**
+ * `refundCents` is what the cancellation gives back to the guest — `0` for a paid stay
+ * cancelled after its refund windows closed — or `null` when there is nothing to say: a
+ * hold that was never paid, a stay whose money had gone back before it was cancelled, a
+ * notice written before the amount was recorded.
+ */
+const bookingCancelledSchema = z.object({
+  type: z.literal(NotificationType.BOOKING_CANCELLED),
+  data: stayNoticeSchema.extend({
+    recipient: stayPartySchema,
+    refundCents: centsSchema.nullable().default(null),
+    currency: noticeCurrencySchema,
+  }),
+});
 
 /** Only the guest paid, so only the guest is told; `amountCents` is what went back. */
 const paymentRefundedSchema = z.object({

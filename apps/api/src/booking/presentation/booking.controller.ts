@@ -19,6 +19,7 @@ import {
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiPreconditionFailedResponse,
   ApiUnauthorizedResponse,
 } from "@nestjs/swagger";
 import {
@@ -178,6 +179,11 @@ export class BookingController {
   })
   @ApiConflictResponse({
     description: "The listing is already booked for an overlapping date range",
+    type: ApiErrorDto,
+  })
+  @ApiPreconditionFailedResponse({
+    description:
+      "The listing has been saved since the version the request names (`listingUpdatedAt`)",
     type: ApiErrorDto,
   })
   // Not the 401 of the global guard, which every route answers: this one comes from the

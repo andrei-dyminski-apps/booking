@@ -10,6 +10,10 @@ import {
   CardTitle,
 } from "@repo/ui/components/card";
 import { Separator } from "@repo/ui/components/separator";
+import {
+  CancellationTerms,
+  CANCELLATION_POLICY_LABELS,
+} from "#entities/booking";
 import { currentUser, listingsApi } from "#shared/api";
 import {
   availabilityTag,
@@ -52,6 +56,7 @@ const REVIEWS_SHOWN = 10;
 export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
   const id = requireId((await params).id);
   const from = today();
+  const now = new Date().toISOString();
 
   // Both listing reads are public, cached under their own URL and tagged separately,
   // because the writes that change them are different: editing a listing does not change
@@ -116,6 +121,10 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
             <Badge variant="outline" className="h-6">
               <UsersIcon />
               Sleeps {listing.capacity}
+            </Badge>
+            <Badge variant="outline" className="h-6">
+              {CANCELLATION_POLICY_LABELS[listing.cancellationPolicy]}{" "}
+              cancellation
             </Badge>
           </div>
           {(weekdayPrices.length > 0 || listing.pricing.dates.length > 0) && (
@@ -211,8 +220,24 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
                 prices={listing}
                 earliest={from}
                 booked={availability.booked}
+                policy={listing.cancellationPolicy}
+                listingUpdatedAt={listing.updatedAt}
+                now={now}
               />
             )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Cancellation</CardTitle>
+            <CardDescription>
+              Chosen by the host and fixed on a stay the moment it is booked: a
+              later change of the policy does not change a stay already taken.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <CancellationTerms policy={listing.cancellationPolicy} />
           </CardContent>
         </Card>
 

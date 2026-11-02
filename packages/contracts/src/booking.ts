@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { cancellationPolicySchema } from "./cancellation-policy.js";
 import { dayMessage, isDay, today } from "./day.js";
 import { listingSummarySchema } from "./listing.js";
 import { centsSchema, currencySchema } from "./money.js";
@@ -75,8 +76,14 @@ export const bookingSchema = z.object({
    */
   currency: currencySchema,
   /**
-   * What went back to the guest, or `null` when nothing did: a cancellation outside the
-   * free window, a hold that was never paid. See `refundOnCancel` (`refund.ts`).
+   * The listing's cancellation policy when the hold was taken — a copy, like `amountCents`:
+   * a later change of the listing's policy does not restate the stay. `refundQuote`
+   * (`refund.ts`) reads it.
+   */
+  cancellationPolicy: cancellationPolicySchema,
+  /**
+   * What went back to the guest, or `null` when nothing did: a cancellation after every
+   * refund window closed, a hold that was never paid. See `refundQuote` (`refund.ts`).
    */
   refundedAmountCents: centsSchema.nullable(),
   /**
@@ -118,38 +125,67 @@ export const bookingSchema = z.object({
  * same reason: `listingId` is what a request names, and what that id resolves to is the
  * server's answer rather than the client's claim.
  */
-export const createBookingSchema = bookingSchema
-  .omit({
-    id: true,
-    listing: true,
-    guestId: true,
-    status: true,
-    amountCents: true,
-    currency: true,
-    refundedAmountCents: true,
-    refundOwedCents: true,
-    paid: true,
-    dispute: true,
-    expiresAt: true,
-    createdAt: true,
-    reviewed: true,
-  })
-  // Both rules are about a date and wait for one: without the guard an empty check-in box
-  // reads as a stay in the past — `"" >= today()` is false — and the form puts that under a
-  // box nobody has filled in yet, beside the refusal that is actually true.
-  // `listingQuerySchema` guards its own cross-field rules the same way.
-  .refine(
-    (booking) =>
-      !isDay(booking.from) || !isDay(booking.to) || booking.from < booking.to,
-    {
-      error: "Check-out date must be later than check-in date",
-      path: ["to"],
-    },
-  )
-  .refine((booking) => !isDay(booking.from) || booking.from >= today(), {
-    error: "Check-in date cannot be in the past",
-    path: ["from"],
-  });
+const stayRequestFields = bookingSchema.omit({
+  id: true,
+  listing: true,
+  guestId: true,
+  status: true,
+  amountCents: true,
+  currency: true,
+  cancellationPolicy: true,
+  refundedAmountCents: true,
+  refundOwedCents: true,
+  paid: true,
+  dispute: true,
+  expiresAt: true,
+  createdAt: true,
+  reviewed: true,
+});
+
+/**
+ * Both rules are about a date and wait for one: without the guard an empty check-in box
+ * reads as a stay in the past — `"" >= today()` is false — and the form puts that under a
+ * box nobody has filled in yet, beside the refusal that is actually true.
+ * `listingQuerySchema` guards its own cross-field rules the same way.
+ */
+function withStayRules<T extends z.ZodType<{ from: string; to: string }>>(
+  schema: T,
+): T {
+  return schema
+    .refine(
+      (booking) =>
+        !isDay(booking.from) || !isDay(booking.to) || booking.from < booking.to,
+      {
+        error: "Check-out date must be later than check-in date",
+        path: ["to"],
+      },
+    )
+    .refine((booking) => !isDay(booking.from) || booking.from >= today(), {
+      error: "Check-in date cannot be in the past",
+      path: ["from"],
+    });
+}
+
+/**
+ * A listing and a range of nights under the booking's rules, and nothing else — what the
+ * waitlist asks for, so a range the booking form would refuse is refused there in the same
+ * words.
+ */
+export const stayRequestSchema = withStayRules(stayRequestFields);
+
+export const createBookingSchema = withStayRules(
+  stayRequestFields.extend({
+    /**
+     * The listing's `updatedAt` as the page that offered the stay read it — one version of
+     * every term the guest was shown beside the button: the prices the quote was worked
+     * out from and the cancellation policy the hold copies. Every save of the listing
+     * stamps it, so when the listing's is no longer this one the hold is refused rather
+     * than taken at a price, or frozen under a policy, the guest never saw. Optional, so a
+     * client that shows no terms can still book.
+     */
+    listingUpdatedAt: z.iso.datetime().optional(),
+  }),
+);
 
 export const bookingListSchema = z.array(bookingSchema);
 

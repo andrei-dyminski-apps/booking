@@ -2,6 +2,8 @@ import {
   NotificationType,
   ReviewKind,
   StayParty,
+  type Cents,
+  type Currency,
   type Notification,
 } from "@repo/contracts";
 import { ROUTES, setAsideHref } from "#shared/config";
@@ -42,7 +44,13 @@ export function describeNotification(
 
       return {
         title: asGuest ? "Your stay was cancelled" : "A stay was cancelled",
-        detail: `${data.listingTitle} · ${stayDates(data)}`,
+        detail: [
+          data.listingTitle,
+          stayDates(data),
+          ...(data.refundCents === null
+            ? []
+            : [cancellationRefund(data.refundCents, data.currency, asGuest)]),
+        ].join(" · "),
         href: asGuest ? ROUTES.bookings : listingStays(data.listingId),
       };
     }
@@ -178,4 +186,22 @@ function stayDates({ from, to }: { from: string; to: string }): string {
  */
 function listingStays(listingId: string): string {
   return filtersHref(ROUTES.bookings, { side: StayParty.HOST, listingId });
+}
+
+/**
+ * What a cancellation gives back, from the side of whoever reads it. Owed rather than sent:
+ * a job sends it after the notice is written, so neither side is told it has gone back.
+ */
+function cancellationRefund(
+  refundCents: Cents,
+  currency: Currency,
+  asGuest: boolean,
+): string {
+  if (refundCents === 0) return "no refund";
+
+  const amount = formatMoney(refundCents, currency);
+
+  return asGuest
+    ? `${amount} coming back to you`
+    : `${amount} going back to the guest`;
 }

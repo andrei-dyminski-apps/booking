@@ -107,6 +107,7 @@ describe("ReviewController (e2e)", () => {
         status: overrides.status ?? BookingStatus.CONFIRMED,
         amountCents: 48_000,
         currency: "usd",
+        cancellationPolicy: "FLEXIBLE",
         expiresAt:
           overrides.status === BookingStatus.PENDING_PAYMENT
             ? new Date(Date.now() + 60_000)

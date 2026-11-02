@@ -13,7 +13,7 @@ import {
   type Booking,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
-import { cents, subtractCents } from "../../payment/domain/money";
+import { CURRENCY, cents, subtractCents } from "../../payment/domain/money";
 import type { BookingPaymentHandler } from "./booking-payment.handler";
 import { MAX_REFUND_ATTEMPTS, type BookingService } from "./booking.service";
 import {
@@ -707,6 +707,85 @@ describe("BookingService", () => {
       expect(bookingRepository.rows.get(id)).toMatchObject({
         booking: { status: BookingStatus.CANCELLED, refundedAmountCents: null },
       });
+    });
+
+    it("refunds the share the stay's own policy gives, frozen when it was taken", async () => {
+      // Half back from 14 days before check-in to 7 under LIMITED.
+      bookingRepository.listingPolicy = "LIMITED";
+      const id = await paidStay(10);
+      // A change of the listing's policy afterwards does not restate the stay.
+      bookingRepository.listingPolicy = "FLEXIBLE";
+
+      await service.remove(id, guest);
+
+      expect([...paymentGateway.refunds.values()]).toEqual([
+        { paymentId: "pi_1", amount: AMOUNT / 2 },
+      ]);
+      expect(bookingRepository.rows.get(id)).toMatchObject({
+        booking: {
+          cancellationPolicy: "LIMITED",
+          status: BookingStatus.CANCELLED,
+          refundedAmountCents: AMOUNT / 2,
+        },
+      });
+    });
+
+    it("tells the host what the guest's cancellation gives back", async () => {
+      bookingRepository.listingPolicy = "LIMITED";
+      const paid = await paidStay(10);
+
+      notificationService.notices.length = 0;
+      await service.remove(paid, guest);
+
+      expect(notificationService.notices).toEqual([
+        {
+          userId: OWNER_ID,
+          content: expect.objectContaining({
+            type: NotificationType.BOOKING_CANCELLED,
+            data: expect.objectContaining({
+              refundCents: AMOUNT / 2,
+              currency: CURRENCY,
+            }) as unknown,
+          }) as unknown,
+        },
+      ]);
+
+      // A hold was never paid, so there is nothing to say about money.
+      const hold = await bookedByGuest();
+
+      notificationService.notices.length = 0;
+      await service.remove(hold, guest);
+
+      expect(notificationService.notices).toEqual([
+        {
+          userId: OWNER_ID,
+          content: expect.objectContaining({
+            data: expect.objectContaining({ refundCents: null }) as unknown,
+          }) as unknown,
+        },
+      ]);
+    });
+
+    it("says nothing about money for a stay refunded in full before it was cancelled", async () => {
+      const paid = await paidStay(30);
+      const found = bookingRepository.rows.get(paid);
+
+      if (found === undefined) throw new Error("The stay was not stored");
+
+      // Refunded in full outside the API, the news not acted on yet.
+      found.booking.refundedAmountCents = AMOUNT;
+      notificationService.notices.length = 0;
+      await service.remove(paid, admin);
+
+      expect(notificationService.notices).toEqual(
+        [GUEST_ID, OWNER_ID].map((userId) => ({
+          userId,
+          content: expect.objectContaining({
+            type: NotificationType.BOOKING_CANCELLED,
+            data: expect.objectContaining({ refundCents: null }) as unknown,
+          }) as unknown,
+        })),
+      );
     });
 
     it("refunds only what a dashboard refund left of the payment", async () => {

@@ -1,25 +1,55 @@
 import {
+  NotificationType,
   StayParty,
   type NotificationContent,
   type StayNotice,
 } from "@repo/contracts";
 import type { NotificationService } from "../../notification/notification.service";
+import type { Cents, Currency } from "../../payment/domain/money";
 
-type BothSidesNotice = Extract<
-  NotificationContent,
-  { data: { recipient: StayParty } }
->["type"];
+type BothSidesNotice = Exclude<
+  Extract<NotificationContent, { data: { recipient: StayParty } }>["type"],
+  typeof NotificationType.BOOKING_CANCELLED
+>;
+
+type Parties = { stay: StayNotice; guestId: string; listingOwnerId: string };
+
+/** What a cancellation gives back, stated to both sides beside the stay. */
+export type CancellationRefund = {
+  refundCents: Cents | null;
+  currency: Currency;
+};
 
 /** Both sides of a stay, leaving out `except` — whoever made it happen. */
 export async function notifyBothSides(
   notificationService: Pick<NotificationService, "notify">,
   type: BothSidesNotice,
-  {
-    stay,
-    guestId,
-    listingOwnerId,
-  }: { stay: StayNotice; guestId: string; listingOwnerId: string },
+  parties: Parties,
   except?: string,
+): Promise<void> {
+  await toBothSides(notificationService, parties, except, (recipient) => ({
+    type,
+    data: { ...parties.stay, recipient },
+  }));
+}
+
+/** The same, for a cancellation: its notice carries what it gives back. */
+export async function notifyBothSidesOfCancellation(
+  notificationService: Pick<NotificationService, "notify">,
+  { refund, ...parties }: Parties & { refund: CancellationRefund },
+  except?: string,
+): Promise<void> {
+  await toBothSides(notificationService, parties, except, (recipient) => ({
+    type: NotificationType.BOOKING_CANCELLED,
+    data: { ...parties.stay, recipient, ...refund },
+  }));
+}
+
+async function toBothSides(
+  notificationService: Pick<NotificationService, "notify">,
+  { guestId, listingOwnerId }: Parties,
+  except: string | undefined,
+  contentFor: (recipient: StayParty) => NotificationContent,
 ): Promise<void> {
   const parties = [
     { userId: guestId, recipient: StayParty.GUEST },
@@ -28,10 +58,7 @@ export async function notifyBothSides(
 
   await Promise.all(
     parties.map(({ userId, recipient }) =>
-      notificationService.notify(userId, {
-        type,
-        data: { ...stay, recipient },
-      }),
+      notificationService.notify(userId, contentFor(recipient)),
     ),
   );
 }

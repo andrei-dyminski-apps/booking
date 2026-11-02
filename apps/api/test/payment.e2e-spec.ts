@@ -2,8 +2,11 @@ import type { NestExpressApplication } from "@nestjs/platform-express";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
 import Stripe from "stripe";
+import { subDays } from "date-fns";
 import {
+  BASIS_POINTS,
   Role,
+  shareOf,
   bookingPaymentSchema,
   bookingSchema,
   type Booking,
@@ -436,6 +439,44 @@ describe("Payments (e2e)", () => {
         key: `booking-${booking.id}-cancellation`,
       },
     ]);
+  });
+
+  it("refunds the share of the window a cancellation falls in, and in full within the grace period", async () => {
+    // LIMITED: full until 14 days before check-in, half until 7.
+    await owner
+      .patch(`/listings/${listingId}`)
+      .send({ cancellationPolicy: "LIMITED" })
+      .expect(200);
+
+    const half = await hold(10, 13);
+    await guest.post(`/bookings/${half.id}/payment`).expect(200);
+    await settled(deliver(half).expect(200));
+    // Booked two days ago, so the grace period is over.
+    await app.get(PrismaService).booking.update({
+      where: { id: half.id },
+      data: { createdAt: subDays(new Date(), 2) },
+    });
+
+    await guest.delete(`/bookings/${half.id}`).expect(204);
+    await refundSent(half.id);
+
+    expect(half.cancellationPolicy).toBe("LIMITED");
+    expect((await read(half.id)).refundedAmountCents).toBe(
+      shareOf(half.amountCents, BASIS_POINTS / 2),
+    );
+
+    // The same nights, freed by that cancellation and booked a moment ago: still inside
+    // the 50% window by the tiers, but check-in is more than 7 days away, so in full.
+    const graced = await hold(10, 13);
+    await guest.post(`/bookings/${graced.id}/payment`).expect(200);
+    await settled(deliver(graced).expect(200));
+
+    await guest.delete(`/bookings/${graced.id}`).expect(204);
+    await refundSent(graced.id);
+
+    expect((await read(graced.id)).refundedAmountCents).toBe(
+      graced.amountCents,
+    );
   });
 
   it("refunds nothing to a guest cancelling the day before, and all on an admin's word", async () => {

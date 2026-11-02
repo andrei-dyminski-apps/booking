@@ -502,11 +502,21 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
 - **A cancellation is final when it is answered, and its refund follows it.**
   `DELETE /bookings/:id` calls no payment provider. A hold can be cancelled at any time, a
   confirmed stay only before its check-in day — by the guest and by an admin alike
-  (`isCancellableOn`, `409` once it has begun). `refundsInFull` decides whether there is a
-  refund — the guest's until 48 hours before check-in and none after, an admin's always, the
-  rule `refundOnCancel` states on the booking page — and the amount is what the row has not
-  recorded as refunded yet; `cancel` writes it as `refund_owed_cents` in the
-  statement that writes `CANCELLED`. The `refund-cancellation` job sends it under
+  (`isCancellableOn`, `409` once it has begun). `refundQuote` decides the refund — a guest's
+  by the stay's own `cancellation_policy` (copied from the listing under `create`'s
+  `FOR UPDATE` lock, like the amount, so a later change of the listing's policy restates no
+  stay; a request that names the version of the listing its guest was shown —
+  `listingUpdatedAt`, which the booking form always sends and every save of the listing,
+  prices included, stamps — is refused with a `412` under the same lock when the listing's is
+  no longer it, rather than taking a price or freezing a policy the guest never read, and not
+  a `409`, which the form reads as its calendar being stale): the share of the window the cancellation falls in, measured from `checkInInstant`,
+  or in full within the grace period, less what was refunded already; an admin's whatever
+  is left, always. The booking page states the same quote. `cancel` writes the amount as
+  `refund_owed_cents` in the statement that writes `CANCELLED`, and `BOOKING_CANCELLED`
+  carries it as `refundCents` (`null` for a hold). The booking freezes the policy's name, not
+  its terms, so a row of `CANCELLATION_TERMS` is never edited once a booking can carry it:
+  new terms are a new policy (`FIRM_V2` — the contract's enum, its row, a migration of the
+  Prisma enum), and the old one stays for the stays already taken under it. The `refund-cancellation` job sends it under
   `booking-<id>-cancellation` (one cancellation per booking, so no amount in the key), capped
   again by what Stripe says is left, and `settleOwedRefund` raises `refunded_amount_cents` by what
   the refund named by that key gave back and clears the debt in one transaction. A refund
@@ -630,7 +640,7 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
   off the row), never in the constant: `PaymentGateway.open` and `Payout` carry it. `+`/`-` on two amounts gives a plain `number` back, which is why the
   arithmetic goes through `addCents`/`subtractCents`/`minCents`/`maxCents`. A log line or an
   exception message reads an amount through `formatCents` (`361.05`). The contract's rules
-  count cents too (`hostShare`, `stayTotal`, `refundOnCancel`), and the schemas
+  count cents too (`hostShare`, `stayTotal`, `refundQuote`), and the schemas
   brand what they parse, so a response read on either side is `Cents` already. The inbox stores
   its payload in cents; `store_money_in_cents` moved the events and notices written before it.
 

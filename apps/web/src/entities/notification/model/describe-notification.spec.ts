@@ -62,6 +62,29 @@ describe("describeNotification", () => {
     expect(paidOut.href).toBe("/dashboard/payouts");
   });
 
+  it("says what a cancellation gives back, from the side of whoever reads it", () => {
+    const cancelled = (
+      recipient: StayParty,
+      refundCents: ReturnType<typeof cents> | null,
+    ) =>
+      describeNotification({
+        ...stored,
+        type: NotificationType.BOOKING_CANCELLED,
+        data: { ...stay, recipient, refundCents, currency: CURRENCY },
+      }).detail;
+
+    expect(cancelled(StayParty.GUEST, cents(18_053))).toMatch(
+      /180\.53 coming back to you$/,
+    );
+    expect(cancelled(StayParty.HOST, cents(18_053))).toMatch(
+      /180\.53 going back to the guest$/,
+    );
+    expect(cancelled(StayParty.GUEST, cents(0))).toMatch(/ · no refund$/);
+    expect(cancelled(StayParty.HOST, null)).toMatch(
+      /Cabin by the lake · [^·]+$/,
+    );
+  });
+
   it("leads a bounced refund to its own row on the payments screen, whether or not a stay names it", () => {
     const failed = (bookingId: string | null) =>
       describeNotification({

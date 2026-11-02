@@ -88,6 +88,7 @@ const stay = (overrides: Partial<Booking> = {}): BookingWithListingOwner => ({
     status: BookingStatus.CONFIRMED,
     amountCents: cents(48_000),
     currency: CURRENCY,
+    cancellationPolicy: "FLEXIBLE",
     refundedAmountCents: null,
     refundOwedCents: null,
     paid: true,
@@ -284,6 +285,7 @@ class FakeListingRepository implements Pick<
       description: "Two rooms under the roof and a wall of glass.",
       pricePerNightCents: cents(12_000),
       capacity: 4,
+      cancellationPolicy: "FLEXIBLE",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });

@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  PreconditionFailedException,
   UnauthorizedException,
   UnprocessableEntityException,
 } from "@nestjs/common";
@@ -15,7 +16,7 @@ import {
   isCancellableOn,
   notRefunded,
   NotificationType,
-  refundsInFull,
+  refundQuote,
   Role,
   StayParty,
   type Booking,
@@ -44,6 +45,7 @@ import {
   CancellationInProgressError,
   DatesUnavailableError,
   GuestNotFoundError,
+  ListingChangedError,
   ListingNotFoundError,
   OwnListingError,
   StayTooCheapError,
@@ -73,7 +75,7 @@ import { isCancellable } from "../domain/booking-status";
 import { owedOnStuck } from "../domain/stuck-stay";
 import { BookingJobs } from "./ports/booking-jobs";
 import { StayEvents } from "./stay-events";
-import { notifyBothSides } from "./stay-notices";
+import { notifyBothSides, notifyBothSidesOfCancellation } from "./stay-notices";
 import { decodeCursor, encodeCursor } from "./booking-cursor";
 
 /**
@@ -223,6 +225,14 @@ export class BookingService {
         throw new ConflictException(error.message);
       }
 
+      // Not a `409`: the frontend reads that as its calendar being stale, and the nights
+      // are free — it is the terms beside them that may have moved.
+      if (error instanceof ListingChangedError) {
+        throw new PreconditionFailedException(
+          "The host has changed this listing since it was shown — review its price and cancellation terms and book again",
+        );
+      }
+
       // Valid dates on a valid listing that add up to more than a payment can carry.
       if (error instanceof StayTooExpensiveError) {
         throw new UnprocessableEntityException(
@@ -343,7 +353,7 @@ export class BookingService {
   async remove(id: string, user: AuthenticatedUser): Promise<void> {
     await this.mayCancel(id, user);
 
-    const { found, wasHold, cancelled, refundOwedCents } =
+    const { found, wasHold, cancelled, refundOwedCents, refundCents } =
       await this.bookingRepository
         .whileCancelling(id, () => this.cancelReadable(id, user))
         .catch((error: unknown) => {
@@ -368,7 +378,7 @@ export class BookingService {
       await this.bookingJobs.refundCancellation(id);
     }
 
-    await this.notifyCancellation(booking, listingOwnerId, user);
+    await this.notifyCancellation(booking, listingOwnerId, user, refundCents);
     await this.waitlistService.announceFreed([booking]);
   }
 
@@ -389,6 +399,7 @@ export class BookingService {
     wasHold: boolean;
     cancelled: CancelledStay;
     refundOwedCents: Cents | null;
+    refundCents: Cents | null;
   }> {
     const found = await this.getReadable(id, user);
     const { booking } = found;
@@ -405,7 +416,10 @@ export class BookingService {
     }
 
     const wasHold = booking.status === BookingStatus.PENDING_PAYMENT;
-    const refundOwedCents = this.refundOwedOnCancel(found, user);
+    const refundCents = this.refundOnCancel(found, user);
+    // The debt the job sends; a refund of nothing is announced but never owed.
+    const refundOwedCents =
+      refundCents !== null && refundCents > 0 ? refundCents : null;
     const cancelled = await this.bookingRepository.cancel(
       id,
       booking.status,
@@ -414,7 +428,7 @@ export class BookingService {
 
     if (cancelled === null) return this.refuseChangedCancellation(id);
 
-    return { found, wasHold, cancelled, refundOwedCents };
+    return { found, wasHold, cancelled, refundOwedCents, refundCents };
   }
 
   /** Still active means the hold was paid for in between: a `409` worth retrying. */
@@ -430,8 +444,16 @@ export class BookingService {
     throw new NotFoundException(`Booking ${id} not found`);
   }
 
-  /** `null` for nothing. An open dispute is a `409`: Stripe refuses to refund a disputed payment. */
-  private refundOwedOnCancel(
+  /**
+   * What cancelling this stay gives back, decided once for the debt the cancellation writes
+   * and for what `BOOKING_CANCELLED` tells both sides: `null` when there is no money to
+   * speak of — a hold had nothing to give, a lost dispute's money went back through the
+   * bank, and a stay refunded in full before it was cancelled has nothing left, where "no
+   * refund" would read as the guest losing money they already have — otherwise the amount,
+   * nothing included. An open dispute is a `409`: Stripe refuses to refund a disputed
+   * payment.
+   */
+  private refundOnCancel(
     { booking, paymentId }: BookingWithListingOwner,
     user: AuthenticatedUser,
   ): Cents | null {
@@ -445,18 +467,19 @@ export class BookingService {
       );
     }
 
-    if (booking.dispute === DisputeStatus.LOST) return null;
+    if (
+      booking.dispute === DisputeStatus.LOST ||
+      notRefunded(booking.amountCents, booking.refundedAmountCents) === NO_CENTS
+    ) {
+      return null;
+    }
 
-    // In full means whatever the stay has not been refunded yet.
-    const owed = refundsInFull(
-      booking.from,
+    // The stay's own policy, frozen when it was taken; what was refunded already comes off.
+    return refundQuote(
+      booking,
       new Date(),
       user.role === Role.ADMIN ? "ADMIN" : "GUEST",
-    )
-      ? notRefunded(booking.amountCents, booking.refundedAmountCents)
-      : NO_CENTS;
-
-    return owed > 0 ? owed : null;
+    ).cents;
   }
 
   /**
@@ -701,11 +724,16 @@ export class BookingService {
     booking: Booking,
     listingOwnerId: string,
     canceller: AuthenticatedUser,
+    refundCents: Cents | null,
   ): Promise<void> {
-    await notifyBothSides(
+    await notifyBothSidesOfCancellation(
       this.notificationService,
-      NotificationType.BOOKING_CANCELLED,
-      { stay: stayNoticeOf(booking), guestId: booking.guestId, listingOwnerId },
+      {
+        stay: stayNoticeOf(booking),
+        guestId: booking.guestId,
+        listingOwnerId,
+        refund: { refundCents, currency: booking.currency },
+      },
       canceller.id,
     );
   }

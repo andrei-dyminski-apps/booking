@@ -80,6 +80,7 @@ describe("PayoutRepository settlement lease (e2e)", () => {
         status: "CONFIRMED",
         amountCents: 24_000,
         currency: "usd",
+        cancellationPolicy: "FLEXIBLE",
       },
     });
 
@@ -273,6 +274,7 @@ describe("The money columns of a paid stay (e2e)", () => {
         status: "CONFIRMED",
         amountCents: AMOUNT,
         currency: "usd",
+        cancellationPolicy: "FLEXIBLE",
         paymentIntentId: "pi_money",
         chargeId: "ch_money",
         paidAt: new Date(),

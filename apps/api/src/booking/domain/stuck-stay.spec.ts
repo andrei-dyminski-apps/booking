@@ -21,6 +21,7 @@ const stay: Booking = {
   status: BookingStatus.CONFIRMED,
   amountCents: cents(48_000),
   currency: CURRENCY,
+  cancellationPolicy: "FLEXIBLE",
   refundedAmountCents: cents(12_000),
   refundOwedCents: null,
   paid: true,

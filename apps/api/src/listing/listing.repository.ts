@@ -323,6 +323,7 @@ function toListing(row: ListingRow): Listing {
     description: row.description,
     pricePerNightCents: cents(row.pricePerNightCents),
     capacity: row.capacity,
+    cancellationPolicy: row.cancellationPolicy,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

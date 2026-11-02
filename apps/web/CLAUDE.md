@@ -117,6 +117,7 @@ apps/web/
         listing/ui/booking-form.tsx       # the only thing here that creates a booking — or joins the waitlist for taken nights
         listing/ui/booking-submit.tsx     # …its button, worded by which of the two the dates call for
         listing/ui/stay-quote.tsx         # …what its dates cost, night by night, redrawn on its own
+        listing/ui/cancellation-quote.tsx # …what cancelling them would refund, dated for the check-in
         listing/ui/listing-reviews.tsx    # the guests' reviews: the summary and the newest page
         listing/ui/listing-skeleton.tsx
         listing/ui/ask-host.tsx           # a guest's question, or the way back to their thread; streamed, degrades
@@ -258,6 +259,7 @@ apps/web/
     features/                 # a user action a second page also runs
       save-listing/ui/listing-form.tsx    # the one form the new and the edit screen run
       save-listing/ui/pricing-fields.tsx  # …its weekday and date prices, saved with the row
+      save-listing/ui/policy-field.tsx    # …its cancellation policy, a select under a controller
       save-listing/ui/listing-form-skeleton.tsx  # its wait, box for box; each screen frames it
       save-listing/ui/listing-form-card.tsx  # …the card both are drawn in; the title and line are the screen's
       save-listing/lib/to-number.ts       # a number box's text onto the contract's number
@@ -285,6 +287,9 @@ apps/web/
       booking/model/status-labels.ts  # the four statuses named once: the filter, the card and the stay's page
       booking/model/hold.ts   # whether a hold still keeps its nights, and whether it waits on the viewer's payment
       booking/ui/booking-status-badge.tsx
+      booking/model/cancellation-policy.ts  # the policies named, their terms and a stay's schedule as sentences
+      booking/ui/cancellation-terms.tsx     # a policy, or one stay's dated windows: the listing page and the stay's page
+      booking/ui/refund-schedule-list.tsx   # …those windows as lines, also the listing page's quote for the dates being chosen
       booking/index.ts
       listing/ui/listing-card.tsx  # a listing to whoever may edit it: the dashboard and the admin's
       listing/index.ts
@@ -967,8 +972,10 @@ rather than for the markup:
 - **A description is a hint beside the label, never a paragraph under the box.** Every
   box and every group of boxes that explains itself does it through
   `shared/ui/hint-label.tsx`: `HintLabel` for a box — `FormField`, `FilterField` and
-  `LookupField` draw it from their `description` — and `HintFieldSet` for a group with a
-  `<legend>`, as the two price groups of the listing form are. A `FieldDescription` under
+  `LookupField` draw it from their `description`, and a box no `register` can reach draws
+  it itself with the id `hintOf` derives (`PolicyField`, a `Select` under a controller) —
+  and `HintFieldSet` for a group with a `<legend>`, as the two price groups of the listing
+  form are. A `FieldDescription` under
   a box or a legend is not written by hand, and neither is the aria of a group: the text is
   rendered twice, once in the popover and once visually hidden under the id `hintOf`
   derives, and that id goes into the control's `aria-describedby` — or the fieldset's,
@@ -1536,21 +1543,22 @@ rather than in `src/shared`.
 component that knows this application's `FieldErrors`, or one whose whole job is to
 navigate with `useRouter`. The test is the dependency, not the size — anything that would
 have to import from `#shared/*` or from `next/*` is not a primitive and does not go into
-the package. Nineteen are exported from there: `PageHeading` — the title and the line
+the package. Twenty are exported from there: `PageHeading` — the title and the line
 under it at the top of a list screen —, `BackLink` — the ghost arrow link above a detail
 screen's heading, back to the list it was opened from —, `ButtonLink` — a `<Link>`
 wearing the button classes, the one spelling of "a link that looks like a button" (see
-below) —, `FormField`, the one box every form that submits is made of, `HintFieldSet`, a
-group of boxes labelled the way a single box is, `LiveRefresh`, which re-renders a
+below) —, `FormField`, the one box every form that submits is made of, `HintLabel` (with
+`hintOf`, the id of its hidden copy), the label and hint of a box `FormField` cannot wrap
+because no `register` reaches it — the listing form's policy `Select` under a controller —,
+`HintFieldSet`, a group of boxes labelled the way a single box is, `LiveRefresh`, which re-renders a
 personal list when the event stream says it changed, and `FilterField`, `FilterSelect`,
 `LookupField`, `FilterForm`, `FiltersDialog`, `FilterChips`, `SortSelect`, `Pager`,
 `StalePageNotice`, `RefusedSearchNotice` and `NoMatchesNotice`, the parts every list
 screen — the catalogue, the stays and the admin's listings and users — searches and pages
 with. `DateRange` and `NightCount` draw a range of days and the nights it spans — on the
 stay's page and card, the waitlist's card and the admin's stuck stays and bounced refunds.
-Two more are internal to the boxes and not exported: `HintLabel`, the label with its
-description as a hint beside it, and `CharacterCount`, the room left in a bounded
-`FormField`. A component only one screen uses stays in that screen's slice, exactly as
+One more is internal to the boxes and not exported: `CharacterCount`, the room left in a
+bounded `FormField`. A component only one screen uses stays in that screen's slice, exactly as
 "pages first" says.
 
 - The design tokens live in `packages/ui/src/styles/globals.css`;

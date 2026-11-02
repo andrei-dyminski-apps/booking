@@ -19,6 +19,7 @@ import {
   listingFormSchema,
   listingFormValues,
 } from "../model/listing-form-schema";
+import { PolicyField } from "./policy-field";
 import { PricingFields } from "./pricing-fields";
 
 /**
@@ -137,6 +138,8 @@ export const ListingForm = ({
               />
             )}
           </FormField>
+
+          <PolicyField form={form} pending={pending} />
 
           <FieldSeparator />
 

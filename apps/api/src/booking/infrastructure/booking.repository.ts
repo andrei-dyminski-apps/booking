@@ -3,6 +3,7 @@ import {
   BookingStatus,
   DisputeStatus,
   type BookedRange,
+  type CancellationPolicy,
   type Booking,
   type BookingQuery,
   type BookingSort,
@@ -11,6 +12,7 @@ import {
   type StuckStayQuery,
 } from "@repo/contracts";
 import { z } from "zod";
+import { isEqual, parseISO } from "date-fns";
 import {
   type Prisma,
   ReviewKind,
@@ -40,6 +42,7 @@ import {
   CancellationInProgressError,
   DatesUnavailableError,
   GuestNotFoundError,
+  ListingChangedError,
   ListingNotFoundError,
   OwnListingError,
 } from "../domain/booking.errors";
@@ -70,6 +73,8 @@ type LockedListing = {
   id: string;
   owner_id: string;
   deleted_at: Date | null;
+  cancellation_policy: CancellationPolicy;
+  updated_at: Date;
 };
 
 /**
@@ -286,7 +291,9 @@ export class BookingRepository {
    *  2. flip this listing's lapsed holds to `EXPIRED`, so a stale `PENDING_PAYMENT` row
    *     neither blocks the slot nor trips the `EXCLUDE` constraint on the insert below.
    *  3. refuse an overlap with an active stay — the informative `409`.
-   *  4. quote the stay off the listing's prices (`quoteStay`), read under the same lock.
+   *  4. quote the stay off the listing's prices (`quoteStay`), read under the same lock,
+   *     beside the cancellation policy the stay copies — refused first when the listing
+   *     was saved since the version the request names (`listingUpdatedAt`).
    *  5. insert the hold with that amount. The `EXCLUDE` constraint is the last line of
    *     defence if a bug ever reaches here, and it is answered as the same `409`.
    *
@@ -304,7 +311,8 @@ export class BookingRepository {
 
     return this.prismaService.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<LockedListing[]>`
-        SELECT id, owner_id, deleted_at FROM listings WHERE id = ${input.listingId}::uuid FOR UPDATE
+        SELECT id, owner_id, deleted_at, cancellation_policy, updated_at
+        FROM listings WHERE id = ${input.listingId}::uuid FOR UPDATE
       `;
 
       const listing = locked[0];
@@ -315,6 +323,16 @@ export class BookingRepository {
 
       if (listing.owner_id === guestId) {
         throw new OwnListingError(input.listingId);
+      }
+
+      // The version of the terms the guest was shown, against the row this hold is about
+      // to be priced off and copy its policy from — both read under the lock a host's
+      // save of the listing, prices included, has to wait for.
+      if (
+        input.listingUpdatedAt !== undefined &&
+        !isEqual(parseISO(input.listingUpdatedAt), listing.updated_at)
+      ) {
+        throw new ListingChangedError(input.listingId);
       }
 
       const released = await tx.booking.updateManyAndReturn({
@@ -357,6 +375,9 @@ export class BookingRepository {
             expiresAt: holdExpiry(now),
             // The breakdown behind the amount, from the same quote and in the same insert.
             ...money,
+            // Copied as the amount is, so a later change of the listing's policy does not
+            // restate this stay's refunds.
+            cancellationPolicy: listing.cancellation_policy,
           },
           include: BOOKING_INCLUDE,
         });
@@ -1037,6 +1058,7 @@ function toBooking(row: BookingRowWithListing): Booking {
     to: toIsoDate(row.to),
     status: row.status,
     ...toStayMoney(row),
+    cancellationPolicy: row.cancellationPolicy,
     paid: row.paidAt !== null,
     dispute: row.disputeStatus,
     expiresAt: row.expiresAt?.toISOString() ?? null,

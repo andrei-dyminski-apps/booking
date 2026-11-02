@@ -54,6 +54,11 @@ model Booking {
   /// keeps it to the currencies the contract knows.
   currency String @db.Char(3)
 
+  /// The listing's cancellation policy when the hold was taken — copied under the same
+  /// `FOR UPDATE` lock as the prices, so a later change of the listing's policy does not
+  /// restate a stay already taken. No default on purpose: `create` has to write it.
+  cancellationPolicy CancellationPolicy @map("cancellation_policy")
+
   /// What each night of the stay cost when it was quoted — `amount_cents` is their sum,
   /// written by the same insert. See `BookingNight`.
   nights BookingNight[]
@@ -162,6 +167,15 @@ enum BookingStatus {
   EXPIRED
 }
 
+/// The refund schedules a host chooses from, the contract's `cancellationPolicySchema`.
+enum CancellationPolicy {
+  FLEXIBLE
+  MODERATE
+  LIMITED
+  FIRM
+  NON_REFUNDABLE
+}
+
 /// The three moments of a dispute this API acts on: opened, and closed one way or the other.
 enum DisputeStatus {
   OPEN
@@ -239,6 +253,9 @@ model Listing {
   description        String
   pricePerNightCents Int       @map("price_per_night_cents")
   capacity           Int
+  /// How much a guest's cancellation refunds, and until when — `CANCELLATION_TERMS` in
+  /// `@repo/contracts`. Every booking copies it when it is taken.
+  cancellationPolicy CancellationPolicy @default(FLEXIBLE) @map("cancellation_policy")
   createdAt          DateTime  @default(now()) @map("created_at")
   updatedAt          DateTime  @updatedAt @map("updated_at")
   /// When the owner retired it. The row outlives that moment because the bookings above

@@ -410,9 +410,13 @@ than a redirect to Checkout. The cycle:
 
 What else moves money:
 
-- **Cancelling a paid stay refunds it, right after it is cancelled** — in full up to 48
-  hours before check-in, and nothing after (`refundOnCancel` in `@repo/contracts`, the rule
-  the page states). An admin's cancellation refunds in full. Neither may cancel a stay
+- **Cancelling a paid stay refunds it, right after it is cancelled** — by the cancellation
+  policy the host chose for the listing and the booking copied when it was taken:
+  `FLEXIBLE` (in full up to 48 hours before check-in), `MODERATE` (5 days), `LIMITED` (in
+  full up to 14 days, half up to 7), `FIRM` (in full up to 30 days, half up to 7) or
+  `NON_REFUNDABLE`. Every policy but the last also refunds in full within 24 hours of
+  booking while check-in is more than 7 days away (`refundQuote` and `CANCELLATION_TERMS` in
+  `@repo/contracts`, the rule the pages state). An admin's cancellation refunds in full. Neither may cancel a stay
   once its check-in day has come. The
   cancellation answers at once and writes what it owes on the booking (`refundOwedCents`); a
   job sends the refund, and a sweep of its own sends any refund Stripe refused until it
@@ -624,7 +628,7 @@ pnpm test           # unit, *.spec.ts next to the code; no database needed
 pnpm test:e2e       # e2e, apps/api/test/*.e2e-spec.ts; needs the database from docker-compose running
 ```
 
-`pnpm test` covers both applications, with a runner each: **Jest** in `apps/api`, where the specs run a service against fakes of its repositories through Nest's testing module, and **Vitest** in `apps/web` and in `packages/contracts` — the latter for `nightlyPrice` and `refundOnCancel`, the rules a night of a stay is priced by and a cancellation refunds by on both sides of the wire. What has a spec on the frontend is deliberately narrow — a parser whose input somebody else writes, which today means `?next=` after signing in ([`next-path.ts`](apps/web/src/shared/lib/next-path.ts)) and the `Set-Cookie` the proxy re-issues ([`session-cookies.ts`](apps/web/src/shared/api/session-cookies.ts)). Both are security decisions that a diff does not show, and neither is a component: a component that would break is one `check-types` and Steiger already refuse.
+`pnpm test` covers both applications, with a runner each: **Jest** in `apps/api`, where the specs run a service against fakes of its repositories through Nest's testing module, and **Vitest** in `apps/web` and in `packages/contracts` — the latter for `nightlyPrice` and `refundQuote`, the rules a night of a stay is priced by and a cancellation refunds by on both sides of the wire. What has a spec on the frontend is deliberately narrow — a parser whose input somebody else writes, which today means `?next=` after signing in ([`next-path.ts`](apps/web/src/shared/lib/next-path.ts)) and the `Set-Cookie` the proxy re-issues ([`session-cookies.ts`](apps/web/src/shared/api/session-cookies.ts)). Both are security decisions that a diff does not show, and neither is a component: a component that would break is one `check-types` and Steiger already refuse.
 
 All of them run through turbo, which builds `@repo/contracts` first — the specs import its schemas as values, and unlike `lint` and `check-types` they need the compiled `dist/`, not the sources.
 

@@ -23,14 +23,25 @@ export {
 } from "./booking.js";
 
 export {
-  FREE_CANCELLATION_HOURS,
-  freeCancellationUntil,
+  checkInInstant,
   isCancellableOn,
   notRefunded,
-  refundOnCancel,
-  refundsInFull,
+  refundQuote,
+  refundSchedule,
   type Canceller,
+  type RefundQuote,
+  type RefundWindow,
 } from "./refund.js";
+
+export {
+  CANCELLATION_TERMS,
+  CancellationPolicy,
+  GRACE_MIN_LEAD_HOURS,
+  GRACE_PERIOD_HOURS,
+  cancellationPolicySchema,
+  type CancellationTerms,
+  type RefundTier,
+} from "./cancellation-policy.js";
 
 export {
   PLATFORM_FEE_BPS,

@@ -56,6 +56,19 @@ export class DatesUnavailableError extends Error {
   }
 }
 
+/**
+ * The listing has been saved since the version the request says the guest was shown, so
+ * its prices or its cancellation policy may not be the ones they read. Read off the same
+ * locked row the hold is priced and copies its policy from, so a host's save either lands
+ * before this check or waits for the hold.
+ */
+export class ListingChangedError extends Error {
+  constructor(listingId: string) {
+    super(`Listing ${listingId} has changed since it was shown`);
+    this.name = "ListingChangedError";
+  }
+}
+
 /** Raised under the lock once the quote exists, so nothing is inserted. */
 export class StayTooExpensiveError extends Error {
   constructor(amount: Cents) {

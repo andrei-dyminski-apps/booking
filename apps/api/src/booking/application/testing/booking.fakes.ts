@@ -8,6 +8,7 @@ import {
   pricedNights,
   Role,
   type BookedRange,
+  type CancellationPolicy,
   type Booking,
   type BookingQuery,
   type BookingSort,
@@ -179,6 +180,9 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
   /** The listing this fake creates bookings against, unless the row says otherwise. */
   listingOwnerId = OWNER_ID;
 
+  /** The listing's policy, which `create` copies onto the stay as the transaction does. */
+  listingPolicy: CancellationPolicy = "FLEXIBLE";
+
   /** Set to have `create` lose the race the pre-flight check cannot close. */
   vanishingListing = false;
 
@@ -326,6 +330,7 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
       status: BookingStatus.PENDING_PAYMENT,
       amountCents: AMOUNT,
       currency: CURRENCY,
+      cancellationPolicy: this.listingPolicy,
       refundedAmountCents: null,
       refundOwedCents: null,
       paid: false,
