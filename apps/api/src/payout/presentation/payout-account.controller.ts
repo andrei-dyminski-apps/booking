@@ -22,7 +22,7 @@ export class PayoutAccountController {
   @Get()
   @ApiOkResponse({ type: HostAccountDto })
   @ApiUnauthorizedResponse({
-    description: "The account behind the session is gone",
+    description: "The account behind the token no longer exists",
     type: ApiErrorDto,
   })
   account(@CurrentUser() user: AuthenticatedUser): Promise<HostAccount> {
@@ -34,7 +34,7 @@ export class PayoutAccountController {
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ type: HostAccountDto })
   @ApiUnauthorizedResponse({
-    description: "The account behind the session is gone",
+    description: "The account behind the token no longer exists",
     type: ApiErrorDto,
   })
   refresh(@CurrentUser() user: AuthenticatedUser): Promise<HostAccount> {
