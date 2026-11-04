@@ -1,6 +1,7 @@
 import { tz } from "@date-fns/tz";
 import { addHours, isAfter, isBefore, min, parseISO, subHours } from "date-fns";
-import { BookingStatus, type Booking } from "./booking.js";
+import { Role } from "./auth.js";
+import { BookingStatus, Canceller, type Booking } from "./booking.js";
 import {
   CANCELLATION_TERMS,
   GRACE_MIN_LEAD_HOURS,
@@ -19,8 +20,6 @@ import {
  * Here for the reason `nightlyPrice` is: the API refunds by it and the booking page states
  * it before the button, so a copy on each side would promise one refund and give another.
  */
-
-export type Canceller = "GUEST" | "ADMIN";
 
 const IN_UTC = { in: tz("UTC") };
 
@@ -102,8 +101,8 @@ export function refundSchedule(stay: ScheduledStay): RefundWindow[] {
 /**
  * What a cancellation gives back right now: the share of the payment, the cents it comes to,
  * and — for a guest — when that share ends and what follows it (`null` once nothing is left
- * to fall, or for an admin), and the window that closed last before now (`null` while none
- * has, or for an admin): what waiting has cost so far.
+ * to fall, or for a host or an admin), and the window that closed last before now (`null`
+ * while none has, or for a host or an admin): what waiting has cost so far.
  */
 export type RefundQuote = {
   /** The share of the payment a cancellation gives back right now. */
@@ -113,13 +112,13 @@ export type RefundQuote = {
   /**
    * The drop ahead: `until` is the moment the current share ends, `shareBps` what it falls
    * to once it does (the following window's share, `0` after the last window). `null` when
-   * no share is left to fall — the schedule is spent — and for an admin.
+   * no share is left to fall — the schedule is spent — and for a host or an admin.
    */
   next: { until: Date; shareBps: number } | null;
   /**
    * The window that closed last before now, with the share it offered: what waiting has
    * cost so far. When every window has closed it is the last one. `null` while no window
-   * has closed yet, and for an admin.
+   * has closed yet, and for a host or an admin.
    */
   closed: RefundWindow | null;
 };
@@ -130,16 +129,17 @@ type QuotedStay = ScheduledStay &
 /**
  * The guest is owed their share of the whole amount less whatever was refunded already —
  * from the payment provider's dashboard, say — rounded half up in their favour, and never a
- * negative amount. An admin's cancellation refunds whatever is left in full: it is the site
- * taking the stay away, not the guest changing their mind. Whether a payment exists at all
- * is the caller's to know.
+ * negative amount. A host's or an admin's cancellation refunds whatever is left in full,
+ * whatever the policy: it is the stay taken away from the guest, not the guest changing
+ * their mind — the host pays for it with a fee instead (`hostCancellationFee`). Whether a
+ * payment exists at all is the caller's to know.
  */
 export function refundQuote(
   stay: QuotedStay,
   now: Date,
   canceller: Canceller,
 ): RefundQuote {
-  if (canceller === "ADMIN") {
+  if (canceller !== "GUEST") {
     return {
       shareBps: BASIS_POINTS,
       cents: notRefunded(stay.amountCents, stay.refundedAmountCents),
@@ -176,8 +176,26 @@ export function refundQuote(
 }
 
 /**
- * One rule for the guest and an admin: from check-in on the nights are being spent, and a
- * cancellation would refund nights already used.
+ * Who a viewer cancels a stay as, or `null` for somebody who may not. The stay's guest
+ * cancels as its guest and its host as its host whatever their role, so an account promoted to
+ * admin neither refunds itself past its stay's policy nor takes a stay from its guest without a
+ * reason and a fee: the role is for somebody else's stay, the way a person does not settle a
+ * matter they are a party to. The API cancels by it, and the host's dialog is worded by it.
+ */
+export function cancellerOf(
+  stay: Pick<Booking, "guestId" | "hostId">,
+  viewer: { id: string; role: Role },
+): Canceller | null {
+  if (viewer.id === stay.guestId) return Canceller.GUEST;
+
+  if (viewer.id === stay.hostId) return Canceller.HOST;
+
+  return viewer.role === Role.ADMIN ? Canceller.ADMIN : null;
+}
+
+/**
+ * One rule for the guest, the host and an admin: from check-in on the nights are being
+ * spent, and a cancellation would refund nights already used.
  */
 export function isCancellableOn(
   booking: Pick<Booking, "status" | "from">,

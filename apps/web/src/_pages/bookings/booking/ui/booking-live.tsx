@@ -6,6 +6,8 @@ import { Loader2Icon } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookingStatus,
+  Canceller,
+  cancellerOf,
   refundSchedule,
   type BookingDetail,
   type User,
@@ -20,7 +22,11 @@ import {
   CardTitle,
 } from "@repo/ui/components/card";
 import { cancellationRefundNote, mayCancel } from "#features/cancel-booking";
-import { BookingStatusBadge, CancellationTerms } from "#entities/booking";
+import {
+  BookingStatusBadge,
+  CANCELLER_NAMES,
+  CancellationTerms,
+} from "#entities/booking";
 import {
   dayStart,
   formatMoment,
@@ -223,6 +229,11 @@ export const BookingLive = ({
   }, [confirmed, schedule, from, clock]);
 
   const refundNote = cancellationRefundNote(booking, viewer, clock);
+  const canceller = cancellerOf(booking, viewer);
+  // The guest's refund reads as part of the stay's state; what cancelling would cost the
+  // host is a line of its own, so it is not read as a fee already charged.
+  const hostNote = canceller === Canceller.HOST ? refundNote : null;
+  const guestNote = canceller === Canceller.HOST ? null : refundNote;
 
   return (
     <Card>
@@ -290,7 +301,12 @@ export const BookingLive = ({
 
         {confirmed && (
           <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-            Paid and confirmed.{refundNote === null ? null : ` ${refundNote}`}
+            Paid and confirmed.{guestNote === null ? null : ` ${guestNote}`}
+          </p>
+        )}
+        {confirmed && hostNote !== null && (
+          <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+            {hostNote}
           </p>
         )}
 
@@ -314,6 +330,17 @@ export const BookingLive = ({
               schedule={schedule}
             />
           </div>
+        )}
+
+        {/* Who took the stay away and why — the guest of a host's cancellation is owed it. */}
+        {booking.cancelledBy !== null && booking.cancelledAt !== null && (
+          <p className="rounded-lg bg-muted px-3 py-2 text-sm break-words text-muted-foreground">
+            Cancelled by {CANCELLER_NAMES[booking.cancelledBy]} on{" "}
+            {formatMoment(booking.cancelledAt)} UTC
+            {booking.cancellationReason === null
+              ? "."
+              : `: “${booking.cancellationReason}”`}
+          </p>
         )}
 
         {booking.refundedAmountCents !== null && (
@@ -340,11 +367,17 @@ export const BookingLive = ({
         refunded". The clock moves on for a confirmed stay only, so the deadline of a hold
         is `lapsed`.
       */}
-      {mayCancel(booking, viewer, clock) && !(pending && (lapsed || paid)) && (
-        <CardFooter>
-          <CancelStayButton booking={booking} refundNote={refundNote} />
-        </CardFooter>
-      )}
+      {canceller !== null &&
+        mayCancel(booking, viewer, clock) &&
+        !(pending && (lapsed || paid)) && (
+          <CardFooter>
+            <CancelStayButton
+              booking={booking}
+              canceller={canceller}
+              refundNote={refundNote}
+            />
+          </CardFooter>
+        )}
     </Card>
   );
 };

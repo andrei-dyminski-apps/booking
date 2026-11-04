@@ -1,4 +1,6 @@
 import {
+  Canceller,
+  HOST_CANCELLATIONS_WINDOW_DAYS,
   NotificationType,
   ReviewKind,
   StayParty,
@@ -7,7 +9,7 @@ import {
   type Notification,
 } from "@repo/contracts";
 import { ROUTES, setAsideHref } from "#shared/config";
-import { filtersHref, formatDay, formatMoney } from "#shared/lib";
+import { countOf, filtersHref, formatDay, formatMoney } from "#shared/lib";
 
 /** A notification as a person reads it: what happened, the detail, and where to look. */
 export type NotificationText = {
@@ -43,15 +45,20 @@ export function describeNotification(
       const asGuest = data.recipient === StayParty.GUEST;
 
       return {
-        title: asGuest ? "Your stay was cancelled" : "A stay was cancelled",
+        title: cancelledTitle(asGuest, data.cancelledBy),
         detail: [
           data.listingTitle,
           stayDates(data),
           ...(data.refundCents === null
             ? []
             : [cancellationRefund(data.refundCents, data.currency, asGuest)]),
+          ...(data.reason === null ? [] : [`“${data.reason}”`]),
         ].join(" · "),
-        href: asGuest ? ROUTES.bookings : listingStays(data.listingId),
+        // The guest to the stay's own page, as a confirmation does: the line above is cut to
+        // one row, and the page is where who cancelled and why are said in full.
+        href: asGuest
+          ? ROUTES.booking(data.bookingId)
+          : listingStays(data.listingId),
       };
     }
     case NotificationType.BOOKING_EXPIRED: {
@@ -101,7 +108,25 @@ export function describeNotification(
 
       return {
         title: "You were paid for a stay",
-        detail: `${formatMoney(data.amountCents, data.currency)} · ${data.listingTitle} · ${stayDates(data)}`,
+        detail: [
+          formatMoney(data.amountCents, data.currency),
+          ...(data.withheldCents > 0
+            ? [
+                `${formatMoney(data.withheldCents, data.currency)} kept back for cancellation fees`,
+              ]
+            : []),
+          data.listingTitle,
+          stayDates(data),
+        ].join(" · "),
+        href: ROUTES.payouts,
+      };
+    }
+    case NotificationType.HOST_CANCELLATION_FEE: {
+      const { data } = notification;
+
+      return {
+        title: "Your cancellation costs a fee",
+        detail: `${formatMoney(data.amountCents, data.currency)} · kept back from your next payouts · ${data.listingTitle} · ${stayDates(data)}`,
         href: ROUTES.payouts,
       };
     }
@@ -142,6 +167,24 @@ export function describeNotification(
         title: "A host's payout is stuck",
         detail: data.error,
         href: setAsideHref("stuck-payouts", { bookingId: data.bookingId }),
+      };
+    }
+    case NotificationType.PAYOUT_SHORTFALL: {
+      const { data } = notification;
+
+      return {
+        title: "A host was paid less than their payout reserved",
+        detail: `${formatMoney(data.sentCents, data.currency)} sent of ${formatMoney(data.reservedCents, data.currency)} · the rest has to be sent outside the payout`,
+        href: ROUTES.booking(data.bookingId),
+      };
+    }
+    case NotificationType.HOST_CANCELLATIONS_THRESHOLD: {
+      const { data } = notification;
+
+      return {
+        title: "A host keeps cancelling stays",
+        detail: `${data.hostName} · ${countOf(data.cancellations, "paid stay")} cancelled in the last ${countOf(HOST_CANCELLATIONS_WINDOW_DAYS, "day")}`,
+        href: ROUTES.adminUser(data.hostId),
       };
     }
     case NotificationType.REVIEW_RECEIVED: {
@@ -204,4 +247,26 @@ function cancellationRefund(
   return asGuest
     ? `${amount} coming back to you`
     : `${amount} going back to the guest`;
+}
+
+/** Who took the stay away, as the side told about it reads it. */
+function cancelledTitle(
+  asGuest: boolean,
+  cancelledBy: Canceller | null,
+): string {
+  if (cancelledBy === Canceller.HOST && asGuest) {
+    return "Your host cancelled your stay";
+  }
+
+  if (cancelledBy === Canceller.GUEST && !asGuest) {
+    return "Your guest cancelled their stay";
+  }
+
+  if (cancelledBy === Canceller.ADMIN) {
+    return asGuest
+      ? "Your stay was cancelled by the site"
+      : "A stay was cancelled by the site";
+  }
+
+  return asGuest ? "Your stay was cancelled" : "A stay was cancelled";
 }

@@ -1,4 +1,4 @@
-import { BookingStatus } from "@repo/contracts";
+import { BookingStatus, Canceller } from "@repo/contracts";
 
 /**
  * The four states of a stay, named for a person. Keyed by the contract's own enum, so a
@@ -11,4 +11,14 @@ export const BOOKING_STATUS_LABELS: Record<BookingStatus, string> = {
   [BookingStatus.CONFIRMED]: "Confirmed",
   [BookingStatus.CANCELLED]: "Cancelled",
   [BookingStatus.EXPIRED]: "Lapsed",
+};
+
+/**
+ * Who cancelled a stay, named for the end of a sentence: "by the host" beside the card's
+ * `Cancelled` badge, "Cancelled by the host on …" on the stay's page.
+ */
+export const CANCELLER_NAMES: Record<Canceller, string> = {
+  [Canceller.GUEST]: "the guest",
+  [Canceller.HOST]: "the host",
+  [Canceller.ADMIN]: "the site",
 };

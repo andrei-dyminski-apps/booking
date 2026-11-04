@@ -12,7 +12,15 @@ import {
 } from "./../src/booking/infrastructure/booking-lease";
 import { BookingRepository } from "./../src/booking/infrastructure/booking.repository";
 import { cents } from "./../src/payment/domain/money";
-import { PayoutRepository } from "./../src/payout/infrastructure/payout.repository";
+import {
+  WaivingAccountGoneError,
+  WaivingAccountNotAdminError,
+} from "./../src/payout/domain/payout.errors";
+import { HostFeeRepository } from "./../src/payout/infrastructure/host-fee.repository";
+import {
+  lockHostFees,
+  PayoutRepository,
+} from "./../src/payout/infrastructure/payout.repository";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
@@ -458,11 +466,348 @@ describe("The money columns of a paid stay (e2e)", () => {
   });
 
   it("counts no failure of a payout that was sent", async () => {
-    await payoutRepository.recordPayout(bookingId, "tr_money", cents(43_200));
+    await payoutRepository.reservePayout(bookingId, hostId, () => ({
+      send: cents(43_200),
+      withheld: cents(0),
+    }));
+    await payoutRepository.whilePayingOut(bookingId, (_stay, record) =>
+      record({ transferId: "tr_money", sent: cents(43_200) }),
+    );
 
     await expect(
       payoutRepository.recordPayoutFailure(bookingId, "settle failed", 2),
     ).resolves.toBeNull();
+  });
+
+  describe("the fees of a host's cancellations", () => {
+    const FEE = 10_000;
+
+    let stays = 0;
+
+    /** Another stay of the same host, paid and due — a payout to race the first one. */
+    async function secondStay(): Promise<string> {
+      stays += 1;
+
+      const first = await prismaService.booking.findUniqueOrThrow({
+        where: { id: bookingId },
+      });
+      const other = await prismaService.booking.create({
+        data: {
+          listingId: first.listingId,
+          guestId: first.guestId,
+          from: parseISO(inDays(-20 * stays), { in: tz("UTC") }),
+          to: parseISO(inDays(-20 * stays + 4), { in: tz("UTC") }),
+          status: "CONFIRMED",
+          amountCents: AMOUNT,
+          currency: "usd",
+          cancellationPolicy: "FLEXIBLE",
+          paymentIntentId: `pi_money_${String(stays)}`,
+          chargeId: `ch_money_${String(stays)}`,
+          paidAt: new Date(),
+        },
+      });
+
+      return other.id;
+    }
+
+    /** A fee the host owes for a stay they cancelled, written as the cancellation writes it. */
+    async function owes(amountCents: number): Promise<string> {
+      const cancelled = await secondStay();
+
+      await prismaService.booking.update({
+        where: { id: cancelled },
+        data: {
+          status: "CANCELLED",
+          cancelledBy: "HOST",
+          cancelledAt: new Date(),
+          paidOutAt: new Date(),
+        },
+      });
+
+      return (
+        await prismaService.hostFee.create({
+          data: {
+            bookingId: cancelled,
+            hostId,
+            amountCents,
+            currency: "usd",
+          },
+        })
+      ).id;
+    }
+
+    /** A payout's two steps: the reservation keeps back what the host owes, then the record. */
+    const payOut = async (id: string, share: number) => {
+      const reserved = await payoutRepository.reservePayout(
+        id,
+        hostId,
+        (owedFees) => {
+          const withheld = Math.min(share, owedFees);
+
+          return { send: cents(share - withheld), withheld: cents(withheld) };
+        },
+      );
+
+      if (!reserved) return false;
+
+      return payoutRepository.whilePayingOut(id, (stay, record) =>
+        record({
+          transferId: `tr_${id}`,
+          sent: stay?.payoutReservedCents ?? cents(0),
+        }),
+      );
+    };
+
+    it("keeps one debt back once when two payouts of the host run at once", async () => {
+      const feeId = await owes(FEE);
+      const other = await secondStay();
+
+      await Promise.all([payOut(bookingId, 40_800), payOut(other, 40_800)]);
+
+      const kept = await prismaService.booking.findMany({
+        where: { id: { in: [bookingId, other] } },
+        select: { feeWithheldCents: true, payoutReservedCents: true },
+      });
+
+      expect(kept.map((row) => row.feeWithheldCents).sort()).toEqual([0, FEE]);
+      // Spent with the record.
+      expect(kept.map((row) => row.payoutReservedCents)).toEqual([null, null]);
+      await expect(
+        prismaService.hostFee.findUniqueOrThrow({ where: { id: feeId } }),
+      ).resolves.toMatchObject({ withheldCents: FEE });
+      // Paid out, so out of the sweep: no transfer is the marker no longer.
+      expect(
+        await payoutRepository.findDuePayouts(new Date(), 10, hostId),
+      ).toEqual([]);
+    });
+
+    it("leaves the reservation already written to a retry, whatever the fees say now", async () => {
+      await owes(FEE);
+
+      const split = (owedFees: number) => ({
+        send: cents(40_800 - Math.min(40_800, owedFees)),
+        withheld: cents(Math.min(40_800, owedFees)),
+      });
+      const reserved = () =>
+        prismaService.booking.findUniqueOrThrow({
+          where: { id: bookingId },
+          select: { payoutReservedCents: true, feeWithheldCents: true },
+        });
+
+      await expect(
+        payoutRepository.reservePayout(bookingId, hostId, split),
+      ).resolves.toBe(true);
+
+      const first = await reserved();
+
+      // A fee written between the two runs is left to the next payout.
+      await owes(FEE);
+
+      await expect(
+        payoutRepository.reservePayout(bookingId, hostId, split),
+      ).resolves.toBe(true);
+      await expect(reserved()).resolves.toEqual(first);
+      expect(first).toEqual({
+        payoutReservedCents: 30_800,
+        feeWithheldCents: FEE,
+      });
+    });
+
+    it("hands a released reservation's withheld back to the fee, and only the reservation read", async () => {
+      const feeId = await owes(FEE);
+
+      await payoutRepository.reservePayout(bookingId, hostId, () => ({
+        send: cents(30_800),
+        withheld: cents(FEE),
+      }));
+
+      const released = await payoutRepository.whileSettling(
+        bookingId,
+        async (_stay, writes) => [
+          await writes.release({ send: cents(40_800), withheld: cents(0) }),
+          await writes.release({ send: cents(30_800), withheld: cents(FEE) }),
+        ],
+      );
+
+      expect(released).toEqual([false, true]);
+      await expect(
+        prismaService.hostFee.findUniqueOrThrow({ where: { id: feeId } }),
+      ).resolves.toMatchObject({ withheldCents: 0 });
+      await expect(
+        prismaService.booking.findUniqueOrThrow({ where: { id: bookingId } }),
+      ).resolves.toMatchObject({
+        payoutReservedCents: null,
+        feeWithheldCents: 0,
+      });
+    });
+
+    it("refuses money kept back by a stay neither reserved nor paid out", async () => {
+      await expect(
+        prismaService.booking.update({
+          where: { id: bookingId },
+          data: { feeWithheldCents: FEE },
+        }),
+      ).rejects.toThrow();
+    });
+
+    it("hands what a settlement no longer keeps back to the fee, as debt", async () => {
+      const feeId = await owes(FEE);
+
+      await payOut(bookingId, 40_800);
+      await payoutRepository.whileSettling(bookingId, (_stay, writes) =>
+        writes.settlement(
+          { paidOut: cents(30_800), withheld: cents(FEE) },
+          { paidOut: cents(0), withheld: cents(6_000) },
+        ),
+      );
+
+      await expect(
+        prismaService.hostFee.findUniqueOrThrow({ where: { id: feeId } }),
+      ).resolves.toMatchObject({ withheldCents: 6_000 });
+      await expect(
+        prismaService.booking.findUniqueOrThrow({ where: { id: bookingId } }),
+      ).resolves.toMatchObject({
+        paidOutAmountCents: 0,
+        feeWithheldCents: 6_000,
+      });
+    });
+
+    it("hands a shortfall back to the fee this stay kept it back for, not to the newest", async () => {
+      const older = await owes(FEE);
+
+      await payOut(bookingId, 40_800);
+
+      // A newer fee, which another stay's payout paid 4 000 towards.
+      const newer = await owes(FEE);
+      const other = await secondStay();
+
+      await payOut(other, 4_000);
+      await payoutRepository.whileSettling(bookingId, (_stay, writes) =>
+        writes.settlement(
+          { paidOut: cents(30_800), withheld: cents(FEE) },
+          { paidOut: cents(0), withheld: cents(6_000) },
+        ),
+      );
+
+      const withheldOf = async (id: string) =>
+        (await prismaService.hostFee.findUniqueOrThrow({ where: { id } }))
+          .withheldCents;
+
+      expect(await withheldOf(older)).toBe(6_000);
+      expect(await withheldOf(newer)).toBe(4_000);
+      await expect(
+        prismaService.hostFeeWithholding.findMany({
+          orderBy: { amountCents: "asc" },
+          select: { bookingId: true, hostFeeId: true, amountCents: true },
+        }),
+      ).resolves.toEqual([
+        { bookingId: other, hostFeeId: newer, amountCents: 4_000 },
+        { bookingId, hostFeeId: older, amountCents: 6_000 },
+      ]);
+    });
+
+    it("drops what a released reservation kept back from the fees it went to", async () => {
+      await owes(FEE);
+
+      await payoutRepository.reservePayout(bookingId, hostId, () => ({
+        send: cents(30_800),
+        withheld: cents(FEE),
+      }));
+      await payoutRepository.whileSettling(bookingId, (_stay, writes) =>
+        writes.release({ send: cents(30_800), withheld: cents(FEE) }),
+      );
+
+      await expect(prismaService.hostFeeWithholding.count()).resolves.toBe(0);
+    });
+
+    it("waits for the host's lock before waiving a fee", async () => {
+      const feeId = await owes(FEE);
+      const hostFeeRepository = app.get(HostFeeRepository);
+      const admin = await prismaService.user.create({
+        data: {
+          name: "Money Admin",
+          email: "money-admin@example.com",
+          passwordHash: "hash",
+          role: "ADMIN",
+        },
+      });
+      let waived = false;
+      let waiving: Promise<boolean> = Promise.resolve(false);
+
+      // A reservation holding the lock between reading what is owed and keeping it back.
+      await prismaService.$transaction(async (tx) => {
+        await lockHostFees(tx, hostId);
+        waiving = hostFeeRepository.waive(
+          feeId,
+          "A storm closed the road",
+          admin.id,
+        );
+        void waiving.then(() => {
+          waived = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+        expect(waived).toBe(false);
+      });
+
+      await expect(waiving).resolves.toBe(true);
+    });
+
+    it("refuses a waiver that names no admin", async () => {
+      const feeId = await owes(FEE);
+
+      await expect(
+        prismaService.hostFee.update({
+          where: { id: feeId },
+          data: { waivedAt: new Date(), waiveReason: "Nobody said who" },
+        }),
+      ).rejects.toThrow(/host_fees_waived_by_someone/);
+    });
+
+    it("refuses a waiver from an account gone, or no longer an active admin", async () => {
+      const feeId = await owes(FEE);
+      const hostFeeRepository = app.get(HostFeeRepository);
+      const demoted = await prismaService.user.create({
+        data: {
+          name: "Former Admin",
+          email: "former-admin@example.com",
+          passwordHash: "hash",
+        },
+      });
+      const blocked = await prismaService.user.create({
+        data: {
+          name: "Blocked Admin",
+          email: "blocked-admin@example.com",
+          passwordHash: "hash",
+          role: "ADMIN",
+          blockedAt: new Date(),
+        },
+      });
+
+      await expect(
+        hostFeeRepository.waive(feeId, "Gone", randomUUID()),
+      ).rejects.toThrow(WaivingAccountGoneError);
+      await expect(
+        hostFeeRepository.waive(feeId, "Demoted", demoted.id),
+      ).rejects.toThrow(WaivingAccountNotAdminError);
+      await expect(
+        hostFeeRepository.waive(feeId, "Blocked", blocked.id),
+      ).rejects.toThrow(WaivingAccountNotAdminError);
+      await expect(
+        prismaService.hostFee.findUniqueOrThrow({ where: { id: feeId } }),
+      ).resolves.toMatchObject({ waivedAt: null, waivedById: null });
+    });
+
+    it("refuses a fee withheld past its amount", async () => {
+      const feeId = await owes(FEE);
+
+      await expect(
+        prismaService.hostFee.update({
+          where: { id: feeId },
+          data: { withheldCents: FEE + 1 },
+        }),
+      ).rejects.toThrow();
+    });
   });
 
   it("leaves a refund owed out of the sweep while its cancellation lease runs", async () => {

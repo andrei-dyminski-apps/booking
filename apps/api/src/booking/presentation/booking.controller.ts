@@ -12,6 +12,7 @@ import {
 } from "@nestjs/common";
 import {
   ApiBadGatewayResponse,
+  ApiBody,
   ApiBadRequestResponse,
   ApiConflictResponse,
   ApiCreatedResponse,
@@ -41,6 +42,7 @@ import {
   BookingPageDto,
   BookingPaymentDto,
   BookingQueryDto,
+  CancelBookingDto,
   CreateBookingDto,
   StuckStayPageDto,
   StuckStayQueryDto,
@@ -201,13 +203,17 @@ export class BookingController {
 
   /**
    * Cancelled when it answers; a refund the cancellation owes is sent after it, by a job,
-   * and the booking says so in `refundOwedCents` until it has gone out.
+   * and the booking says so in `refundOwedCents` until it has gone out. The guest, the host
+   * of the listing and an admin may cancel; a host has to give a `reason`, refunds the guest
+   * in full and owes a fee for a paid stay. The body is optional — a client with nothing to
+   * say sends none.
    */
   @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiBody({ type: CancelBookingDto, required: false })
   @ApiNoContentResponse()
-  @ApiForbiddenResponse({
-    description: "The booking exists but was not made by the caller",
+  @ApiBadRequestResponse({
+    description: "The host of the listing cancels without a reason",
     type: ApiErrorDto,
   })
   @ApiConflictResponse({
@@ -222,7 +228,8 @@ export class BookingController {
   remove(
     @Param("id", ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: CancelBookingDto,
   ): Promise<void> {
-    return this.bookingService.remove(id, user);
+    return this.bookingService.remove(id, user, dto);
   }
 }

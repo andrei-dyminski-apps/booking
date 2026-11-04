@@ -155,7 +155,7 @@ of the catalogue and a listing's reviews is behind the global `JwtAuthGuard` and
 | `GET`    | `/bookings/:id`                    | a single booking; the guest, the owner of the listing or an admin                                              |
 | `POST`   | `/bookings`                        | a 15-minute hold, priced by the server; USER only, `403` — own listing, `409` — dates taken                    |
 | `POST`   | `/bookings/:id/payment`            | opens (or answers again) the hold's PaymentIntent secret; its guest only, `409` — not awaiting payment         |
-| `DELETE` | `/bookings/:id`                    | cancel, `204`; the guest or an admin, a paid stay's refund sent right after by a job (`refundOwedCents`)       |
+| `DELETE` | `/bookings/:id`                    | cancel, `204`; the guest, an admin, or the host with a `reason` (refunds in full, owes a fee); refund by a job |
 | `POST`   | `/bookings/:id/stuck/refund/retry` | hand a set-aside refund back and queue it, `204`; ADMIN only, `409` — not set aside                            |
 | `POST`   | `/bookings/:id/stuck/payout/retry` | hand a set-aside payout back and queue it, `204`; ADMIN only, `409` — not set aside                            |
 | `POST`   | `/payments/webhook`                | Stripe's deliveries: signature checked, recorded, `200` at once, handled by a worker; public                   |
@@ -167,6 +167,9 @@ of the catalogue and a listing's reviews is behind the global `JwtAuthGuard` and
 | `POST`   | `/payouts/account/refresh`         | asks Stripe where an unfinished onboarding stands and writes it down; USER only                                |
 | `POST`   | `/payouts/account/session`         | a session for Stripe's embedded components, opening the account the first time; USER only                      |
 | `POST`   | `/payouts/webhook`                 | Stripe's thin events about hosts' accounts, into the same inbox; public                                        |
+| `GET`    | `/host-fees/mine`                  | the fees the caller owes for cancelling paid stays, what is owed, the last year's count; USER only             |
+| `GET`    | `/host-fees`                       | the same for one host, by `hostId`; ADMIN only                                                                 |
+| `POST`   | `/host-fees/:id/waive`             | waive what is still owed of a fee, with a `reason`, `204`; ADMIN only, `409` — waived or withheld in full      |
 | `GET`    | `/waitlist`                        | the date ranges the caller waits for, check-in still ahead, earliest first; USER only                          |
 | `POST`   | `/waitlist`                        | wait for held nights; `409` — the nights are free, `403` — own listing, own stay or a full list                |
 | `GET`    | `/waitlist/demand`                 | ranges waited for on the caller's listings — or every one, with who waits, for an admin; keyset pages          |
@@ -727,6 +730,7 @@ Turborepo caches task results locally in `.turbo`. Cacheable tasks are described
 
 ## Useful links
 
+- [Glossary](docs/glossary.md) — the domain, the money flows and the architecture in plain words, from "hold" and "payout reservation" to "set aside" and "BFF"
 - [Turborepo: tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks) and [filters](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
 - [Next.js App Router](https://nextjs.org/docs/app)
 - [NestJS](https://docs.nestjs.com)

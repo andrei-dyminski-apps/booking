@@ -5,6 +5,7 @@ import {
   bookingPaymentSchema,
   bookingQuerySchema,
   bookingSchema,
+  cancelBookingSchema,
   createBookingSchema,
   refundFailurePageSchema,
   refundFailureQuerySchema,
@@ -21,6 +22,14 @@ import {
  * the controller itself keeps returning the contract type `Booking`.
  */
 export class CreateBookingDto extends createZodDto(createBookingSchema) {}
+
+/**
+ * Optional as a whole: `DELETE` usually travels without a body, and a missing one is the
+ * same as an empty one.
+ */
+export class CancelBookingDto extends createZodDto(
+  cancelBookingSchema.default({}),
+) {}
 
 export class BookingDto extends createZodDto(bookingSchema) {}
 

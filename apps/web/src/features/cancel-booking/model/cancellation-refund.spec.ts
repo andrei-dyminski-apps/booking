@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { BookingStatus, CURRENCY, cents, Role } from "@repo/contracts";
+import {
+  BookingStatus,
+  CURRENCY,
+  cents,
+  DisputeStatus,
+  Role,
+} from "@repo/contracts";
 import { cancellationRefundNote } from "./cancellation-refund";
 
 const GUEST = { id: "guest", role: Role.USER };
@@ -15,6 +21,7 @@ const stay = {
   dispute: null,
   from: "2026-11-10",
   guestId: GUEST.id,
+  hostId: HOST.id,
   // Booked long before, so the grace period is over.
   createdAt: "2026-09-01T12:00:00.000Z",
   cancellationPolicy: "FLEXIBLE" as const,
@@ -140,8 +147,63 @@ describe("cancellationRefundNote", () => {
     expect(cancellationRefundNote(stay, ADMIN, checkIn)).toBeNull();
   });
 
-  it("says nothing to a host, who is not offered the button, or of an unpaid stay", () => {
-    expect(cancellationRefundNote(stay, HOST, INSIDE)).toBeNull();
+  it("tells the host the guest gets everything back and what the fee of the window costs", () => {
+    // Inside the last 48 hours: half the stay; an hour before them, a quarter.
+    expect(cancellationRefundNote(stay, HOST, OUTSIDE)).toBe(
+      "If you cancel now, the guest is refunded in full and you pay a fee of $180.53 (50% of what it refunds), kept back from your next payouts.",
+    );
+    expect(cancellationRefundNote(stay, HOST, INSIDE)).toMatch(
+      /a fee of \$90\.26 \(25% of what it refunds\)/,
+    );
+    expect(
+      cancellationRefundNote(stay, HOST, "2026-10-01T00:00:00.000Z"),
+    ).toMatch(/a fee of \$36\.11 \(10% of what it refunds\)/);
+    expect(
+      cancellationRefundNote(
+        { ...stay, status: BookingStatus.PENDING_PAYMENT },
+        HOST,
+        INSIDE,
+      ),
+    ).toBe(
+      "Nobody has paid for this request yet, so declining it costs you nothing.",
+    );
+  });
+
+  it("charges the host a share of what is left to refund, and nothing when nothing is", () => {
+    expect(
+      cancellationRefundNote(
+        { ...stay, refundedAmountCents: cents(16_105) },
+        HOST,
+        OUTSIDE,
+      ),
+    ).toMatch(/a fee of \$100\.00 \(50% of what it refunds\)/);
+    expect(
+      cancellationRefundNote(
+        { ...stay, refundedAmountCents: stay.amountCents },
+        HOST,
+        OUTSIDE,
+      ),
+    ).toBe(
+      "The stay has been refunded in full already: cancelling refunds nothing more and costs you nothing.",
+    );
+    expect(
+      cancellationRefundNote(
+        { ...stay, dispute: DisputeStatus.LOST },
+        HOST,
+        OUTSIDE,
+      ),
+    ).toBe(
+      "The bank has returned the payment after a dispute: cancelling refunds nothing and costs you nothing.",
+    );
+  });
+
+  it("says nothing to the host of a stay nobody paid for", () => {
+    expect(
+      cancellationRefundNote({ ...stay, paid: false }, HOST, OUTSIDE),
+    ).toBeNull();
+  });
+
+  it("says nothing of an unpaid stay", () => {
     expect(
       cancellationRefundNote({ ...stay, paid: false }, ADMIN, INSIDE),
     ).toBeNull();

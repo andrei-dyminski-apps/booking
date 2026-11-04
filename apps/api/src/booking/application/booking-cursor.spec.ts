@@ -11,6 +11,7 @@ const booking: Booking = {
     pricePerNightCents: cents(12_050),
   },
   guestId: "7e1a3d2f-2b3c-4d5e-9f6a-0b1c2d3e4f50",
+  hostId: "7e1a3d2f-2b3c-4d5e-9f6a-0b1c2d3e4f51",
   from: "2026-09-01",
   to: "2026-09-05",
   status: BookingStatus.PENDING_PAYMENT,
@@ -23,6 +24,9 @@ const booking: Booking = {
   dispute: null,
   expiresAt: "2026-08-20T12:15:00.000Z",
   createdAt: "2026-08-20T12:00:00.000Z",
+  cancelledBy: null,
+  cancelledAt: null,
+  cancellationReason: null,
   reviewed: { byGuest: false, byOwner: false },
 };
 

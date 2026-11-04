@@ -498,14 +498,14 @@ describe("BookingController (e2e)", () => {
     await otherGuest.get(`/bookings/${id}`).expect(404);
   });
 
-  it("is cancelled by its guest or an admin, and not by the owner of the listing", async () => {
+  it("is cancelled by its guest, an admin, or the owner of the listing with a reason", async () => {
     const first = await guest.post("/bookings").send(input).expect(201);
     const id = (first.body as { id: string }).id;
 
-    // Reading the bookings against your listing is not the same right as cancelling one —
-    // and the owner, who may read this one, is told so. A stranger gets the 404 they get
+    // The owner may cancel, but owes the guest a reason. A stranger gets the 404 they get
     // for reading it.
-    await owner.delete(`/bookings/${id}`).expect(403);
+    await owner.delete(`/bookings/${id}`).expect(400);
+    await owner.delete(`/bookings/${id}`).send({ reason: "   " }).expect(400);
     await otherGuest.delete(`/bookings/${id}`).expect(404);
     await guest.delete(`/bookings/${id}`).expect(204);
 
@@ -521,5 +521,23 @@ describe("BookingController (e2e)", () => {
     await admin
       .delete(`/bookings/${(second.body as { id: string }).id}`)
       .expect(204);
+
+    const third = await guest.post("/bookings").send(input).expect(201);
+    const thirdId = (third.body as { id: string }).id;
+
+    await owner
+      .delete(`/bookings/${thirdId}`)
+      .send({ reason: "The heating has broken down" })
+      .expect(204);
+
+    const declined = bookingSchema.parse(
+      (await guest.get(`/bookings/${thirdId}`).expect(200)).body,
+    );
+
+    expect(declined).toMatchObject({
+      status: "CANCELLED",
+      cancelledBy: "HOST",
+      cancellationReason: "The heating has broken down",
+    });
   });
 });

@@ -350,7 +350,15 @@ export class BookingPaymentHandler
     await notifyBothSidesOfCancellation(
       this.notificationService,
       // The money went back before the cancellation, and its own notice says so.
-      { ...stay.hold, refund: { refundCents: null, currency: stay.currency } },
+      {
+        ...stay.hold,
+        notice: {
+          refundCents: null,
+          currency: stay.currency,
+          cancelledBy: null,
+          reason: null,
+        },
+      },
     );
     await this.waitlistService.announceFreed([stay.hold.stay]);
   }

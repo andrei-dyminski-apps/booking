@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  cancellerOf,
   checkInInstant,
   isCancellableOn,
   notRefunded,
@@ -244,19 +245,24 @@ describe("refundQuote amounts", () => {
     ).toBe(0);
   });
 
-  it("refunds an admin's cancellation of whatever is left in full", () => {
-    const stay = {
-      ...stayUnder("NON_REFUNDABLE"),
-      refundedAmountCents: cents(10_000),
-    };
+  it.each(["ADMIN", "HOST"] as const)(
+    "refunds a cancellation by %s of whatever is left in full, whatever the policy",
+    (canceller) => {
+      const stay = {
+        ...stayUnder("NON_REFUNDABLE"),
+        refundedAmountCents: cents(10_000),
+      };
 
-    expect(refundQuote(stay, at("2030-10-13T12:00:00.000Z"), "ADMIN")).toEqual({
-      shareBps: 10_000,
-      cents: 26_105,
-      next: null,
-      closed: null,
-    });
-  });
+      expect(
+        refundQuote(stay, at("2030-10-13T12:00:00.000Z"), canceller),
+      ).toEqual({
+        shareBps: 10_000,
+        cents: 26_105,
+        next: null,
+        closed: null,
+      });
+    },
+  );
 });
 
 describe("isCancellableOn", () => {
@@ -293,5 +299,21 @@ describe("notRefunded", () => {
   it("is nothing for a stay refunded in full or past it, never a negative amount", () => {
     expect(notRefunded(cents(36_105), cents(36_105))).toBe(0);
     expect(notRefunded(cents(36_105), cents(40_000))).toBe(0);
+  });
+});
+
+describe("cancellerOf", () => {
+  const stay = { guestId: "guest", hostId: "host" };
+
+  it("names the guest, the host and an admin on somebody else's stay", () => {
+    expect(cancellerOf(stay, { id: "guest", role: "USER" })).toBe("GUEST");
+    expect(cancellerOf(stay, { id: "host", role: "USER" })).toBe("HOST");
+    expect(cancellerOf(stay, { id: "admin", role: "ADMIN" })).toBe("ADMIN");
+    expect(cancellerOf(stay, { id: "stranger", role: "USER" })).toBeNull();
+  });
+
+  it("keeps an account promoted to admin to its side of its own stay", () => {
+    expect(cancellerOf(stay, { id: "guest", role: "ADMIN" })).toBe("GUEST");
+    expect(cancellerOf(stay, { id: "host", role: "ADMIN" })).toBe("HOST");
   });
 });

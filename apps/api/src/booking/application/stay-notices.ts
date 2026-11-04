@@ -1,5 +1,6 @@
 import {
   NotificationType,
+  type Canceller,
   StayParty,
   type NotificationContent,
   type StayNotice,
@@ -14,10 +15,15 @@ type BothSidesNotice = Exclude<
 
 type Parties = { stay: StayNotice; guestId: string; listingOwnerId: string };
 
-/** What a cancellation gives back, stated to both sides beside the stay. */
-export type CancellationRefund = {
+/**
+ * What a cancellation gives back, who made it and why, stated to both sides beside the stay.
+ * The provider's news cancels with no canceller and no reason.
+ */
+export type CancellationNotice = {
   refundCents: Cents | null;
   currency: Currency;
+  cancelledBy: Canceller | null;
+  reason: string | null;
 };
 
 /** Both sides of a stay, leaving out `except` — whoever made it happen. */
@@ -33,15 +39,15 @@ export async function notifyBothSides(
   }));
 }
 
-/** The same, for a cancellation: its notice carries what it gives back. */
+/** The same, for a cancellation: its notice carries what it gives back and who made it. */
 export async function notifyBothSidesOfCancellation(
   notificationService: Pick<NotificationService, "notify">,
-  { refund, ...parties }: Parties & { refund: CancellationRefund },
+  { notice, ...parties }: Parties & { notice: CancellationNotice },
   except?: string,
 ): Promise<void> {
   await toBothSides(notificationService, parties, except, (recipient) => ({
     type: NotificationType.BOOKING_CANCELLED,
-    data: { ...parties.stay, recipient, ...refund },
+    data: { ...parties.stay, recipient, ...notice },
   }));
 }
 

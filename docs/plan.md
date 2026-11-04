@@ -425,7 +425,7 @@ grace: boolean }>`, a tier being `{ hoursBefore, shareBps }`. `checkInInstant(bo
       `cancellation-refund.spec.ts`; e2e — a cancellation in a 50% window owes exactly half,
       the policy round-trips through `POST`/`PATCH`/`GET /listings`.
 
-### 7.2 — Host cancellations, and the fee they cost
+### 7.2 — Host cancellations, and the fee they cost ✅
 
 A host who cancels a stay always refunds the guest in full, and pays for it: the platform
 loses Stripe's processing fee on every full refund and the guest loses their plans.
@@ -436,41 +436,46 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
 | 48 hours – 30 days    | 25%                    |
 | < 48 hours            | 50%                    |
 
-- [ ] `@repo/contracts`: `Canceller` gains `HOST`; `hostCancellationFee(booking, now)` by the
+- [x] `@repo/contracts`: `Canceller` gains `HOST`; `hostCancellationFee(booking, now)` by the
       table, through `checkInInstant`, and nothing for a hold — declining an unpaid request
       is free. Both sides read it: the API charges by it, the host's dialog states it before
       the button. `cancelledBy` on `bookingSchema`; a `reason` the host has to give
       (`cancelBookingSchema`), optional for the guest.
-- [ ] Prisma: `bookings.cancelled_by`, `cancelled_at`, `cancellation_reason`; a `host_fees`
+- [x] Prisma: `bookings.cancelled_by`, `cancelled_at`, `cancellation_reason`; a `host_fees`
       ledger — one row per cancelled stay (`booking_id` unique), `host_id`, `amount_cents`,
       `withheld_cents`, `waived_at` with `waive_reason`, the usual `CHECK`s
       (`withheld ≤ amount`, waived with a reason or neither).
-- [ ] `BookingService.mayCancel` admits the listing's owner, before check-in, for a hold and
-      a confirmed stay; the cancellation writes the fee row in its own transaction.
+- [x] `BookingService.mayCancel` admits the listing's owner, before check-in, for a hold and
+      a confirmed stay; the cancellation writes the fee row in its own transaction. The
+      threshold counts the fees, so a declined hold is not a cancellation against the host.
       "Reading and writing are separate rules" in `apps/api/CLAUDE.md` changes with it.
-- [ ] **The fee is withheld from the host's next payouts**, since nothing of the cancelled
+- [x] **The fee is withheld from the host's next payouts**, since nothing of the cancelled
       stay was ever paid to them. `PayoutService.payOut` transfers `owedToHost(stay)` less
       what the host still owes, oldest fee first, and records it as
-      `bookings.fee_withheld_cents` and in `host_fees.withheld_cents` in the transaction that
-      writes `transfer_id` — under a per-host advisory lock, so two stays paid out at once
-      cannot withhold the same debt. `settle` counts `paid_out + fee_withheld` as what the
+      `bookings.fee_withheld_cents` and in `host_fees.withheld_cents` when it reserves the
+      payout (`payout_reserved_cents`) — a short transaction under a per-host advisory lock,
+      so two stays paid out at once cannot withhold the same debt. The transfer goes out
+      after it under the settlement's lease rather than inside a transaction, so no pool
+      connection waits on Stripe, and a retry sends the reserved amount; `settle` records a
+      transfer a dead run never wrote, or releases a reservation a refund left uncovered. `settle` counts `paid_out + fee_withheld` as what the
       host holds: when a later refund leaves the stay owing less, it reverses the transfer
       first and hands any shortfall back to the fee as debt rather than inventing a negative
-      transfer. Before building that, check whether Stripe's account debits reach an
-      Accounts v2 recipient — if they do, debiting the fee at cancellation replaces the
-      withholding and its edge cases.
-- [ ] A fee nobody can withhold — a host who never earns again — stays on the admin's
+      transfer. Checked before building it: Stripe's account debits need the host's legally
+      binding consent, the same region and money on the connected balance — which a recipient
+      account has usually paid out already — so the withholding stays. A payout the fees take
+      whole sends no transfer, so "paid out" became `paid_out_at` rather than `transfer_id`.
+- [x] A fee nobody can withhold — a host who never earns again — stays on the admin's
       screen; the platform does not charge a host's card.
-- [ ] `POST /host-fees/:id/waive` (`@Roles(ADMIN)`, a reason): the extenuating circumstance
+- [x] `POST /host-fees/:id/waive` (`@Roles(ADMIN)`, a reason): the extenuating circumstance
       a policy cannot foresee. What was already withheld stays withheld.
-- [ ] Visibility: the host's payouts page lists the fees still owed; the admin's account page
+- [x] Visibility: the host's payouts page lists the fees still owed; the admin's account page
       shows the host's cancellations in the last 12 months and the fees; a third
       cancellation in 12 months tells every admin. Notices: `BOOKING_CANCELLED` with
       `cancelledBy: HOST` and the reason to the guest, `HOST_CANCELLATION_FEE` to the host,
       `HOST_CANCELLATIONS_THRESHOLD` to the admins.
-- [ ] Web: "Cancel" on the Hosting tab and on the stay's page for its host, with the fee and
+- [x] Web: "Cancel" on the Hosting tab and on the stay's page for its host, with the fee and
       the reason in the dialog; `may-cancel.ts` and its spec.
-- [ ] Specs: the fee's tiers; e2e — the guest is refunded in full under any policy, the fee is
+- [x] Specs: the fee's tiers; e2e — the guest is refunded in full under any policy, the fee is
       withheld from the next payout, two payouts at once withhold it once, a refund after the
       withholding returns the shortfall to the debt; the old "a host cannot cancel" case is
       rewritten.

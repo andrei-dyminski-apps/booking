@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { stayPartySchema } from "./booking.js";
+import { cancellerSchema, stayPartySchema } from "./booking.js";
 import { reviewKindSchema, reviewSchema } from "./review.js";
-import { CURRENCY, centsSchema, currencySchema } from "./money.js";
+import { CURRENCY, NO_CENTS, centsSchema, currencySchema } from "./money.js";
 import { PAGING } from "./query.js";
 
 /**
@@ -12,7 +12,8 @@ import { PAGING } from "./query.js";
  *
  * - `BOOKING_REQUESTED` — a guest took a hold on one of the recipient's listings.
  * - `BOOKING_CANCELLED` — a stay the recipient is one side of was cancelled by the other
- *   side or by an admin; `recipient` says which side they are.
+ *   side or by an admin; `recipient` says which side they are, `cancelledBy` who did it and
+ *   `reason` why, when they said.
  * - `BOOKING_EXPIRED` — a hold the recipient is one side of lapsed unpaid and let its
  *   nights go; nobody did it, so both sides hear, and `recipient` says which one this is.
  * - `BOOKING_CONFIRMED` — a hold the recipient is one side of was paid and is now a stay;
@@ -36,6 +37,14 @@ import { PAGING } from "./query.js";
  *   failing and was set aside; the guest's money waits for a person to send it.
  * - `PAYOUT_FAILED` — told to every admin: the host's transfer for a stay kept failing and
  *   was set aside; the host's share waits for a person.
+ * - `PAYOUT_SHORTFALL` — told to every admin: a host's payout found a transfer Stripe already
+ *   held for less than the payout had reserved, recorded it as it was, and nothing sends the
+ *   difference — a person has to.
+ * - `HOST_CANCELLATION_FEE` — the recipient cancelled a paid stay at their listing as its
+ *   host, and owes the fee it costs; it is withheld from their next payouts.
+ * - `HOST_CANCELLATIONS_THRESHOLD` — told to every admin: a host has cancelled
+ *   `HOST_CANCELLATIONS_THRESHOLD` paid stays or more within a year, not counting the ones
+ *   whose fee an admin waived.
  * - `REVIEW_RECEIVED` — the other side of a finished stay reviewed the recipient: a guest
  *   reviewed their listing (`kind: LISTING`) or a host reviewed them (`kind: GUEST`).
  * - `WAITLIST_AVAILABLE` — nights the recipient was waiting for came free. Nothing is held
@@ -58,6 +67,9 @@ export const notificationTypeSchema = z.enum([
   "PAYMENT_EVENT_FAILED",
   "CANCELLATION_REFUND_FAILED",
   "PAYOUT_FAILED",
+  "PAYOUT_SHORTFALL",
+  "HOST_CANCELLATION_FEE",
+  "HOST_CANCELLATIONS_THRESHOLD",
   "REVIEW_RECEIVED",
   "WAITLIST_AVAILABLE",
 ]);
@@ -103,7 +115,8 @@ const noticeCurrencySchema = currencySchema.default(CURRENCY);
  * `refundCents` is what the cancellation gives back to the guest — `0` for a paid stay
  * cancelled after its refund windows closed — or `null` when there is nothing to say: a
  * hold that was never paid, a stay whose money had gone back before it was cancelled, a
- * notice written before the amount was recorded.
+ * notice written before the amount was recorded. `cancelledBy` and `reason` are `null` on the
+ * notices written before either was recorded.
  */
 const bookingCancelledSchema = z.object({
   type: z.literal(NotificationType.BOOKING_CANCELLED),
@@ -111,6 +124,8 @@ const bookingCancelledSchema = z.object({
     recipient: stayPartySchema,
     refundCents: centsSchema.nullable().default(null),
     currency: noticeCurrencySchema,
+    cancelledBy: cancellerSchema.nullable().default(null),
+    reason: z.string().nullable().default(null),
   }),
 });
 
@@ -129,11 +144,16 @@ const paymentDisputedSchema = z.object({
   data: stayNoticeSchema,
 });
 
-/** `amountCents` is the host's share as it was transferred, the platform's fee already off. */
+/**
+ * `amountCents` is the host's share as it was transferred, the platform's fee already off;
+ * `withheldCents` what was kept back of it towards the fees of the host's cancellations
+ * (`0` on the notices written before anything could be).
+ */
 const payoutSentSchema = z.object({
   type: z.literal(NotificationType.PAYOUT_SENT),
   data: stayNoticeSchema.extend({
     amountCents: centsSchema,
+    withheldCents: centsSchema.default(NO_CENTS),
     currency: noticeCurrencySchema,
   }),
 });
@@ -180,6 +200,43 @@ const payoutFailedSchema = z.object({
   data: stuckMoneySchema,
 });
 
+/**
+ * The stay whose payout found a transfer for less than it reserved: what was reserved, what
+ * the transfer holds, and the currency of both. The difference is what the host is still owed.
+ */
+const payoutShortfallSchema = z.object({
+  type: z.literal(NotificationType.PAYOUT_SHORTFALL),
+  data: z.object({
+    bookingId: z.uuid(),
+    reservedCents: centsSchema,
+    sentCents: centsSchema,
+    currency: noticeCurrencySchema,
+  }),
+});
+
+/** The stay the host cancelled, and the fee it costs them. */
+const hostCancellationFeeSchema = z.object({
+  type: z.literal(NotificationType.HOST_CANCELLATION_FEE),
+  data: stayNoticeSchema.extend({
+    feeId: z.uuid(),
+    amountCents: centsSchema,
+    currency: noticeCurrencySchema,
+  }),
+});
+
+/**
+ * The host, and how many paid stays they cancelled within the window — the cancellations
+ * whose fee an admin waived not counted.
+ */
+const hostCancellationsThresholdSchema = z.object({
+  type: z.literal(NotificationType.HOST_CANCELLATIONS_THRESHOLD),
+  data: z.object({
+    hostId: z.uuid(),
+    hostName: z.string(),
+    cancellations: z.int().min(1),
+  }),
+});
+
 const reviewReceivedSchema = z.object({
   type: z.literal(NotificationType.REVIEW_RECEIVED),
   data: z.object({
@@ -220,6 +277,9 @@ export const notificationContentSchema = z.discriminatedUnion("type", [
   paymentEventFailedSchema,
   cancellationRefundFailedSchema,
   payoutFailedSchema,
+  payoutShortfallSchema,
+  hostCancellationFeeSchema,
+  hostCancellationsThresholdSchema,
   reviewReceivedSchema,
   waitlistAvailableSchema,
 ]);
@@ -246,6 +306,9 @@ export const notificationSchema = z.discriminatedUnion("type", [
   paymentEventFailedSchema.extend(stored),
   cancellationRefundFailedSchema.extend(stored),
   payoutFailedSchema.extend(stored),
+  payoutShortfallSchema.extend(stored),
+  hostCancellationFeeSchema.extend(stored),
+  hostCancellationsThresholdSchema.extend(stored),
   reviewReceivedSchema.extend(stored),
   waitlistAvailableSchema.extend(stored),
 ]);

@@ -7,3 +7,26 @@ export class SettlementInProgressError extends RetryLaterError {
     this.name = "SettlementInProgressError";
   }
 }
+
+/**
+ * What `HostFeeRepository.waive` throws when the account behind the admin's token is gone:
+ * the token outlives the row (a reseed, a deletion), and the waiver names who made it.
+ */
+export class WaivingAccountGoneError extends Error {
+  constructor(adminId: string) {
+    super(`User ${adminId} no longer exists`);
+    this.name = "WaivingAccountGoneError";
+  }
+}
+
+/**
+ * What `HostFeeRepository.waive` throws when the account behind the token is no longer an
+ * active admin — demoted or blocked since the token was issued — read under a lock the
+ * demotion takes too, like `CallerNotAdminError` of `UserRepository.update`.
+ */
+export class WaivingAccountNotAdminError extends Error {
+  constructor(adminId: string) {
+    super(`User ${adminId} is no longer an active admin`);
+    this.name = "WaivingAccountNotAdminError";
+  }
+}

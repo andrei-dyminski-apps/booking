@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   BookingStatus,
+  cancellerOf,
   isReviewable,
   Role,
   StayParty,
@@ -18,7 +19,11 @@ import {
   CardTitle,
 } from "@repo/ui/components/card";
 import { cancellationRefundNote, mayCancel } from "#features/cancel-booking";
-import { awaitsPaymentFrom, BookingStatusBadge } from "#entities/booking";
+import {
+  awaitsPaymentFrom,
+  BookingStatusBadge,
+  CANCELLER_NAMES,
+} from "#entities/booking";
 import { ROUTES } from "#shared/config";
 import { formatMoment, formatMoney } from "#shared/lib";
 import { ButtonLink, DateRange, NightCount } from "#shared/ui";
@@ -61,6 +66,7 @@ export const BookingCard = ({
   // A hold past its deadline waits only for the sweep: "Pay" would open a form the API
   // refuses, so it reads "Details" like any other stay.
   const awaitsPayment = awaitsPaymentFrom(booking, viewer, now);
+  const canceller = cancellerOf(booking, viewer);
 
   return (
     <Card>
@@ -98,6 +104,12 @@ export const BookingCard = ({
         </CardDescription>
         <CardAction className="flex items-center gap-2">
           <BookingStatusBadge status={booking.status} />
+          {/* Read with the badge: "Cancelled by the host". */}
+          {booking.cancelledBy !== null && (
+            <span className="text-sm text-muted-foreground">
+              by {CANCELLER_NAMES[booking.cancelledBy]}
+            </span>
+          )}
           {review === "written" && <Badge variant="outline">Reviewed</Badge>}
         </CardAction>
       </CardHeader>
@@ -142,10 +154,12 @@ export const BookingCard = ({
             about="guest"
           />
         )}
-        {mayCancel(booking, viewer, now) && (
+        {canceller !== null && mayCancel(booking, viewer, now) && (
           <CancelBookingButton
             bookingId={booking.id}
             listingId={booking.listingId}
+            status={booking.status}
+            canceller={canceller}
             refundNote={cancellationRefundNote(booking, viewer, now)}
           />
         )}

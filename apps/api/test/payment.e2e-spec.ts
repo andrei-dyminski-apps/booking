@@ -6,9 +6,11 @@ import { subDays } from "date-fns";
 import {
   BASIS_POINTS,
   Role,
+  hostFeeOverviewSchema,
   shareOf,
   bookingPaymentSchema,
   bookingSchema,
+  userSchema,
   type Booking,
   type CreateListingInput,
 } from "@repo/contracts";
@@ -494,6 +496,81 @@ describe("Payments (e2e)", () => {
     await admin.delete(`/bookings/${taken.id}`).expect(204);
     await refundSent(taken.id);
     expect((await read(taken.id)).refundedAmountCents).toBe(taken.amountCents);
+  });
+
+  it("refunds the guest in full when the host cancels, whatever the policy, and charges the host's fee", async () => {
+    await owner
+      .patch(`/listings/${listingId}`)
+      .send({ cancellationPolicy: "NON_REFUNDABLE" })
+      .expect(200);
+
+    // The day before check-in: nothing for a guest under any policy, half the stay for a host.
+    const taken = await paid(1, 3);
+
+    await owner
+      .delete(`/bookings/${taken.id}`)
+      .send({ reason: "A pipe burst in the bathroom" })
+      .expect(204);
+    await refundSent(taken.id);
+
+    expect((await read(taken.id)).refundedAmountCents).toBe(taken.amountCents);
+
+    const mine = hostFeeOverviewSchema.parse(
+      (await owner.get("/host-fees/mine").expect(200)).body,
+    );
+    const fee = shareOf(taken.amountCents, BASIS_POINTS / 2);
+
+    expect(mine).toMatchObject({
+      cancellationsInWindow: 1,
+      owedCents: fee,
+      fees: [
+        {
+          bookingId: taken.id,
+          amountCents: fee,
+          withheldCents: 0,
+          cancellationReason: "A pipe burst in the bathroom",
+        },
+      ],
+    });
+
+    // The host's own fee is the admin's to waive, not theirs.
+    const feeId = mine.fees[0]?.id ?? "";
+
+    await owner
+      .post(`/host-fees/${feeId}/waive`)
+      .send({ reason: "Mine" })
+      .expect(403);
+    await admin
+      .post(`/host-fees/${feeId}/waive`)
+      .send({ reason: "A flood the policy could not foresee" })
+      .expect(204);
+    await admin
+      .post(`/host-fees/${feeId}/waive`)
+      .send({ reason: "Again" })
+      .expect(409);
+
+    const hostId = (await read(taken.id)).hostId;
+    const seen = hostFeeOverviewSchema.parse(
+      (await admin.get(`/host-fees?hostId=${hostId}`).expect(200)).body,
+    );
+
+    const me = userSchema.parse((await admin.get("/auth/me").expect(200)).body);
+
+    expect(seen.owedCents).toBe(0);
+    expect(seen.fees[0]).toMatchObject({
+      waiveReason: "A flood the policy could not foresee",
+      waivedBy: { id: me.id, name: me.name },
+    });
+
+    // The host is told why, not which admin.
+    const theirs = hostFeeOverviewSchema.parse(
+      (await owner.get("/host-fees/mine").expect(200)).body,
+    );
+
+    expect(theirs.fees[0]).toMatchObject({
+      waiveReason: "A flood the policy could not foresee",
+      waivedBy: null,
+    });
   });
 
   it("records the charge a payment produced, for the host's transfer", async () => {

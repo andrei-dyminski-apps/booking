@@ -12,18 +12,27 @@ const hold = {
   expiresAt: "2026-11-01T12:15:00.000Z",
   dispute: null,
   guestId: GUEST.id,
+  hostId: HOST.id,
 };
+
+const STRANGER = { id: "stranger", role: Role.USER };
 
 const stay = { ...hold, status: BookingStatus.CONFIRMED };
 
 describe("mayCancel", () => {
-  it("offers a hold to its guest and an admin until its deadline, and not after it", () => {
+  it("offers a hold to its guest, its host and an admin until its deadline, and not after it", () => {
     const before = "2026-11-01T12:14:59.000Z";
 
     expect(mayCancel(hold, GUEST, before)).toBe(true);
     expect(mayCancel(hold, ADMIN, before)).toBe(true);
-    expect(mayCancel(hold, HOST, before)).toBe(false);
+    expect(mayCancel(hold, HOST, before)).toBe(true);
+    expect(mayCancel(hold, STRANGER, before)).toBe(false);
     expect(mayCancel(hold, GUEST, hold.expiresAt)).toBe(false);
+  });
+
+  it("offers the host a confirmed stay until its check-in day, as everybody else", () => {
+    expect(mayCancel(stay, HOST, "2026-11-09T23:59:59.000Z")).toBe(true);
+    expect(mayCancel(stay, HOST, "2026-11-10T00:00:00.000Z")).toBe(false);
   });
 
   it("offers a confirmed stay until its check-in day, the deadline of its hold long past", () => {

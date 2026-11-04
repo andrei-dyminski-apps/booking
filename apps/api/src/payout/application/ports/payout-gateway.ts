@@ -14,8 +14,14 @@ export abstract class PayoutGateway {
     caller: Caller,
   ): Promise<boolean>;
 
-  /** Once per booking: answers the transfer that exists, possibly an earlier run's with another amount. */
+  /**
+   * Once per booking: answers the transfer that exists, possibly an earlier run's with another
+   * amount. The idempotency key names the reservation, so a retry of it is the same request.
+   */
   abstract transfer(payout: Payout): Promise<SentTransfer>;
+
+  /** The booking's transfer if one went out, without sending one — a lost write's answer. */
+  abstract findTransfer(bookingId: string): Promise<SentTransfer | null>;
 
   /** What was sent less every reversal, one whose write was lost included. */
   abstract heldOnTransfer(transferId: string): Promise<Cents>;
@@ -49,6 +55,12 @@ export type Payout = {
   /** The transfer waits for this charge's funds rather than drawing on the platform's. */
   chargeId: string;
   amount: Cents;
+  /**
+   * Which reservation of the stay's payout this sends (`payout_reservations`): part of the
+   * idempotency key, because a reservation made afresh may send another amount, and Stripe
+   * refuses a key it has seen with other parameters — or replays its saved failure — for 24 hours.
+   */
+  reservation: number;
   /** The stay's, so the host is paid in what the guest was charged in. */
   currency: Currency;
   description: string;

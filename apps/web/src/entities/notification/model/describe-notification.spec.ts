@@ -53,7 +53,12 @@ describe("describeNotification", () => {
     const paidOut = describeNotification({
       ...stored,
       type: NotificationType.PAYOUT_SENT,
-      data: { ...stay, amountCents: cents(32_495), currency: CURRENCY },
+      data: {
+        ...stay,
+        amountCents: cents(32_495),
+        withheldCents: cents(0),
+        currency: CURRENCY,
+      },
     });
 
     expect(refunded.detail).toMatch(/^.*361\.05 · Cabin by the lake$/);
@@ -70,7 +75,14 @@ describe("describeNotification", () => {
       describeNotification({
         ...stored,
         type: NotificationType.BOOKING_CANCELLED,
-        data: { ...stay, recipient, refundCents, currency: CURRENCY },
+        data: {
+          ...stay,
+          recipient,
+          refundCents,
+          currency: CURRENCY,
+          cancelledBy: null,
+          reason: null,
+        },
       }).detail;
 
     expect(cancelled(StayParty.GUEST, cents(18_053))).toMatch(
@@ -83,6 +95,78 @@ describe("describeNotification", () => {
     expect(cancelled(StayParty.HOST, null)).toMatch(
       /Cabin by the lake · [^·]+$/,
     );
+  });
+
+  it("tells each side the other cancelled, the guest why, and the host what it costs", () => {
+    const byHost = describeNotification({
+      ...stored,
+      type: NotificationType.BOOKING_CANCELLED,
+      data: {
+        ...stay,
+        recipient: StayParty.GUEST,
+        refundCents: cents(36_105),
+        currency: CURRENCY,
+        cancelledBy: "HOST",
+        reason: "A pipe burst",
+      },
+    });
+    const fee = describeNotification({
+      ...stored,
+      type: NotificationType.HOST_CANCELLATION_FEE,
+      data: {
+        ...stay,
+        feeId: BOOKING_ID,
+        amountCents: cents(3_611),
+        currency: CURRENCY,
+      },
+    });
+    const kept = describeNotification({
+      ...stored,
+      type: NotificationType.PAYOUT_SENT,
+      data: {
+        ...stay,
+        amountCents: cents(20_000),
+        withheldCents: cents(3_611),
+        currency: CURRENCY,
+      },
+    });
+
+    const byGuest = describeNotification({
+      ...stored,
+      type: NotificationType.BOOKING_CANCELLED,
+      data: {
+        ...stay,
+        recipient: StayParty.HOST,
+        refundCents: null,
+        currency: CURRENCY,
+        cancelledBy: "GUEST",
+        reason: null,
+      },
+    });
+
+    expect(byHost.title).toBe("Your host cancelled your stay");
+    expect(byGuest.title).toBe("Your guest cancelled their stay");
+    expect(byHost.detail).toMatch(/ · “A pipe burst”$/);
+    expect(byHost.href).toBe(`/bookings/${BOOKING_ID}`);
+    expect(fee.detail).toMatch(/^\$36\.11 · kept back from your next payouts/);
+    expect(fee.href).toBe("/dashboard/payouts");
+    expect(kept.detail).toContain("$36.11 kept back for cancellation fees");
+  });
+
+  it("leads the admins to a host who keeps cancelling", () => {
+    const host = "6d0f2c1e-1a2b-4c3d-8e5f-9a0b1c2d3e4f";
+
+    expect(
+      describeNotification({
+        ...stored,
+        type: NotificationType.HOST_CANCELLATIONS_THRESHOLD,
+        data: { hostId: host, hostName: "Harbour Host", cancellations: 3 },
+      }),
+    ).toEqual({
+      title: "A host keeps cancelling stays",
+      detail: "Harbour Host · 3 paid stays cancelled in the last 365 days",
+      href: `/admin/users/${host}`,
+    });
   });
 
   it("leads a bounced refund to its own row on the payments screen, whether or not a stay names it", () => {
@@ -107,6 +191,25 @@ describe("describeNotification", () => {
     expect(failed(null).href).toBe(
       "/admin/payments?list=bounced&refundId=re_1",
     );
+  });
+
+  it("tells the admins a host's payout fell short, and leads them to the stay", () => {
+    const shortfall = describeNotification({
+      ...stored,
+      type: NotificationType.PAYOUT_SHORTFALL,
+      data: {
+        bookingId: BOOKING_ID,
+        reservedCents: cents(30_000),
+        sentCents: cents(20_000),
+        currency: CURRENCY,
+      },
+    });
+
+    expect(shortfall.title).toBe(
+      "A host was paid less than their payout reserved",
+    );
+    expect(shortfall.detail).toMatch(/200\.00.* sent of .*300\.00/);
+    expect(shortfall.href).toBe(`/bookings/${BOOKING_ID}`);
   });
 
   it("leads stuck money and a set-aside event to their own rows on the payments screen", () => {

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import { CalendarCheckIcon, WarehouseIcon } from "lucide-react";
 import { Role, type ManagedUserDetail } from "@repo/contracts";
 import { Badge } from "@repo/ui/components/badge";
@@ -16,18 +16,21 @@ import {
   UserBlockedSince,
   UserJoined,
 } from "#entities/user";
-import { requireRole } from "#shared/api";
+import { HostFees } from "#entities/host-fee";
+import { hostFeesApi, requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
 import { countOf, filtersHref, requireId } from "#shared/lib";
 import { BackLink, ButtonLink } from "#shared/ui";
 import { BlockButton } from "./block-button";
 import { RoleForm } from "./role-form";
+import { WaiveFeeButton } from "./waive-fee-button";
 
 /**
  * One account: what it is, the two things an admin may change about it, and the way to
  * what it has done on the site. The stays and the listings are not listed here — each is
  * a link to the list that already pages and filters them, narrowed to this account by the
- * filter that list already takes (`guestId` on the stays, `ownerId` on the listings).
+ * filter that list already takes (`guestId` on the stays, `ownerId` on the listings). What
+ * the account owes as a host for cancelling paid stays is, with a waiver per fee.
  */
 export const UserPage = async ({ params }: PageProps<"/admin/users/[id]">) => {
   const id = requireId((await params).id);
@@ -65,6 +68,14 @@ export const UserPage = async ({ params }: PageProps<"/admin/users/[id]">) => {
 
       <AccessCard user={user} self={self} />
       <ActivityCard user={user} />
+      {/* Streamed after the account: its access and activity do not wait for the fees. */}
+      <Suspense fallback={null}>
+        <HostFees
+          read={() => hostFeesApi.ofHost(id)}
+          audience="admin"
+          action={(fee) => <WaiveFeeButton feeId={fee.id} />}
+        />
+      </Suspense>
     </div>
   );
 };

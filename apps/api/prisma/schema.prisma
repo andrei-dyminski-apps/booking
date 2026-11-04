@@ -117,8 +117,39 @@ model Booking {
   /// rather than a lock held by a transaction, because the work under it calls Stripe.
   cancellingUntil DateTime? @map("cancelling_until")
 
-  /// Until when a settlement of the host's payout holds the stay — `whileSettling`.
+  /// Until when a settlement or the transfer of the host's payout holds the stay —
+  /// `whileSettling`, `whilePayingOut`.
   settlingUntil DateTime? @map("settling_until")
+
+  /// Who cancelled the stay, when and why — `null` on a stay nobody cancelled. Written by the
+  /// statement that writes `CANCELLED`, from `DELETE /bookings/:id`; a stay the provider's
+  /// news cancelled (a full refund, a lost dispute) names no canceller.
+  cancelledBy        Canceller? @map("cancelled_by")
+  cancelledAt        DateTime?  @map("cancelled_at")
+  cancellationReason String?    @map("cancellation_reason")
+
+  /// What a payout means to send, fixed before the transfer under the host's lock and
+  /// cleared once the payout is recorded — so a retry sends the same amount, and the
+  /// transfer goes out without a transaction held open across Stripe.
+  payoutReservedCents Int? @map("payout_reserved_cents")
+
+  /// How many reservations the stay's payout has made; the current one's number is part of
+  /// the transfer's idempotency key. A retry of one reservation is the same request to
+  /// Stripe; a reservation made afresh after a release may send another amount, and is a new
+  /// request rather than a key Stripe would refuse, or answer with a stale result, for 24 hours.
+  payoutReservations Int @default(0) @map("payout_reservations")
+
+  /// What was kept back of the host's share of this stay towards the fees they owe
+  /// (`host_fees`), written with the reservation of the payout. What the host holds of the stay is
+  /// `paid_out_amount_cents` plus this, so `settle` takes a later refund out of both — the
+  /// transfer first, then this, the shortfall handed back to the fees as debt.
+  feeWithheldCents Int @default(0) @map("fee_withheld_cents")
+
+  hostFee HostFee?
+
+  /// Which fees `fee_withheld_cents` went to, and how much of it to each — what a refund
+  /// after the payout hands back, to the fees it was kept back for.
+  feeWithholdings HostFeeWithholding[]
 
   /// Restrict, not Cascade: the bookings of other people are not something a listing may
   /// quietly take down with it. What an owner asks for is answered without ever reaching
@@ -174,6 +205,13 @@ enum CancellationPolicy {
   LIMITED
   FIRM
   NON_REFUNDABLE
+}
+
+/// Who cancelled a stay — the contract's `cancellerSchema`.
+enum Canceller {
+  GUEST
+  HOST
+  ADMIN
 }
 
 /// The three moments of a dispute this API acts on: opened, and closed one way or the other.
@@ -247,24 +285,24 @@ model BookingNight {
 /// `listings_price_within_contract` (raw SQL, last set by `store_money_in_cents`) and a
 /// write that bypasses the API cannot leave a price the API would then refuse to read back.
 model Listing {
-  id                 String    @id @default(uuid()) @db.Uuid
-  ownerId            String    @map("owner_id") @db.Uuid
+  id                 String             @id @default(uuid()) @db.Uuid
+  ownerId            String             @map("owner_id") @db.Uuid
   title              String
   description        String
-  pricePerNightCents Int       @map("price_per_night_cents")
+  pricePerNightCents Int                @map("price_per_night_cents")
   capacity           Int
   /// How much a guest's cancellation refunds, and until when — `CANCELLATION_TERMS` in
   /// `@repo/contracts`. Every booking copies it when it is taken.
   cancellationPolicy CancellationPolicy @default(FLEXIBLE) @map("cancellation_policy")
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
   /// When the owner retired it. The row outlives that moment because the bookings above
   /// point at it and a guest's stay has to keep naming where it was: `Restrict` would
   /// refuse the delete outright, and refusing is not an answer an owner with one finished
   /// stay in their history can ever get past. A retired listing is not in the catalogue,
   /// not on its owner's dashboard and not bookable — `ListingRepository` is where all
   /// three of those are one `where`.
-  deletedAt          DateTime? @map("deleted_at")
+  deletedAt          DateTime?          @map("deleted_at")
 
   /// Restrict, not Cascade, for the reason the booking above is: a cascade from `users`
   /// would have to delete listings that bookings restrict, so it would promise an account
@@ -388,6 +426,8 @@ model User {
   conversations Conversation[]
   notifications Notification[]
   waitlist      WaitlistEntry[]
+  hostFees      HostFee[]       @relation("HostFeeHost")
+  waivedFees    HostFee[]       @relation("HostFeeWaivedBy")
 
   /// `GET /users` is a keyset page ordered by `created_at` with `id` behind it — the pair
   /// `user-cursor.ts` encodes. One index serves both directions, the same arithmetic as the
@@ -507,6 +547,9 @@ enum NotificationType {
   PAYMENT_EVENT_FAILED
   CANCELLATION_REFUND_FAILED
   PAYOUT_FAILED
+  PAYOUT_SHORTFALL
+  HOST_CANCELLATION_FEE
+  HOST_CANCELLATIONS_THRESHOLD
   REVIEW_RECEIVED
   WAITLIST_AVAILABLE
 }
@@ -645,4 +688,64 @@ model RefundFailure {
   /// `GET /refund-failures`, newest first — the keyset of `common/set-aside-cursor.ts`.
   @@index([failedAt(sort: Desc), refundId(sort: Desc)])
   @@map("refund_failures")
+}
+
+/// What a host owes for cancelling a paid stay — one row per cancelled stay, written in the
+/// transaction that cancels it, sized by `hostCancellationFee`. Nothing was ever paid to the
+/// host for that stay, so the fee is withheld from their next payouts: `withheld_cents` grows
+/// as payouts keep it back, oldest fee first, under a per-host advisory lock. A fee nobody can
+/// withhold — a host who never earns again — stays owed on the admin's screen; the platform
+/// does not charge a host's card. An admin may waive it (`waived_at` with `waive_reason` and
+/// `waived_by_id`, all or none — `host_fees_waived_with_reason`, `host_fees_waived_by_someone`);
+/// what was withheld before stays withheld.
+/// `withheld_cents` never passes `amount_cents` (`host_fees_withheld_within_amount`), and it
+/// is the sum of the fee's `host_fee_withholdings`, written in the same transactions.
+model HostFee {
+  id            String    @id @default(uuid()) @db.Uuid
+  bookingId     String    @unique @map("booking_id") @db.Uuid
+  hostId        String    @map("host_id") @db.Uuid
+  amountCents   Int       @map("amount_cents")
+  /// The stay's currency, as `bookings.currency`.
+  currency      String    @db.Char(3)
+  withheldCents Int       @default(0) @map("withheld_cents")
+  waivedAt      DateTime? @map("waived_at")
+  waiveReason   String?   @map("waive_reason")
+  /// The admin who waived it.
+  waivedById    String?   @map("waived_by_id") @db.Uuid
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  /// Cascade: the fee is about the stay, and only the cleanups delete a booking row.
+  booking  Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  host     User    @relation("HostFeeHost", fields: [hostId], references: [id], onDelete: Cascade)
+  /// Restrict: who forgave the money is the record of the waiver, and SetNull would break
+  /// `host_fees_waived_by_someone`. The cleanups delete bookings, and the fees with them,
+  /// before users. NoAction would not let more through: a fee on the admin's own stay is
+  /// two cascades away (users → bookings → host_fees), and the check runs before they do.
+  waivedBy User?   @relation("HostFeeWaivedBy", fields: [waivedById], references: [id], onDelete: Restrict)
+
+  withholdings HostFeeWithholding[]
+
+  /// A host's fees oldest first — the order a payout withholds them in and the overview reads.
+  @@index([hostId, createdAt])
+  @@map("host_fees")
+}
+
+/// What one payout kept back towards one fee: a stay's `fee_withheld_cents` split over the
+/// fees it went to, so money handed back by a refund after the payout, or by a released
+/// reservation, goes back onto those fees rather than onto whichever are newest. Written,
+/// lowered and deleted under the host's lock, beside the fee's `withheld_cents` it adds up to.
+/// The amount is never zero (`host_fee_withholdings_amount_positive`): a row taken back whole
+/// is deleted.
+model HostFeeWithholding {
+  bookingId   String @map("booking_id") @db.Uuid
+  hostFeeId   String @map("host_fee_id") @db.Uuid
+  amountCents Int    @map("amount_cents")
+
+  /// Cascade both ways, for the reason `HostFee` gives: only the cleanups delete these rows.
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  hostFee HostFee @relation(fields: [hostFeeId], references: [id], onDelete: Cascade)
+
+  @@id([bookingId, hostFeeId])
+  @@index([hostFeeId])
+  @@map("host_fee_withholdings")
 }

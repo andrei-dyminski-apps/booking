@@ -2,11 +2,13 @@ import { parseISO } from "date-fns";
 import {
   BookingStatus,
   CANCELLATION_TERMS,
+  Canceller,
+  cancellerOf,
   DisputeStatus,
+  hostCancellationFee,
   isCancellableOn,
   notRefunded,
   refundQuote,
-  Role,
   shareOf,
   type Booking,
   type Cents,
@@ -22,15 +24,15 @@ import { dayOf, formatMoney } from "#shared/lib";
 
 /**
  * What cancelling a paid stay would give back, said to whoever is looking — or `null` when
- * there is nothing to say: a hold or a stay nobody paid for has nothing to give back, and a
- * host is not offered the button. It reads `refundQuote`, the rule the API refunds by, over
- * the stay's own frozen policy, so the sentence and the refund are the same decision: an
- * admin's cancellation gives back whatever is left whenever it happens, a guest's the share
- * of the window it falls in, less what a refund from Stripe's dashboard gave back already.
- * The sentence names when the share falls next and, once one window has closed, what it
- * would have been before. A dispute the bank has settled against the stay has given the
- * money back already; an open one is not offered the button at all (`mayCancel`), so it
- * needs no sentence.
+ * there is nothing to say: a hold or a stay nobody paid for has nothing to give back. The
+ * host is told what it costs them instead (`hostCancellationNote`), which they read first.
+ * It reads `refundQuote`, the rule the API refunds by, over the stay's own frozen policy,
+ * so the sentence and the refund are the same decision: an admin's cancellation gives back
+ * whatever is left whenever it happens, a guest's the share of the window it falls in, less
+ * what a refund from Stripe's dashboard gave back already. The sentence names when the
+ * share falls next and, once one window has closed, what it would have been before. A
+ * dispute the bank has settled against the stay has given the money back already; an open
+ * one is not offered the button at all (`mayCancel`), so it needs no sentence.
  *
  * `now` is the server's, handed down like `today()`: the render that straddles the end of
  * a window is the one where the server and the browser would otherwise disagree.
@@ -46,12 +48,17 @@ export function cancellationRefundNote(
     | "dispute"
     | "from"
     | "guestId"
+    | "hostId"
     | "createdAt"
     | "cancellationPolicy"
   >,
   viewer: Pick<User, "id" | "role">,
   now: string,
 ): string | null {
+  const canceller = cancellerOf(booking, viewer);
+
+  if (canceller === Canceller.HOST) return hostCancellationNote(booking, now);
+
   if (booking.status !== BookingStatus.CONFIRMED || !booking.paid) return null;
 
   // A stay that has begun can no longer be cancelled, so there is no refund to word.
@@ -59,9 +66,9 @@ export function cancellationRefundNote(
     return null;
   }
 
-  const admin = viewer.role === Role.ADMIN;
+  if (canceller === null) return null;
 
-  if (!admin && viewer.id !== booking.guestId) return null;
+  const admin = canceller === Canceller.ADMIN;
 
   if (booking.dispute === DisputeStatus.LOST) {
     return "The bank has returned the payment after a dispute: cancelling refunds nothing more.";
@@ -111,6 +118,43 @@ export function cancellationRefundNote(
   return quote.closed === null
     ? sentence
     : `${sentence} Before ${windowEnd(quote.closed.until)} it would have been ${shareInWords(quote.closed.shareBps)}.`;
+}
+
+/**
+ * The host's side of a cancellation: the guest is refunded in full whatever the policy, and
+ * the host pays the fee of the window it falls in — `hostCancellationFee`, the rule the API
+ * charges by — kept back from their next payouts. Declining a hold costs nothing.
+ */
+function hostCancellationNote(
+  booking: Pick<
+    Booking,
+    | "status"
+    | "paid"
+    | "dispute"
+    | "amountCents"
+    | "refundedAmountCents"
+    | "currency"
+    | "from"
+  >,
+  now: string,
+): string | null {
+  if (booking.status === BookingStatus.PENDING_PAYMENT) {
+    return "Nobody has paid for this request yet, so declining it costs you nothing.";
+  }
+
+  // A stay nobody paid for (the seed's) has nothing to say, as it has nothing for the guest.
+  if (!booking.paid || !isCancellableOn(booking, dayOf(now))) return null;
+
+  const fee = hostCancellationFee(booking, parseISO(now));
+
+  // Paid, and still no fee: the money has gone back already, one way or the other.
+  if (fee.cents === 0) {
+    return booking.dispute === DisputeStatus.LOST
+      ? "The bank has returned the payment after a dispute: cancelling refunds nothing and costs you nothing."
+      : "The stay has been refunded in full already: cancelling refunds nothing more and costs you nothing.";
+  }
+
+  return `If you cancel now, the guest is refunded in full and you pay a fee of ${formatMoney(fee.cents, booking.currency)} (${sharePercent(fee.feeBps)} of what it refunds), kept back from your next payouts.`;
 }
 
 function whatComesBack(
