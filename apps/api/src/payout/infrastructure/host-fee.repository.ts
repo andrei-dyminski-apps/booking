@@ -37,7 +37,7 @@ type LockedAdmin = { role: Role; blocked_at: Date | null };
 
 /**
  * The ledger of what hosts owe for their cancellations, as the screens read it and an admin
- * waives it. The row is written by `BookingRepository.cancel` and withheld from by
+ * waives it. The row is written by `BookingCancellationRepository.cancel` and withheld from by
  * `PayoutRepository.reservePayout`; this class only reads it and waives it.
  */
 @Injectable()

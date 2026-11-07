@@ -10,18 +10,14 @@ import {
 } from "./booking-refund.service";
 import type { BookingPaymentHandler } from "./booking-payment.handler";
 import type { BookingService } from "./booking.service";
-import {
-  AMOUNT,
-  createBookingTestbed,
-  guest,
-  LISTING_ID,
-  payForStay,
-  type FakeBookingJobs,
-  type FakeBookingRepository,
-  type FakeNotificationService,
-  type FakePaymentGateway,
-  type FakeWaitlistService,
-} from "./testing/booking.fakes";
+import { createBookingTestbed, payForStay } from "./testing/booking.fakes";
+import { AMOUNT, guest, LISTING_ID } from "./testing/booking-fixtures.fakes";
+import { type FakeBookingJobs } from "./testing/booking-jobs.fakes";
+import { type FakeBookingRefundRepository } from "./testing/booking-refund-repository.fakes";
+import { type FakeBookingTable } from "./testing/booking-table.fakes";
+import { type FakeNotificationService } from "./testing/notification-service.fakes";
+import { type FakePaymentGateway } from "./testing/payment-gateway.fakes";
+import { type FakeWaitlistService } from "./testing/waitlist-service.fakes";
 
 /**
  * The refund a cancellation owes, once `BookingService` has written it: the job that sends
@@ -32,7 +28,8 @@ import {
 describe("BookingRefundService", () => {
   let service: BookingService;
   let refundService: BookingRefundService;
-  let bookingRepository: FakeBookingRepository;
+  let bookingTable: FakeBookingTable;
+  let bookingRefundRepository: FakeBookingRefundRepository;
   let bookingJobs: FakeBookingJobs;
   let notificationService: FakeNotificationService;
   let waitlistService: FakeWaitlistService;
@@ -48,7 +45,8 @@ describe("BookingRefundService", () => {
       service,
       refundService,
       paymentHandler,
-      bookingRepository,
+      bookingTable,
+      bookingRefundRepository,
       bookingJobs,
       notificationService,
       waitlistService,
@@ -62,7 +60,7 @@ describe("BookingRefundService", () => {
 
     await service.remove(id, guest);
 
-    expect(bookingRepository.rows.get(id)).toMatchObject({
+    expect(bookingTable.rows.get(id)).toMatchObject({
       booking: {
         status: BookingStatus.CANCELLED,
         refundedAmountCents: null,
@@ -78,7 +76,7 @@ describe("BookingRefundService", () => {
     await expect(refundService.refundCancellation(id)).resolves.toBe(false);
 
     expect(paymentGateway.refunds.size).toBe(1);
-    expect(bookingRepository.rows.get(id)).toMatchObject({
+    expect(bookingTable.rows.get(id)).toMatchObject({
       booking: { refundedAmountCents: AMOUNT, refundOwedCents: null },
     });
   });
@@ -90,7 +88,7 @@ describe("BookingRefundService", () => {
     await service.remove(id, guest);
 
     expect(bookingJobs.failedRefunds).toHaveLength(1);
-    expect(bookingRepository.rows.get(id)).toMatchObject({
+    expect(bookingTable.rows.get(id)).toMatchObject({
       booking: { status: BookingStatus.CANCELLED, refundOwedCents: AMOUNT },
     });
 
@@ -100,7 +98,7 @@ describe("BookingRefundService", () => {
     paymentGateway.refusing = false;
 
     await expect(refundService.refundOwedCancellations()).resolves.toBe(1);
-    expect(bookingRepository.rows.get(id)).toMatchObject({
+    expect(bookingTable.rows.get(id)).toMatchObject({
       booking: { refundedAmountCents: AMOUNT, refundOwedCents: null },
     });
   });
@@ -126,10 +124,10 @@ describe("BookingRefundService", () => {
       },
     ]);
     // Still owed, and left to a person: the sweep no longer reads it.
-    expect(bookingRepository.rows.get(id)?.booking.refundOwedCents).toBe(
-      AMOUNT,
+    expect(bookingTable.rows.get(id)?.booking.refundOwedCents).toBe(AMOUNT);
+    await expect(bookingRefundRepository.findOwedRefunds(50)).resolves.toEqual(
+      [],
     );
-    await expect(bookingRepository.findOwedRefunds(50)).resolves.toEqual([]);
   });
 
   describe("a refund set aside", () => {
@@ -206,7 +204,7 @@ describe("BookingRefundService", () => {
       expect([...paymentGateway.refunds.values()]).toEqual([
         { paymentId: "pi_1", amount: AMOUNT },
       ]);
-      expect(bookingRepository.rows.get(id)).toMatchObject({
+      expect(bookingTable.rows.get(id)).toMatchObject({
         booking: { refundedAmountCents: AMOUNT, refundOwedCents: null },
       });
       await expect(
@@ -230,12 +228,12 @@ describe("BookingRefundService", () => {
     const failing = await paidStay(30);
     bookingJobs.worker = null;
     await service.remove(failing, guest);
-    await bookingRepository.recordRefundFailure(failing, "refused", 99);
+    await bookingRefundRepository.recordRefundFailure(failing, "refused", 99);
 
     const fresh = await paidStay(31);
     await service.remove(fresh, guest);
 
-    await expect(bookingRepository.findOwedRefunds(1)).resolves.toEqual([
+    await expect(bookingRefundRepository.findOwedRefunds(1)).resolves.toEqual([
       fresh,
     ]);
   });
@@ -244,7 +242,7 @@ describe("BookingRefundService", () => {
     const id = await paidStay(30);
     bookingJobs.worker = null;
     await service.remove(id, guest);
-    const found = bookingRepository.rows.get(id);
+    const found = bookingTable.rows.get(id);
 
     if (found !== undefined) found.booking.dispute = "OPEN";
 
@@ -263,7 +261,7 @@ describe("BookingRefundService", () => {
     const id = await paidStay(30);
     bookingJobs.worker = null;
     await service.remove(id, guest);
-    const found = bookingRepository.rows.get(id);
+    const found = bookingTable.rows.get(id);
 
     if (found !== undefined) found.booking.dispute = "LOST";
 

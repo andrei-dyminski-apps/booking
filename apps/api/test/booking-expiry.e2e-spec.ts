@@ -4,6 +4,7 @@ import { App } from "supertest/types";
 import { AppModule } from "./../src/app.module";
 import { BookingJobs } from "./../src/booking/application/ports/booking-jobs";
 import { BookingRepository } from "./../src/booking/infrastructure/booking.repository";
+import { BookingCancellationRepository } from "./../src/booking/infrastructure/booking-cancellation.repository";
 import {
   EXPIRE_HOLD_JOB,
   SWEEP_LAPSED_HOLDS_JOB,
@@ -32,6 +33,7 @@ describe("Booking hold expiry (e2e)", () => {
   let app: INestApplication<App>;
   let prismaService: PrismaService;
   let bookingRepository: BookingRepository;
+  let bookingCancellationRepository: BookingCancellationRepository;
   let bookingJobs: BookingJobs;
   let guestId: string;
   let ownerId: string;
@@ -49,6 +51,7 @@ describe("Booking hold expiry (e2e)", () => {
 
     prismaService = app.get(PrismaService);
     bookingRepository = app.get(BookingRepository);
+    bookingCancellationRepository = app.get(BookingCancellationRepository);
     bookingJobs = app.get(BookingJobs);
 
     await resetDatabase(app);
@@ -168,7 +171,11 @@ describe("Booking hold expiry (e2e)", () => {
    */
   it("is a no-op for a booking that is no longer a pending hold", async () => {
     const cancelled = await lapsedHold();
-    await bookingRepository.cancel(cancelled, "PENDING_PAYMENT", null);
+    await bookingCancellationRepository.cancel(
+      cancelled,
+      "PENDING_PAYMENT",
+      null,
+    );
 
     await expect(bookingRepository.expireHold(cancelled)).resolves.toEqual([]);
     expect(await statusOf(cancelled)).toBe("CANCELLED");

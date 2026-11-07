@@ -9,19 +9,11 @@ import {
   type BookingQuery,
   type BookingSort,
   type CreateBookingInput,
-  type StuckKind,
-  type StuckStayQuery,
 } from "@repo/contracts";
 import { tz } from "@date-fns/tz";
 import { z } from "zod";
 import { isEqual, parseISO, subDays } from "date-fns";
-import {
-  type Prisma,
-  ReviewKind,
-  type Booking as BookingRow,
-  type Listing as ListingRow,
-  type Review as ReviewRow,
-} from "../../generated/prisma/client";
+import type { Prisma } from "../../generated/prisma/client";
 import {
   isExclusionViolation,
   isPrismaError,
@@ -33,15 +25,11 @@ import {
   CREATED_AT_ORDER,
   type Page,
 } from "../../common/paging";
-import type { SetAside } from "../../common/job-failure";
-import type { SetAsideCursor } from "../../common/set-aside-cursor";
-import { setAsideWithin } from "../../common/set-aside-window";
 import { readPricedListing } from "../../listing/listing-pricing";
 import { toIsoDate } from "../../common/iso-date";
 import { PrismaService } from "../../prisma/prisma.service";
 import { ACTIVE_STATUSES, holdExpiry } from "../domain/booking-status";
 import {
-  CancellationInProgressError,
   DatesUnavailableError,
   GuestNotFoundError,
   ListingChangedError,
@@ -52,30 +40,19 @@ import type {
   BookingCursor,
   BookingDetailWithListingOwner,
   BookingWithListingOwner,
-  CancellationBy,
-  CancelledStay,
   ConfirmedStay,
   CreatedBooking,
-  RefundTarget,
   ReleasedHold,
-  StuckStayRow,
 } from "../domain/booking.types";
 import { quoteStay } from "../domain/stay-price";
-import { hostFeesKey, shareOutHostFees } from "../domain/stuck-stay";
-import { LeaseBusyError, whileLeased, type LeaseTiming } from "./booking-lease";
+import { cents, type Cents } from "../../payment/domain/money";
 import {
-  cents,
-  NO_CENTS,
-  subtractCents,
-  type Cents,
-} from "../../payment/domain/money";
-import {
-  nullableCentsOf,
+  BOOKING_INCLUDE,
   RELEASED_HOLD_INCLUDE,
   stayMoneyData,
-  toRefundTarget,
+  toBooking,
   toReleasedHold,
-  toStayMoney,
+  type BookingRowWithListing,
 } from "./stay-rows";
 
 /** One row of the `FOR UPDATE` read — raw SQL, so the column keeps its stored name. */
@@ -87,40 +64,6 @@ type LockedListing = {
   updated_at: Date;
 };
 
-/**
- * What every read of a booking selects from the listing it names, and it is not narrowed
- * by `deleted_at`: a retired listing is still where the stay was, and resolving it here is
- * the only way its guest ever learns the title again — see `listingSummarySchema` in the
- * contract. Any extra column a caller selects alongside it (the owner, for the
- * authorization rules) stays out of the answer, because `toBooking` names the two fields
- * it copies rather than spreading the row.
- */
-const LISTING_SUMMARY = {
-  listing: { select: { title: true, pricePerNightCents: true, ownerId: true } },
-} satisfies Prisma.BookingInclude;
-
-/**
- * Which halves of the stay have been reviewed, read beside the listing on every booking —
- * the contract's `reviewed`. The kinds and nothing else: what a review says is read through
- * the lists that are scoped for it, and a booking is read by both of the people it names.
- * At most two rows, found through the unique `(booking_id, kind)` pair.
- */
-const REVIEW_KINDS = {
-  reviews: { select: { kind: true } },
-} satisfies Prisma.BookingInclude;
-
-/** Everything `toBooking` reads off a row besides its own columns. */
-const BOOKING_INCLUDE = {
-  ...LISTING_SUMMARY,
-  ...REVIEW_KINDS,
-} satisfies Prisma.BookingInclude;
-
-/** A stored booking with the listing columns the contract's `listing` is built from. */
-type BookingRowWithListing = BookingRow & {
-  listing: Pick<ListingRow, "title" | "pricePerNightCents" | "ownerId">;
-  reviews: Pick<ReviewRow, "kind">[];
-};
-
 function withListingOwner(row: BookingRowWithListing): BookingWithListingOwner {
   return {
     booking: toBooking(row),
@@ -129,17 +72,13 @@ function withListingOwner(row: BookingRowWithListing): BookingWithListingOwner {
   };
 }
 
-/** What the admin's list of stuck stays narrows by, past its kind. */
-export type StuckStayFilters = Pick<
-  StuckStayQuery,
-  "bookingId" | "listingId" | "guestId" | "hostId" | "from" | "to"
->;
-
 /**
- * Every query the module makes, and the whole of its knowledge about how a stay is stored:
- * that dates live in `@db.Date` columns while the contract speaks `YYYY-MM-DD`, that a
- * stay has a status and only two of the four hold the slot, and that an overlap is a pair
- * of strict inequalities.
+ * The reads of a stay, the hold and its payment, and the module's knowledge about how a stay
+ * is stored: that dates live in `@db.Date` columns while the contract speaks `YYYY-MM-DD`,
+ * that a stay has a status and only two of the four hold the slot, and that an overlap is a
+ * pair of strict inequalities. The cancellation is `BookingCancellationRepository`'s, the
+ * money that goes back to a guest `BookingRefundRepository`'s; the `where` clauses below are
+ * shared by all three.
  *
  * `create` is phase 4's centrepiece: an interactive transaction that locks the listing
  * row, so competing bookings for one listing are serialised instead of racing the
@@ -409,372 +348,6 @@ export class BookingRepository {
     });
   }
 
-  /**
-   * Cancelling keeps the row and moves it out of the active set: the record is what phase
-   * 5 refunds against, and an inactive status frees the slot the `EXCLUDE` constraint
-   * guards. `expiresAt` is left where it is — the deadline this hold had is part of that
-   * record, and `status` is what says it no longer holds anything. `false` is the row
-   * already being gone from the active set — cancelled or expired by another request
-   * between the read that authorized this one and here. `updateMany` reports that in a
-   * count instead of an exception, the same trade the old `delete` made with `deleteMany`.
-   *
-   * What the cancellation gives back is written in the same statement (`refund_owed_cents`), so
-   * it is never answered while the money it owes is written nowhere. It matches only the
-   * status the refund was decided by — `null` for a hold confirmed in between too — and
-   * reads the payment back from the `UPDATE`, so one attached meanwhile is withdrawn.
-   */
-  async cancel(
-    id: string,
-    status: BookingStatus,
-    refundOwedCents: Cents | null,
-    by: CancellationBy | null = null,
-  ): Promise<CancelledStay | null> {
-    const feeCents = by?.feeCents ?? null;
-    const write = async (
-      client: Pick<Prisma.TransactionClient, "booking" | "hostFee">,
-    ): Promise<CancelledStay | null> => {
-      const [cancelled] = await client.booking.updateManyAndReturn({
-        where: {
-          id,
-          AND: [{ status: { in: [...ACTIVE_STATUSES] } }, { status }],
-        },
-        data: {
-          status: BookingStatus.CANCELLED,
-          refundOwedCents,
-          ...(by === null
-            ? {}
-            : {
-                cancelledBy: by.canceller,
-                cancelledAt: new Date(),
-                cancellationReason: by.reason,
-              }),
-        },
-        select: {
-          paymentIntentId: true,
-          currency: true,
-          listing: { select: { ownerId: true } },
-        },
-      });
-
-      if (cancelled === undefined) return null;
-
-      const fee =
-        feeCents === null
-          ? null
-          : await client.hostFee.create({
-              data: {
-                bookingId: id,
-                hostId: cancelled.listing.ownerId,
-                amountCents: feeCents,
-                currency: cancelled.currency,
-              },
-              select: { id: true, amountCents: true },
-            });
-
-      return {
-        paymentId: cancelled.paymentIntentId,
-        fee:
-          fee === null
-            ? null
-            : { id: fee.id, amountCents: cents(fee.amountCents) },
-      };
-    };
-
-    // A fee goes in the cancellation's own transaction: a host is never let off a stay they
-    // took away by a process that died between the two writes, nor charged for one that
-    // stayed. Without one the cancellation is a single statement and needs none.
-    return feeCents === null
-      ? write(this.prismaService)
-      : this.prismaService.$transaction(write);
-  }
-
-  /**
-   * How many paid stays this host cancelled within the window that ends at `now`
-   * (`countedCancellationsWhere`), and the host's name, for the notice that tells the admins.
-   * `null` for a host who is gone.
-   */
-  async hostCancellations(
-    hostId: string,
-    now: Date,
-  ): Promise<{ name: string; cancellations: number } | null> {
-    const host = await this.prismaService.user.findUnique({
-      where: { id: hostId },
-      select: {
-        name: true,
-        _count: {
-          select: {
-            hostFees: { where: countedCancellationsWhere(hostId, now) },
-          },
-        },
-      },
-    });
-
-    return host === null
-      ? null
-      : { name: host.name, cancellations: host._count.hostFees };
-  }
-
-  /**
-   * The debts still owed, the fewest failures first. A stay under a running lease is left
-   * to its holder, and one under an open dispute to the outcome. Raw SQL, because the lease
-   * is compared on the database's clock, which Prisma's `where` cannot name.
-   */
-  async findOwedRefunds(limit: number): Promise<string[]> {
-    const rows = await this.prismaService.$queryRaw<{ id: string }[]>`
-      SELECT id::text AS id FROM bookings
-      WHERE refund_owed_cents IS NOT NULL
-        AND refund_failed_at IS NULL
-        AND dispute_status IS DISTINCT FROM 'OPEN'
-        AND (cancelling_until IS NULL OR cancelling_until <= (now() AT TIME ZONE 'UTC'))
-      ORDER BY refund_attempts, id
-      LIMIT ${limit}
-    `;
-
-    return rows.map(({ id }) => id);
-  }
-
-  /**
-   * The stays whose owed refund or host payout was set aside, newest first. Each kind reads
-   * its own partial index (`bookings_refund_failed_idx`, `bookings_payout_failed_idx`); the
-   * payout's columns are `PayoutRepository`'s to write, and only read here, because the
-   * row a stay is answered with is this repository's mapping.
-   */
-  async findStuckPage(
-    kind: StuckKind,
-    cursor: SetAsideCursor | null,
-    limit: number,
-    filters: StuckStayFilters,
-  ): Promise<Page<StuckStayRow>> {
-    const isRefund = kind === "refund";
-    const column = isRefund ? "refundFailedAt" : "payoutFailedAt";
-    const after: Prisma.BookingWhereInput =
-      cursor === null
-        ? {}
-        : {
-            [column]: { lte: cursor.at },
-            OR: [
-              { [column]: { lt: cursor.at } },
-              { [column]: cursor.at, id: { lt: cursor.id } },
-            ],
-          };
-    const rows = await this.prismaService.booking.findMany({
-      where: {
-        AND: [
-          isRefund
-            ? STUCK_REFUND
-            : stuckPayout(this.prismaService.booking.fields),
-          {
-            id: filters.bookingId,
-            listingId: filters.listingId,
-            guestId: filters.guestId,
-            [column]: setAsideWithin(filters),
-            ...(filters.hostId === undefined
-              ? {}
-              : { listing: { ownerId: filters.hostId } }),
-          },
-          after,
-        ],
-      },
-      include: BOOKING_INCLUDE,
-      orderBy: [{ [column]: "desc" }, { id: "desc" }],
-      take: limit + 1,
-    });
-    const page = rows.slice(0, limit);
-    const feesLeft = isRefund
-      ? new Map<string, Cents>()
-      : await this.feesLeftFor(page.map((row) => row.listing.ownerId));
-
-    return {
-      items: page.flatMap((row) => {
-        const { failedAt, attempts, lastError } = isRefund
-          ? {
-              failedAt: row.refundFailedAt,
-              attempts: row.refundAttempts,
-              lastError: row.refundLastError,
-            }
-          : {
-              failedAt: row.payoutFailedAt,
-              attempts: row.payoutAttempts,
-              lastError: row.payoutLastError,
-            };
-
-        if (failedAt === null) return [];
-
-        return [
-          {
-            kind,
-            booking: toBooking(row),
-            attempts,
-            lastError,
-            failedAt: failedAt.toISOString(),
-            payout: isRefund
-              ? null
-              : {
-                  reservedCents: nullableCentsOf(row.payoutReservedCents),
-                  feeWithheldCents: cents(row.feeWithheldCents),
-                  hostFeesOwedCents: feesLeft.get(row.id) ?? NO_CENTS,
-                },
-          },
-        ];
-      }),
-      hasMore: rows.length > limit,
-    };
-  }
-
-  /**
-   * The fees left for each stuck payout of these hosts, by `shareOutHostFees`. Every stuck
-   * payout of theirs is read, not only this page's and whatever the filters, so a stay's
-   * figure does not change with the page or the filters it is seen under; the set-aside rows
-   * are few, and the partial index holds nothing else.
-   */
-  private async feesLeftFor(hostIds: string[]): Promise<Map<string, Cents>> {
-    if (hostIds.length === 0) return new Map();
-
-    const hosts = [...new Set(hostIds)];
-    const [sums, stays] = await Promise.all([
-      this.prismaService.hostFee.groupBy({
-        by: ["hostId", "currency"],
-        where: owedFeesWhere(this.prismaService, { in: hosts }),
-        _sum: { amountCents: true, withheldCents: true },
-      }),
-      this.prismaService.booking.findMany({
-        where: {
-          AND: [
-            stuckPayout(this.prismaService.booking.fields),
-            { listing: { ownerId: { in: hosts } } },
-          ],
-        },
-        include: { listing: { select: { ownerId: true } } },
-        orderBy: [{ payoutFailedAt: "asc" }, { id: "asc" }],
-      }),
-    ]);
-
-    return shareOutHostFees(
-      stays.map((row) => ({
-        booking: {
-          ...toStayMoney(row),
-          id: row.id,
-          hostId: row.listing.ownerId,
-          paid: row.paidAt !== null,
-          dispute: row.disputeStatus,
-        },
-        payout: {
-          reservedCents: nullableCentsOf(row.payoutReservedCents),
-          feeWithheldCents: cents(row.feeWithheldCents),
-        },
-      })),
-      new Map(
-        sums.map(({ hostId, currency, _sum }) => [
-          hostFeesKey(hostId, currency),
-          subtractCents(
-            cents(_sum.amountCents ?? 0),
-            cents(_sum.withheldCents ?? 0),
-          ),
-        ]),
-      ),
-    );
-  }
-
-  /**
-   * Hands a set-aside debt back to the sweep with a whole count of attempts. `false` for a
-   * stay whose refund is not set aside — or that is not there.
-   */
-  async handBackRefund(id: string): Promise<boolean> {
-    const { count } = await this.prismaService.booking.updateMany({
-      where: { id, ...STUCK_REFUND },
-      data: { refundFailedAt: null, refundAttempts: 0 },
-    });
-
-    return count > 0;
-  }
-
-  /**
-   * Sets the debt aside at `maxAttempts`. Two conditional steps, so of two runs failing at
-   * once only one reports it. `null` for a debt no longer pending.
-   */
-  async recordRefundFailure(
-    id: string,
-    error: string,
-    maxAttempts: number,
-  ): Promise<SetAside | null> {
-    const pending = {
-      id,
-      refundOwedCents: { not: null },
-      refundFailedAt: null,
-    } satisfies Prisma.BookingWhereInput;
-    const [counted] = await this.prismaService.booking.updateManyAndReturn({
-      where: pending,
-      data: { refundAttempts: { increment: 1 }, refundLastError: error },
-      select: { refundAttempts: true },
-    });
-
-    if (counted === undefined) return null;
-
-    if (counted.refundAttempts < maxAttempts) {
-      return { attempts: counted.refundAttempts, setAside: false };
-    }
-
-    const { count } = await this.prismaService.booking.updateMany({
-      where: pending,
-      data: { refundFailedAt: new Date() },
-    });
-
-    return { attempts: counted.refundAttempts, setAside: count > 0 };
-  }
-
-  /**
-   * One transaction, or the host's share would count the refund twice. `total` is `null`
-   * when nothing went out; it only rises, so Stripe's figure from a webhook is kept.
-   */
-  async settleOwedRefund(id: string, total: Cents | null): Promise<void> {
-    await this.prismaService.$transaction([
-      ...(total === null
-        ? []
-        : [
-            this.prismaService.booking.updateMany({
-              where: {
-                id,
-                OR: [
-                  { refundedAmountCents: null },
-                  { refundedAmountCents: { lt: total } },
-                ],
-              },
-              data: { refundedAmountCents: total },
-            }),
-          ]),
-      this.prismaService.booking.updateMany({
-        where: { id },
-        data: {
-          refundOwedCents: null,
-          refundAttempts: 0,
-          refundLastError: null,
-        },
-      }),
-    ]);
-  }
-
-  /**
-   * The cancellation lease, which the refund job and the payment webhooks take too: the
-   * webhook reporting a refund waits here instead of reading the stay half way.
-   */
-  async whileCancelling<T>(id: string, work: () => Promise<T>): Promise<T> {
-    try {
-      return await whileLeased(
-        this.prismaService,
-        "cancelling_until",
-        id,
-        CANCEL_LEASE,
-        work,
-      );
-    } catch (error) {
-      if (error instanceof LeaseBusyError) {
-        throw new CancellationInProgressError(id);
-      }
-
-      throw error;
-    }
-  }
-
   /** Only into an empty column, and only while pending: `false` is a hold released meanwhile. */
   async attachPayment(id: string, paymentId: string): Promise<boolean> {
     const { count } = await this.prismaService.booking.updateMany({
@@ -826,53 +399,6 @@ export class BookingRepository {
       where: { id, confirmationAnnouncedAt: null },
       data: { confirmationAnnouncedAt: new Date() },
     });
-  }
-
-  async findPaymentTarget(id: string): Promise<RefundTarget | null> {
-    return this.readRefundTarget({ id });
-  }
-
-  /** Only into an empty column, so of two runs only the one that wrote it tells the guest. */
-  async recordRefund(id: string, amount: Cents): Promise<boolean> {
-    const { count } = await this.prismaService.booking.updateMany({
-      where: { id, refundedAmountCents: null },
-      data: { refundedAmountCents: amount },
-    });
-
-    return count > 0;
-  }
-
-  async findRefundTarget(paymentId: string): Promise<RefundTarget | null> {
-    return this.readRefundTarget({ paymentIntentId: paymentId });
-  }
-
-  private async readRefundTarget(
-    where: Prisma.BookingWhereUniqueInput,
-  ): Promise<RefundTarget | null> {
-    const row = await this.prismaService.booking.findUnique({
-      where,
-      include: RELEASED_HOLD_INCLUDE,
-    });
-
-    return row === null ? null : toRefundTarget(row);
-  }
-
-  /** From exactly what was read, so an older event never lowers it. */
-  async raiseRefunded(
-    id: string,
-    from: Cents | null,
-    to: Cents,
-  ): Promise<boolean> {
-    const { count } = await this.prismaService.booking.updateMany({
-      where: {
-        id,
-        paidAt: { not: null },
-        refundedAmountCents: from,
-      },
-      data: { refundedAmountCents: to },
-    });
-
-    return count > 0;
   }
 
   /**
@@ -1064,7 +590,8 @@ export function lapsedHolds(now: Date): Prisma.BookingWhereInput {
  * an overlap with it, `findActiveRanges` reports the ranges it matches, and
  * `ListingRepository` filters the catalogue by the listings that match none of them. The
  * exported ones are `where` clauses, which is the whole of what crosses that line —
- * everything that turns a row into a contract type stays in this file.
+ * everything that turns a row into a contract type stays in the booking repositories and
+ * `stay-rows.ts`.
  */
 export function holdsTheSlot(now: Date): Prisma.BookingWhereInput {
   return { status: { in: [...ACTIVE_STATUSES] }, NOT: lapsedHolds(now) };
@@ -1091,8 +618,8 @@ export function cancellationsWindowStart(now: Date): Date {
  * The cancellations of a host that count within the window ending at `now`: the fees written
  * for them, one per paid stay, less the ones an admin waived — the waiver says the
  * cancellation was not the host's doing. Written once, so the admins' threshold notice
- * (`hostCancellations`) and the host's overview (`HostFeeRepository.overviewOf`) count the
- * same stays.
+ * (`BookingCancellationRepository.hostCancellations`) and the host's overview
+ * (`HostFeeRepository.overviewOf`) count the same stays.
  */
 export function countedCancellationsWhere(
   hostId: string,
@@ -1172,23 +699,6 @@ export function stuckPayout(
   return { AND: [payoutOwed(fields), { payoutFailedAt: { not: null } }] };
 }
 
-/** A debt set aside — still owed, which is what a retry hands back. */
-const STUCK_REFUND = {
-  refundFailedAt: { not: null },
-  refundOwedCents: { not: null },
-} satisfies Prisma.BookingWhereInput;
-
-/**
- * Sixty seconds of room for a refund and a settlement; three of waiting keep a cancellation
- * inside the frontend's ten. Each try is an `UPDATE`, so the tries back off.
- */
-const CANCEL_LEASE: LeaseTiming = {
-  leaseMs: 60_000,
-  waitMs: 3_000,
-  pollMs: 100,
-  pollMaxMs: 1_000,
-};
-
 /**
  * The names Postgres gives the two foreign keys of `bookings`; they are written down in
  * `migration.sql` under `prisma/migrations`, which is what makes them a fact of the
@@ -1214,36 +724,4 @@ function violatedForeignKey(
   error: Prisma.PrismaClientKnownRequestError,
 ): string | null {
   return violatedConstraint(error, foreignKeyConstraintSchema)?.index ?? null;
-}
-
-function toBooking(row: BookingRowWithListing): Booking {
-  return {
-    id: row.id,
-    listingId: row.listingId,
-    // Named field by field rather than spread: a caller that selects more of the listing
-    // than the summary — the owner, for the authorization rules — must not have it leak
-    // into a response body.
-    listing: {
-      title: row.listing.title,
-      pricePerNightCents: cents(row.listing.pricePerNightCents),
-    },
-    guestId: row.guestId,
-    hostId: row.listing.ownerId,
-    from: toIsoDate(row.from),
-    to: toIsoDate(row.to),
-    status: row.status,
-    ...toStayMoney(row),
-    cancellationPolicy: row.cancellationPolicy,
-    paid: row.paidAt !== null,
-    dispute: row.disputeStatus,
-    expiresAt: row.expiresAt?.toISOString() ?? null,
-    createdAt: row.createdAt.toISOString(),
-    cancelledBy: row.cancelledBy,
-    cancelledAt: row.cancelledAt?.toISOString() ?? null,
-    cancellationReason: row.cancellationReason,
-    reviewed: {
-      byGuest: row.reviews.some((review) => review.kind === ReviewKind.LISTING),
-      byOwner: row.reviews.some((review) => review.kind === ReviewKind.GUEST),
-    },
-  };
 }

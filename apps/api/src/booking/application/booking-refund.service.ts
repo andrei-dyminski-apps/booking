@@ -23,6 +23,8 @@ import {
   NO_CENTS,
 } from "../../payment/domain/money";
 import { BookingRepository } from "../infrastructure/booking.repository";
+import { BookingCancellationRepository } from "../infrastructure/booking-cancellation.repository";
+import { BookingRefundRepository } from "../infrastructure/booking-refund.repository";
 import { CancellationInProgressError } from "../domain/booking.errors";
 import { owedOnStuck } from "../domain/stuck-stay";
 import { BookingJobs } from "./ports/booking-jobs";
@@ -41,6 +43,8 @@ export class BookingRefundService {
 
   constructor(
     private readonly bookingRepository: BookingRepository,
+    private readonly bookingCancellationRepository: BookingCancellationRepository,
+    private readonly bookingRefundRepository: BookingRefundRepository,
     private readonly paymentGateway: PaymentGateway,
     private readonly bookingJobs: BookingJobs,
     private readonly notificationService: NotificationService,
@@ -55,8 +59,9 @@ export class BookingRefundService {
     let refunded: boolean;
 
     try {
-      refunded = await this.bookingRepository.whileCancelling(id, () =>
-        this.sendOwedRefund(id),
+      refunded = await this.bookingCancellationRepository.whileCancelling(
+        id,
+        () => this.sendOwedRefund(id),
       );
     } catch (error) {
       // Held by another run: nothing failed yet.
@@ -84,7 +89,7 @@ export class BookingRefundService {
   async refundOwedCancellations(): Promise<number> {
     let sent = 0;
 
-    for (const id of await this.bookingRepository.findOwedRefunds(
+    for (const id of await this.bookingRefundRepository.findOwedRefunds(
       SWEEP_BATCH,
     )) {
       try {
@@ -111,7 +116,7 @@ export class BookingRefundService {
     const cursor = readCursor(query.cursor, "newest", (raw) =>
       decodeSetAsideCursor(resource, raw, bookingSchema.shape.id),
     );
-    const page = await this.bookingRepository.findStuckPage(
+    const page = await this.bookingRefundRepository.findStuckPage(
       query.kind,
       cursor,
       query.limit,
@@ -136,7 +141,7 @@ export class BookingRefundService {
    */
   async retryStuckRefund(id: string): Promise<void> {
     await writeOrRefuse(
-      this.bookingRepository.handBackRefund(id),
+      this.bookingRefundRepository.handBackRefund(id),
       () => this.bookingRepository.exists(id),
       {
         conflict: `The refund owed on booking ${id} is not set aside`,
@@ -157,7 +162,7 @@ export class BookingRefundService {
     let failure: SetAside | null;
 
     try {
-      failure = await this.bookingRepository.recordRefundFailure(
+      failure = await this.bookingRefundRepository.recordRefundFailure(
         id,
         message,
         MAX_REFUND_ATTEMPTS,
@@ -201,7 +206,7 @@ export class BookingRefundService {
     if (booking.dispute === DisputeStatus.OPEN) return false;
 
     if (booking.dispute === DisputeStatus.LOST || paymentId === null) {
-      await this.bookingRepository.settleOwedRefund(id, null);
+      await this.bookingRefundRepository.settleOwedRefund(id, null);
 
       return false;
     }
@@ -219,7 +224,7 @@ export class BookingRefundService {
     );
 
     if (amount === 0) {
-      await this.bookingRepository.settleOwedRefund(id, null);
+      await this.bookingRefundRepository.settleOwedRefund(id, null);
 
       return false;
     }
@@ -231,7 +236,7 @@ export class BookingRefundService {
       `booking-${id}-cancellation`,
     );
 
-    await this.bookingRepository.settleOwedRefund(
+    await this.bookingRefundRepository.settleOwedRefund(
       id,
       sent > 0 ? addCents(refundedBefore, sent) : null,
     );

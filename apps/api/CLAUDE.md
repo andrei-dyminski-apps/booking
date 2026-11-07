@@ -99,14 +99,16 @@ src/
       booking-refund.service.spec.ts
       booking-payment.handler.ts  # succeeded: confirms the hold, or refunds a late payment; refunded: records it, cancels a stay not yet begun refunded in full; a lost dispute: cancels a stay not yet begun
       booking-payment.handler.spec.ts  # the provider's news, in the same module as the service
-      testing/booking.fakes.ts  # the fixtures, fakes and module the three specs share; out of the build (`*.fakes.ts`)
+      testing/booking.fakes.ts  # the module the three specs share; the fixtures and one fake per port beside it, the three repository fakes over one FakeBookingTable; out of the build (`*.fakes.ts`)
       stay-events.ts       # confirmed / refunded, announced to whoever follows the stays (payout)
       booking-cursor.ts    # the keyset cursor of GET /bookings, encoded and parsed
       refund-failure.service.ts  # the admin's list of bounced refunds and the record of how each went back
     infrastructure/
-      booking.repository.ts      # the queries, the locking transaction, the quote under the lock
+      booking.repository.ts      # the reads, the hold's locking transaction and its quote, the payment; the `where` clauses the other repositories share
+      booking-cancellation.repository.ts  # the cancellation, the host's fee beside it, and the cancellation lease (whileCancelling)
+      booking-refund.repository.ts  # the refunds owed and their sweep, the stuck list, the refund targets the provider's news reads
       booking-lease.ts           # whileLeased: the per-booking leases, on the database's clock, renewed while held
-      stay-rows.ts               # a stay's money and its two people off a row, and the integer money columns into Cents — BookingRepository and PayoutRepository both map through it; stayMoneyData — what a quote writes, bounded by MIN_CHARGE/MAX_CHARGE, for create and the seed
+      stay-rows.ts               # a stay's money and its two people off a row, the stay as the contract has it (toBooking), and the integer money columns into Cents — the booking repositories and PayoutRepository all map through it; stayMoneyData — what a quote writes, bounded by MIN_CHARGE/MAX_CHARGE, for create and the seed
       refund-failure.repository.ts  # refund_failures: the refunds a guest's bank sent back
       booking-expiry.queue.ts    # BullMQ, behind BookingJobs: the per-hold job, the two sweeps
       booking-expiry.processor.ts
@@ -719,7 +721,7 @@ platform, and the host is paid their share by a transfer once the stay has begun
   moment a window closes the next tier applies, as with a refund; nothing for a hold, for
   a stay nobody paid for such as the seed's, for one refunded in full already, or for one
   whose dispute was lost — that money went back through the bank, so nothing is refunded).
-  `BookingRepository.cancel` writes the `host_fees` row — one per
+  `BookingCancellationRepository.cancel` writes the `host_fees` row — one per
   stay, `booking_id` unique — in the cancellation's own transaction, `HOST_CANCELLATION_FEE`
   tells the host, and from the third fee within a year every admin hears
   (`HOST_CANCELLATIONS_THRESHOLD`, a notice of the same name) — a fee an admin waived is

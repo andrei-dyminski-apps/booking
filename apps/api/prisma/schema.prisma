@@ -113,8 +113,9 @@ model Booking {
   /// Where a dispute of the payment stands; `null` while nobody disputed it.
   disputeStatus DisputeStatus? @map("dispute_status")
 
-  /// Until when a cancellation holds the stay — `BookingRepository.whileCancelling`. A lease
-  /// rather than a lock held by a transaction, because the work under it calls Stripe.
+  /// Until when a cancellation holds the stay —
+  /// `BookingCancellationRepository.whileCancelling`. A lease rather than a lock held by a
+  /// transaction, because the work under it calls Stripe.
   cancellingUntil DateTime? @map("cancelling_until")
 
   /// Until when a settlement or the transfer of the host's payout holds the stay —

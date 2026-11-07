@@ -16,10 +16,11 @@ import type { AuthenticatedUser } from "../../auth/auth.types";
 import { CURRENCY, cents, subtractCents } from "../../payment/domain/money";
 import type { BookingPaymentHandler } from "./booking-payment.handler";
 import type { BookingService } from "./booking.service";
+import { createBookingTestbed, payForStay } from "./testing/booking.fakes";
+import { type FakeBookingCancellationRepository } from "./testing/booking-cancellation-repository.fakes";
 import {
   admin,
   AMOUNT,
-  createBookingTestbed,
   GUEST_ID,
   guest,
   input,
@@ -28,19 +29,19 @@ import {
   OTHER_LISTING_ID,
   owner,
   OWNER_ID,
-  payForStay,
   searchFor,
   stayAfter,
   stranger,
   STRANGER_ID,
   userWith,
-  type FakeBookingJobs,
-  type FakeBookingRepository,
-  type FakeNotificationService,
-  type FakePaymentGateway,
-  type FakeStayEventsListener,
-  type FakeWaitlistService,
-} from "./testing/booking.fakes";
+} from "./testing/booking-fixtures.fakes";
+import { type FakeBookingJobs } from "./testing/booking-jobs.fakes";
+import { type FakeBookingRepository } from "./testing/booking-repository.fakes";
+import { type FakeBookingTable } from "./testing/booking-table.fakes";
+import { type FakeNotificationService } from "./testing/notification-service.fakes";
+import { type FakePaymentGateway } from "./testing/payment-gateway.fakes";
+import { type FakeStayEventsListener } from "./testing/stay-events.fakes";
+import { type FakeWaitlistService } from "./testing/waitlist-service.fakes";
 
 /** A partial refund of a stay that costs `AMOUNT`, and what it leaves of the payment. */
 const PART = cents(10_000);
@@ -56,6 +57,8 @@ const REST = subtractCents(AMOUNT, PART);
 describe("BookingService", () => {
   let service: BookingService;
   let bookingRepository: FakeBookingRepository;
+  let bookingTable: FakeBookingTable;
+  let bookingCancellationRepository: FakeBookingCancellationRepository;
   let bookingJobs: FakeBookingJobs;
   let notificationService: FakeNotificationService;
   let waitlistService: FakeWaitlistService;
@@ -83,6 +86,8 @@ describe("BookingService", () => {
       service,
       paymentHandler,
       bookingRepository,
+      bookingTable,
+      bookingCancellationRepository,
       bookingJobs,
       notificationService,
       waitlistService,
@@ -135,7 +140,7 @@ describe("BookingService", () => {
     await expect(service.create(GUEST_ID, input)).rejects.toThrow(
       ForbiddenException,
     );
-    expect(bookingRepository.rows.size).toBe(0);
+    expect(bookingTable.rows.size).toBe(0);
     expect(bookingJobs.scheduled).toEqual([]);
     expect(notificationService.notices).toEqual([]);
   });
@@ -146,7 +151,7 @@ describe("BookingService", () => {
     await expect(
       service.create(STRANGER_ID, { ...input, from: "2026-09-04" }),
     ).rejects.toThrow(ConflictException);
-    expect(bookingRepository.rows.size).toBe(1);
+    expect(bookingTable.rows.size).toBe(1);
   });
 
   it("narrows the list to what the role of the caller may see", async () => {
@@ -366,10 +371,10 @@ describe("BookingService", () => {
     await expect(service.remove(id, stranger)).rejects.toThrow(
       NotFoundException,
     );
-    expect(bookingRepository.leases).toEqual([]);
+    expect(bookingCancellationRepository.leases).toEqual([]);
 
     await service.remove(id, guest);
-    expect(bookingRepository.leases).toEqual([id]);
+    expect(bookingCancellationRepository.leases).toEqual([id]);
   });
 
   it("tells the host about a hold the moment it is taken", async () => {
@@ -572,7 +577,7 @@ describe("BookingService", () => {
         { paymentId: "pi_1", amount: AMOUNT },
       ]);
       // 48 hours to 30 days before check-in: a quarter of the stay.
-      expect(bookingRepository.hostFees.get(id)).toMatchObject({
+      expect(bookingCancellationRepository.hostFees.get(id)).toMatchObject({
         hostId: OWNER_ID,
         amountCents: AMOUNT / 4,
       });
@@ -582,16 +587,16 @@ describe("BookingService", () => {
       const early = await paidStay(40);
       await service.remove(early, owner, why);
 
-      expect(bookingRepository.hostFees.get(early)?.amountCents).toBe(
-        AMOUNT / 10,
-      );
+      expect(
+        bookingCancellationRepository.hostFees.get(early)?.amountCents,
+      ).toBe(AMOUNT / 10);
 
       const late = await paidStay(1);
       await service.remove(late, owner, why);
 
-      expect(bookingRepository.hostFees.get(late)?.amountCents).toBe(
-        AMOUNT / 2,
-      );
+      expect(
+        bookingCancellationRepository.hostFees.get(late)?.amountCents,
+      ).toBe(AMOUNT / 2);
     });
 
     it("holds a host promoted to admin to a host's terms: a reason, and the fee", async () => {
@@ -604,7 +609,9 @@ describe("BookingService", () => {
 
       await service.remove(id, promoted, why);
 
-      expect(bookingRepository.hostFees.get(id)?.amountCents).toBe(AMOUNT / 10);
+      expect(bookingCancellationRepository.hostFees.get(id)?.amountCents).toBe(
+        AMOUNT / 10,
+      );
     });
 
     it("costs nothing for a hold nobody has paid for", async () => {
@@ -612,7 +619,7 @@ describe("BookingService", () => {
 
       await service.remove(id, owner, why);
 
-      expect(bookingRepository.hostFees.size).toBe(0);
+      expect(bookingCancellationRepository.hostFees.size).toBe(0);
       expect(
         notificationService.notices.map(({ content }) => content.type),
       ).not.toContain(NotificationType.HOST_CANCELLATION_FEE);
@@ -677,7 +684,7 @@ describe("BookingService", () => {
         await service.remove(await paidStay(days), owner, why);
       }
 
-      const [waived] = bookingRepository.hostFees.values();
+      const [waived] = bookingCancellationRepository.hostFees.values();
 
       if (waived !== undefined) waived.waived = true;
 
@@ -706,7 +713,7 @@ describe("BookingService", () => {
       await expect(service.remove(id, owner, why)).rejects.toThrow(
         ConflictException,
       );
-      expect(bookingRepository.hostFees.size).toBe(0);
+      expect(bookingCancellationRepository.hostFees.size).toBe(0);
     });
   });
 
@@ -766,7 +773,7 @@ describe("BookingService", () => {
         currency: "usd",
       });
       expect(second).toEqual(first);
-      expect(bookingRepository.rows.get(id)?.paymentId).toBe("pi_1");
+      expect(bookingTable.rows.get(id)?.paymentId).toBe("pi_1");
     });
 
     it("answers the guest alone, and hides the stay from a stranger", async () => {
@@ -795,7 +802,7 @@ describe("BookingService", () => {
 
       // Past its deadline but not released yet: the sweep is about to give the nights away.
       const lapsing = (await service.create(GUEST_ID, stayAfter(1))).id;
-      const found = bookingRepository.rows.get(lapsing);
+      const found = bookingTable.rows.get(lapsing);
 
       if (found === undefined) throw new Error("The hold was not stored");
 
@@ -814,7 +821,7 @@ describe("BookingService", () => {
       await expect(service.payment(id, guest)).rejects.toThrow(
         ConflictException,
       );
-      expect(bookingRepository.rows.get(id)?.paymentId).toBeNull();
+      expect(bookingTable.rows.get(id)?.paymentId).toBeNull();
 
       paymentGateway.openingElsewhere = false;
 
@@ -826,12 +833,12 @@ describe("BookingService", () => {
     it("withdraws a payment opened while the hold was being released", async () => {
       const id = await bookedByGuest();
       bookingRepository.lapsed.add(id);
-      bookingRepository.racing = () => service.releaseHold(id);
+      bookingTable.racing = () => service.releaseHold(id);
 
       await expect(service.payment(id, guest)).rejects.toThrow(
         ConflictException,
       );
-      expect(bookingRepository.rows.get(id)?.paymentId).toBeNull();
+      expect(bookingTable.rows.get(id)?.paymentId).toBeNull();
       expect(bookingJobs.withdrawals).toEqual(["pi_1"]);
     });
   });
@@ -845,7 +852,7 @@ describe("BookingService", () => {
       expect([...paymentGateway.refunds.entries()]).toEqual([
         [`booking-${id}-cancellation`, { paymentId: "pi_1", amount: AMOUNT }],
       ]);
-      expect(bookingRepository.rows.get(id)).toMatchObject({
+      expect(bookingTable.rows.get(id)).toMatchObject({
         booking: {
           status: BookingStatus.CANCELLED,
           refundedAmountCents: AMOUNT,
@@ -864,7 +871,7 @@ describe("BookingService", () => {
       await service.remove(id, guest);
 
       expect(paymentGateway.refunds.size).toBe(1);
-      expect(bookingRepository.rows.get(id)).toMatchObject({
+      expect(bookingTable.rows.get(id)).toMatchObject({
         booking: { refundedAmountCents: PART, refundOwedCents: null },
       });
     });
@@ -875,7 +882,7 @@ describe("BookingService", () => {
       await service.remove(id, guest);
 
       expect(paymentGateway.refunds.size).toBe(0);
-      expect(bookingRepository.rows.get(id)).toMatchObject({
+      expect(bookingTable.rows.get(id)).toMatchObject({
         booking: { status: BookingStatus.CANCELLED, refundedAmountCents: null },
       });
     });
@@ -892,7 +899,7 @@ describe("BookingService", () => {
       expect([...paymentGateway.refunds.values()]).toEqual([
         { paymentId: "pi_1", amount: AMOUNT / 2 },
       ]);
-      expect(bookingRepository.rows.get(id)).toMatchObject({
+      expect(bookingTable.rows.get(id)).toMatchObject({
         booking: {
           cancellationPolicy: "LIMITED",
           status: BookingStatus.CANCELLED,
@@ -939,7 +946,7 @@ describe("BookingService", () => {
 
     it("says nothing about money for a stay refunded in full before it was cancelled", async () => {
       const paid = await paidStay(30);
-      const found = bookingRepository.rows.get(paid);
+      const found = bookingTable.rows.get(paid);
 
       if (found === undefined) throw new Error("The stay was not stored");
 
@@ -975,7 +982,7 @@ describe("BookingService", () => {
       expect([...paymentGateway.refunds.values()]).toEqual([
         { paymentId: "pi_1", amount: REST },
       ]);
-      expect(bookingRepository.rows.get(id)).toMatchObject({
+      expect(bookingTable.rows.get(id)).toMatchObject({
         booking: {
           status: BookingStatus.CANCELLED,
           refundedAmountCents: AMOUNT,
@@ -997,7 +1004,7 @@ describe("BookingService", () => {
         { paymentId: "pi_1", amount: REST },
       ]);
       // The row counts its own refund only: the dashboard's is its webhook's to tell.
-      expect(bookingRepository.rows.get(id)).toMatchObject({
+      expect(bookingTable.rows.get(id)).toMatchObject({
         booking: { status: BookingStatus.CANCELLED, refundedAmountCents: REST },
       });
     });
@@ -1015,14 +1022,14 @@ describe("BookingService", () => {
 
       await service.remove(id, guest);
 
-      expect(bookingRepository.rows.get(id)).toMatchObject({
+      expect(bookingTable.rows.get(id)).toMatchObject({
         booking: { status: BookingStatus.CANCELLED, refundedAmountCents: PART },
       });
     });
 
     it("refuses to cancel a stay whose payment is disputed until the bank decides", async () => {
       const id = await paidStay(30);
-      const found = bookingRepository.rows.get(id);
+      const found = bookingTable.rows.get(id);
 
       if (found !== undefined) found.booking.dispute = "OPEN";
 
@@ -1035,7 +1042,7 @@ describe("BookingService", () => {
 
     it("cancels a stay whose dispute was lost without refunding it again", async () => {
       const id = await paidStay(30);
-      const found = bookingRepository.rows.get(id);
+      const found = bookingTable.rows.get(id);
 
       if (found !== undefined) found.booking.dispute = "LOST";
 
@@ -1050,7 +1057,7 @@ describe("BookingService", () => {
 
       await service.remove(id, admin);
 
-      expect(bookingRepository.rows.get(id)?.booking.refundedAmountCents).toBe(
+      expect(bookingTable.rows.get(id)?.booking.refundedAmountCents).toBe(
         AMOUNT,
       );
     });
@@ -1063,7 +1070,7 @@ describe("BookingService", () => {
       await service.remove(id, { ...guest, role: Role.ADMIN });
 
       expect(paymentGateway.refunds.size).toBe(0);
-      expect(bookingRepository.rows.get(id)?.booking).toMatchObject({
+      expect(bookingTable.rows.get(id)?.booking).toMatchObject({
         status: BookingStatus.CANCELLED,
         cancelledBy: "GUEST",
       });
@@ -1078,7 +1085,7 @@ describe("BookingService", () => {
       await expect(service.remove(id, admin)).rejects.toBeInstanceOf(
         ConflictException,
       );
-      expect(bookingRepository.rows.get(id)?.booking.status).toBe(
+      expect(bookingTable.rows.get(id)?.booking.status).toBe(
         BookingStatus.CONFIRMED,
       );
       expect(paymentGateway.refunds.size).toBe(0);
@@ -1105,15 +1112,15 @@ describe("BookingService", () => {
     it("leaves a hold paid for mid-cancellation confirmed, and asks for another try", async () => {
       const id = await bookedByGuest();
       await service.payment(id, guest);
-      bookingRepository.racing = async (racedId) => {
-        bookingRepository.racing = null;
+      bookingTable.racing = async (racedId) => {
+        bookingTable.racing = null;
         await bookingRepository.confirmPayment(racedId, "pi_1", null, AMOUNT);
       };
 
       await expect(service.remove(id, guest)).rejects.toThrow(
         ConflictException,
       );
-      expect(bookingRepository.rows.get(id)?.booking.status).toBe(
+      expect(bookingTable.rows.get(id)?.booking.status).toBe(
         BookingStatus.CONFIRMED,
       );
       expect(bookingJobs.withdrawals).toEqual([]);
@@ -1121,8 +1128,8 @@ describe("BookingService", () => {
 
     it("withdraws a payment a payment page opened while the hold was being cancelled", async () => {
       const id = await bookedByGuest();
-      bookingRepository.racing = async () => {
-        bookingRepository.racing = null;
+      bookingTable.racing = async () => {
+        bookingTable.racing = null;
         await service.payment(id, guest);
       };
 

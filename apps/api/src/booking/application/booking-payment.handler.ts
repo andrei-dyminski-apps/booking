@@ -26,6 +26,8 @@ import {
 } from "../domain/booking.errors";
 import type { ConfirmedStay, RefundTarget } from "../domain/booking.types";
 import { BookingRepository } from "../infrastructure/booking.repository";
+import { BookingCancellationRepository } from "../infrastructure/booking-cancellation.repository";
+import { BookingRefundRepository } from "../infrastructure/booking-refund.repository";
 import { RefundFailureRepository } from "../infrastructure/refund-failure.repository";
 import { StayEvents } from "./stay-events";
 import { notifyBothSides, notifyBothSidesOfCancellation } from "./stay-notices";
@@ -39,6 +41,8 @@ export class BookingPaymentHandler
 
   constructor(
     private readonly bookingRepository: BookingRepository,
+    private readonly bookingCancellationRepository: BookingCancellationRepository,
+    private readonly bookingRefundRepository: BookingRefundRepository,
     private readonly refundFailureRepository: RefundFailureRepository,
     private readonly paymentGateway: PaymentGateway,
     private readonly notificationService: NotificationService,
@@ -103,7 +107,7 @@ export class BookingPaymentHandler
       return;
     }
 
-    await this.bookingRepository.whileCancelling(bookingId, () =>
+    await this.bookingCancellationRepository.whileCancelling(bookingId, () =>
       this.confirmOrRefund(event, bookingId),
     );
   }
@@ -126,7 +130,8 @@ export class BookingPaymentHandler
       return;
     }
 
-    const target = await this.bookingRepository.findPaymentTarget(bookingId);
+    const target =
+      await this.bookingRefundRepository.findPaymentTarget(bookingId);
 
     // A booking this database does not hold: another database's on a shared test account
     // that took this site's name, or a local one wiped since. There is no account deletion
@@ -170,7 +175,7 @@ export class BookingPaymentHandler
     // than quoted goes back whole, but the row records the most it could have charged.
     if (
       ownPayment &&
-      (await this.bookingRepository.recordRefund(
+      (await this.bookingRefundRepository.recordRefund(
         bookingId,
         minCents(event.amount, target.amountCents),
       ))
@@ -196,7 +201,8 @@ export class BookingPaymentHandler
     event: Extract<PaymentEvent, { kind: "refunded" }>,
   ): Promise<void> {
     const { amountRefunded, paymentId } = event;
-    const found = await this.bookingRepository.findRefundTarget(paymentId);
+    const found =
+      await this.bookingRefundRepository.findRefundTarget(paymentId);
 
     if (found !== null && awaitsItsPayment(found)) {
       throw new PaymentNotConfirmedYetError(paymentId);
@@ -205,35 +211,39 @@ export class BookingPaymentHandler
     // A late payment or `stripe trigger`'s: no stay was confirmed with it.
     if (found === null || !found.paid) return;
 
-    await this.bookingRepository.whileCancelling(found.bookingId, async () => {
-      const stay = await this.bookingRepository.findRefundTarget(paymentId);
+    await this.bookingCancellationRepository.whileCancelling(
+      found.bookingId,
+      async () => {
+        const stay =
+          await this.bookingRefundRepository.findRefundTarget(paymentId);
 
-      if (stay === null) return;
+        if (stay === null) return;
 
-      const before = stay.refundedAmountCents ?? NO_CENTS;
+        const before = stay.refundedAmountCents ?? NO_CENTS;
 
-      if (await this.raiseRefundTotal(event, stay)) {
-        await this.notificationService.notify(stay.hold.guestId, {
-          type: NotificationType.PAYMENT_REFUNDED,
-          data: {
-            ...stay.hold.stay,
-            amountCents: subtractCents(amountRefunded, before),
-            currency: stay.currency,
-          },
-        });
-      }
+        if (await this.raiseRefundTotal(event, stay)) {
+          await this.notificationService.notify(stay.hold.guestId, {
+            type: NotificationType.PAYMENT_REFUNDED,
+            data: {
+              ...stay.hold.stay,
+              amountCents: subtractCents(amountRefunded, before),
+              currency: stay.currency,
+            },
+          });
+        }
 
-      if (
-        amountRefunded >= stay.amountCents &&
-        stay.status === BookingStatus.CONFIRMED &&
-        notBegunYet(stay)
-      ) {
-        await this.cancelStay(
-          stay,
-          `Booking ${stay.bookingId} was refunded in full and is cancelled`,
-        );
-      }
-    });
+        if (
+          amountRefunded >= stay.amountCents &&
+          stay.status === BookingStatus.CONFIRMED &&
+          notBegunYet(stay)
+        ) {
+          await this.cancelStay(
+            stay,
+            `Booking ${stay.bookingId} was refunded in full and is cancelled`,
+          );
+        }
+      },
+    );
 
     await this.stayEvents.refunded(found.bookingId);
   }
@@ -242,7 +252,7 @@ export class BookingPaymentHandler
   private async settleLostDispute(
     event: Extract<PaymentEvent, { kind: "disputeClosed" }>,
   ): Promise<void> {
-    const found = await this.bookingRepository.findRefundTarget(
+    const found = await this.bookingRefundRepository.findRefundTarget(
       event.paymentId,
     );
 
@@ -252,22 +262,25 @@ export class BookingPaymentHandler
 
     if (found === null || !found.paid) return;
 
-    await this.bookingRepository.whileCancelling(found.bookingId, async () => {
-      const stay = await this.bookingRepository.findRefundTarget(
-        event.paymentId,
-      );
-
-      if (
-        stay !== null &&
-        stay.status === BookingStatus.CONFIRMED &&
-        notBegunYet(stay)
-      ) {
-        await this.cancelStay(
-          stay,
-          `Booking ${stay.bookingId} lost its payment to a dispute and is cancelled`,
+    await this.bookingCancellationRepository.whileCancelling(
+      found.bookingId,
+      async () => {
+        const stay = await this.bookingRefundRepository.findRefundTarget(
+          event.paymentId,
         );
-      }
-    });
+
+        if (
+          stay !== null &&
+          stay.status === BookingStatus.CONFIRMED &&
+          notBegunYet(stay)
+        ) {
+          await this.cancelStay(
+            stay,
+            `Booking ${stay.bookingId} lost its payment to a dispute and is cancelled`,
+          );
+        }
+      },
+    );
   }
 
   /**
@@ -278,7 +291,9 @@ export class BookingPaymentHandler
   private async reportFailedRefund(
     event: Extract<PaymentEvent, { kind: "refundFailed" }>,
   ): Promise<void> {
-    const stay = await this.bookingRepository.findRefundTarget(event.paymentId);
+    const stay = await this.bookingRefundRepository.findRefundTarget(
+      event.paymentId,
+    );
     // The refund's currency is the stay's; a payment no stay names any more is one this
     // site charged, and every charge is in `CURRENCY`.
     const failure = {
@@ -315,7 +330,7 @@ export class BookingPaymentHandler
     if (amountRefunded <= (stay.refundedAmountCents ?? NO_CENTS)) return false;
 
     if (
-      await this.bookingRepository.raiseRefunded(
+      await this.bookingRefundRepository.raiseRefunded(
         stay.bookingId,
         stay.refundedAmountCents,
         amountRefunded,
@@ -324,7 +339,7 @@ export class BookingPaymentHandler
       return true;
     }
 
-    const now = await this.bookingRepository.findRefundTarget(paymentId);
+    const now = await this.bookingRefundRepository.findRefundTarget(paymentId);
 
     if ((now?.refundedAmountCents ?? NO_CENTS) >= amountRefunded) return false;
 
@@ -335,7 +350,7 @@ export class BookingPaymentHandler
 
   private async cancelStay(stay: RefundTarget, why: string): Promise<void> {
     if (
-      (await this.bookingRepository.cancel(
+      (await this.bookingCancellationRepository.cancel(
         stay.bookingId,
         BookingStatus.CONFIRMED,
         // The money went back already: nothing is owed.

@@ -38,6 +38,7 @@ import { readCursor, type Page } from "../../common/paging";
 import { NotificationService } from "../../notification/notification.service";
 import { WaitlistService } from "../../waitlist/waitlist.service";
 import { BookingRepository } from "../infrastructure/booking.repository";
+import { BookingCancellationRepository } from "../infrastructure/booking-cancellation.repository";
 import {
   CancellationInProgressError,
   DatesUnavailableError,
@@ -86,6 +87,7 @@ export class BookingService {
 
   constructor(
     private readonly bookingRepository: BookingRepository,
+    private readonly bookingCancellationRepository: BookingCancellationRepository,
     private readonly paymentGateway: PaymentGateway,
     private readonly bookingJobs: BookingJobs,
     private readonly notificationService: NotificationService,
@@ -363,7 +365,7 @@ export class BookingService {
       throw new BadRequestException(HOST_REASON_REQUIRED);
     }
     const { found, wasHold, cancelled, refundOwedCents, refundCents } =
-      await this.bookingRepository
+      await this.bookingCancellationRepository
         .whileCancelling(id, () =>
           this.cancelReadable(id, user, canceller, reason),
         )
@@ -463,7 +465,7 @@ export class BookingService {
       reason,
       feeCents: fee > 0 ? fee : null,
     };
-    const cancelled = await this.bookingRepository.cancel(
+    const cancelled = await this.bookingCancellationRepository.cancel(
       id,
       booking.status,
       refundOwedCents,
@@ -611,7 +613,7 @@ export class BookingService {
     let record: { name: string; cancellations: number } | null;
 
     try {
-      record = await this.bookingRepository.hostCancellations(
+      record = await this.bookingCancellationRepository.hostCancellations(
         hostId,
         new Date(),
       );
