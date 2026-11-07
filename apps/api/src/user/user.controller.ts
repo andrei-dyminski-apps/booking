@@ -84,7 +84,7 @@ export class UserController {
   // `@Roles` declares on the class rather than joining it.
   @ApiForbiddenResponse({
     description:
-      "Requires the role ADMIN; the account is the caller's own, or the caller has been blocked or demoted since the token was issued",
+      "Requires the role ADMIN; the account is an admin's, which cannot be blocked, or the caller has been blocked or demoted since the token was issued",
     type: ApiErrorDto,
   })
   update(

@@ -178,34 +178,6 @@ describe("UserController (e2e)", () => {
     await admin.get("/users?cursor=not-a-cursor").expect(400);
   });
 
-  it("changes a role, which the account carries from its next sign-in", async () => {
-    const guestId = await idOf(credentialsFor.USER.email);
-
-    const promoted = await admin
-      .patch(`/users/${guestId}`)
-      .send({ role: Role.ADMIN })
-      .expect(200);
-
-    expect(managedUserSchema.parse(promoted.body).role).toBe(Role.ADMIN);
-
-    // The access token in the agent still says USER: `JwtStrategy` reads no database.
-    await guest.get("/users").expect(403);
-    await guest.post("/auth/login").send(credentialsFor.USER).expect(200);
-    await guest.get("/users").expect(200);
-    await guest.get("/listings/mine").expect(403);
-
-    const demoted = await admin
-      .patch(`/users/${guestId}`)
-      .send({ role: Role.USER })
-      .expect(200);
-
-    expect(managedUserSchema.parse(demoted.body).role).toBe(Role.USER);
-
-    await guest.post("/auth/login").send(credentialsFor.USER).expect(200);
-    await guest.get("/listings/mine").expect(200);
-    await guest.get("/users").expect(403);
-  });
-
   it("blocks an account: no refresh, no new sign-in, and `/auth/me` reads it as signed out", async () => {
     const guestId = await idOf(credentialsFor.USER.email);
 
@@ -265,24 +237,32 @@ describe("UserController (e2e)", () => {
       .expect(200);
   });
 
-  it("refuses a change from an admin who has been demoted since signing in", async () => {
+  it("refuses a change from an admin who has been demoted or blocked since signing in", async () => {
     const adminId = await idOf(credentialsFor.ADMIN.email);
     const guestId = await idOf(credentialsFor.USER.email);
+    const prismaService = app.get(PrismaService);
 
     // The token in the agent still says ADMIN, and the guard believes it; the row does not.
-    await app
-      .get(PrismaService)
-      .user.update({ where: { id: adminId }, data: { role: Role.USER } });
+    for (const data of [{ role: Role.USER }, { blockedAt: new Date() }]) {
+      await prismaService.user.update({
+        where: { id: adminId },
+        data: { role: Role.ADMIN, blockedAt: null, ...data },
+      });
 
-    await admin.patch(`/users/${guestId}`).send({ blocked: true }).expect(403);
-    expect(
-      await app
-        .get(PrismaService)
-        .user.findUniqueOrThrow({ where: { id: guestId } }),
-    ).toMatchObject({ blockedAt: null });
+      await admin
+        .patch(`/users/${guestId}`)
+        .send({ blocked: true })
+        .expect(403);
+      expect(
+        await prismaService.user.findUniqueOrThrow({ where: { id: guestId } }),
+      ).toMatchObject({ blockedAt: null });
+      expect(
+        await prismaService.refreshToken.count({ where: { userId: guestId } }),
+      ).toBeGreaterThan(0);
+    }
   });
 
-  it("lets only one of two admins blocking each other at once through", async () => {
+  it("refuses to block an admin's account, the caller's own included, a role change, an empty change and an unknown id", async () => {
     const second = await signInAs(app, Role.ADMIN, {
       name: "E2E Second Admin",
       email: "e2e-admin-2@example.com",
@@ -291,36 +271,26 @@ describe("UserController (e2e)", () => {
     const adminId = await idOf(credentialsFor.ADMIN.email);
     const secondId = await idOf("e2e-admin-2@example.com");
 
-    const statuses = await Promise.all([
-      admin.patch(`/users/${secondId}`).send({ blocked: true }),
-      second.patch(`/users/${adminId}`).send({ blocked: true }),
-    ]).then((responses) => responses.map((response) => response.status));
-
-    expect(statuses.sort()).toEqual([200, 403]);
+    await admin.patch(`/users/${adminId}`).send({ blocked: true }).expect(403);
+    await admin.patch(`/users/${secondId}`).send({ blocked: true }).expect(403);
+    await second.patch(`/users/${adminId}`).send({ blocked: true }).expect(403);
     expect(
       await app
         .get(PrismaService)
         .user.count({ where: { role: Role.ADMIN, blockedAt: null } }),
-    ).toBe(1);
-  });
-
-  it("refuses an admin's change to their own account, an empty change and an unknown id", async () => {
-    const adminId = await idOf(credentialsFor.ADMIN.email);
-
-    await admin
-      .patch(`/users/${adminId}`)
-      .send({ role: Role.USER })
-      .expect(403);
-    await admin.patch(`/users/${adminId}`).send({ blocked: true }).expect(403);
-    // The same row to Postgres, and a different string to a naive comparison.
-    await admin
-      .patch(`/users/${adminId.toUpperCase()}`)
-      .send({ blocked: true })
-      .expect(403);
+    ).toBe(2);
 
     const guestId = await idOf(credentialsFor.USER.email);
 
     await admin.patch(`/users/${guestId}`).send({}).expect(400);
+    await admin
+      .patch(`/users/${guestId}`)
+      .send({ role: Role.ADMIN })
+      .expect(400);
+    await admin
+      .patch(`/users/${guestId}`)
+      .send({ blocked: false, role: Role.ADMIN })
+      .expect(400);
     await admin
       .patch("/users/0b6f7f6e-2f4c-4a52-9a5e-8f1f6d2c3b4a")
       .send({ blocked: true })

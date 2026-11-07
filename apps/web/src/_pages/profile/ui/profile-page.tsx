@@ -16,8 +16,7 @@ import { readReviewSummaryOf } from "../api/read-review-summary-of";
 export const ProfilePage = async () => {
   const user = await requireUser(ROUTES.profile);
   const reviews = await readReviewSummaryOf(user.id);
-  // What hosts said about this account as a guest — any account that has stayed somewhere,
-  // an admin's included, since the reviews outlive a change of role.
+  // What hosts said about this account as a guest — any account that has stayed somewhere.
   const reviewed = reviews !== null && reviews.count > 0;
 
   return (

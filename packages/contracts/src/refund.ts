@@ -177,10 +177,11 @@ export function refundQuote(
 
 /**
  * Who a viewer cancels a stay as, or `null` for somebody who may not. The stay's guest
- * cancels as its guest and its host as its host whatever their role, so an account promoted to
- * admin neither refunds itself past its stay's policy nor takes a stay from its guest without a
- * reason and a fee: the role is for somebody else's stay, the way a person does not settle a
- * matter they are a party to. The API cancels by it, and the host's dialog is worded by it.
+ * cancels as its guest and its host as its host whatever their role, so an account made
+ * admin outside the API after booking or listing neither refunds itself past its stay's
+ * policy nor takes a stay from its guest without a reason and a fee: the role is for
+ * somebody else's stay, the way a person does not settle a matter they are a party to. The
+ * API cancels by it, and the host's dialog is worded by it.
  */
 export function cancellerOf(
   stay: Pick<Booking, "guestId" | "hostId">,

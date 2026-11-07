@@ -767,6 +767,7 @@ describe("The money columns of a paid stay (e2e)", () => {
     it("refuses a waiver from an account gone, or no longer an active admin", async () => {
       const feeId = await owes(FEE);
       const hostFeeRepository = app.get(HostFeeRepository);
+      // Both written the way the API cannot write them: a role, a block on an admin.
       const demoted = await prismaService.user.create({
         data: {
           name: "Former Admin",

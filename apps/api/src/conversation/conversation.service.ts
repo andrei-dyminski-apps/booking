@@ -241,8 +241,7 @@ export class ConversationService {
    * way to learn that its id exists — the rule `BookingService.getReadable` follows.
    *
    * Decided by the account rather than the role. The two people of a thread are fixed by
-   * its rows — the guest who wrote, and whoever owns the listing — and a role that changed
-   * since does not make either of them somebody else.
+   * its rows — the guest who wrote, and whoever owns the listing.
    */
   private async sideOf(
     id: string,

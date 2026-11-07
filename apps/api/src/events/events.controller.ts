@@ -31,8 +31,8 @@ const HEARTBEAT_MS = 25_000;
  * sooner — see `RealtimeService.closing`.
  *
  * The guard checks the access token when the stream opens and never again, so without a
- * bound a stream would outlive the token it was opened with — and with it a block or a
- * role change, which the API otherwise enforces within `JWT_ACCESS_TTL`. Closing it is what
+ * bound a stream would outlive the token it was opened with — and with it a block, which
+ * the API otherwise enforces within `JWT_ACCESS_TTL`. Closing it is what
  * makes the reconnect pass the guard again: a live session reconnects unnoticed, an expired
  * token is a `401` the frontend answers with one refresh, and a blocked account is turned
  * away. Each reconnect starts with a `sync`, so nothing is lost across it.

@@ -85,12 +85,12 @@ export class HostFeeRepository {
    * them, and a waiver landing between the two would leave it keeping back more than is owed.
    *
    * The admin's row is read under `FOR KEY SHARE` first, before the fee — the caller is
-   * settled before anything about the fee, so a missing id tells a former admin nothing:
-   * the role in the token may be stale, and `UserRepository.update` locks the rows it
-   * changes `FOR UPDATE`, so a demotion or a block either commits before this read or waits
-   * for the waiver. The lock also keeps the row from being deleted before the waiver names
-   * it, and leaves the account's other writes alone — a payout account's update takes no
-   * key lock.
+   * settled before anything about the fee, so a missing id tells a session that outlived
+   * its account nothing. The role in the token is not trusted here: the API changes no
+   * role and blocks no admin, but a write to `users` outside it does both, and the token
+   * keeps its claim until the next refresh. So the row has to be an active admin's as well.
+   * The lock keeps the row from being deleted before the waiver names it, and leaves the
+   * account's other writes alone — a payout account's update takes no key lock.
    */
   async waive(id: string, reason: string, adminId: string): Promise<boolean> {
     return this.prismaService.$transaction(async (tx) => {

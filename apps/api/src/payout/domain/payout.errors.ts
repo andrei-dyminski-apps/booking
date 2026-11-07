@@ -21,8 +21,8 @@ export class WaivingAccountGoneError extends Error {
 
 /**
  * What `HostFeeRepository.waive` throws when the account behind the token is no longer an
- * active admin — demoted or blocked since the token was issued — read under a lock the
- * demotion takes too, like `CallerNotAdminError` of `UserRepository.update`.
+ * active admin: its role or its block was written in the database after the token was
+ * issued, and `JwtStrategy` reads no database, so the token still claims `ADMIN`.
  */
 export class WaivingAccountNotAdminError extends Error {
   constructor(adminId: string) {

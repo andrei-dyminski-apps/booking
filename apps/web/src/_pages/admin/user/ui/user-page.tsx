@@ -22,12 +22,11 @@ import { ROUTES } from "#shared/config";
 import { countOf, filtersHref, requireId } from "#shared/lib";
 import { BackLink, ButtonLink } from "#shared/ui";
 import { BlockButton } from "./block-button";
-import { RoleForm } from "./role-form";
 import { WaiveFeeButton } from "./waive-fee-button";
 
 /**
- * One account: what it is, the two things an admin may change about it, and the way to
- * what it has done on the site. The stays and the listings are not listed here — each is
+ * One account: what it is, whether it may sign in, and the way to what it has done on the
+ * site. The stays and the listings are not listed here — each is
  * a link to the list that already pages and filters them, narrowed to this account by the
  * filter that list already takes (`guestId` on the stays, `ownerId` on the listings). What
  * the account owes as a host for cancelling paid stays is, with a waiver per fee.
@@ -66,8 +65,12 @@ export const UserPage = async ({ params }: PageProps<"/admin/users/[id]">) => {
         </div>
       </div>
 
-      <AccessCard user={user} self={self} />
-      <ActivityCard user={user} />
+      {user.role === Role.USER && (
+        <>
+          <AccessCard user={user} />
+          <ActivityCard user={user} />
+        </>
+      )}
       {/* Streamed after the account: its access and activity do not wait for the fees. */}
       <Suspense fallback={null}>
         <HostFees
@@ -81,51 +84,36 @@ export const UserPage = async ({ params }: PageProps<"/admin/users/[id]">) => {
 };
 
 /**
- * The role and the block. The admin's own account is drawn without them — the API refuses
- * a change to the caller's own row on every request, and controls that could only reach
- * that `403` are not worth putting on the screen.
+ * The block. Only a user's account is drawn with it — the API refuses to block an admin's,
+ * the viewer's own included, and a control that could only reach that `403` is not worth
+ * putting on the screen.
  */
-const AccessCard = ({
-  user,
-  self,
-}: {
-  user: ManagedUserDetail;
-  self: boolean;
-}) => (
+const AccessCard = ({ user }: { user: ManagedUserDetail }) => (
   <Card>
     <CardHeader>
       <CardTitle>Access</CardTitle>
       <CardDescription>
-        {self
-          ? "This is your account. Another admin changes its role or blocks it."
-          : "A new role takes effect when the account's session next refreshes. A block ends its sessions and stops any new sign-in; a page already open loses access when its short-lived token runs out."}
+        A block ends its sessions and stops any new sign-in; a page already open
+        loses access when its short-lived token runs out.
       </CardDescription>
     </CardHeader>
 
-    {!self && (
-      <CardFooter className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <RoleForm userId={user.id} role={user.role} name={user.name} />
-        <BlockButton
-          userId={user.id}
-          name={user.name}
-          blocked={user.blockedAt !== null}
-        />
-      </CardFooter>
-    )}
+    <CardFooter className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-start sm:justify-end">
+      <BlockButton
+        userId={user.id}
+        name={user.name}
+        blocked={user.blockedAt !== null}
+      />
+    </CardFooter>
   </Card>
 );
 
 /**
- * What the account has behind it: the stays it took and the listings it offers. A user
- * may do both, so a user gets both rows, an empty one included; an admin gets a row only
- * while it has something in it — a role changed later leaves the stays and the listings
- * where they were. With neither row there is no card.
+ * What the account has behind it: the stays it took and the listings it offers, both rows
+ * drawn, an empty one included. Only a user's account has the card — an admin neither books
+ * nor lists, and the API grants no role, so an admin's would always be empty.
  */
 const ActivityCard = ({ user }: { user: ManagedUserDetail }) => {
-  const stays = user.role === Role.USER || user.bookingCount > 0;
-  const listings = user.role === Role.USER || user.listingCount > 0;
-  if (!stays && !listings) return null;
-
   return (
     <Card>
       <CardHeader>
@@ -133,32 +121,28 @@ const ActivityCard = ({ user }: { user: ManagedUserDetail }) => {
       </CardHeader>
       <CardContent>
         <ul role="list" className="flex flex-col divide-y">
-          {stays && (
-            <ActivityRow
-              icon={<CalendarCheckIcon className="size-4" />}
-              label={countOf(user.bookingCount, "stay taken", "stays taken")}
-              href={
-                user.bookingCount > 0
-                  ? filtersHref(ROUTES.bookings, { guestId: user.id })
-                  : null
-              }
-            />
-          )}
-          {listings && (
-            <ActivityRow
-              icon={<WarehouseIcon className="size-4" />}
-              label={countOf(
-                user.listingCount,
-                "listing on offer",
-                "listings on offer",
-              )}
-              href={
-                user.listingCount > 0
-                  ? filtersHref(ROUTES.admin, { ownerId: user.id })
-                  : null
-              }
-            />
-          )}
+          <ActivityRow
+            icon={<CalendarCheckIcon className="size-4" />}
+            label={countOf(user.bookingCount, "stay taken", "stays taken")}
+            href={
+              user.bookingCount > 0
+                ? filtersHref(ROUTES.bookings, { guestId: user.id })
+                : null
+            }
+          />
+          <ActivityRow
+            icon={<WarehouseIcon className="size-4" />}
+            label={countOf(
+              user.listingCount,
+              "listing on offer",
+              "listings on offer",
+            )}
+            href={
+              user.listingCount > 0
+                ? filtersHref(ROUTES.admin, { ownerId: user.id })
+                : null
+            }
+          />
         </ul>
       </CardContent>
     </Card>

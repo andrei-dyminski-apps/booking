@@ -22,7 +22,7 @@ Terms are grouped by topic and alphabetical inside a group. `code` names are rea
 
 **Admin** — an account with the role `ADMIN`. Manages accounts, removes reviews, cancels any
 stay (with a full refund) and acts on whatever the money flows gave up on. An admin is not a side
-of any conversation and cannot change their own role or block themselves.
+of any conversation, and an admin account cannot be blocked.
 
 **Catalogue** — the public, filterable list of listings that are on offer. Its filters live in the
 URL, so a filtered catalogue is a link somebody can send.
@@ -60,8 +60,8 @@ review of each kind per stay.
 - Nothing on a review names its author: the kind says which side wrote it.
 - A stay opens for review once it is `CONFIRMED` and its check-out day has come.
 
-**Role** — `USER` or `ADMIN`; nothing else. Registration always creates a `USER`; only an admin
-promotes. A change of role takes effect at the holder's next token refresh.
+**Role** — `USER` or `ADMIN`; nothing else. Registration always creates a `USER`, and the API
+changes no role: an admin account is made outside it (the seed writes the demo admin).
 
 **Side** — which half of a relationship the caller is on. For stays, `GUEST` (their trips) or
 `HOST` (stays taken against their listings). For conversations, the same two, decided by the
@@ -143,9 +143,9 @@ ceiling can still be paid for.
 ## Cancellations and fees
 
 **Canceller** — who cancelled a stay: `GUEST`, `HOST` or `ADMIN`. The relation comes before the
-role: a guest or host who was later promoted to admin still cancels their own stay as its guest or
-host; `ADMIN` is the role acting on somebody else's stay. Everybody who may read a stay may cancel
-it, each on their own terms.
+role: a guest or host made admin outside the API after booking or listing still cancels their own
+stay as its guest or host; `ADMIN` is the role acting on somebody else's stay. Everybody who may
+read a stay may cancel it, each on their own terms.
 
 **Cancellation policy** — the refund schedule a host picks for a listing. A booking copies the
 policy's _name_ when the hold is taken, so a later change to the listing restates no stay already
@@ -460,22 +460,22 @@ lapsed hold is still `PENDING_PAYMENT` even though its slot is already free.
 
 ### Limits and constants
 
-| Constant                         | Value       | Where it matters                               |
-| -------------------------------- | ----------- | ---------------------------------------------- |
-| Hold length                      | 15 minutes  | `expiresAt` of a `PENDING_PAYMENT` booking     |
-| `GRACE_PERIOD_HOURS`             | 24          | full refund within a day of booking            |
-| `GRACE_MIN_LEAD_HOURS`           | 7 days      | grace applies only if check-in is further away |
-| `PLATFORM_FEE_BPS`               | 1 500 (15%) | taken from the host's share                    |
-| `PAYOUT_DELAY_HOURS`             | 24          | after midnight UTC of check-in                 |
-| `HOST_CANCELLATIONS_THRESHOLD`   | 3           | counted cancellations within a year            |
-| `HOST_CANCELLATIONS_WINDOW_DAYS` | 365         | the window those are counted in                |
-| `MAX_WAITLIST_ENTRIES`           | 20          | per account                                    |
-| `MIN_RATING` / `MAX_RATING`      | 1 / 5       | review stars                                   |
-| `MAX_EVENT_ATTEMPTS`             | 24          | before a webhook event is set aside            |
-| `MAX_REFUND_ATTEMPTS`            | 30          | before an owed refund is set aside             |
-| `MAX_PAYOUT_ATTEMPTS`            | 24          | before a payout is set aside                   |
-| `EVENT_RETENTION_DAYS`           | 90          | processed events are pruned after this         |
-| Access / refresh token lifetime  | 15 min / 7 days | how long each half of a session lasts      |
+| Constant                         | Value           | Where it matters                               |
+| -------------------------------- | --------------- | ---------------------------------------------- |
+| Hold length                      | 15 minutes      | `expiresAt` of a `PENDING_PAYMENT` booking     |
+| `GRACE_PERIOD_HOURS`             | 24              | full refund within a day of booking            |
+| `GRACE_MIN_LEAD_HOURS`           | 7 days          | grace applies only if check-in is further away |
+| `PLATFORM_FEE_BPS`               | 1 500 (15%)     | taken from the host's share                    |
+| `PAYOUT_DELAY_HOURS`             | 24              | after midnight UTC of check-in                 |
+| `HOST_CANCELLATIONS_THRESHOLD`   | 3               | counted cancellations within a year            |
+| `HOST_CANCELLATIONS_WINDOW_DAYS` | 365             | the window those are counted in                |
+| `MAX_WAITLIST_ENTRIES`           | 20              | per account                                    |
+| `MIN_RATING` / `MAX_RATING`      | 1 / 5           | review stars                                   |
+| `MAX_EVENT_ATTEMPTS`             | 24              | before a webhook event is set aside            |
+| `MAX_REFUND_ATTEMPTS`            | 30              | before an owed refund is set aside             |
+| `MAX_PAYOUT_ATTEMPTS`            | 24              | before a payout is set aside                   |
+| `EVENT_RETENTION_DAYS`           | 90              | processed events are pruned after this         |
+| Access / refresh token lifetime  | 15 min / 7 days | how long each half of a session lasts          |
 
 ## Where the rules are written
 

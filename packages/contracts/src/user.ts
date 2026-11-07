@@ -95,9 +95,11 @@ export const userPageSchema = z.object({
 });
 
 /**
- * What an admin may change about an account: which role it has, and whether it may sign in
- * at all. Both are optional because either is a change of its own, and at least one has to
- * be there — an empty `PATCH` would answer `200` for having done nothing.
+ * What an admin may change about an account: whether it may sign in at all. A role is not
+ * here — the API grants none: registration writes a `USER`, and an admin account is made
+ * outside it. An admin account cannot be blocked either, which is what keeps the site from
+ * losing its admins to one another. The object is strict, so a `role` still sent is a `400`
+ * rather than a key stripped and a `200` that reads as a promotion done.
  *
  * `blocked` is a boolean rather than a moment: when it happened is the server's clock to
  * read, not the client's to claim. Blocking also ends every session the account holds —
@@ -106,14 +108,9 @@ export const userPageSchema = z.object({
  * The email and the password are not here. An admin who could rewrite an address could
  * take an account over by resetting it to their own; a password is its owner's alone.
  */
-export const updateUserSchema = z
-  .object({
-    role: roleSchema.optional(),
-    blocked: z.boolean().optional(),
-  })
-  .refine((input) => input.role !== undefined || input.blocked !== undefined, {
-    error: "Change the role, the block, or both",
-  });
+export const updateUserSchema = z.strictObject({
+  blocked: z.boolean(),
+});
 
 export type ManagedUser = z.infer<typeof managedUserSchema>;
 export type ManagedUserDetail = z.infer<typeof managedUserDetailSchema>;
