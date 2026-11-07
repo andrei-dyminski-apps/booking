@@ -4,6 +4,7 @@ import { BookingModule } from "../booking/booking.module";
 import { NotificationModule } from "../notification/notification.module";
 import { PaymentModule } from "../payment/payment.module";
 import { PrismaModule } from "../prisma/prisma.module";
+import { HostAccountService } from "./application/host-account.service";
 import { HostFeeService } from "./application/host-fee.service";
 import { PayoutEventHandler } from "./application/payout-event-handler";
 import { PayoutService } from "./application/payout.service";
@@ -39,6 +40,7 @@ import { StuckPayoutController } from "./presentation/stuck-payout.controller";
   ],
   providers: [
     PayoutService,
+    HostAccountService,
     PayoutRepository,
     HostFeeService,
     HostFeeRepository,

@@ -1,3 +1,4 @@
+import type { PublicOf } from "../../../common/testing/public-of.fakes";
 import {
   PaymentGateway,
   PaymentOpeningInProgressError,
@@ -5,7 +6,6 @@ import {
   type PaymentEvent,
 } from "../../../payment/application/ports/payment-gateway";
 import { addCents, NO_CENTS, type Cents } from "../../../payment/domain/money";
-import type { PublicOf } from "./booking-fixtures.fakes";
 
 /**
  * The provider, as far as the rules here care: which payments were opened, withdrawn and

@@ -1,19 +1,10 @@
-import {
-  BadGatewayException,
-  Injectable,
-  Logger,
-  UnauthorizedException,
-} from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import {
   DisputeStatus,
-  HostAccountStatus,
   NotificationType,
   payoutDueAt,
-  type AccountSession,
-  type HostAccount,
   type StayNotice,
 } from "@repo/contracts";
-import type { AuthenticatedUser } from "../../auth/auth.types";
 import { awaitsItsPayment } from "../../booking/domain/booking-status";
 import { PaymentNotConfirmedYetError } from "../../booking/domain/booking.errors";
 import { errorText, type SetAside } from "../../common/job-failure";
@@ -30,17 +21,10 @@ import {
 } from "../../payment/domain/money";
 import { mayPayOut, owedToHost } from "../domain/payout";
 import { SettlementInProgressError } from "../domain/payout.errors";
-import type {
-  PayoutAccountHolder,
-  SettledStay,
-  SettlementWrites,
-} from "../domain/payout.types";
+import type { SettledStay, SettlementWrites } from "../domain/payout.types";
 import { PayoutRepository } from "../infrastructure/payout.repository";
-import {
-  PayoutGateway,
-  type AccountEvent,
-  type Caller,
-} from "./ports/payout-gateway";
+import { HostAccountService } from "./host-account.service";
+import { PayoutGateway } from "./ports/payout-gateway";
 import { PayoutJobs } from "./ports/payout-jobs";
 
 /** A refund is not one: the booking side records it and tells this one through `StayEvents`. */
@@ -49,15 +33,11 @@ export type SettlementEvent = Extract<
   { kind: "disputed" | "disputeClosed" }
 >;
 
-const ACCOUNT_CHANGES = new Set([
-  "v2.core.account[configuration.recipient].capability_status_updated",
-  "v2.core.account[requirements].updated",
-]);
-
 /**
- * The host's half of the money: the payout account, the transfer once a stay has begun,
- * and `settle`, which reverses whatever a later refund or lost dispute removes. Every
- * transfer and reversal goes under a key, and every write is conditional on what was read.
+ * The host's half of the money: the transfer once a stay has begun, and `settle`, which
+ * reverses whatever a later refund or lost dispute removes. Every transfer and reversal goes
+ * under a key, and every write is conditional on what was read. The account the transfer
+ * goes to is `HostAccountService`'s.
  */
 @Injectable()
 export class PayoutService {
@@ -68,104 +48,8 @@ export class PayoutService {
     private readonly payoutGateway: PayoutGateway,
     private readonly payoutJobs: PayoutJobs,
     private readonly notificationService: NotificationService,
+    private readonly hostAccountService: HostAccountService,
   ) {}
-
-  async account(user: AuthenticatedUser): Promise<HostAccount> {
-    const holder = await this.holderOf(user);
-
-    if (holder.accountId === null) {
-      return { status: HostAccountStatus.NOT_STARTED };
-    }
-
-    return {
-      status: holder.enabled
-        ? HostAccountStatus.ENABLED
-        : HostAccountStatus.ONBOARDING,
-    };
-  }
-
-  /**
-   * Asks Stripe while onboarding is unfinished instead of waiting for the account event,
-   * which may not have landed when the host comes back from the form — or, without
-   * `stripe listen`, ever. An unreachable provider answers what the row says.
-   */
-  async refresh(user: AuthenticatedUser): Promise<HostAccount> {
-    const holder = await this.holderOf(user);
-
-    if (holder.accountId === null || holder.enabled) return this.account(user);
-
-    let enabled = false;
-
-    try {
-      enabled = await this.refreshAccount(holder.accountId, "request");
-    } catch (error) {
-      this.logger.warn(
-        `Could not ask Stripe about account ${holder.accountId}: ${String(error)}`,
-      );
-    }
-
-    return {
-      status: enabled
-        ? HostAccountStatus.ENABLED
-        : HostAccountStatus.ONBOARDING,
-    };
-  }
-
-  private async holderOf(
-    user: AuthenticatedUser,
-  ): Promise<PayoutAccountHolder> {
-    const holder = await this.payoutRepository.findHolder(user.id);
-
-    if (holder === null) {
-      throw new UnauthorizedException("Session no longer exists");
-    }
-
-    return holder;
-  }
-
-  /**
-   * Opens the caller's account the first time, written only into the empty column. Only
-   * the provider's failures are a `502`; the database's stay the `500` they are.
-   */
-  async session(user: AuthenticatedUser): Promise<AccountSession> {
-    const holder = await this.holderOf(user);
-    let accountId = holder.accountId;
-
-    if (accountId === null) {
-      const opened = await this.askProvider(user, () =>
-        this.payoutGateway.createRecipientAccount({
-          userId: user.id,
-          email: holder.email,
-          name: holder.name,
-        }),
-      );
-
-      await this.payoutRepository.attachAccount(user.id, opened);
-      accountId =
-        (await this.payoutRepository.findHolder(user.id))?.accountId ?? opened;
-    }
-
-    return {
-      clientSecret: await this.askProvider(user, () =>
-        this.payoutGateway.createAccountSession(accountId),
-      ),
-    };
-  }
-
-  private async askProvider<T>(
-    user: AuthenticatedUser,
-    call: () => Promise<T>,
-  ): Promise<T> {
-    try {
-      return await call();
-    } catch (error) {
-      this.logger.error(
-        `Could not open the payout session of user ${user.id}: ${String(error)}`,
-      );
-
-      throw new BadGatewayException("The payout account could not be opened");
-    }
-  }
 
   async schedule(stay: Pick<StayNotice, "bookingId" | "from">): Promise<void> {
     await this.payoutJobs.schedulePayout(
@@ -376,7 +260,10 @@ export class PayoutService {
       accounts.set(destination.accountId, enabled);
 
       if (!enabled) {
-        await this.switchPayouts(destination.accountId, false);
+        await this.hostAccountService.switchPayouts(
+          destination.accountId,
+          false,
+        );
         this.logger.warn(
           `Account ${destination.accountId} can no longer receive transfers, its payouts wait`,
         );
@@ -828,46 +715,6 @@ export class PayoutService {
         return this.openDispute(stay);
       case "disputeClosed":
         return this.closeDispute(stay, event.won);
-    }
-  }
-
-  /** A thin event says only that something changed, so the account is asked afresh. */
-  async handleAccountEvent(event: AccountEvent): Promise<void> {
-    if (event.accountId !== null && ACCOUNT_CHANGES.has(event.type)) {
-      await this.refreshAccount(event.accountId, "background");
-    }
-  }
-
-  private async refreshAccount(
-    accountId: string,
-    caller: Caller,
-  ): Promise<boolean> {
-    const enabled = await this.payoutGateway.transfersEnabled(
-      accountId,
-      caller,
-    );
-
-    await this.switchPayouts(accountId, enabled);
-
-    return enabled;
-  }
-
-  /**
-   * The write that switches the flag queues the host's run either way: switched on, it pays
-   * what waited; switched off, it hands back the reservations standing on the host's stays,
-   * which `findDuePayouts` still selects for that.
-   */
-  private async switchPayouts(
-    accountId: string,
-    enabled: boolean,
-  ): Promise<void> {
-    const changed = await this.payoutRepository.setPayoutsEnabled(
-      accountId,
-      enabled,
-    );
-
-    if (changed?.switched === true) {
-      await this.payoutJobs.schedulePayoutsOf(changed.userId);
     }
   }
 

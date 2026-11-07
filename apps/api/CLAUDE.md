@@ -31,6 +31,7 @@ src/
   common/set-aside-cursor.ts  # the keyset cursor the three lists of what the money paths set aside share; the tag tells them apart
   common/set-aside-window.ts  # setAsideWithin — the `from`/`to` days of the three lists as bounds on the moment, UTC
   common/set-aside.ts    # writeOrRefuse — the 409/404 every admin action on something set aside answers when its write missed
+  common/testing/public-of.fakes.ts  # PublicOf — the type every fake of a class is written against; out of the build (`*.fakes.ts`)
   prisma/                # PrismaModule + PrismaService (extends PrismaClient)
     prisma.errors.ts     # isPrismaError, violatedConstraint — driver failures, read once
     escape-like.ts       # `%`, `_` and `\` of a `contains`, escaped — three repositories search by a part
@@ -140,11 +141,14 @@ src/
     domain/payout.types.ts # SettledStay, PayoutAccountHolder — what the repository answers and the service reads; HostFeeReader — whether a fee's waiver is named
     domain/payout.errors.ts # SettlementInProgressError — the settlement lease held past its wait; WaivingAccountGoneError, WaivingAccountNotAdminError — a waiver's caller gone, or demoted or blocked, since the token
     application/
-      payout.service.ts    # host payouts: the account, the transfer less the host's fees, reversals, refunds, disputes
+      payout.service.ts    # host payouts: the transfer less the host's fees, reversals, refunds, disputes
       payout.service.spec.ts
+      host-account.service.ts  # the host's payout account: opening it, the onboarding session, the flag kept in step with Stripe
+      host-account.service.spec.ts
       host-fee.service.ts  # what hosts owe for cancelling: the overview both screens read, the admin's waiver
       host-fee.service.spec.ts
-      payout-event-handler.ts  # registers with the dispatcher and with StayEvents
+      payout-event-handler.ts  # registers with the dispatcher and with StayEvents; account events to HostAccountService, the rest to PayoutService
+      testing/payout.fakes.ts  # the module the two service specs share; the fixtures and one fake per port beside it; out of the build (`*.fakes.ts`)
       ports/payout-gateway.ts   # PayoutGateway — connected accounts, transfers, account events
       ports/payout-jobs.ts      # PayoutJobs — the payout jobs, as the service asks for them
     infrastructure/
@@ -183,6 +187,7 @@ src/
     notification-cursor.ts      # keyset over created_at, one ordering
     notification.service.spec.ts
     notification-cursor.spec.ts
+    testing/notification-service.fakes.ts  # notify and notifyAdmins recorded — the booking and payout testbeds share it; out of the build (`*.fakes.ts`)
     dto/notification.dto.ts
   realtime/              # the push transport: Redis pub/sub, one channel per account; no domain
     realtime.service.ts  # publish(userId, event), eventsOf(userId, opening), closing
@@ -688,7 +693,7 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
 
 Stripe Connect as a marketplace, with **separate charges and transfers**: the guest pays the
 platform, and the host is paid their share by a transfer once the stay has begun.
-`PayoutService` owns it.
+`PayoutService` owns it; the account the transfer goes to is `HostAccountService`'s.
 
 - **The rule is the contract's.** `hostShare` (what is left after refunds, less
   `PLATFORM_FEE_BPS`, rounded half up once; the platform keeps the rest of the money, so no
@@ -862,7 +867,7 @@ The connection URLs repeat what docker-compose.yml is given, and nothing links t
 - Both test tasks are declared in `turbo.json` with `dependsOn: ["^build"]`, so run them from the root. The specs import `@repo/contracts` schemas as values and need the built `dist/`; a direct `pnpm --filter @repo/api test` skips the build and fails on a fresh clone.
 - A new controller or service comes with a spec modelled on `src/booking/application/booking.service.spec.ts` (`Test.createTestingModule`).
 - A cursor is untrusted input and gets a spec of its own — `catalogue-cursor.spec.ts`, `booking-cursor.spec.ts`, `user-cursor.spec.ts` and `lookup-cursor.spec.ts`, and both are about what the parse refuses: a key the column it names could not hold, an id that is not one, an ordering nobody offers, and a cursor the other list of this API issued. What a fake repository has to get right beside them is the shape the service reasons about (a page of `limit` rows with `hasMore`, a scope the filters narrow), not the SQL — that is the e2e specs' half.
-- A service spec fakes the repositories instead of mocking Prisma — every module has them, so the only spec left holding a `PrismaService` mock is the one written for a repository itself (`src/user/user.repository.spec.ts`): `src/auth/auth.service.spec.ts`, `src/user/user.service.spec.ts`, `src/listing/listing.service.spec.ts` and `src/booking/application/booking.service.spec.ts` run their service against in-memory stores and assert what ends up stored, so the test states the rule ("a replayed token revokes the family", "an owner may read the stay and not cancel it") rather than the call the service happens to make. The fakes are typed `PublicOf<Repository>` — a mapped type keeps only the public surface, so a fake needs no inheritance and still stops compiling when the real class gains or drops a method, or changes what one returns. An argument added to an existing method it does not catch: a shorter signature stays assignable to a longer one, and method parameters are compared bivariantly even under `strictFunctionTypes`. With the repository faked, the Prisma code paths of that module are covered by e2e alone; that is the trade, and it is why `test/auth.e2e-spec.ts` and `test/listing.e2e-spec.ts` have to keep exercising them. Where a query decides something HTTP cannot provoke on demand, the e2e spec takes the repository out of the container and calls it directly instead of going through the API. There are two: `test/refresh-token.repository.e2e-spec.ts`, because which of two parallel refreshes reads the row first is a matter of timing — reading it after the winner burned it is a replay, not the race the conditional update exists for; and `test/booking.repository.e2e-spec.ts`, because two adapter-specific error shapes decide something HTTP cannot provoke: the guest foreign key (a missing listing is now refused by the `FOR UPDATE` read, so only the guest key reaches the insert) read through `violatedConstraint`, and the `EXCLUDE` constraint violation (`23P01`) read through `isExclusionViolation` when two overlapping creates race past the in-transaction check. Both are the kind of parse that has to be executed against the real driver rather than trusted.
+- A service spec fakes the repositories instead of mocking Prisma — every module has them, so the only spec left holding a `PrismaService` mock is the one written for a repository itself (`src/user/user.repository.spec.ts`): `src/auth/auth.service.spec.ts`, `src/user/user.service.spec.ts`, `src/listing/listing.service.spec.ts` and `src/booking/application/booking.service.spec.ts` run their service against in-memory stores and assert what ends up stored, so the test states the rule ("a replayed token revokes the family", "an owner may read the stay and not cancel it") rather than the call the service happens to make. The fakes are typed `PublicOf<Repository>` (`src/common/testing/public-of.fakes.ts`, one declaration for every spec) — a mapped type keeps only the public surface, so a fake needs no inheritance and still stops compiling when the real class gains or drops a method, or changes what one returns. An argument added to an existing method it does not catch: a shorter signature stays assignable to a longer one, and method parameters are compared bivariantly even under `strictFunctionTypes`. With the repository faked, the Prisma code paths of that module are covered by e2e alone; that is the trade, and it is why `test/auth.e2e-spec.ts` and `test/listing.e2e-spec.ts` have to keep exercising them. Where a query decides something HTTP cannot provoke on demand, the e2e spec takes the repository out of the container and calls it directly instead of going through the API. There are two: `test/refresh-token.repository.e2e-spec.ts`, because which of two parallel refreshes reads the row first is a matter of timing — reading it after the winner burned it is a replay, not the race the conditional update exists for; and `test/booking.repository.e2e-spec.ts`, because two adapter-specific error shapes decide something HTTP cannot provoke: the guest foreign key (a missing listing is now refused by the `FOR UPDATE` read, so only the guest key reaches the insert) read through `violatedConstraint`, and the `EXCLUDE` constraint violation (`23P01`) read through `isExclusionViolation` when two overlapping creates race past the in-transaction check. Both are the kind of parse that has to be executed against the real driver rather than trusted.
 - In e2e, check the response with a schema from `@repo/contracts` (`bookingSchema.parse(response.body)`) — that way the test catches a drift from the contract, not only a status code.
 - Every route except the `@Public()` ones is behind the global guard, so an e2e spec talks to the API through the agent from `test/session.ts` (`signIn(app)`) — a `request(app.getHttpServer())` without cookies only ever gets a 401. A rule that differs by role needs an agent per role: `signInAs(app, Role.ADMIN)` registers, writes the role into the row and logs in again, because the token minted at registration still says `USER`. A host is not a role, so it is `signIn(app, hostCredentials)` — a second `USER` whose listing makes it the host.
 - `test/event-stream.ts` reads `GET /events` off a real socket (`app.listen(0)`, once per application, and `fetch`) for the notification and conversation specs: supertest waits for a body to end, and this one never does.

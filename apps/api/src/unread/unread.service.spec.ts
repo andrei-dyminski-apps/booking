@@ -1,12 +1,10 @@
 import { Test } from "@nestjs/testing";
+import type { PublicOf } from "../common/testing/public-of.fakes";
 import { UnreadRepository } from "./unread.repository";
 import { UnreadService } from "./unread.service";
 import type { UnreadCounts } from "./unread.types";
 
 const ALICE = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
-
-/** See `auth.service.spec.ts` for what this mapped type does and does not catch. */
-type PublicOf<T> = { [K in keyof T]: T[K] };
 
 /** Every account's counts in memory, as the last write under the lock left them. */
 class FakeUnreadRepository implements PublicOf<UnreadRepository> {

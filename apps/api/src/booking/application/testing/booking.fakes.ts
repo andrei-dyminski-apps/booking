@@ -1,5 +1,6 @@
 import { Test } from "@nestjs/testing";
 import { NotificationService } from "../../../notification/notification.service";
+import { FakeNotificationService } from "../../../notification/testing/notification-service.fakes";
 import { PaymentEventDispatcher } from "../../../payment/application/payment-event-dispatcher";
 import { PaymentGateway } from "../../../payment/application/ports/payment-gateway";
 import { WaitlistService } from "../../../waitlist/waitlist.service";
@@ -24,7 +25,6 @@ import { FakeBookingJobs } from "./booking-jobs.fakes";
 import { FakeBookingRefundRepository } from "./booking-refund-repository.fakes";
 import { FakeBookingRepository } from "./booking-repository.fakes";
 import { FakeBookingTable } from "./booking-table.fakes";
-import { FakeNotificationService } from "./notification-service.fakes";
 import { FakePaymentGateway } from "./payment-gateway.fakes";
 import { FakeRefundFailureRepository } from "./refund-failure-repository.fakes";
 import { FakeStayEventsListener } from "./stay-events.fakes";
@@ -35,7 +35,8 @@ import { FakeWaitlistService } from "./waitlist-service.fakes";
  * `booking-payment.handler.spec.ts` build their classes in — one module, because the
  * handler's news, the cancellations and their refunds act on the same rows. The fixtures
  * and the fakes of everything around the three classes are the files beside this one, one
- * per port; the three repository fakes share one `FakeBookingTable`.
+ * per port — the notifications' is `notification/testing/`'s, shared with the payout specs;
+ * the three repository fakes share one `FakeBookingTable`.
  * Kept out of the build by `tsconfig.build.json` (`*.fakes.ts`).
  */
 

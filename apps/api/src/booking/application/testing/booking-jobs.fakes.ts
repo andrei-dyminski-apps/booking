@@ -1,10 +1,10 @@
+import type { PublicOf } from "../../../common/testing/public-of.fakes";
 import type { BookingJobs } from "../ports/booking-jobs";
-import type { PublicOf } from "./booking-fixtures.fakes";
 
 /**
  * `runAt` is taken as an argument rather than ignored, because that is the only thing the
  * service decides about the deadline: it forwards the one the repository wrote. A fake
- * with the shorter signature stays assignable (see `PublicOf` above), so nothing but this
+ * with the shorter signature stays assignable (see `PublicOf`), so nothing but this
  * would notice a service that scheduled the job for the wrong moment — or for `now`.
  */
 export class FakeBookingJobs implements PublicOf<BookingJobs> {

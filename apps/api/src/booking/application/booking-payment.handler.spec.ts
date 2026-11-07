@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NotificationType, BookingStatus } from "@repo/contracts";
+import { type FakeNotificationService } from "../../notification/testing/notification-service.fakes";
 import { PaymentEventBusyError } from "../../payment/application/payment-event-handler";
 import type { PaymentEvent } from "../../payment/application/ports/payment-gateway";
 import {
@@ -26,7 +27,6 @@ import {
 } from "./testing/booking-fixtures.fakes";
 import { type FakeBookingRepository } from "./testing/booking-repository.fakes";
 import { type FakeBookingTable } from "./testing/booking-table.fakes";
-import { type FakeNotificationService } from "./testing/notification-service.fakes";
 import { type FakePaymentGateway } from "./testing/payment-gateway.fakes";
 import { type FakeRefundFailureRepository } from "./testing/refund-failure-repository.fakes";
 import { type FakeStayEventsListener } from "./testing/stay-events.fakes";

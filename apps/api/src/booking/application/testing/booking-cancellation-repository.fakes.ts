@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { BookingStatus } from "@repo/contracts";
+import type { PublicOf } from "../../../common/testing/public-of.fakes";
 import type { Cents } from "../../../payment/domain/money";
 import { CancellationInProgressError } from "../../domain/booking.errors";
 import type { CancellationBy, CancelledStay } from "../../domain/booking.types";
 import type { BookingCancellationRepository } from "../../infrastructure/booking-cancellation.repository";
-import { isActive, type PublicOf } from "./booking-fixtures.fakes";
+import { isActive } from "./booking-fixtures.fakes";
 import type { FakeBookingTable } from "./booking-table.fakes";
 
 /**

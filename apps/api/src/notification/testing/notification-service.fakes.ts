@@ -1,5 +1,5 @@
 import type { NotificationContent } from "@repo/contracts";
-import type { NotificationService } from "../../../notification/notification.service";
+import type { NotificationService } from "../notification.service";
 
 /**
  * `notify` and `notifyAdmins`, the two methods these services call: what is asserted is who

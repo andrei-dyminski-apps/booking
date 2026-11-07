@@ -13,6 +13,7 @@ import {
   type Booking,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
+import { type FakeNotificationService } from "../../notification/testing/notification-service.fakes";
 import { CURRENCY, cents, subtractCents } from "../../payment/domain/money";
 import type { BookingPaymentHandler } from "./booking-payment.handler";
 import type { BookingService } from "./booking.service";
@@ -38,7 +39,6 @@ import {
 import { type FakeBookingJobs } from "./testing/booking-jobs.fakes";
 import { type FakeBookingRepository } from "./testing/booking-repository.fakes";
 import { type FakeBookingTable } from "./testing/booking-table.fakes";
-import { type FakeNotificationService } from "./testing/notification-service.fakes";
 import { type FakePaymentGateway } from "./testing/payment-gateway.fakes";
 import { type FakeStayEventsListener } from "./testing/stay-events.fakes";
 import { type FakeWaitlistService } from "./testing/waitlist-service.fakes";

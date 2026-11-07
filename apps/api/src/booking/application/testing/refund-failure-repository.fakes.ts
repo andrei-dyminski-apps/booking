@@ -4,11 +4,12 @@ import type {
 } from "@repo/contracts";
 import type { Page } from "../../../common/paging";
 import type { SetAsideCursor } from "../../../common/set-aside-cursor";
+import type { PublicOf } from "../../../common/testing/public-of.fakes";
 import type {
   RefundFailureRepository,
   RefundFailure,
 } from "../../infrastructure/refund-failure.repository";
-import { compare, type PublicOf } from "./booking-fixtures.fakes";
+import { compare } from "./booking-fixtures.fakes";
 
 /** The failures by refund id, written once each the way the unique key writes them. */
 export class FakeRefundFailureRepository implements PublicOf<RefundFailureRepository> {

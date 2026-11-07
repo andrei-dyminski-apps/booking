@@ -14,6 +14,7 @@ import {
   type ListingQuery,
   type UpdateListingInput,
 } from "@repo/contracts";
+import type { PublicOf } from "../common/testing/public-of.fakes";
 import { cents } from "../payment/domain/money";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { BookingRepository } from "../booking/infrastructure/booking.repository";
@@ -57,9 +58,6 @@ const userWith = (id: string, role: Role): AuthenticatedUser => ({
 const owner = userWith(OWNER_ID, Role.USER);
 const otherOwner = userWith(OTHER_OWNER_ID, Role.USER);
 const admin = userWith(OTHER_OWNER_ID, Role.ADMIN);
-
-/** See `auth.service.spec.ts` for what this mapped type does and does not catch. */
-type PublicOf<T> = { [K in keyof T]: T[K] };
 
 /**
  * The repository is faked rather than mocked: the role check happens before the service,

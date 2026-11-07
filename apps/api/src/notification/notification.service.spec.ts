@@ -9,6 +9,7 @@ import {
   type NotificationQuery,
   type ServerEvent,
 } from "@repo/contracts";
+import type { PublicOf } from "../common/testing/public-of.fakes";
 import { cents, CURRENCY } from "../payment/domain/money";
 import type { Page } from "../common/paging";
 import { RealtimeService } from "../realtime/realtime.service";
@@ -19,9 +20,6 @@ import { NotificationService } from "./notification.service";
 
 const ALICE = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
 const BOB = "6d0f2c1e-1a2b-4c3d-8e5f-9a0b1c2d3e4f";
-
-/** See `auth.service.spec.ts` for what this mapped type does and does not catch. */
-type PublicOf<T> = { [K in keyof T]: T[K] };
 
 const requested = (title = "Loft above the harbour"): NotificationContent => ({
   type: NotificationType.BOOKING_REQUESTED,

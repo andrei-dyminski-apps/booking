@@ -25,6 +25,7 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import type { BookingWithListingOwner } from "../booking/domain/booking.types";
 import { BookingRepository } from "../booking/infrastructure/booking.repository";
 import type { Page } from "../common/paging";
+import type { PublicOf } from "../common/testing/public-of.fakes";
 import { ListingRepository } from "../listing/listing.repository";
 import { NotificationService } from "../notification/notification.service";
 import { cents, CURRENCY } from "../payment/domain/money";
@@ -58,9 +59,6 @@ const input: CreateReviewInput = {
   rating: 4,
   comment: "A lovely stay, the kitchen was a joy.",
 };
-
-/** See `auth.service.spec.ts` for what this mapped type does and does not catch. */
-type PublicOf<T> = { [K in keyof T]: T[K] };
 
 const query = (search: Record<string, string> = {}): ReviewQuery =>
   reviewQuerySchema.parse(search);

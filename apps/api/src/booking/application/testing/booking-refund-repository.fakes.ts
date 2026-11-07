@@ -2,6 +2,7 @@ import type { StuckKind } from "@repo/contracts";
 import type { SetAside } from "../../../common/job-failure";
 import type { Page } from "../../../common/paging";
 import type { SetAsideCursor } from "../../../common/set-aside-cursor";
+import type { PublicOf } from "../../../common/testing/public-of.fakes";
 import { NO_CENTS, type Cents } from "../../../payment/domain/money";
 import type {
   BookingWithListingOwner,
@@ -9,7 +10,7 @@ import type {
   StuckStayRow,
 } from "../../domain/booking.types";
 import type { BookingRefundRepository } from "../../infrastructure/booking-refund.repository";
-import { compare, type PublicOf } from "./booking-fixtures.fakes";
+import { compare } from "./booking-fixtures.fakes";
 import { holdOf, type FakeBookingTable } from "./booking-table.fakes";
 
 /** The refunds owed on the shared table, how often each failed, and the provider's news. */

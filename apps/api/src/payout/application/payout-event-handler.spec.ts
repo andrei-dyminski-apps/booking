@@ -6,12 +6,14 @@ import { PaymentEventBusyError } from "../../payment/application/payment-event-h
 import type { PaymentEvent } from "../../payment/application/ports/payment-gateway";
 import { cents, type Cents } from "../../payment/domain/money";
 import { SettlementInProgressError } from "../domain/payout.errors";
+import { HostAccountService } from "./host-account.service";
 import { PayoutEventHandler } from "./payout-event-handler";
 import { PayoutService, type SettlementEvent } from "./payout.service";
+import type { AccountEvent } from "./ports/payout-gateway";
 
 /**
- * Only what the handler hands the payout service: what the service does with each call is
- * `payout.service.spec.ts`'s.
+ * Only what the handler hands the two services: what each does with a call is
+ * `payout.service.spec.ts`'s and `host-account.service.spec.ts`'s.
  */
 class FakePayoutService implements Pick<
   PayoutService,
@@ -51,6 +53,19 @@ class FakePayoutService implements Pick<
   }
 }
 
+class FakeHostAccountService implements Pick<
+  HostAccountService,
+  "handleAccountEvent"
+> {
+  readonly events: AccountEvent[] = [];
+
+  handleAccountEvent(event: AccountEvent): Promise<void> {
+    this.events.push(event);
+
+    return Promise.resolve();
+  }
+}
+
 const stay: StayNotice = {
   bookingId: "2f3a4b5c-6d7e-4f80-9a1b-2c3d4e5f6a7b",
   listingId: "3a4b5c6d-7e8f-4091-8a2b-3c4d5e6f7a8b",
@@ -62,11 +77,13 @@ const stay: StayNotice = {
 describe("PayoutEventHandler", () => {
   let handler: PayoutEventHandler;
   let payoutService: FakePayoutService;
+  let hostAccountService: FakeHostAccountService;
   let registered: unknown[];
   let stayEvents: StayEvents;
 
   beforeEach(async () => {
     payoutService = new FakePayoutService();
+    hostAccountService = new FakeHostAccountService();
     registered = [];
 
     const moduleRef = await Test.createTestingModule({
@@ -74,6 +91,7 @@ describe("PayoutEventHandler", () => {
         PayoutEventHandler,
         StayEvents,
         { provide: PayoutService, useValue: payoutService },
+        { provide: HostAccountService, useValue: hostAccountService },
         {
           provide: PaymentEventDispatcher,
           useValue: { register: (found: unknown) => registered.push(found) },
@@ -128,6 +146,21 @@ describe("PayoutEventHandler", () => {
     await handler.handle({ kind: "other", eventId: "evt_x", type: "x" });
 
     expect(payoutService.events).toEqual([disputed, closed]);
+    expect(hostAccountService.events).toEqual([]);
+  });
+
+  it("hands an account event to the host account service", async () => {
+    const changed: AccountEvent = {
+      kind: "account",
+      eventId: "evt_account",
+      type: "v2.core.account[requirements].updated",
+      accountId: "acct_host",
+    };
+
+    await handler.handle(changed);
+
+    expect(hostAccountService.events).toEqual([changed]);
+    expect(payoutService.events).toEqual([]);
   });
 
   it("schedules the payout of a stay the booking side confirms", async () => {

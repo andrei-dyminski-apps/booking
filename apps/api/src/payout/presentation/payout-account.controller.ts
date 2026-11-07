@@ -9,14 +9,14 @@ import type { AuthenticatedUser } from "../../auth/auth.types";
 import { CurrentUser } from "../../auth/decorators/current-user.decorator";
 import { Roles } from "../../auth/decorators/roles.decorator";
 import { ApiErrorDto } from "../../common/dto/api-error.dto";
-import { PayoutService } from "../application/payout.service";
+import { HostAccountService } from "../application/host-account.service";
 import { AccountSessionDto, HostAccountDto } from "./dto/payout.dto";
 
 /** No account id in any route, so nobody reaches anybody else's. An admin hosts nothing. */
 @Controller("payouts/account")
 @Roles(Role.USER)
 export class PayoutAccountController {
-  constructor(private readonly payoutService: PayoutService) {}
+  constructor(private readonly hostAccountService: HostAccountService) {}
 
   /** Asks Stripe nothing. */
   @Get()
@@ -26,7 +26,7 @@ export class PayoutAccountController {
     type: ApiErrorDto,
   })
   account(@CurrentUser() user: AuthenticatedUser): Promise<HostAccount> {
-    return this.payoutService.account(user);
+    return this.hostAccountService.account(user);
   }
 
   /** A `POST`: it writes the flag and may queue the payouts that waited. */
@@ -38,7 +38,7 @@ export class PayoutAccountController {
     type: ApiErrorDto,
   })
   refresh(@CurrentUser() user: AuthenticatedUser): Promise<HostAccount> {
-    return this.payoutService.refresh(user);
+    return this.hostAccountService.refresh(user);
   }
 
   /** A `POST`: it creates the account the first time and a session every time. */
@@ -50,6 +50,6 @@ export class PayoutAccountController {
     type: ApiErrorDto,
   })
   session(@CurrentUser() user: AuthenticatedUser): Promise<AccountSession> {
-    return this.payoutService.session(user);
+    return this.hostAccountService.session(user);
   }
 }

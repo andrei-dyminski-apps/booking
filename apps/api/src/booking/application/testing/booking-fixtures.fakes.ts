@@ -65,9 +65,6 @@ export const owner = userWith(OWNER_ID, Role.USER);
 export const stranger = userWith(STRANGER_ID, Role.USER);
 export const admin = userWith(STRANGER_ID, Role.ADMIN);
 
-/** See `auth.service.spec.ts` for what this mapped type does and does not catch. */
-export type PublicOf<T> = { [K in keyof T]: T[K] };
-
 /**
  * A query as it reaches the service: parsed by the contract rather than written out, so a
  * spec never states a default the API does not have.

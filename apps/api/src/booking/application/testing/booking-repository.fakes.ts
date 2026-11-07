@@ -9,6 +9,7 @@ import {
   type CreateBookingInput,
 } from "@repo/contracts";
 import type { Page } from "../../../common/paging";
+import type { PublicOf } from "../../../common/testing/public-of.fakes";
 import { CURRENCY, type Cents } from "../../../payment/domain/money";
 import { holdExpiry } from "../../domain/booking-status";
 import {
@@ -32,7 +33,6 @@ import {
   listing,
   ordering,
   OWNER_ID,
-  type PublicOf,
 } from "./booking-fixtures.fakes";
 import { holdOf, type FakeBookingTable } from "./booking-table.fakes";
 

@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { BookingStatus, NotificationType, type Booking } from "@repo/contracts";
+import { type FakeNotificationService } from "../../notification/testing/notification-service.fakes";
 import {
   MAX_REFUND_ATTEMPTS,
   type BookingRefundService,
@@ -15,7 +16,6 @@ import { AMOUNT, guest, LISTING_ID } from "./testing/booking-fixtures.fakes";
 import { type FakeBookingJobs } from "./testing/booking-jobs.fakes";
 import { type FakeBookingRefundRepository } from "./testing/booking-refund-repository.fakes";
 import { type FakeBookingTable } from "./testing/booking-table.fakes";
-import { type FakeNotificationService } from "./testing/notification-service.fakes";
 import { type FakePaymentGateway } from "./testing/payment-gateway.fakes";
 import { type FakeWaitlistService } from "./testing/waitlist-service.fakes";
 
