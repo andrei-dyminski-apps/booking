@@ -1,9 +1,15 @@
 "use server";
 
 import { refresh, revalidateTag, updateTag } from "next/cache";
+import { cancelBookingSchema, type CancelBookingInput } from "@repo/contracts";
 import { bookingsApi } from "#shared/api";
 import { availabilityTag, CATALOGUE_TAG } from "#shared/config";
-import { NO_FORM_ERRORS, toFormErrors, type FormErrors } from "#shared/lib";
+import {
+  NO_FORM_ERRORS,
+  toFieldErrors,
+  toFormErrors,
+  type FormErrors,
+} from "#shared/lib";
 
 /**
  * Cancelling from the stay's own page. An action rather than a browser call because the
@@ -16,15 +22,25 @@ import { NO_FORM_ERRORS, toFormErrors, type FormErrors } from "#shared/lib";
  *
  * The listing whose nights come free is read off the API's answer, not taken from the
  * browser, unlike the list's action which binds the one its card drew: here only the id
- * travels.
+ * travels, and the reason, which the API requires of a host.
  */
-export async function cancelStayAction(bookingId: string): Promise<FormErrors> {
+export async function cancelStayAction(
+  bookingId: string,
+  _state: FormErrors,
+  values: CancelBookingInput,
+): Promise<FormErrors> {
+  const parsed = cancelBookingSchema.safeParse(values);
+
+  if (!parsed.success) {
+    return { message: null, fields: toFieldErrors(parsed.error.issues) };
+  }
+
   let listingId: string;
 
   try {
     listingId = (await bookingsApi.get(bookingId, { cache: "no-store" }))
       .listingId;
-    await bookingsApi.remove(bookingId);
+    await bookingsApi.remove(bookingId, parsed.data);
   } catch (error) {
     // A stay that is not this caller's, one that moved on while the dialog was open, an
     // unreachable API. Each of them belongs next to the button that provoked it.

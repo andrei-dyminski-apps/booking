@@ -8,6 +8,7 @@ import {
   availabilityTag,
   CATALOGUE_TAG,
   HTTP_STATUS,
+  listingTag,
   ROUTES,
 } from "#shared/config";
 import { toFieldErrors, toFormErrors, type FormErrors } from "#shared/lib";
@@ -28,13 +29,24 @@ import type { ReservationErrors } from "../model/reservation-errors";
  * race is inside the transaction that locks the listing. Its answer arrives here as a
  * `409` and is shown the way every other refusal is, with `stale` set: the form remembers
  * these nights as taken even when they lie past the window its calendar draws.
+ *
+ * The listing's `updatedAt` travels the other way round: it is the version of the terms
+ * the page showed beside the button — the prices the quote was worked out from and the
+ * cancellation policy — so the API can refuse a hold at a price, or under a policy, the
+ * guest never read. That refusal is a `412`, not a `409` — the nights are free — and it
+ * reads the listing again, so the page redraws with the terms now in force.
  */
 export async function createBookingAction(
   listingId: string,
+  listingUpdatedAt: string,
   _state: FormErrors,
   values: CreateBookingInput,
 ): Promise<ReservationErrors> {
-  const parsed = createBookingSchema.safeParse({ ...values, listingId });
+  const parsed = createBookingSchema.safeParse({
+    ...values,
+    listingId,
+    listingUpdatedAt,
+  });
 
   if (!parsed.success) {
     return {
@@ -58,6 +70,14 @@ export async function createBookingAction(
 
     if (stale) {
       updateTag(availabilityTag(listingId));
+      refresh();
+    }
+
+    if (
+      error instanceof ApiResponseError &&
+      error.status === HTTP_STATUS.PRECONDITION_FAILED
+    ) {
+      updateTag(listingTag(listingId));
       refresh();
     }
 

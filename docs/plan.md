@@ -17,7 +17,7 @@ The domain model (grown phase by phase):
 - **User** — `id, email, passwordHash, role (USER | ADMIN)` — phases 2–3; hosting is owning a listing, not a role (see the end of phase 3)
 - **Listing** (a place to stay) — belongs to one user, its host, has a nightly price — phase 3
 - **Booking** — `status: PENDING_PAYMENT | CONFIRMED | CANCELLED | EXPIRED`, `expiresAt`, `paymentIntentId`, a date range — phases 1 → 4 → 5
-- **Review** — optional, phase 7
+- **Review** — optional, phase 8
 
 ## Layering inside `apps/api`
 
@@ -53,7 +53,7 @@ a file each: the three entry points share the notices, the payment withdrawals a
 waitlist hand-over between them, and splitting `BookingService` would have meant those
 helpers living in a fifth file every use case imports — the split the layer exists for is
 between the entry points and the rules, and that one is there. The refund rule went to
-`@repo/contracts` (`refundOnCancel`) rather than `domain/`, because the booking page states
+`@repo/contracts` (`refundQuote`) rather than `domain/`, because the booking page states
 it to the guest before the API applies it — the reason `nightlyPrice` lives there.
 
 What justifies it there and nowhere else:
@@ -65,7 +65,7 @@ What justifies it there and nowhere else:
   confirms it, a BullMQ job expires the hold. That is what makes `application/` a layer
   rather than a formality — with a single entry point it would be one.
 - **Two external worlds**: Postgres and Stripe. `PaymentGateway` as a port is what makes the
-  "e2e over the whole cycle, Stripe mocked" of phase 7 an architectural property instead of a
+  "e2e over the whole cycle, Stripe mocked" of phase 8 an architectural property instead of a
   hack inside the test.
 
 The transaction with `SELECT ... FOR UPDATE` and the `EXCLUDE` constraint of phase 4 stay in
@@ -80,7 +80,7 @@ The modules that deliberately keep the plain layering:
 - **`listing` / the catalogue (phase 5)** — read-heavy CRUD with filters and pagination. It
   has the repository like every other module; what it does not get is a domain model, which
   would only stand between the query and the projection the list needs.
-- **`review` (phase 7)** — CRUD: the repository and nothing more.
+- **`review` (phase 8)** — CRUD: the repository and nothing more.
 
 The rollout follows the phases: `auth` took the repository step at the end of phase 2, where
 it was cheapest — its backend was finished and phase 3 only adds guards on top; `booking`
@@ -244,7 +244,7 @@ public — a catalogue behind a login is not a catalogue, and a read that carrie
 could not be cached by URL for every visitor at once. The frontend is built on top of it:
 `/listings` is the catalogue, `/listings/:id` the page a stay is booked from, `/bookings`
 the list of stays every role reads its own scope of. PPR was the one box left, and it moved
-to the end of the roadmap, phase 10: what it buys is a measured time to first byte, and
+to the end of the roadmap, phase 11: what it buys is a measured time to first byte, and
 there is nothing to measure before a deploy.
 
 - [x] A list of listings with filters (dates, price, capacity); filters live in the **URL searchParams** (shareable links), Server Components, cursor pagination.
@@ -367,7 +367,186 @@ is the transition a hold could not make on its own. The details are "Payments" i
       reverses a payout already sent. Stripe.js runs under a `Content-Security-Policy` with a
       script nonce per request.
 
-## Phase 7 — Production polish
+## Phase 7 — Cancellation policies and refunds
+
+Today one rule covers the whole site: a guest's cancellation refunds in full until 48 hours
+before midnight UTC of check-in and nothing after, an admin's refunds in full, nobody
+cancels once the stay has begun, and a host cannot cancel at all. The machinery around that
+rule — the debt written with `CANCELLED`, the refund job, its sweep, the set-aside rows,
+`settle` taking back a payout — is already shaped for any amount, so this phase changes the
+rules and adds the paths that are missing, not the plumbing. The model is the industry's:
+a policy chosen per listing, frozen onto the booking, tiers with a partial refund, a grace
+period, a non-refundable rate for a discount, host cancellations with a fee, an early
+check-out refunding unused nights. Six steps, each its own branch and pull request, in this
+order — each later step reads the function the first one introduces.
+
+### 7.1 — A policy per listing, frozen onto the booking, and the grace period ✅
+
+| Policy           | 100%       | 50%       | Unused nights (7.4) |
+| ---------------- | ---------- | --------- | ------------------- |
+| `FLEXIBLE`       | ≥ 48 hours | —         | 100%                |
+| `MODERATE`       | ≥ 5 days   | —         | 50%                 |
+| `LIMITED`        | ≥ 14 days  | 7–14 days | 0                   |
+| `FIRM`           | ≥ 30 days  | 7–30 days | 0                   |
+| `NON_REFUNDABLE` | —          | —         | 0 (7.5)             |
+
+`FLEXIBLE` is today's rule, so the migration gives it to every existing listing and booking
+and no stay already taken changes its terms. The grace period: a booking cancelled within 24
+hours of being created, with check-in still more than 7 days away, refunds in full under any
+policy except `NON_REFUNDABLE` — a discount that is free to undo for a day is not a trade.
+
+- [x] `@repo/contracts`: `cancellationPolicySchema`, and the terms as data —
+      `CANCELLATION_TERMS: Record<Policy, { tiers: RefundTier[]; unusedNightsBps: number;
+grace: boolean }>`, a tier being `{ hoursBefore, shareBps }`. `checkInInstant(booking)`
+      becomes the one anchor every window is measured from (midnight UTC of `from` for now,
+      so 7.6 changes one function). `refundQuote(booking, now, canceller)` →
+      `{ shareBps, cents, next: { until, shareBps } | null }` replaces `refundsInFull` and
+      `refundOnCancel`, and both sides read it: the API owes by it, the booking page words it.
+      The guest is owed `max(0, shareOf(amount, bps) − refunded)`, rounded half up in their
+      favour; an admin (and, from 7.2, a host) `notRefunded`, as today.
+- [x] `cancellationPolicy` on `listingSchema` and `createListingSchema` (optional, `FLEXIBLE`
+      by default) and on `bookingSchema`.
+- [x] Prisma: `enum CancellationPolicy`, `listings.cancellation_policy` (default `FLEXIBLE`),
+      `bookings.cancellation_policy` (backfilled, then `NOT NULL` with no default, so `create`
+      has to write it). `BookingRepository.create` reads the policy under the same
+      `FOR UPDATE` as the prices and copies it, the way it copies `amount_cents`: a later
+      change of the listing's policy does not restate a stay.
+- [x] `BookingService.refundOwedOnCancel` owes by `refundQuote`; the debt, the job and the
+      sweep stay as they are. `BOOKING_CANCELLED` carries `refundCents` and `currency`.
+- [x] Web: the policy's name, summary and tiers as sentences in `entities/booking` (the
+      listing form, the listing page, the stay's page and `features/cancel-booking` read
+      them); a select in `features/save-listing`; a "Cancellation" block beside the booking
+      form with the dates for the nights chosen; the whole schedule on the stay's page;
+      `cancellation-refund.ts` worded from `refundQuote` ("Cancelling now refunds 50% (X);
+      before D it would have been 100%").
+- [x] The seed spreads listings across the policies.
+- [x] Specs: `refund.spec.ts` (every tier edge, the grace period at 23:59 / 24:01 and 6 / 7
+      days, rounding, a share after a dashboard refund), `booking.service.spec.ts`,
+      `cancellation-refund.spec.ts`; e2e — a cancellation in a 50% window owes exactly half,
+      the policy round-trips through `POST`/`PATCH`/`GET /listings`.
+
+### 7.2 — Host cancellations, and the fee they cost ✅
+
+A host who cancels a stay always refunds the guest in full, and pays for it: the platform
+loses Stripe's processing fee on every full refund and the guest loses their plans.
+
+| Cancelled by the host | Fee, of `amount_cents` |
+| --------------------- | ---------------------- |
+| ≥ 30 days before      | 10%                    |
+| 48 hours – 30 days    | 25%                    |
+| < 48 hours            | 50%                    |
+
+- [x] `@repo/contracts`: `Canceller` gains `HOST`; `hostCancellationFee(booking, now)` by the
+      table, through `checkInInstant`, and nothing for a hold — declining an unpaid request
+      is free. Both sides read it: the API charges by it, the host's dialog states it before
+      the button. `cancelledBy` on `bookingSchema`; a `reason` the host has to give
+      (`cancelBookingSchema`), optional for the guest.
+- [x] Prisma: `bookings.cancelled_by`, `cancelled_at`, `cancellation_reason`; a `host_fees`
+      ledger — one row per cancelled stay (`booking_id` unique), `host_id`, `amount_cents`,
+      `withheld_cents`, `waived_at` with `waive_reason`, the usual `CHECK`s
+      (`withheld ≤ amount`, waived with a reason or neither).
+- [x] `BookingService.mayCancel` admits the listing's owner, before check-in, for a hold and
+      a confirmed stay; the cancellation writes the fee row in its own transaction. The
+      threshold counts the fees, so a declined hold is not a cancellation against the host.
+      "Reading and writing are separate rules" in `apps/api/CLAUDE.md` changes with it.
+- [x] **The fee is withheld from the host's next payouts**, since nothing of the cancelled
+      stay was ever paid to them. `PayoutService.payOut` transfers `owedToHost(stay)` less
+      what the host still owes, oldest fee first, and records it as
+      `bookings.fee_withheld_cents` and in `host_fees.withheld_cents` when it reserves the
+      payout (`payout_reserved_cents`) — a short transaction under a per-host advisory lock,
+      so two stays paid out at once cannot withhold the same debt. The transfer goes out
+      after it under the settlement's lease rather than inside a transaction, so no pool
+      connection waits on Stripe, and a retry sends the reserved amount; `settle` records a
+      transfer a dead run never wrote, or releases a reservation a refund left uncovered. `settle` counts `paid_out + fee_withheld` as what the
+      host holds: when a later refund leaves the stay owing less, it reverses the transfer
+      first and hands any shortfall back to the fee as debt rather than inventing a negative
+      transfer. Checked before building it: Stripe's account debits need the host's legally
+      binding consent, the same region and money on the connected balance — which a recipient
+      account has usually paid out already — so the withholding stays. A payout the fees take
+      whole sends no transfer, so "paid out" became `paid_out_at` rather than `transfer_id`.
+- [x] A fee nobody can withhold — a host who never earns again — stays on the admin's
+      screen; the platform does not charge a host's card.
+- [x] `POST /host-fees/:id/waive` (`@Roles(ADMIN)`, a reason): the extenuating circumstance
+      a policy cannot foresee. What was already withheld stays withheld.
+- [x] Visibility: the host's payouts page lists the fees still owed; the admin's account page
+      shows the host's cancellations in the last 12 months and the fees; a third
+      cancellation in 12 months tells every admin. Notices: `BOOKING_CANCELLED` with
+      `cancelledBy: HOST` and the reason to the guest, `HOST_CANCELLATION_FEE` to the host,
+      `HOST_CANCELLATIONS_THRESHOLD` to the admins.
+- [x] Web: "Cancel" on the Hosting tab and on the stay's page for its host, with the fee and
+      the reason in the dialog; `may-cancel.ts` and its spec.
+- [x] Specs: the fee's tiers; e2e — the guest is refunded in full under any policy, the fee is
+      withheld from the next payout, two payouts at once withhold it once, a refund after the
+      withholding returns the shortfall to the debt; the old "a host cannot cancel" case is
+      rewritten.
+
+### 7.3 — A partial refund by an admin, without a cancellation
+
+- [ ] `adminRefundSchema { amountCents, reason, requestId }`, at most `notRefunded − refundOwed`.
+- [ ] `POST /bookings/:id/refunds` (`@Roles(ADMIN)`) refunds at once under
+      `booking-<id>-adjustment-<requestId>` — the dialog mints the id, so a second press is
+      the same refund — and records it in `booking_adjustments` (who, how much, why, the
+      provider's refund id). An open dispute is a `409`.
+- [ ] Nothing new downstream: `charge.refunded` raises `refunded_amount_cents`, `StayEvents`
+      reaches `settle`, and a payout already sent is reversed by the difference.
+- [ ] Web: "Refund part" on the stay's page for an admin (`centsFromInput`, a reason), and the
+      adjustments listed under the stay.
+- [ ] Specs: e2e — more than is left is refused, a repeated `requestId` refunds once, a
+      refund after the payout reverses the host's share.
+
+### 7.4 — Ending a stay early, refunding the unused nights
+
+- [ ] `@repo/contracts`: `mayEndEarly(booking, today)` — confirmed, begun, at least one night
+      left — and `unusedNightsRefund(booking, nights, today)`: the `booking_nights` from
+      tomorrow's on, times the policy's `unusedNightsBps`. Tonight is used.
+- [ ] The stay stays `CONFIRMED`; `to` moves to the new check-out and `ended_early_at` is
+      stamped, so the `EXCLUDE` constraint and the waitlist see the nights free and the
+      review opens at once. `booking_nights` keep what was bought. A stay with no nights
+      recorded (before `store_money_in_cents`) cannot end early.
+- [ ] `POST /bookings/:id/end-early` (the guest, an admin) under `whileCancelling`: the debt
+      goes into `refund_owed_cents` and out through the same job. The key
+      `booking-<id>-cancellation` is shared safely — a cancellation happens only before
+      check-in and an early end only after. Then `announceFreed`.
+- [ ] The host's side needs nothing: `owedToHost` already counts a refund owed, and `settle`
+      reverses what was paid out beyond it.
+- [ ] Web: "End stay early" on the stay's page during the stay, with what it refunds.
+- [ ] Specs: the night arithmetic (tonight, the last night); e2e — the nights are free, the
+      refund is right, a payout already sent is reversed.
+
+### 7.5 — A non-refundable rate for a discount
+
+- [ ] `@repo/contracts`: `listing.nonRefundableDiscountBps` (nullable, at most
+      `MAX_NON_REFUNDABLE_DISCOUNT_BPS`), `createBookingSchema.rate`
+      (`STANDARD | NON_REFUNDABLE`). `quoteStay` takes the discount off the total once, with
+      one rounding; the nights keep their undiscounted prices and `discount_cents` holds the
+      difference, so `amount = Σ nights − discount`, checked against `MIN_CHARGE` /
+      `MAX_CHARGE` after it.
+- [ ] Prisma: `listings.non_refundable_discount_bps`, `bookings.discount_cents` (a `CHECK`
+      within the amount). `create` refuses the rate on a listing that does not offer it
+      (`400`) and freezes `NON_REFUNDABLE` as the booking's policy.
+- [ ] A guest's cancellation refunds nothing, and the grace period does not apply; a host's or
+      an admin's still refunds in full.
+- [ ] Web: the switch and the percentage on the listing form; both rates with their totals on
+      the booking form (`stay-quote.tsx`). The catalogue still shows and filters by the base
+      price.
+- [ ] Specs: `pricing.spec.ts` (the discount, its rounding, the floor); e2e — the guest's
+      cancellation refunds 0, the host's and the admin's 100%.
+
+### 7.6 — Check-in in the listing's own time zone
+
+- [ ] `listingSchema` gains `timeZone` (IANA, checked through `Intl`) and `checkInTime`
+      (`HH:mm`), frozen onto the booking; `checkInInstant` becomes
+      `TZDate(from + checkInTime, timeZone)`. Every refund window, the fee's tiers,
+      `isCancellableOn` (the instant, not the UTC day) and `payoutDueAt` follow from it.
+- [ ] Backfilled `UTC` / `00:00`, so nothing already booked moves.
+- [ ] Left as they are, on UTC days: `createBookingSchema`'s "check-in not in the past" and
+      `isReviewable` — they are about calendar days, not about the moment of arrival.
+- [ ] Web: the two fields on the listing form; every date of a cancellation or a refund shown
+      in the listing's time with the zone named.
+- [ ] Specs: a DST change and the far zones (UTC−10, UTC+14); e2e — a payout due by the new
+      `payoutDueAt`.
+
+## Phase 8 — Production polish
 
 - [ ] Tests: unit tests for the services, e2e over the whole booking and payment cycle (Stripe mocked), the concurrency test from phase 4.
 - [ ] CI: GitHub Actions — `lint`, `check-types`, `test`, `build` with the turbo cache; a badge in the README.
@@ -492,13 +671,13 @@ is the transition a hold could not make on its own. The details are "Payments" i
 
 - [ ] Optional: reviews with ratings, email notifications through BullMQ.
 
-## Phase 8 — Deployment and presentation
+## Phase 9 — Deployment and presentation
 
 - [ ] Web on Vercel; API + Postgres + Redis on Railway or Fly.io. `API_ORIGIN` is a runtime variable of the frontend server, so a changed API address is a redeploy without a rebuild; `TRUST_PROXY` on the API has to reach past the extra `X-Forwarded-For` entry the frontend server's own request produces.
 - [ ] The README as a pitch: screenshots, an architecture diagram, an "interesting decisions" section (concurrency, webhooks, refresh-token rotation), a three-command start, Stripe test cards, demo logins for all three roles.
 - [ ] The demo scenario: two browser windows book the same slot at once — one goes to payment, the other receives a polite conflict.
 
-## Phase 9 — Localization
+## Phase 10 — Localization
 
 The whole tree is English today, the interface included, and that is a rule rather than an
 accident (`.claude/rules/workflow.md`). This phase is the one change allowed to touch it,
@@ -557,11 +736,11 @@ of its pieces were written in advance, each with a note saying so.
       the one that stays: a calendar day is a `YYYY-MM-DD` string read as midnight UTC,
       because that is the clock the contract compares a check-in against. Only its display
       is localized; parsing one in the visitor's zone moves a stay by a day.
-- [ ] **The SEO of two languages**, and it is the other half of the JSON-LD item in phase 7.
+- [ ] **The SEO of two languages**, and it is the other half of the JSON-LD item in phase 8.
       `<html lang>` comes from the resolved locale instead of the literal `en` it carries
       now, `generateMetadata` emits `alternates.languages` so each page names its
       counterpart, and every JSON-LD document gains `inLanguage`. A locale is a path
-      segment, so a canonical is per language and the `?cursor=…` rule from phase 7 applies
+      segment, so a canonical is per language and the `?cursor=…` rule from phase 8 applies
       unchanged in both.
 - [ ] **What stays English.** Everything that is not the interface: code, comments, tests
       and their fixtures, commit messages aside, the seed's demo data, the API's logs and
@@ -575,10 +754,10 @@ copy behind it is a product decision rather than an engineering one. So is curre
 money is stored and answered in one currency, and localizing how a number is written is
 not converting what it is worth.
 
-## Phase 10 — Partial prerendering
+## Phase 11 — Partial prerendering
 
 - [ ] `cacheComponents: true` and PPR — moved here from phase 5, so the win is
-      measured on the site phase 8 deployed. The catalogue is the page whose shell is worth
+      measured on the site phase 9 deployed. The catalogue is the page whose shell is worth
       prerendering, and the flag turned out not to be a flag. Under
       `cacheComponents` the `cache` and `next` options of `fetch` stop being how a read is
       cached: `"use cache"` with `cacheLife`/`cacheTag` replaces them, which is a rewrite
@@ -620,7 +799,7 @@ not converting what it is worth.
   before React has hydrated, and `refresh()` / `updateTag` are reachable only from there.
   The client path stays for what a round trip cannot express — a poll for a webhook — and
   phase 6 is what brings the first of those.
-- The order of the phases follows the dependencies: database → auth → roles → concurrency → catalogue → Stripe → polish → deployment. The catalogue comes before Stripe because the dependency runs one way only: Stripe Elements needs a booking to attach to, and a booking is created from the form on the listing page, which is the catalogue's. Nothing in the catalogue needs a payment — it is server-rendered from `searchParams`, and TanStack Query arrives with the polling of the webhook.
+- The order of the phases follows the dependencies: database → auth → roles → concurrency → catalogue → Stripe → cancellation policies → polish → deployment. The cancellation policies follow Stripe directly because they change the rules its refund machinery runs on, and they come before localization because they add screens and sentences it would otherwise translate twice. The catalogue comes before Stripe because the dependency runs one way only: Stripe Elements needs a booking to attach to, and a booking is created from the form on the listing page, which is the catalogue's. Nothing in the catalogue needs a payment — it is server-rendered from `searchParams`, and TanStack Query arrives with the polling of the webhook.
 
 ## Decisions deliberately not taken
 

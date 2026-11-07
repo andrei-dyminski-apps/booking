@@ -10,6 +10,7 @@ import {
   type BookingPage,
   type BookingPayment,
   type BookingQuery,
+  type CancelBookingInput,
   type CreateBookingInput,
   type StuckKind,
   type StuckStayPage,
@@ -67,11 +68,13 @@ export const bookingsApi = {
       body: input,
     }),
 
-  remove: (id: string): Promise<void> =>
+  /** A host has to say why (`reason`); the guest and an admin may send nothing. */
+  remove: (id: string, input: CancelBookingInput = {}): Promise<void> =>
     apiRequest({
       method: "DELETE",
       path: `/bookings/${encodeURIComponent(id)}`,
       schema: z.void(),
+      body: input,
     }),
 
   /** The stays whose owed refund or host payout stopped retrying — the admin's alone. */

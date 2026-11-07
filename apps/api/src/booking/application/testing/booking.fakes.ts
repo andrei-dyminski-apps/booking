@@ -8,6 +8,7 @@ import {
   pricedNights,
   Role,
   type BookedRange,
+  type CancellationPolicy,
   type Booking,
   type BookingQuery,
   type BookingSort,
@@ -51,6 +52,7 @@ import type {
   BookingCursor,
   BookingDetailWithListingOwner,
   BookingWithListingOwner,
+  CancellationBy,
   CancelledStay,
   ConfirmedStay,
   CreatedBooking,
@@ -178,6 +180,9 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
 
   /** The listing this fake creates bookings against, unless the row says otherwise. */
   listingOwnerId = OWNER_ID;
+
+  /** The listing's policy, which `create` copies onto the stay as the transaction does. */
+  listingPolicy: CancellationPolicy = "FLEXIBLE";
 
   /** Set to have `create` lose the race the pre-flight check cannot close. */
   vanishingListing = false;
@@ -321,11 +326,13 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
       listingId: booking.listingId,
       listing,
       guestId,
+      hostId: this.listingOwnerId,
       from: booking.from,
       to: booking.to,
       status: BookingStatus.PENDING_PAYMENT,
       amountCents: AMOUNT,
       currency: CURRENCY,
+      cancellationPolicy: this.listingPolicy,
       refundedAmountCents: null,
       refundOwedCents: null,
       paid: false,
@@ -334,6 +341,9 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
       createdAt: new Date(
         Date.parse("2026-08-17T12:00:00.000Z") + this.rows.size * 1_000,
       ).toISOString(),
+      cancelledBy: null,
+      cancelledAt: null,
+      cancellationReason: null,
       reviewed: { byGuest: false, byOwner: false },
     };
 
@@ -348,10 +358,17 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
     return Promise.resolve({ ...created, released });
   }
 
+  /** The fees the host's cancellations wrote, by booking; `waived` as an admin left it. */
+  readonly hostFees = new Map<
+    string,
+    { id: string; hostId: string; amountCents: Cents; waived?: boolean }
+  >();
+
   async cancel(
     id: string,
     status: BookingStatus,
     refundOwedCents: Cents | null,
+    by: CancellationBy | null = null,
   ): Promise<CancelledStay | null> {
     await this.racing?.(id);
 
@@ -368,7 +385,39 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
     found.booking.status = BookingStatus.CANCELLED;
     found.booking.refundOwedCents = refundOwedCents;
 
-    return { paymentId: found.paymentId };
+    if (by !== null) {
+      found.booking.cancelledBy = by.canceller;
+      found.booking.cancelledAt = new Date().toISOString();
+      found.booking.cancellationReason = by.reason;
+    }
+
+    const fee =
+      by?.feeCents == null
+        ? null
+        : {
+            id: randomUUID(),
+            hostId: found.listingOwnerId,
+            amountCents: by.feeCents,
+          };
+
+    if (fee !== null) this.hostFees.set(id, fee);
+
+    return {
+      paymentId: found.paymentId,
+      fee: fee === null ? null : { id: fee.id, amountCents: fee.amountCents },
+    };
+  }
+
+  /** Every fee of the host not waived counts: the fake keeps no clock. */
+  hostCancellations(
+    hostId: string,
+  ): Promise<{ name: string; cancellations: number } | null> {
+    return Promise.resolve({
+      name: "Host",
+      cancellations: [...this.hostFees.values()].filter(
+        (fee) => fee.hostId === hostId && fee.waived !== true,
+      ).length,
+    });
   }
 
   /** The failed runs of an owed refund by booking, and when it was set aside. */
@@ -456,6 +505,7 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
                 attempts: failure.attempts,
                 lastError: "refused",
                 failedAt: failure.setAsideAt.toISOString(),
+                payout: null,
               },
             ]
           : [];

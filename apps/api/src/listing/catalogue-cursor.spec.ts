@@ -10,6 +10,7 @@ const listing: Listing = {
   description: "Two rooms under the roof and a wall of glass facing the water.",
   pricePerNightCents: cents(12_050),
   capacity: 4,
+  cancellationPolicy: "FLEXIBLE",
   createdAt: "2026-08-20T12:00:00.000Z",
   updatedAt: "2026-08-20T12:00:00.000Z",
 };

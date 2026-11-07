@@ -107,15 +107,16 @@ export class StripePayoutGateway extends PayoutGateway {
           metadata: { bookingId: payout.bookingId },
         },
         {
-          idempotencyKey: `booking-${payout.bookingId}-payout`,
+          idempotencyKey: `booking-${payout.bookingId}-payout-${String(payout.reservation)}`,
           ...BACKGROUND_REQUEST,
         },
       );
 
       return { id: transfer.id, amount: heldOf(transfer) };
     } catch (error) {
-      // A run racing this one with another amount is refused by the key; the transfer the
-      // other run sent is the answer. A key that named the amount would have sent two.
+      // A run racing this one under the same reservation is refused by the key while its
+      // request is in flight; the transfer it sent is the answer. Two reservations never race:
+      // a new one is made only after `settle` found no transfer for the last, under the lease.
       if (!(error instanceof Stripe.errors.StripeIdempotencyError)) throw error;
 
       const existing = await this.findTransfer(payout.bookingId);
@@ -126,7 +127,7 @@ export class StripePayoutGateway extends PayoutGateway {
     }
   }
 
-  private async findTransfer(bookingId: string): Promise<SentTransfer | null> {
+  async findTransfer(bookingId: string): Promise<SentTransfer | null> {
     for await (const transfer of this.stripe.transfers.list(
       { transfer_group: transferGroupOf(bookingId), limit: 100 },
       BACKGROUND_REQUEST,

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { userSchema } from "./auth.js";
-import { bookingSchema, createBookingSchema } from "./booking.js";
+import { bookingSchema, stayRequestSchema } from "./booking.js";
 import { blank, PAGING } from "./query.js";
 
 /**
@@ -13,12 +13,13 @@ export const MAX_WAITLIST_ENTRIES = 20;
 /**
  * Asking to be told when nights somebody else holds come free. The same three fields and
  * the same two rules a booking has — a waitlist entry is a booking that could not be taken
- * yet, so a range the booking form would refuse is refused here in the same words.
+ * yet, so a range the booking form would refuse is refused here in the same words. Not the
+ * cancellation policy the booking may name: an entry takes no stay, so it freezes no terms.
  *
  * The API refuses a range that is free right now (`409`): the answer to free nights is to
  * book them, and an entry nothing will ever release would wait forever.
  */
-export const joinWaitlistSchema = createBookingSchema;
+export const joinWaitlistSchema = stayRequestSchema;
 
 /**
  * One range the caller is waiting for. A wish rather than a claim: it holds nothing, and

@@ -141,6 +141,7 @@ class FakeListingRepository implements PublicOf<ListingRepository> {
       id: `00000000-0000-4000-8000-${String(this.rows.size + 1).padStart(12, "0")}`,
       ownerId,
       ...fields,
+      cancellationPolicy: fields.cancellationPolicy ?? "FLEXIBLE",
       createdAt: "2026-08-20T12:00:00.000Z",
       updatedAt: "2026-08-20T12:00:00.000Z",
     };

@@ -28,7 +28,7 @@ import type { ConfirmedStay, RefundTarget } from "../domain/booking.types";
 import { BookingRepository } from "../infrastructure/booking.repository";
 import { RefundFailureRepository } from "../infrastructure/refund-failure.repository";
 import { StayEvents } from "./stay-events";
-import { notifyBothSides } from "./stay-notices";
+import { notifyBothSides, notifyBothSidesOfCancellation } from "./stay-notices";
 
 /** What the stays make of the provider's news. Idempotent, because a failed event runs again. */
 @Injectable()
@@ -347,10 +347,18 @@ export class BookingPaymentHandler
 
     this.logger.log(why);
 
-    await notifyBothSides(
+    await notifyBothSidesOfCancellation(
       this.notificationService,
-      NotificationType.BOOKING_CANCELLED,
-      stay.hold,
+      // The money went back before the cancellation, and its own notice says so.
+      {
+        ...stay.hold,
+        notice: {
+          refundCents: null,
+          currency: stay.currency,
+          cancelledBy: null,
+          reason: null,
+        },
+      },
     );
     await this.waitlistService.announceFreed([stay.hold.stay]);
   }

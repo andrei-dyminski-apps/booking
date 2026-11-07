@@ -155,7 +155,7 @@ of the catalogue and a listing's reviews is behind the global `JwtAuthGuard` and
 | `GET`    | `/bookings/:id`                    | a single booking; the guest, the owner of the listing or an admin                                              |
 | `POST`   | `/bookings`                        | a 15-minute hold, priced by the server; USER only, `403` — own listing, `409` — dates taken                    |
 | `POST`   | `/bookings/:id/payment`            | opens (or answers again) the hold's PaymentIntent secret; its guest only, `409` — not awaiting payment         |
-| `DELETE` | `/bookings/:id`                    | cancel, `204`; the guest or an admin, a paid stay's refund sent right after by a job (`refundOwedCents`)       |
+| `DELETE` | `/bookings/:id`                    | cancel, `204`; the guest, an admin, or the host with a `reason` (refunds in full, owes a fee); refund by a job |
 | `POST`   | `/bookings/:id/stuck/refund/retry` | hand a set-aside refund back and queue it, `204`; ADMIN only, `409` — not set aside                            |
 | `POST`   | `/bookings/:id/stuck/payout/retry` | hand a set-aside payout back and queue it, `204`; ADMIN only, `409` — not set aside                            |
 | `POST`   | `/payments/webhook`                | Stripe's deliveries: signature checked, recorded, `200` at once, handled by a worker; public                   |
@@ -167,6 +167,9 @@ of the catalogue and a listing's reviews is behind the global `JwtAuthGuard` and
 | `POST`   | `/payouts/account/refresh`         | asks Stripe where an unfinished onboarding stands and writes it down; USER only                                |
 | `POST`   | `/payouts/account/session`         | a session for Stripe's embedded components, opening the account the first time; USER only                      |
 | `POST`   | `/payouts/webhook`                 | Stripe's thin events about hosts' accounts, into the same inbox; public                                        |
+| `GET`    | `/host-fees/mine`                  | the fees the caller owes for cancelling paid stays, what is owed, the last year's count; USER only             |
+| `GET`    | `/host-fees`                       | the same for one host, by `hostId`; ADMIN only                                                                 |
+| `POST`   | `/host-fees/:id/waive`             | waive what is still owed of a fee, with a `reason`, `204`; ADMIN only, `409` — waived or withheld in full      |
 | `GET`    | `/waitlist`                        | the date ranges the caller waits for, check-in still ahead, earliest first; USER only                          |
 | `POST`   | `/waitlist`                        | wait for held nights; `409` — the nights are free, `403` — own listing, own stay or a full list                |
 | `GET`    | `/waitlist/demand`                 | ranges waited for on the caller's listings — or every one, with who waits, for an admin; keyset pages          |
@@ -410,9 +413,13 @@ than a redirect to Checkout. The cycle:
 
 What else moves money:
 
-- **Cancelling a paid stay refunds it, right after it is cancelled** — in full up to 48
-  hours before check-in, and nothing after (`refundOnCancel` in `@repo/contracts`, the rule
-  the page states). An admin's cancellation refunds in full. Neither may cancel a stay
+- **Cancelling a paid stay refunds it, right after it is cancelled** — by the cancellation
+  policy the host chose for the listing and the booking copied when it was taken:
+  `FLEXIBLE` (in full up to 48 hours before check-in), `MODERATE` (5 days), `LIMITED` (in
+  full up to 14 days, half up to 7), `FIRM` (in full up to 30 days, half up to 7) or
+  `NON_REFUNDABLE`. Every policy but the last also refunds in full within 24 hours of
+  booking while check-in is more than 7 days away (`refundQuote` and `CANCELLATION_TERMS` in
+  `@repo/contracts`, the rule the pages state). An admin's cancellation refunds in full. Neither may cancel a stay
   once its check-in day has come. The
   cancellation answers at once and writes what it owes on the booking (`refundOwedCents`); a
   job sends the refund, and a sweep of its own sends any refund Stripe refused until it
@@ -624,7 +631,7 @@ pnpm test           # unit, *.spec.ts next to the code; no database needed
 pnpm test:e2e       # e2e, apps/api/test/*.e2e-spec.ts; needs the database from docker-compose running
 ```
 
-`pnpm test` covers both applications, with a runner each: **Jest** in `apps/api`, where the specs run a service against fakes of its repositories through Nest's testing module, and **Vitest** in `apps/web` and in `packages/contracts` — the latter for `nightlyPrice` and `refundOnCancel`, the rules a night of a stay is priced by and a cancellation refunds by on both sides of the wire. What has a spec on the frontend is deliberately narrow — a parser whose input somebody else writes, which today means `?next=` after signing in ([`next-path.ts`](apps/web/src/shared/lib/next-path.ts)) and the `Set-Cookie` the proxy re-issues ([`session-cookies.ts`](apps/web/src/shared/api/session-cookies.ts)). Both are security decisions that a diff does not show, and neither is a component: a component that would break is one `check-types` and Steiger already refuse.
+`pnpm test` covers both applications, with a runner each: **Jest** in `apps/api`, where the specs run a service against fakes of its repositories through Nest's testing module, and **Vitest** in `apps/web` and in `packages/contracts` — the latter for `nightlyPrice` and `refundQuote`, the rules a night of a stay is priced by and a cancellation refunds by on both sides of the wire. What has a spec on the frontend is deliberately narrow — a parser whose input somebody else writes, which today means `?next=` after signing in ([`next-path.ts`](apps/web/src/shared/lib/next-path.ts)) and the `Set-Cookie` the proxy re-issues ([`session-cookies.ts`](apps/web/src/shared/api/session-cookies.ts)). Both are security decisions that a diff does not show, and neither is a component: a component that would break is one `check-types` and Steiger already refuse.
 
 All of them run through turbo, which builds `@repo/contracts` first — the specs import its schemas as values, and unlike `lint` and `check-types` they need the compiled `dist/`, not the sources.
 
@@ -723,6 +730,7 @@ Turborepo caches task results locally in `.turbo`. Cacheable tasks are described
 
 ## Useful links
 
+- [Glossary](docs/glossary.md) — the domain, the money flows and the architecture in plain words, from "hold" and "payout reservation" to "set aside" and "BFF"
 - [Turborepo: tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks) and [filters](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
 - [Next.js App Router](https://nextjs.org/docs/app)
 - [NestJS](https://docs.nestjs.com)

@@ -8,9 +8,15 @@ export {
   bookingQuerySchema,
   bookingPageSchema,
   bookingPaymentSchema,
+  cancelBookingSchema,
+  cancellerSchema,
   createBookingSchema,
+  hostCancelBookingSchema,
+  HOST_REASON_REQUIRED,
   stayPartySchema,
   BookingStatus,
+  Canceller,
+  MAX_CANCELLATION_REASON_LENGTH,
   DisputeStatus,
   StayParty,
   type Booking,
@@ -20,17 +26,48 @@ export {
   type BookingPage,
   type CreateBookingInput,
   type BookingPayment,
+  type CancelBookingInput,
 } from "./booking.js";
 
 export {
-  FREE_CANCELLATION_HOURS,
-  freeCancellationUntil,
+  HOST_CANCELLATIONS_THRESHOLD,
+  HOST_CANCELLATIONS_WINDOW_DAYS,
+  HOST_FEE_LAST_MINUTE_BPS,
+  HOST_FEE_TIERS,
+  MAX_WAIVE_REASON_LENGTH,
+  hostCancellationFee,
+  hostFeeOverviewSchema,
+  hostFeeQuerySchema,
+  hostFeeSchema,
+  stillOwed,
+  waiveHostFeeSchema,
+  type HostCancellationFee,
+  type HostFee,
+  type HostFeeOverview,
+  type HostFeeQuery,
+  type WaiveHostFeeInput,
+} from "./host-fee.js";
+
+export {
+  cancellerOf,
+  checkInInstant,
   isCancellableOn,
   notRefunded,
-  refundOnCancel,
-  refundsInFull,
-  type Canceller,
+  refundQuote,
+  refundSchedule,
+  type RefundQuote,
+  type RefundWindow,
 } from "./refund.js";
+
+export {
+  CANCELLATION_TERMS,
+  CancellationPolicy,
+  GRACE_MIN_LEAD_HOURS,
+  GRACE_PERIOD_HOURS,
+  cancellationPolicySchema,
+  type CancellationTerms,
+  type RefundTier,
+} from "./cancellation-policy.js";
 
 export {
   PLATFORM_FEE_BPS,

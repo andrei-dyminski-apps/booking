@@ -7,6 +7,7 @@ import { quoteStay } from "../src/booking/domain/stay-price";
 import { stayMoneyData } from "../src/booking/infrastructure/stay-rows";
 import {
   BookingStatus,
+  CancellationPolicy,
   ConversationSide,
   PrismaClient,
   ReviewKind,
@@ -66,7 +67,9 @@ type UserKey = keyof typeof users;
  * `pricePerNightCents` is the default; a few listings carry the exceptions as well — dearer
  * weekends, a cheaper midweek, a few dates priced on their own — so the listing page has
  * a stay whose nights do not all cost the same to quote. The dates are days from the run,
- * for the reason `inDays` below gives.
+ * for the reason `inDays` below gives. The cancellation policies are spread across the
+ * listings, so the listing page and the stays show every schedule but `NON_REFUNDABLE`,
+ * which belongs with the discount that pays for it.
  */
 const listings: Array<{
   owner: UserKey;
@@ -74,6 +77,7 @@ const listings: Array<{
   description: string;
   pricePerNightCents: number;
   capacity: number;
+  cancellationPolicy: CancellationPolicy;
   weekdayPrices?: Partial<Record<Weekday, number>>;
   datePrices?: Array<{ inDays: number; priceCents: number }>;
 }> = [
@@ -84,6 +88,7 @@ const listings: Array<{
       "Two rooms under the roof, a wall of glass facing the water and a kitchen that fits four.",
     pricePerNightCents: 12_000,
     capacity: 4,
+    cancellationPolicy: CancellationPolicy.FLEXIBLE,
     weekdayPrices: { fri: 15_000, sat: 15_000 },
     datePrices: [
       { inDays: 30, priceCents: 19_900 },
@@ -97,6 +102,7 @@ const listings: Array<{
       "A wood stove, a long table and nothing within earshot but the forest road.",
     pricePerNightCents: 8_500,
     capacity: 6,
+    cancellationPolicy: CancellationPolicy.MODERATE,
     weekdayPrices: { mon: 7_000, tue: 7_000, wed: 7_000, thu: 7_000 },
   },
   {
@@ -106,6 +112,7 @@ const listings: Array<{
       "One room, one window over the awnings, and every tram line within a minute's walk.",
     pricePerNightCents: 5_400,
     capacity: 2,
+    cancellationPolicy: CancellationPolicy.FLEXIBLE,
   },
   {
     owner: "owner",
@@ -114,6 +121,7 @@ const listings: Array<{
       "Six bedrooms, a kitchen built for a crowd and a field that ends at the river.",
     pricePerNightCents: 21_000,
     capacity: 12,
+    cancellationPolicy: CancellationPolicy.FIRM,
   },
   {
     owner: "owner",
@@ -122,6 +130,7 @@ const listings: Array<{
       "A bed under the beams, a desk at the window and the water two floors down.",
     pricePerNightCents: 3_900,
     capacity: 1,
+    cancellationPolicy: CancellationPolicy.LIMITED,
   },
   {
     owner: "owner",
@@ -130,6 +139,7 @@ const listings: Array<{
       "A deck facing west, an outdoor shower and sand from the bottom step onwards.",
     pricePerNightCents: 16_500,
     capacity: 8,
+    cancellationPolicy: CancellationPolicy.FIRM,
     weekdayPrices: { sat: 19_500, sun: 19_500 },
     datePrices: [{ inDays: 45, priceCents: 25_000 }],
   },
@@ -140,6 +150,7 @@ const listings: Array<{
       "Two rooms at the end of a row of vines, with the press house for a neighbour.",
     pricePerNightCents: 9_800,
     capacity: 3,
+    cancellationPolicy: CancellationPolicy.MODERATE,
   },
   {
     owner: "host",
@@ -148,6 +159,7 @@ const listings: Array<{
       "A stove, a drying rack for boots and the last road before the path takes over.",
     pricePerNightCents: 7_200,
     capacity: 4,
+    cancellationPolicy: CancellationPolicy.LIMITED,
   },
 ];
 
@@ -400,6 +412,7 @@ async function main(): Promise<void> {
         from: booking.from,
         to: booking.to,
         ...moneyOf(booking.listing, booking.from, booking.to),
+        cancellationPolicy: listing.cancellationPolicy,
         // Confirmed, not holds: a PENDING_PAYMENT booking would lapse 15 minutes after
         // the seed runs and disappear from the demo.
         status: BookingStatus.CONFIRMED,
@@ -438,6 +451,7 @@ async function main(): Promise<void> {
         from: past.from,
         to: past.to,
         ...moneyOf(past.listing, past.from, past.to),
+        cancellationPolicy: listing.cancellationPolicy,
         status: BookingStatus.CONFIRMED,
       },
     });

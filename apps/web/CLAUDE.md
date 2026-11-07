@@ -117,6 +117,7 @@ apps/web/
         listing/ui/booking-form.tsx       # the only thing here that creates a booking — or joins the waitlist for taken nights
         listing/ui/booking-submit.tsx     # …its button, worded by which of the two the dates call for
         listing/ui/stay-quote.tsx         # …what its dates cost, night by night, redrawn on its own
+        listing/ui/cancellation-quote.tsx # …what cancelling them would refund, dated for the check-in
         listing/ui/listing-reviews.tsx    # the guests' reviews: the summary and the newest page
         listing/ui/listing-skeleton.tsx
         listing/ui/ask-host.tsx           # a guest's question, or the way back to their thread; streamed, degrades
@@ -135,7 +136,7 @@ apps/web/
         overview/ui/bookings-toolbar.tsx    # one row: the filters, the ordering, the chips
         overview/ui/bookings-filters-dialog.tsx  # every filter, in a modal
         overview/ui/booking-card.tsx
-        overview/ui/cancel-booking-button.tsx
+        overview/ui/cancel-booking-button.tsx  # the shared dialog over this list's action
         overview/ui/review-booking-button.tsx  # one half of a finished stay, in a dialog
         overview/ui/rating-field.tsx        # …its rating, picked as stars: a radio per star
         overview/ui/bookings-skeleton.tsx
@@ -148,7 +149,7 @@ apps/web/
         booking/ui/booking-page.tsx       # one stay; the publishable key handed to its guest's hold
         booking/ui/booking-live.tsx       # the booking in the query cache, polled until the webhook moves it
         booking/ui/payment-form.tsx       # opens the payment from the browser, Stripe Elements; success starts the poll and declares nothing; a Stripe.js that never loaded says so
-        booking/ui/cancel-stay-button.tsx # the cancel as a mutation over the action, open with the reason on a refusal
+        booking/ui/cancel-stay-button.tsx # the shared dialog over this page's action; a success reads the stay again
         booking/ui/booking-skeleton.tsx
         booking/api/booking-query.ts      # the query keys and the browser's read, shared by the poll and the cancel
         booking/api/cancel-stay-action.ts # cancels, then frees the nights in the Data Cache
@@ -221,8 +222,10 @@ apps/web/
         user/ui/user-page.tsx             # one account: access, and links to its activity
         user/ui/role-form.tsx             # a box and a button, no confirmation
         user/ui/block-button.tsx          # asks before blocking, not before reopening
+        user/ui/waive-fee-button.tsx      # forgives what is left of one host fee, the reason in a dialog
         user/ui/user-skeleton.tsx
         user/api/update-user-actions.ts
+        user/api/waive-fee-action.ts
         user/index.ts
         payments/ui/payments-page.tsx     # four lists of the API behind one set of tabs, `?list=`
         payments/ui/list-tabs.tsx         # …the tabs, and the open/resolved halves of the bounced refunds
@@ -258,6 +261,7 @@ apps/web/
     features/                 # a user action a second page also runs
       save-listing/ui/listing-form.tsx    # the one form the new and the edit screen run
       save-listing/ui/pricing-fields.tsx  # …its weekday and date prices, saved with the row
+      save-listing/ui/policy-field.tsx    # …its cancellation policy, a select under a controller
       save-listing/ui/listing-form-skeleton.tsx  # its wait, box for box; each screen frames it
       save-listing/ui/listing-form-card.tsx  # …the card both are drawn in; the title and line are the screen's
       save-listing/lib/to-number.ts       # a number box's text onto the contract's number
@@ -270,11 +274,14 @@ apps/web/
       delete-review/ui/delete-review-button.tsx  # the admin's, on a listing's reviews and a guest's
       delete-review/api/delete-review-action.ts
       delete-review/index.ts
-      cancel-booking/model/may-cancel.ts  # whether "Cancel" is offered — every rule the API refuses by: a begun stay, a lapsed hold, an open dispute
+      cancel-booking/model/may-cancel.ts  # whether "Cancel" is offered — to the guest, the host, an admin — and every rule the API refuses by
       cancel-booking/model/may-cancel.spec.ts
-      cancel-booking/model/cancellation-refund.ts  # what cancelling gives back, worded for the guest, an admin or nobody
+      cancel-booking/model/cancellation-refund.ts  # what cancelling gives back, worded for the guest or an admin — or what it costs the host
       cancel-booking/model/cancellation-refund.spec.ts
-      cancel-booking/ui/cancel-stay-warning.tsx  # the dialog's warning; each page sends the request its own way
+      cancel-booking/model/cancel-form.ts  # the reason box onto the contract's body: required of the host
+      cancel-booking/ui/cancel-stay-dialog.tsx  # the confirmation both screens open; each page hands it its action
+      cancel-booking/ui/cancel-reason-field.tsx  # …its box for the reason, worded for whoever cancels
+      cancel-booking/ui/cancel-stay-warning.tsx  # …and its warning: what comes back, or what it costs the host
       cancel-booking/index.ts
       logout/ui/logout-button.tsx         # the browser's call: only it holds a refresh token
       logout/index.ts
@@ -282,10 +289,16 @@ apps/web/
       listing-search/ui/listing-filter-fields.tsx  # …and its boxes: both listings dialogs
       listing-search/index.ts
     entities/                 # a domain model a second page also needs
-      booking/model/status-labels.ts  # the four statuses named once: the filter, the card and the stay's page
+      booking/model/status-labels.ts  # the four statuses and who cancelled, named once: the filter, the card and the stay's page
       booking/model/hold.ts   # whether a hold still keeps its nights, and whether it waits on the viewer's payment
       booking/ui/booking-status-badge.tsx
+      booking/model/cancellation-policy.ts  # the policies named, their terms and a stay's schedule as sentences
+      booking/ui/cancellation-terms.tsx     # a policy, or one stay's dated windows: the listing page and the stay's page
+      booking/ui/refund-schedule-list.tsx   # …those windows as lines, also the listing page's quote for the dates being chosen
       booking/index.ts
+      host-fee/ui/host-fees.tsx       # the section both screens stream: the read they hand it, a line when the API cannot answer
+      host-fee/ui/host-fees-card.tsx  # …and what a host owes for cancelling paid stays, drawn: their payouts screen and the admin's page of the account
+      host-fee/index.ts
       listing/ui/listing-card.tsx  # a listing to whoever may edit it: the dashboard and the admin's
       listing/index.ts
       user/model/roles.ts     # the roles named for a person: both admin screens read them
@@ -316,6 +329,7 @@ apps/web/
       api/keyset-page.ts      # a stale cursor onto null, the one both paged reads share
       api/notifications.ts    # notificationsApi — the caller's feed and its two marks
       api/payouts.ts          # payoutsApi — the caller's payout account and its component session
+      api/host-fees.ts        # hostFeesApi — the caller's cancellation fees, one host's for an admin, and the waiver
       api/payment-events.ts   # paymentEventsApi — the admin's: the events set aside, and a retry
       api/refund-failures.ts  # refundFailuresApi — the admin's: the bounced refunds, and a resolve
       api/waitlist.ts         # waitlistApi — the caller's own, read whole, join and leave; the demand, paged
@@ -812,9 +826,9 @@ this side decided.
 - **The header offers, it does not permit** (`_app/layout/header.tsx`). The link is
   rendered for the role that has a use for it; the section behind it answers the same way
   whether or not the link was there. So does a button inside a page: the "Cancel" on a
-  stay is drawn for the guest who took it and for an admin, and a host who may read that
-  stay is not offered it — the API refuses them either way, and what is being decided here
-  is what to put on the screen.
+  stay is drawn for its guest, the host of its listing and an admin (`mayCancel`), and
+  nobody else, who could not even read the stay — the API refuses them either way, and
+  what is being decided here is what to put on the screen.
 - **A page can have one scope per side rather than one page per role**, and `/bookings` is
   that case: `GET /bookings` narrows what it returns by the caller — a user sees the stays
   they took or the stays taken against their listings, an admin all of them — so the page
@@ -862,14 +876,16 @@ this side decided.
   An event and a stuck stay are retried with no confirmation, since every job behind
   them is idempotent; a bounced refund is resolved with a note in a dialog, because the
   same card refuses it again and the money goes back outside Stripe. The four admin
-  notices lead to their tabs filtered down to their own row (`describeNotification`: the
-  event's id, the refund's id, the stuck stay's id), and the stay of a row is one link
-  further. A row dealt with between the notice and the click leaves that filter empty, and
-  the page says so rather than "nothing matches" (`NoLongerWaitingNotice`), pointing to
-  where the row is now: the other half of the bounced refunds, or the stay. The tab names and the one builder of the screen's address live in
-  `shared/config/routes.ts` (`SET_ASIDE_LISTS`, `SET_ASIDE_FILTERS_OF`, `setAsideHref` —
-  the list, its filters and the cursor) rather than in the page, because the notification entity links to them and
-  may not import a page; the page writes every link through the same function, so a
+  notices about something set aside lead to their tabs filtered down to their own row
+  (`describeNotification`: the event's id, the refund's id, the stuck stay's id), and the
+  stay of a row is one link further; `PAYOUT_SHORTFALL` — a payout recorded for less than it
+  reserved, nothing set aside — leads to the stay itself. A row dealt with between the
+  notice and the click leaves that filter empty, and the page says so rather than "nothing
+  matches" (`NoLongerWaitingNotice`), pointing to where the row is now: the other half of
+  the bounced refunds, or the stay. The tab names and the one builder of the screen's
+  address live in `shared/config/routes.ts` (`SET_ASIDE_LISTS`, `SET_ASIDE_FILTERS_OF`,
+  `setAsideHref` — the list, its filters and the cursor) rather than in the page, because
+  the notification entity links to them and may not import a page; the page writes every link through the same function, so a
   notice cannot lead to an address the page redirects away from. The two listing write
   actions, `save-listing`'s and `delete-listing`'s, send their author back to the section
   of their own role (`listingsSectionFor` in `shared/config/routes.ts`), read off the
@@ -953,6 +969,15 @@ What `useActionForm` ties together, and what each third of it owns:
 - **A form-level message is not a field's.** `FormErrors.message` — an unreachable API, a
   `409` about nights somebody else took — is rendered by the form itself in a `FieldError`,
   which is a `role="alert"` and therefore announced without being tied to a box.
+- **A call that never came back is a message too, and nothing else is.** When the
+  browser's request to the action fails — the connection dropped, this server restarting —
+  Next passes on the `fetch` rejection, a `TypeError`, and the hook answers it as a
+  form-level message instead of handing the page to the error boundary over a blip. What
+  the action throws on the server is still thrown: a drift from the contract belongs to
+  the boundary, and a `redirect()` reaches the client as a rejection the router handles.
+  The message does not claim that nothing happened — the request may have landed before
+  the connection went — and a retry of a write that did is refused by the API in its own
+  words.
 
 **Every box is a `FormField`** (`shared/ui/form-field.tsx`), and it exists for the wiring
 rather than for the markup:
@@ -967,8 +992,10 @@ rather than for the markup:
 - **A description is a hint beside the label, never a paragraph under the box.** Every
   box and every group of boxes that explains itself does it through
   `shared/ui/hint-label.tsx`: `HintLabel` for a box — `FormField`, `FilterField` and
-  `LookupField` draw it from their `description` — and `HintFieldSet` for a group with a
-  `<legend>`, as the two price groups of the listing form are. A `FieldDescription` under
+  `LookupField` draw it from their `description`, and a box no `register` can reach draws
+  it itself with the id `hintOf` derives (`PolicyField`, a `Select` under a controller) —
+  and `HintFieldSet` for a group with a `<legend>`, as the two price groups of the listing
+  form are. A `FieldDescription` under
   a box or a legend is not written by hand, and neither is the aria of a group: the text is
   rendered twice, once in the popover and once visually hidden under the id `hintOf`
   derives, and that id goes into the control's `aria-describedby` — or the fieldset's,
@@ -1028,14 +1055,17 @@ characters` reaches the box either way. The number is read off the schema
   words and its own place.
 
 **A form with no fields is neither of the two** — the confirmations behind a destructive
-action (`delete-listing-button.tsx`, `cancel-booking-button.tsx`, `block-button.tsx`) submit a bound id and
+action (`delete-listing-button.tsx`, `block-button.tsx`) submit a bound id and
 nothing else, so they stay a plain `action={submit}` with nothing to validate. So does a
 form whose only box is a closed choice — `role-form.tsx` on the admin's page of an account:
 a select of the two roles cannot hold a value the contract refuses, so a browser-side
 parse would have nothing to say, and the action still parses what arrives with
-`updateUserSchema`. A form that gains a box somebody types into stops being this case.
-So do the `GET` forms of the filter dialogs, which navigate rather than mutate; those are
-the next section.
+`updateUserSchema`. A form that gains a box somebody types into stops being this case —
+the dialog that cancels a stay was one and is not any more: it carries a reason, required
+of the host and optional for the guest and an admin, so it is `useActionForm` over
+`cancelFormSchema` (`features/cancel-booking/ui/cancel-stay-dialog.tsx`), the contract's
+body. Neither are the `GET` forms of the filter dialogs, which navigate rather than
+mutate; those are the next section.
 
 ## Search, filters and the URL
 
@@ -1313,7 +1343,8 @@ Where a mutation goes:
 A Server Action is the default, and it is what the `api/` segment of a page slice holds.
 The client path is for what a round trip cannot express — a poll for a webhook that has
 not landed yet — and it goes through `shared/api` like every other call. A write on such a
-screen is still an action, run as a mutation so the query cache hears of it.
+screen is still an action, and what it answers is followed by an invalidation of the
+query, so the cache hears of it.
 
 **The stay's own page (`_pages/bookings/booking`) is that client path, and the only one.**
 It is what brought TanStack Query in (`_app/providers`), and the reasons are two:
@@ -1350,19 +1381,25 @@ It is what brought TanStack Query in (`_app/providers`), and the reasons are two
   could still fail after it and leave the guest with no form for the rest of the hold. So a
   method like that added on the API's side is a change to this page first.
 - **Cancelling there goes through the same cache, and is not optimistic.** A cancellation
-  decides a refund, so the page says `Cancelled` only once the API has: the dialog stays open
-  while the request is on its way and with the reason in it on a refusal, as the list's
-  does, and a success reads the booking again. The request itself is `cancelStayAction`,
-  run as the mutation: a browser call can invalidate nothing in the Data Cache, and an
-  action that only invalidated would be an endpoint for emptying the catalogue's cache in a
-  loop. So the action cancels, and frees the nights — its listing's availability, the
-  catalogue, the router — only after a cancellation it made itself, for the listing the
-  API's answer names. A refusal is returned rather than thrown, since what an action throws
-  reaches the browser with its message hidden. What the two
-  dialogs share — to whom "Cancel" is offered, the refund it is worded with, the warning —
-  is `features/cancel-booking`; how the request is sent stays with each page, and so does
-  whatever only the page knows (the tab's `paid`, above). Whether a hold
-  still keeps its nights, and whether it waits on the viewer to pay, is `entities/booking`
+  decides a refund, so the page says `Cancelled` only once the API has: the dialog stays
+  open while the request is on its way and with the reason in it on a refusal, as the
+  list's does, and a success reads the booking again. The request itself is
+  `cancelStayAction`, handed to `CancelStayDialog` like the list's action is; the page's
+  `onCancelled` invalidates the stay's query once the dialog has closed: a browser call
+  can invalidate nothing in the Data Cache, and an action that only invalidated would be
+  an endpoint for emptying the catalogue's cache in a loop. So the action cancels, and
+  frees the nights — its listing's availability, the catalogue, the router — only after a
+  cancellation it made itself, for the listing the API's answer names. A refusal is
+  returned rather than thrown, since what an action throws reaches the browser with its
+  message hidden. What the two screens share — to whom "Cancel" is offered and in which
+  role (`cancellerOf` from `@repo/contracts`, the API's rule: the guest, the host of the
+  listing — each whatever their role — and an admin on somebody else's stay), the refund
+  it is worded with or the fee it costs the host (`hostCancellationFee`, the rule the API
+  charges by), and the dialog itself (`CancelStayDialog`: the warning, the reason box, a
+  host's hold worded as declining it, and a form inside the popup, so every opening starts
+  clean) — is `features/cancel-booking`; how the request is sent stays with each page, and
+  so does whatever only the page knows (the tab's `paid`, above). Whether a hold still
+  keeps its nights, and whether it waits on the viewer to pay, is `entities/booking`
   (`isHoldOpen`, `awaitsPaymentFrom`): the list's "Pay", the page's form and the offer to
   cancel all read the deadline there, so a hold past it is offered neither anywhere.
 
@@ -1374,7 +1411,15 @@ script and reads `window` — and fetches its own client secret through the BFF
 server render. The status the page opens on is read on the server, off the row; while
 onboarding is unfinished the panel asks the API to check with Stripe
 (`payoutsApi.refresh`) when it opens and when the form is left, and re-renders the page once
-the answer is that the account is enabled.
+the answer is that the account is enabled. Above the panel, `HostFees`
+(`entities/host-fee`) lists what the host owes for cancelling paid stays and what was kept
+back of their payouts towards it (`hostFeesApi.mine`); the admin's page of an account draws
+the same section for that host (`hostFeesApi.ofHost`), with a "Waive" dialog on every fee
+still owed (`_pages/admin/user/ui/waive-fee-button.tsx`). A host with nothing in it gets no
+card. Both screens stream it in a `Suspense` boundary, since it is a second read the rest of
+the screen does not depend on, and hand it the read rather than its result. Unlike
+`PayoutsNotice` it does not degrade to nothing: no card already means "nothing owed", so an
+API that cannot answer is said in a line instead, and anything else is thrown.
 The dashboard shows a "Set up payouts" notice above the listings until the account is
 enabled — bookings are taken either way.
 
@@ -1467,10 +1512,10 @@ A mutation nobody can undo — deleting a row, revoking access, anything the API
 with a `DELETE` — asks first, in an `AlertDialog` from `@repo/ui`
 (`features/delete-listing/ui/delete-listing-button.tsx`,
 `features/delete-review/ui/delete-review-button.tsx`,
-`_pages/bookings/overview/ui/cancel-booking-button.tsx` and `_pages/admin/user/ui/block-button.tsx`). Not a second
-button that takes the place of the first: a modal takes the focus and refuses a click
-outside itself, which is what stops the confirmation being hit by the hand that was
-already moving.
+`features/cancel-booking/ui/cancel-stay-dialog.tsx` and
+`_pages/admin/user/ui/block-button.tsx`). Not a second button that takes the place of
+the first: a modal takes the focus and refuses a click outside itself, which is what stops
+the confirmation being hit by the hand that was already moving.
 
 - **The form goes inside the popup**, not around it. The popup is portalled out of the
   subtree that renders it, so a submit button left behind in a form up here stops
@@ -1536,21 +1581,22 @@ rather than in `src/shared`.
 component that knows this application's `FieldErrors`, or one whose whole job is to
 navigate with `useRouter`. The test is the dependency, not the size — anything that would
 have to import from `#shared/*` or from `next/*` is not a primitive and does not go into
-the package. Nineteen are exported from there: `PageHeading` — the title and the line
+the package. Twenty are exported from there: `PageHeading` — the title and the line
 under it at the top of a list screen —, `BackLink` — the ghost arrow link above a detail
 screen's heading, back to the list it was opened from —, `ButtonLink` — a `<Link>`
 wearing the button classes, the one spelling of "a link that looks like a button" (see
-below) —, `FormField`, the one box every form that submits is made of, `HintFieldSet`, a
-group of boxes labelled the way a single box is, `LiveRefresh`, which re-renders a
+below) —, `FormField`, the one box every form that submits is made of, `HintLabel` (with
+`hintOf`, the id of its hidden copy), the label and hint of a box `FormField` cannot wrap
+because no `register` reaches it — the listing form's policy `Select` under a controller —,
+`HintFieldSet`, a group of boxes labelled the way a single box is, `LiveRefresh`, which re-renders a
 personal list when the event stream says it changed, and `FilterField`, `FilterSelect`,
 `LookupField`, `FilterForm`, `FiltersDialog`, `FilterChips`, `SortSelect`, `Pager`,
 `StalePageNotice`, `RefusedSearchNotice` and `NoMatchesNotice`, the parts every list
 screen — the catalogue, the stays and the admin's listings and users — searches and pages
 with. `DateRange` and `NightCount` draw a range of days and the nights it spans — on the
 stay's page and card, the waitlist's card and the admin's stuck stays and bounced refunds.
-Two more are internal to the boxes and not exported: `HintLabel`, the label with its
-description as a hint beside it, and `CharacterCount`, the room left in a bounded
-`FormField`. A component only one screen uses stays in that screen's slice, exactly as
+One more is internal to the boxes and not exported: `CharacterCount`, the room left in a
+bounded `FormField`. A component only one screen uses stays in that screen's slice, exactly as
 "pages first" says.
 
 - The design tokens live in `packages/ui/src/styles/globals.css`;

@@ -1,5 +1,6 @@
 import type {
   Booking,
+  Canceller,
   BookingStatus,
   PricedNight,
   StayNotice,
@@ -53,9 +54,20 @@ export type ReleasedHold = {
 /** The same shape as a released hold, because the same two people are told. */
 export type ConfirmedStay = ReleasedHold;
 
-/** The payment the row named when it was cancelled. */
+/**
+ * Who cancels a stay from `DELETE /bookings/:id`, why, and — for its host — the fee it costs
+ * them (`null` when it costs nothing). The provider's news cancels with none of it.
+ */
+export type CancellationBy = {
+  canceller: Canceller;
+  reason: string | null;
+  feeCents: Cents | null;
+};
+
+/** The payment the row named when it was cancelled, and the host's fee it wrote, if any. */
 export type CancelledStay = {
   paymentId: string | null;
+  fee: { id: string; amountCents: Cents } | null;
 };
 
 /** A stay's money as the payment handlers read it; `SettledStay` extends it. */
@@ -95,7 +107,21 @@ export type BookingCursor =
   | { sort: "checkInAsc" | "checkInDesc"; from: Date; id: string };
 
 /**
- * A stay set aside as the repository reads it: the row's facts, without what the job would
- * send — that figure is a rule (`owedOnStuck`), which the service applies.
+ * What a payout's job sends besides the host's share: a reservation never handed back goes as
+ * it is while the stay still covers it, and otherwise the fees the host owes come off first.
  */
-export type StuckStayRow = Omit<StuckStay, "owedCents">;
+export type StuckPayout = {
+  reservedCents: Cents | null;
+  feeWithheldCents: Cents;
+  /** What the host owes in fees less what their stuck payouts set aside earlier keep back (`shareOutHostFees`). */
+  hostFeesOwedCents: Cents;
+};
+
+/**
+ * A stay set aside as the repository reads it: the row's facts, without what the job would
+ * send — that figure is a rule (`owedOnStuck`), which the service applies. `payout` is
+ * `null` on a stuck refund.
+ */
+export type StuckStayRow = Omit<StuckStay, "owedCents"> & {
+  payout: StuckPayout | null;
+};

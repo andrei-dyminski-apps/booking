@@ -13,7 +13,7 @@ import {
   type Booking,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
-import { cents, subtractCents } from "../../payment/domain/money";
+import { CURRENCY, cents, subtractCents } from "../../payment/domain/money";
 import type { BookingPaymentHandler } from "./booking-payment.handler";
 import { MAX_REFUND_ATTEMPTS, type BookingService } from "./booking.service";
 import {
@@ -324,12 +324,17 @@ describe("BookingService", () => {
     );
   });
 
-  it("lets the guest and an admin cancel, and the owner of the listing only look", async () => {
+  it("lets the guest, an admin and the host with a reason cancel", async () => {
     const id = await bookedByGuest();
 
-    // Reading the bookings against your listing is not the same right as cancelling one.
-    await expect(service.remove(id, owner)).rejects.toThrow(ForbiddenException);
-    await expect(service.findOne(id, owner)).resolves.toMatchObject({ id });
+    // A host takes a stay away from its guest, who is owed a reason.
+    await expect(service.remove(id, owner)).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(service.findOne(id, owner)).resolves.toMatchObject({
+      id,
+      status: BookingStatus.PENDING_PAYMENT,
+    });
 
     await service.remove(id, guest);
     expect(bookingJobs.cancelled).toContain(id);
@@ -337,7 +342,15 @@ describe("BookingService", () => {
     const second = await bookedByGuest();
     await service.remove(second, admin);
 
-    await expect(seenBy(admin)).resolves.toHaveLength(2);
+    const third = await bookedByGuest();
+    await service.remove(third, owner, { reason: "The roof leaks" });
+
+    await expect(seenBy(admin)).resolves.toHaveLength(3);
+    await expect(service.findOne(third, guest)).resolves.toMatchObject({
+      status: BookingStatus.CANCELLED,
+      cancelledBy: "HOST",
+      cancellationReason: "The roof leaks",
+    });
   });
 
   // The lease would otherwise let anybody who knows an id keep the guest's own
@@ -345,7 +358,9 @@ describe("BookingService", () => {
   it("takes the cancellation lease only for somebody who may cancel", async () => {
     const id = await bookedByGuest();
 
-    await expect(service.remove(id, owner)).rejects.toThrow(ForbiddenException);
+    await expect(service.remove(id, owner)).rejects.toThrow(
+      BadRequestException,
+    );
     await expect(service.remove(id, stranger)).rejects.toThrow(
       NotFoundException,
     );
@@ -416,8 +431,8 @@ describe("BookingService", () => {
     it("hands it nothing for a cancellation it refused", async () => {
       const id = await bookedByGuest();
 
-      await expect(service.remove(id, owner)).rejects.toThrow(
-        ForbiddenException,
+      await expect(service.remove(id, stranger)).rejects.toThrow(
+        NotFoundException,
       );
 
       expect(waitlistService.freed).toEqual([]);
@@ -534,9 +549,163 @@ describe("BookingService", () => {
     const id = await bookedByGuest();
 
     notificationService.notices.length = 0;
-    await expect(service.remove(id, owner)).rejects.toThrow(ForbiddenException);
+    await expect(service.remove(id, owner)).rejects.toThrow(
+      BadRequestException,
+    );
 
     expect(notificationService.notices).toEqual([]);
+  });
+
+  describe("a host's cancellation", () => {
+    const why = { reason: "A pipe burst" };
+
+    it("refunds the guest in full under any policy, and costs the host the fee of its tier", async () => {
+      // Nothing back for a guest inside the last week under FIRM; everything for the host's.
+      bookingRepository.listingPolicy = "FIRM";
+      const id = await paidStay(5);
+
+      await service.remove(id, owner, why);
+
+      expect([...paymentGateway.refunds.values()]).toEqual([
+        { paymentId: "pi_1", amount: AMOUNT },
+      ]);
+      // 48 hours to 30 days before check-in: a quarter of the stay.
+      expect(bookingRepository.hostFees.get(id)).toMatchObject({
+        hostId: OWNER_ID,
+        amountCents: AMOUNT / 4,
+      });
+    });
+
+    it("costs a tenth a month ahead and half inside the last two days", async () => {
+      const early = await paidStay(40);
+      await service.remove(early, owner, why);
+
+      expect(bookingRepository.hostFees.get(early)?.amountCents).toBe(
+        AMOUNT / 10,
+      );
+
+      const late = await paidStay(1);
+      await service.remove(late, owner, why);
+
+      expect(bookingRepository.hostFees.get(late)?.amountCents).toBe(
+        AMOUNT / 2,
+      );
+    });
+
+    it("holds a host promoted to admin to a host's terms: a reason, and the fee", async () => {
+      const id = await paidStay(40);
+      const promoted = { ...owner, role: Role.ADMIN };
+
+      await expect(service.remove(id, promoted)).rejects.toThrow(
+        BadRequestException,
+      );
+
+      await service.remove(id, promoted, why);
+
+      expect(bookingRepository.hostFees.get(id)?.amountCents).toBe(AMOUNT / 10);
+    });
+
+    it("costs nothing for a hold nobody has paid for", async () => {
+      const id = await bookedByGuest();
+
+      await service.remove(id, owner, why);
+
+      expect(bookingRepository.hostFees.size).toBe(0);
+      expect(
+        notificationService.notices.map(({ content }) => content.type),
+      ).not.toContain(NotificationType.HOST_CANCELLATION_FEE);
+    });
+
+    it("tells the guest who cancelled and why, and the host what it costs", async () => {
+      const id = await paidStay(40);
+
+      notificationService.notices.length = 0;
+      await service.remove(id, owner, why);
+
+      expect(notificationService.notices).toEqual([
+        {
+          userId: GUEST_ID,
+          content: expect.objectContaining({
+            type: NotificationType.BOOKING_CANCELLED,
+            data: expect.objectContaining({
+              recipient: StayParty.GUEST,
+              refundCents: AMOUNT,
+              cancelledBy: "HOST",
+              reason: why.reason,
+            }) as unknown,
+          }) as unknown,
+        },
+        {
+          userId: OWNER_ID,
+          content: expect.objectContaining({
+            type: NotificationType.HOST_CANCELLATION_FEE,
+            data: expect.objectContaining({
+              bookingId: id,
+              amountCents: AMOUNT / 10,
+            }) as unknown,
+          }) as unknown,
+        },
+      ]);
+    });
+
+    it("tells every admin from the third paid stay a host cancels", async () => {
+      const thresholdNotices = () =>
+        notificationService.toAdmins.filter(
+          ({ type }) => type === NotificationType.HOST_CANCELLATIONS_THRESHOLD,
+        );
+
+      for (const days of [40, 50]) {
+        await service.remove(await paidStay(days), owner, why);
+      }
+
+      expect(thresholdNotices()).toEqual([]);
+
+      await service.remove(await paidStay(60), owner, why);
+
+      expect(thresholdNotices()).toEqual([
+        {
+          type: NotificationType.HOST_CANCELLATIONS_THRESHOLD,
+          data: { hostId: OWNER_ID, hostName: "Host", cancellations: 3 },
+        },
+      ]);
+    });
+
+    it("leaves a cancellation whose fee an admin waived out of the count", async () => {
+      for (const days of [40, 50]) {
+        await service.remove(await paidStay(days), owner, why);
+      }
+
+      const [waived] = bookingRepository.hostFees.values();
+
+      if (waived !== undefined) waived.waived = true;
+
+      await service.remove(await paidStay(60), owner, why);
+
+      expect(
+        notificationService.toAdmins.filter(
+          ({ type }) => type === NotificationType.HOST_CANCELLATIONS_THRESHOLD,
+        ),
+      ).toEqual([]);
+    });
+
+    it("answers a host with no reason by the row first: a stay cancelled already is a 404", async () => {
+      const id = await paidStay(40);
+
+      await service.remove(id, guest);
+
+      await expect(service.remove(id, owner)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it("refuses the host once the stay has begun, as everybody else", async () => {
+      const id = await paidStay(0);
+
+      await expect(service.remove(id, owner, why)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(bookingRepository.hostFees.size).toBe(0);
+    });
   });
 
   /**
@@ -709,6 +878,85 @@ describe("BookingService", () => {
       });
     });
 
+    it("refunds the share the stay's own policy gives, frozen when it was taken", async () => {
+      // Half back from 14 days before check-in to 7 under LIMITED.
+      bookingRepository.listingPolicy = "LIMITED";
+      const id = await paidStay(10);
+      // A change of the listing's policy afterwards does not restate the stay.
+      bookingRepository.listingPolicy = "FLEXIBLE";
+
+      await service.remove(id, guest);
+
+      expect([...paymentGateway.refunds.values()]).toEqual([
+        { paymentId: "pi_1", amount: AMOUNT / 2 },
+      ]);
+      expect(bookingRepository.rows.get(id)).toMatchObject({
+        booking: {
+          cancellationPolicy: "LIMITED",
+          status: BookingStatus.CANCELLED,
+          refundedAmountCents: AMOUNT / 2,
+        },
+      });
+    });
+
+    it("tells the host what the guest's cancellation gives back", async () => {
+      bookingRepository.listingPolicy = "LIMITED";
+      const paid = await paidStay(10);
+
+      notificationService.notices.length = 0;
+      await service.remove(paid, guest);
+
+      expect(notificationService.notices).toEqual([
+        {
+          userId: OWNER_ID,
+          content: expect.objectContaining({
+            type: NotificationType.BOOKING_CANCELLED,
+            data: expect.objectContaining({
+              refundCents: AMOUNT / 2,
+              currency: CURRENCY,
+            }) as unknown,
+          }) as unknown,
+        },
+      ]);
+
+      // A hold was never paid, so there is nothing to say about money.
+      const hold = await bookedByGuest();
+
+      notificationService.notices.length = 0;
+      await service.remove(hold, guest);
+
+      expect(notificationService.notices).toEqual([
+        {
+          userId: OWNER_ID,
+          content: expect.objectContaining({
+            data: expect.objectContaining({ refundCents: null }) as unknown,
+          }) as unknown,
+        },
+      ]);
+    });
+
+    it("says nothing about money for a stay refunded in full before it was cancelled", async () => {
+      const paid = await paidStay(30);
+      const found = bookingRepository.rows.get(paid);
+
+      if (found === undefined) throw new Error("The stay was not stored");
+
+      // Refunded in full outside the API, the news not acted on yet.
+      found.booking.refundedAmountCents = AMOUNT;
+      notificationService.notices.length = 0;
+      await service.remove(paid, admin);
+
+      expect(notificationService.notices).toEqual(
+        [GUEST_ID, OWNER_ID].map((userId) => ({
+          userId,
+          content: expect.objectContaining({
+            type: NotificationType.BOOKING_CANCELLED,
+            data: expect.objectContaining({ refundCents: null }) as unknown,
+          }) as unknown,
+        })),
+      );
+    });
+
     it("refunds only what a dashboard refund left of the payment", async () => {
       const id = await paidStay(30);
       await paymentHandler.handle({
@@ -830,6 +1078,20 @@ describe("BookingService", () => {
       expect(bookingRepository.rows.get(id)?.booking.refundedAmountCents).toBe(
         AMOUNT,
       );
+    });
+
+    it("refunds a guest promoted to admin by their stay's policy, not in full", async () => {
+      // Nothing back inside the last week under FIRM, whatever the guest's role now.
+      bookingRepository.listingPolicy = "FIRM";
+      const id = await paidStay(1);
+
+      await service.remove(id, { ...guest, role: Role.ADMIN });
+
+      expect(paymentGateway.refunds.size).toBe(0);
+      expect(bookingRepository.rows.get(id)?.booking).toMatchObject({
+        status: BookingStatus.CANCELLED,
+        cancelledBy: "GUEST",
+      });
     });
 
     it("refuses the guest and an admin alike once the stay has begun", async () => {

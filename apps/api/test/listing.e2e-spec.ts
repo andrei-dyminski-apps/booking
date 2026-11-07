@@ -456,6 +456,42 @@ describe("ListingController (e2e)", () => {
     expect(listingSchema.parse(response.body).pricePerNightCents).toBe(13_550);
   });
 
+  it("stores a cancellation policy, FLEXIBLE unless one is named, and keeps it through an edit that does not name it", async () => {
+    const read = async (id: string) =>
+      listingDetailSchema.parse(
+        (await anyone().get(`/listings/${id}`).expect(200)).body,
+      ).cancellationPolicy;
+
+    expect(await read(listingId)).toBe("FLEXIBLE");
+
+    const firm = await publish({ cancellationPolicy: "FIRM" });
+
+    expect(await read(firm)).toBe("FIRM");
+    expect(
+      (await catalogue()).items.find((listing) => listing.id === firm)
+        ?.cancellationPolicy,
+    ).toBe("FIRM");
+
+    await owner
+      .patch(`/listings/${firm}`)
+      .send({ pricePerNightCents: 13_550 })
+      .expect(200);
+    expect(await read(firm)).toBe("FIRM");
+
+    const changed = await owner
+      .patch(`/listings/${firm}`)
+      .send({ cancellationPolicy: "MODERATE" })
+      .expect(200);
+    expect(listingSchema.parse(changed.body).cancellationPolicy).toBe(
+      "MODERATE",
+    );
+
+    await owner
+      .patch(`/listings/${firm}`)
+      .send({ cancellationPolicy: "GENEROUS" })
+      .expect(400);
+  });
+
   it("refuses the edit to another owner — the role passes, the ownership does not", async () => {
     await otherOwner
       .patch(`/listings/${listingId}`)

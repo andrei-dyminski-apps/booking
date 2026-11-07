@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { differenceInMilliseconds, isBefore, parseISO } from "date-fns";
 import { Loader2Icon } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookingStatus,
-  freeCancellationUntil,
+  Canceller,
+  cancellerOf,
+  refundSchedule,
   type BookingDetail,
   type User,
 } from "@repo/contracts";
@@ -20,7 +22,11 @@ import {
   CardTitle,
 } from "@repo/ui/components/card";
 import { cancellationRefundNote, mayCancel } from "#features/cancel-booking";
-import { BookingStatusBadge } from "#entities/booking";
+import {
+  BookingStatusBadge,
+  CANCELLER_NAMES,
+  CancellationTerms,
+} from "#entities/booking";
 import {
   dayStart,
   formatMoment,
@@ -187,13 +193,21 @@ export const BookingLive = ({
   }, [pending, lapsed, expiresAt]);
 
   const confirmed = booking.status === BookingStatus.CONFIRMED;
-  const { from } = booking;
+  const { from, createdAt, cancellationPolicy } = booking;
+  // Read by the timer below and drawn under "Cancellation": one schedule for both, kept
+  // across the poll's re-renders, which change none of the three facts it is made of.
+  const schedule = useMemo(
+    () => refundSchedule({ from, createdAt, cancellationPolicy }),
+    [from, createdAt, cancellationPolicy],
+  );
 
+  // Every moment the refund falls, then check-in, when the button goes: the note is
+  // redrawn at each of them, earliest first.
   useEffect(() => {
     if (!confirmed) return;
 
-    const next = [freeCancellationUntil(from), dayStart(from)].find((moment) =>
-      isBefore(parseISO(clock), moment),
+    const next = [...schedule.map(({ until }) => until), dayStart(from)].find(
+      (moment) => isBefore(parseISO(clock), moment),
     );
 
     if (next === undefined) return;
@@ -212,9 +226,14 @@ export const BookingLive = ({
     return () => {
       clearTimeout(timer);
     };
-  }, [confirmed, from, clock]);
+  }, [confirmed, schedule, from, clock]);
 
   const refundNote = cancellationRefundNote(booking, viewer, clock);
+  const canceller = cancellerOf(booking, viewer);
+  // The guest's refund reads as part of the stay's state; what cancelling would cost the
+  // host is a line of its own, so it is not read as a fee already charged.
+  const hostNote = canceller === Canceller.HOST ? refundNote : null;
+  const guestNote = canceller === Canceller.HOST ? null : refundNote;
 
   return (
     <Card>
@@ -282,7 +301,45 @@ export const BookingLive = ({
 
         {confirmed && (
           <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-            Paid and confirmed.{refundNote === null ? null : ` ${refundNote}`}
+            Paid and confirmed.{guestNote === null ? null : ` ${guestNote}`}
+          </p>
+        )}
+        {confirmed && hostNote !== null && (
+          <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+            {hostNote}
+          </p>
+        )}
+
+        {/* The whole schedule of a stay still holding its nights, dated: the policy was
+            frozen onto it when it was booked, so the listing's policy today may differ. A
+            hold is shown it too — it is what paying commits to — but nothing has been
+            charged yet, and without saying so "No refund" reads as cancelling the hold
+            costing money. */}
+        {(pending || confirmed) && (
+          <div className="flex flex-col gap-1">
+            <h3 className="text-sm font-medium">Cancellation</h3>
+            {pending && (
+              <p className="text-sm text-muted-foreground">
+                Nothing has been charged yet, so cancelling the hold costs
+                nothing. Once the stay is paid, a cancellation refunds as
+                follows.
+              </p>
+            )}
+            <CancellationTerms
+              policy={booking.cancellationPolicy}
+              schedule={schedule}
+            />
+          </div>
+        )}
+
+        {/* Who took the stay away and why — the guest of a host's cancellation is owed it. */}
+        {booking.cancelledBy !== null && booking.cancelledAt !== null && (
+          <p className="rounded-lg bg-muted px-3 py-2 text-sm break-words text-muted-foreground">
+            Cancelled by {CANCELLER_NAMES[booking.cancelledBy]} on{" "}
+            {formatMoment(booking.cancelledAt)} UTC
+            {booking.cancellationReason === null
+              ? "."
+              : `: “${booking.cancellationReason}”`}
           </p>
         )}
 
@@ -310,11 +367,17 @@ export const BookingLive = ({
         refunded". The clock moves on for a confirmed stay only, so the deadline of a hold
         is `lapsed`.
       */}
-      {mayCancel(booking, viewer, clock) && !(pending && (lapsed || paid)) && (
-        <CardFooter>
-          <CancelStayButton booking={booking} refundNote={refundNote} />
-        </CardFooter>
-      )}
+      {canceller !== null &&
+        mayCancel(booking, viewer, clock) &&
+        !(pending && (lapsed || paid)) && (
+          <CardFooter>
+            <CancelStayButton
+              booking={booking}
+              canceller={canceller}
+              refundNote={refundNote}
+            />
+          </CardFooter>
+        )}
     </Card>
   );
 };

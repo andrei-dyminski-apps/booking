@@ -7,6 +7,7 @@ export {
 } from "./auth";
 export { bookingsApi } from "./bookings";
 export { conversationsApi } from "./conversations";
+export { hostFeesApi } from "./host-fees";
 export { listingsApi } from "./listings";
 export { lookupsApi } from "./lookups";
 export { notificationsApi } from "./notifications";

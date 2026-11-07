@@ -12,7 +12,7 @@ import {
 import { notRefunded } from "./refund.js";
 
 /**
- * Here for the reason `refundOnCancel` is: the API transfers by it and the host's screens
+ * Here for the reason `refundQuote` is: the API transfers by it and the host's screens
  * state it. The host is paid once the stay has begun, so until then a cancellation takes
  * nothing back from anybody.
  */

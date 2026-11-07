@@ -133,16 +133,19 @@ src/
   payout/                # the host's half of the money; follows booking and payment
     payout.module.ts       # imports BookingModule and PaymentModule; nothing imports it
     domain/payout.ts       # owedToHost over the row (the contract's rule), mayPayOut — nothing leaves while a dispute is open
-    domain/payout.types.ts # SettledStay, PayoutAccountHolder — what the repository answers and the service reads
-    domain/payout.errors.ts # SettlementInProgressError — the settlement lease held past its wait
+    domain/payout.types.ts # SettledStay, PayoutAccountHolder — what the repository answers and the service reads; HostFeeReader — whether a fee's waiver is named
+    domain/payout.errors.ts # SettlementInProgressError — the settlement lease held past its wait; WaivingAccountGoneError, WaivingAccountNotAdminError — a waiver's caller gone or no longer an active admin
     application/
-      payout.service.ts    # host payouts: the account, the transfer, reversals, refunds, disputes
+      payout.service.ts    # host payouts: the account, the transfer less the host's fees, reversals, refunds, disputes
       payout.service.spec.ts
+      host-fee.service.ts  # what hosts owe for cancelling: the overview both screens read, the admin's waiver
+      host-fee.service.spec.ts
       payout-event-handler.ts  # registers with the dispatcher and with StayEvents
       ports/payout-gateway.ts   # PayoutGateway — connected accounts, transfers, account events
       ports/payout-jobs.ts      # PayoutJobs — the payout jobs, as the service asks for them
     infrastructure/
-      payout.repository.ts       # a stay's money after payment, and the payout account on a user
+      payout.repository.ts       # a stay's money after payment, the payout account on a user, the payout reservation under the host's lock
+      host-fee.repository.ts     # host_fees as the screens read it, and the waiver
       stripe-payout.gateway.ts   # the host's half: Accounts v2 recipients, transfers, thin events
       host-payout.queue.ts       # BullMQ, behind PayoutJobs: the per-stay payout job and the hourly sweep
       host-payout.processor.ts
@@ -150,6 +153,7 @@ src/
       payout-account.controller.ts   # GET /payouts/account, POST /payouts/account/refresh and /session
       payout-webhook.controller.ts   # POST /payouts/webhook — the thin account events, into the same inbox
       stuck-payout.controller.ts     # POST /bookings/:id/stuck/payout/retry — the admin's
+      host-fee.controller.ts         # GET /host-fees/mine, GET /host-fees?hostId=, POST /host-fees/:id/waive
       dto/payout.dto.ts
   review/                # the two-sided review of a finished stay
     review.controller.ts # no prefix: each route names its parent — a listing, a guest, a stay
@@ -387,17 +391,30 @@ Two checks, and the split between them is the point.
   was retired still carries the old name for as long as `JWT_ACCESS_TTL` — the `OWNER`
   removed by `20261021120000_drop_owner_role` lands there and is refused until the next
   refresh.
-- **Reading and writing are separate rules over the same row.** A host reads the bookings
-  against their listing and cannot cancel one; that is why `BookingService.remove` does not
-  reuse the check in `findOne`.
+- **Reading and writing are separate rules over the same row.** Who may read a stay is
+  `getReadable` (the guest, the host, an admin); who cancels it, and on what terms, is
+  `BookingService.mayCancel`, which answers a `Canceller` rather than a yes: the guest
+  refunds by the policy, the host must give a reason (`400`), refunds the guest in full and
+  owes a fee for a paid stay, an admin refunds in full. The reason is asked for before the
+  cancellation's lease, and only of a row that could be cancelled at all: a stay cancelled
+  already is a `404` to its host as to anybody, and since a row never becomes cancellable
+  again, the lease is taken by no request that will be refused for its body. Which of the
+  three the caller is comes from `cancellerOf` in `@repo/contracts` — the frontend words its
+  dialog by the same rule — and the relation comes before the role: a guest or a host
+  promoted to admin since cancels their own stay as its guest or its host, by the policy or
+  with a reason and a fee, and `ADMIN` is the role acting on somebody else's stay, the
+  separation of duties every money path keeps. That is why `remove` does not reuse the
+  check in `findOne`.
 - **403 or 404 depends on whether the caller could have found the row anyway.** A listing
   refused to another owner answers `403`: the catalogue is readable by every signed-in
   user, so "exists, but not yours" tells them what `GET /listings` told them a moment
   earlier. A booking is the other case — nothing lets a stranger list bookings, so a `403`
   would be the one way to learn that an id exists at all, and `getReadable` answers
-  `404` for a row the caller may not read. The `403` on cancelling stays: it goes to
-  someone who may already read the booking (the owner of the listing), and denies them the
-  second right rather than the first.
+  `404` for a row the caller may not read. Cancelling has no `403` left to give: everybody
+  who may read a stay — the guest, the host, an admin — may cancel it, each on their own
+  terms, so `mayCancel` takes the canceller from the rule that answers the `404`
+  (`readerOf`, which `getReadable` reads through as well): a caller who is none of the three
+  is refused there, never named a canceller by elimination.
 - **Roles come from the database, never from a request.** `/auth/register` always writes a
   `USER`; an admin changes a role through `PATCH /users/:id`, and never their own — the
   `403` from `UserService` keeps a site from losing its last admin by one click. That route is also the one place the role is read from the row rather than the token: `UserService.update` refuses a caller whose account is no longer an active admin, because an admin who was just blocked or demoted would otherwise keep up to `JWT_ACCESS_TTL` to block the admin who did it. The caller's row is read in `UserRepository.update`, locked with the target's (`SELECT ... FOR UPDATE`, ordered by id) inside the transaction that writes — a read before it would let two admins blocking each other at once both through and leave the site with none (`CallerNotAdminError` is what the service turns into the `403`). The own-account check compares the id lower-cased, because `ParseUUIDPipe` accepts an upper-case UUID that Postgres resolves to the same row. `JwtStrategy` reads no database, so a promoted user carries the old role until
@@ -501,12 +518,25 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
   still fail after `processing` — is a change on that page first.
 - **A cancellation is final when it is answered, and its refund follows it.**
   `DELETE /bookings/:id` calls no payment provider. A hold can be cancelled at any time, a
-  confirmed stay only before its check-in day — by the guest and by an admin alike
-  (`isCancellableOn`, `409` once it has begun). `refundsInFull` decides whether there is a
-  refund — the guest's until 48 hours before check-in and none after, an admin's always, the
-  rule `refundOnCancel` states on the booking page — and the amount is what the row has not
-  recorded as refunded yet; `cancel` writes it as `refund_owed_cents` in the
-  statement that writes `CANCELLED`. The `refund-cancellation` job sends it under
+  confirmed stay only before its check-in day — by the guest, the host and an admin alike
+  (`isCancellableOn`, `409` once it has begun). `refundQuote` decides the refund — a guest's
+  by the stay's own `cancellation_policy` (copied from the listing under `create`'s
+  `FOR UPDATE` lock, like the amount, so a later change of the listing's policy restates no
+  stay; a request that names the version of the listing its guest was shown —
+  `listingUpdatedAt`, which the booking form always sends and every save of the listing,
+  prices included, stamps — is refused with a `412` under the same lock when the listing's is
+  no longer it, rather than taking a price or freezing a policy the guest never read, and not
+  a `409`, which the form reads as its calendar being stale): the share of the window the cancellation falls in, measured from `checkInInstant`,
+  or in full within the grace period, less what was refunded already; a host's and an
+  admin's whatever is left, always, under any policy. `cancel` writes who cancelled, when and
+  why (`cancelled_by`, `cancelled_at`, `cancellation_reason`) in the statement that writes
+  `CANCELLED` — the provider's news cancels with none of them — and `BOOKING_CANCELLED`
+  carries the canceller and the reason to the other side. The booking page states the same quote. `cancel` writes the amount as
+  `refund_owed_cents` in the statement that writes `CANCELLED`, and `BOOKING_CANCELLED`
+  carries it as `refundCents` (`null` for a hold). The booking freezes the policy's name, not
+  its terms, so a row of `CANCELLATION_TERMS` is never edited once a booking can carry it:
+  new terms are a new policy (`FIRM_V2` — the contract's enum, its row, a migration of the
+  Prisma enum), and the old one stays for the stays already taken under it. The `refund-cancellation` job sends it under
   `booking-<id>-cancellation` (one cancellation per booking, so no amount in the key), capped
   again by what Stripe says is left, and `settleOwedRefund` raises `refunded_amount_cents` by what
   the refund named by that key gave back and clears the debt in one transaction. A refund
@@ -520,7 +550,8 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
   disputed payment cannot be refunded: an open dispute is a `409`.
 - **A debt or a payout that keeps failing is set aside**, the way the inbox sets an event
   aside: every failed run counts on the row (`refund_attempts`/`refund_last_error`,
-  `payout_attempts`/`payout_last_error`), the sweeps read the fewest failures first so a
+  `payout_attempts`/`payout_last_error`) — a run that only found the stay's lease taken
+  (`CancellationInProgressError`, `SettlementInProgressError`) is no failure and counts nothing — the sweeps read the fewest failures first so a
   failing row cannot fill a batch, and after `MAX_REFUND_ATTEMPTS` (30, about half an hour of
   the minute sweep) or `MAX_PAYOUT_ATTEMPTS` (24, about a day of the hourly one) the row is
   stamped `refund_failed_at`/`payout_failed_at`, the sweep leaves it alone, the job stops
@@ -611,7 +642,7 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
 - **Notices**: `BOOKING_CONFIRMED` to both sides, `PAYMENT_REFUNDED` to the guest of a late
   payment or a dashboard refund — through `notify`, which never throws. What only a person
   can put right goes to every admin through `notifyAdmins` (`REFUND_FAILED`,
-  `PAYMENT_EVENT_FAILED`, `CANCELLATION_REFUND_FAILED`, `PAYOUT_FAILED`). A redelivery of a
+  `PAYMENT_EVENT_FAILED`, `CANCELLATION_REFUND_FAILED`, `PAYOUT_FAILED`, `PAYOUT_SHORTFALL`). A redelivery of a
   payment that confirmed a still-confirmed stay repeats the payout's scheduling and the
   notices unless `confirmation_announced_at` says they were done; the whole event runs under
   `whileCancelling`, so two runs over one payment tell both sides once.
@@ -630,7 +661,7 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
   off the row), never in the constant: `PaymentGateway.open` and `Payout` carry it. `+`/`-` on two amounts gives a plain `number` back, which is why the
   arithmetic goes through `addCents`/`subtractCents`/`minCents`/`maxCents`. A log line or an
   exception message reads an amount through `formatCents` (`361.05`). The contract's rules
-  count cents too (`hostShare`, `stayTotal`, `refundOnCancel`), and the schemas
+  count cents too (`hostShare`, `stayTotal`, `refundQuote`), and the schemas
   brand what they parse, so a response read on either side is `Cents` already. The inbox stores
   its payload in cents; `store_money_in_cents` moved the events and notices written before it.
 
@@ -647,7 +678,11 @@ platform, and the host is paid their share by a transfer once the stay has begun
   screen states them — and so does `owedToHost` (nothing for an unpaid stay or a lost
   dispute, a refund owed counted as refunded, `hostShare` of the rest), because
   `GET /bookings/stuck` states what the job would send as `owedCents` (the refund owed for
-  `kind=refund`, `owedToHost` for `kind=payout`; `owedOnStuck` in
+  `kind=refund`; for `kind=payout` a reservation still standing that the stay covers, else
+  `owedToHost` less the fees left for it — what the host owes (`owedFeesWhere`) shared out
+  over all their stuck payouts, the first set aside first (`shareOutHostFees`), so one debt
+  comes off one host's rows once rather than off each, with what a reservation the stay
+  outgrew kept back counted back in, since its release hands it back first; `owedOnStuck` in
   `booking/domain/stuck-stay.ts`, applied by `BookingService`) — the admin's screen draws
   the figure and does not apply the rule. `domain/payout.ts` applies it to the row's facts
   and adds what only the API decides: nothing leaves while a dispute is open (`mayPayOut`).
@@ -661,16 +696,95 @@ platform, and the host is paid their share by a transfer once the stay has begun
   unfinished; `GET /payouts/account` only reads the row. The write that switches it on
   queues a `pay-host` job rather than paying inside the request or the event.
 - **Bookings are never refused for a host who cannot be paid.** Their payouts wait.
+- **A host who cancels a paid stay owes a fee** (`hostCancellationFee` in the contract: 10%
+  of what the cancellation refunds — the payment less what went back already — more than 30
+  days before `checkInInstant`, 25% more than 48 hours before, 50% after that; at the very
+  moment a window closes the next tier applies, as with a refund; nothing for a hold, for
+  a stay nobody paid for such as the seed's, for one refunded in full already, or for one
+  whose dispute was lost — that money went back through the bank, so nothing is refunded).
+  `BookingRepository.cancel` writes the `host_fees` row — one per
+  stay, `booking_id` unique — in the cancellation's own transaction, `HOST_CANCELLATION_FEE`
+  tells the host, and from the third fee within a year every admin hears
+  (`HOST_CANCELLATIONS_THRESHOLD`, a notice of the same name) — a fee an admin waived is
+  not counted, the waiver saying the cancellation was not the host's doing. The host's
+  overview (`cancellationsInWindow`) counts the same stays: both read
+  `countedCancellationsWhere` and `cancellationsWindowStart` in `booking.repository.ts`. Nothing of a cancelled stay was ever paid to the
+  host, so **the fee is withheld from their next payouts** rather than debited: Stripe's
+  account debits want the host's signed consent, the same region and money on a balance a
+  recipient account has usually paid out already. `payOut` takes two
+  steps. `PayoutRepository.reservePayout` is a short transaction under a per-host
+  `pg_advisory_xact_lock`, so two stays of one host paid out at once cannot keep back the
+  same debt: it fixes `payout_reserved_cents` (`owedToHost` less what the host owes in the
+  stay's currency — a payout keeps back cents of what it sends, and the stuck list shares
+  the fees out by host and currency alike, `hostFeesKey`) and
+  `fee_withheld_cents`, and adds the latter to the fees' `withheld_cents` oldest first,
+  recording which fee each part went to in `host_fee_withholdings` (the fee's
+  `withheld_cents` is the sum of its rows). The transfer then goes out under
+  `whilePayingOut` — the settlement's lease, never a transaction, so no connection waits on
+  Stripe — after reading the stay once more: a reservation a refund or a dispute has
+  outgrown since is not sent but handed to `settle`, which releases it, and the next run
+  reserves afresh. The record writes `transfer_id`,
+  `paid_out_amount_cents` and `paid_out_at` and clears the reservation. A retry finds the
+  reservation and sends the same amount under the same key — a transfer found by its group
+  for less than was reserved is recorded as found and every admin is told
+  (`PAYOUT_SHORTFALL`, beside the error in the log), because nothing sends the difference
+  and a person has to; a reservation made afresh after
+  a release counts up `payout_reservations`, whose number is part of the key, so another
+  amount is a new request rather than one Stripe refuses — or answers with a saved failure —
+  for 24 hours. `settle` resolves a reservation left unrecorded that has a reason to go back
+  (the stay no longer covers it, or the payout cannot go out — below): under the lease no
+  transfer is on its way, so a transfer Stripe holds (`findTransfer`, by `transfer_group`)
+  is recorded and settled — and the host told (`PAYOUT_SENT`, after the lease, as the payout
+  run tells of its own), the shortfall check above applied the same way; with none, the
+  reservation is released, its withheld handed back
+  to the fees, and the next payout run reserves afresh. A payout being set aside whose
+  hand-back finds the transfer is recorded rather than reported: the record clears
+  `payout_failed_at` (a payout recorded is not stuck; the attempts stay as its history), and
+  no `PAYOUT_FAILED` goes out. One the stay still covers is left to
+  its payout run without asking Stripe — the run records a transfer sent under its key just
+  the same. Switching a host's account off queues the host's run, and the sweep still
+  selects a stay of theirs with a reservation standing, so that run hands it back. An open
+  dispute hands it back from the event, which comes again while the lease is taken. A reservation
+  is a hold, released when the payout behind it cannot go out rather than left for a wait
+  nobody can bound: a payout set aside after `MAX_PAYOUT_ATTEMPTS`, one whose host's
+  account cannot receive transfers, and one an open dispute holds, hand it back the same way, whatever the stay still
+  covers — fees kept back from money nobody sent would read as paid while it waits — and
+  the next run, or the admin's retry, reserves afresh. CHECKs keep
+  the reservation off a paid-out stay and money kept back to reserved or paid-out stays.
+  A payout the fees take whole sends no transfer, which is why "paid out" is `paid_out_at`,
+  not `transfer_id` (`payoutOwed`, `bookings_awaiting_payout_idx`). `settle` counts
+  `paid_out + fee_withheld` as what the host holds: a later refund comes out of the transfer
+  first, and whatever the transfer cannot cover goes back as debt onto the fees this stay's
+  payout kept it back for — by its `host_fee_withholdings`, a fee still owed first and the
+  newest of them first, a waived one last, where it is forgiven with the fee — instead of a
+  negative transfer. Nothing lands on a fee the stay never paid towards, so a waiver
+  forgives what the screen showed it forgiving. A fee nobody can withhold — a host who never earns
+  again — stays owed on the admin's screen; the platform does not charge a host's card.
+  `POST /host-fees/:id/waive` (ADMIN, a reason) forgives what is still owed and records the
+  admin who did (`waived_by_id`, restricting the user); what was withheld stays withheld. The
+  role in the token is not trusted for money: the admin's row is read `FOR KEY SHARE` in the
+  waiver's transaction — the lock `UserRepository.update`'s `FOR UPDATE` waits on — so an
+  account gone since the token is a `401` and one demoted or blocked since a `403`. Only
+  `GET /host-fees?hostId=` names the admin (`waivedBy`); the host's `/mine` answers `null`.
+  It takes the host's lock like every write that changes what the
+  host owes, so it never lands between a reservation's read of the fees owed and its
+  keeping back from them. Every transaction that holds the host's lock and a `bookings` row
+  takes the lock first (`lockHostFees`): the reservation, a release and a settlement's write
+  alike, the last two off the host the lease read, so the two locks never meet in opposite
+  orders. The `CHECK`s (`host_fees_withheld_within_amount`,
+  `host_fees_waived_with_reason`, …) hold the ledger for the writes around the API.
 - **Two halves, like hold expiry**: a delayed job per stay at `payoutDueAt` (`payout-<id>`)
   and an hourly sweep, a hundred stays a run, the fewest failures first, over
-  `bookings_awaiting_payout_idx` (partial: paid, no transfer, not set aside), which leaves
+  `bookings_awaiting_payout_idx` (partial: paid, not paid out, not set aside), which leaves
   out a stay refunded in full or owed a refund.
 - **A transfer is idempotent and recorded once**: funded by the stay's own charge
-  (`source_transaction`), sent under `booking-<id>-payout` — no amount in the key, so a retry
-  cannot send a second one — and looked up by `transfer_group` and `metadata.bookingId`
-  before it is sent, because Stripe forgets a key after 24 hours. `transfer_id` is written
-  only into an empty column. Those three, not a lease, are what keep the stay's job, the
-  sweep and a host's `pay-host` job — run four at a time by the worker — to one transfer. A
+  (`source_transaction`), sent under `booking-<id>-payout-<reservation>` — a retry of one
+  reservation is the same request, and two reservations never race, since a new one is made
+  only after `settle` found no transfer for the last under the lease — and looked up by
+  `transfer_group` and `metadata.bookingId` before it is sent, because Stripe forgets a key
+  after 24 hours. The payout is recorded only into a reserved stay not paid out. Those three
+  and the lease are what keep the stay's job, the sweep and a host's `pay-host` job — run
+  four at a time by the worker — to one transfer. A
   refund or dispute that lands while the transfer is in flight does not undo the write;
   `settle` takes back the difference straight after.
 - **`settle` is the one place that takes money back from a host**: under `whileSettling` it
@@ -686,7 +800,8 @@ cents>` and lowers `paid_out_amount_cents` from exactly what it read. Two settle
   settles.
 - **Disputes** move forward only — `OPEN` from none, `WON`/`LOST` from none or `OPEN` —
   because Stripe does not order its deliveries. Opened, the host is told (`PAYMENT_DISPUTED`)
-  and nothing moves; won, the stay's `pay-out` job is queued; lost, `settle` reverses what
+  and nothing is sent — a reservation standing then is handed back, since no payout run
+  reads a disputed stay; won, the stay's `pay-out` job is queued; lost, `settle` reverses what
   was sent and the booking side cancels the stay if its check-in has not come.
   `PAYOUT_SENT` tells the host about each transfer.
 - **Stripe's side has to be set up once**: Connect enabled with the platform profile and

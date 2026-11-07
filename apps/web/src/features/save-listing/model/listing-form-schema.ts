@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
+  CancellationPolicy,
   createListingSchema,
+  type CancellationPolicy as PolicyName,
   type CreateListingInput,
   type ListingDetail,
   type Weekday,
@@ -22,6 +24,7 @@ export type ListingFormValues = {
   pricePerNightCents: string;
   /** `setValueAs: toNumber` has already made it a number, or `undefined` for an empty box. */
   capacity: number | undefined;
+  cancellationPolicy: PolicyName;
   pricing: {
     weekdays: Partial<Record<Weekday, string>>;
     dates: { date: string; priceCents: string }[];
@@ -46,6 +49,7 @@ export const listingFormSchema = z
     description: z.custom<string>(),
     pricePerNightCents: priceBox,
     capacity: z.custom<number | undefined>(),
+    cancellationPolicy: z.custom<PolicyName>(),
     pricing: z.object({
       weekdays: z.partialRecord(weekdaySchema, priceBox),
       dates: z.array(
@@ -90,6 +94,9 @@ export function listingFormValues(
     pricePerNightCents:
       listing === undefined ? "" : inputOfCents(listing.pricePerNightCents),
     capacity: listing?.capacity,
+    // A new listing starts on the database's own default.
+    cancellationPolicy:
+      listing?.cancellationPolicy ?? CancellationPolicy.FLEXIBLE,
     pricing: {
       weekdays: Object.fromEntries(
         Object.entries(listing?.pricing.weekdays ?? {}).map(

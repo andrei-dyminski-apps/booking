@@ -1,6 +1,7 @@
 import { tz } from "@date-fns/tz";
 import { differenceInCalendarDays, parseISO } from "date-fns";
 import { z } from "zod";
+import { cancellationPolicySchema } from "./cancellation-policy.js";
 import { dayMessage, isDay, today } from "./day.js";
 import { blank, PAGING } from "./query.js";
 
@@ -127,6 +128,11 @@ export const listingSchema = z.object({
     .max(MAX_CAPACITY, {
       error: `A listing may not sleep more than ${String(MAX_CAPACITY)} guests`,
     }),
+  /**
+   * What a guest's cancellation refunds, and until when (`CANCELLATION_TERMS`). Every
+   * booking copies it when the hold is taken.
+   */
+  cancellationPolicy: cancellationPolicySchema,
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
@@ -284,6 +290,13 @@ export const createListingSchema = listingSchema
     updatedAt: true,
   })
   .extend({
+    /**
+     * Optional: a listing created without one is `FLEXIBLE`, the database's default, and a
+     * `PATCH` without one leaves it as it was. No `.default()` here, because the `PATCH`
+     * schema is this one made partial, and a default would reset the policy of every
+     * listing whose save did not mention it.
+     */
+    cancellationPolicy: cancellationPolicySchema.optional(),
     /**
      * Optional, and replaced whole when present: a listing created without it costs its
      * default price every night, and a `PATCH` without it leaves the exceptions as they

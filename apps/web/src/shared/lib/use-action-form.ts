@@ -116,7 +116,18 @@ export function useActionForm<
 
   const [errors, dispatch, pending] = useActionState<FormErrors, Output>(
     async (state, values) => {
-      const answer = await action(state, values);
+      let answer: FormErrors;
+
+      try {
+        answer = await action(state, values);
+      } catch (error) {
+        // What an action throws on the server — a drift from the contract, a 500 — still
+        // reaches the error boundary, and a `redirect()` arrives as a rejection the router
+        // handles: both are rethrown. Only the call itself failing is this form's to say.
+        if (!isConnectionLost(error)) throw error;
+
+        return CONNECTION_LOST;
+      }
 
       if (answer.message === null && Object.keys(answer.fields).length === 0) {
         succeeded.current?.(form);
@@ -182,3 +193,20 @@ export function useActionForm<
     message: errors.message,
   };
 }
+
+/**
+ * The browser never got an answer from this server: the action's `fetch` rejected, which
+ * Next passes on as it is — a `TypeError` in every browser ("Failed to fetch", "Load
+ * failed", "NetworkError when attempting to fetch resource"). Whether the request reached
+ * the server before the connection went is not known, so the message does not say that
+ * nothing happened: a retry of a write that did land is refused by the API in its own words.
+ */
+function isConnectionLost(error: unknown): boolean {
+  return error instanceof TypeError;
+}
+
+const CONNECTION_LOST: FormErrors = {
+  message:
+    "The connection was lost before an answer came back. Check it and try again.",
+  fields: {},
+};

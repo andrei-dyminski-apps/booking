@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import {
   HostAccountStatus,
   BASIS_POINTS,
@@ -5,7 +6,8 @@ import {
   PLATFORM_FEE_BPS,
   Role,
 } from "@repo/contracts";
-import { payoutsApi, requireRole } from "#shared/api";
+import { HostFees } from "#entities/host-fee";
+import { hostFeesApi, payoutsApi, requireRole } from "#shared/api";
 import { ROUTES, stripePublishableKey } from "#shared/config";
 import { countOf } from "#shared/lib";
 import { BackLink, PageHeading } from "#shared/ui";
@@ -37,6 +39,11 @@ export const PayoutsPage = async () => {
           description={`Guests pay the site; you are paid your share ${countOf(PAYOUT_DELAY_HOURS, "hour")} after each stay begins — everything left after refunds, less the site's ${String(feePercent)}%.`}
         />
       </div>
+
+      {/* Streamed after the page: the panel does not wait for the fees. */}
+      <Suspense fallback={null}>
+        <HostFees read={hostFeesApi.mine} audience="host" />
+      </Suspense>
 
       <PayoutsPanel
         enabled={status === HostAccountStatus.ENABLED}

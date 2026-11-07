@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { cancellationPolicySchema } from "./cancellation-policy.js";
 import { dayMessage, isDay, today } from "./day.js";
 import { listingSummarySchema } from "./listing.js";
 import { centsSchema, currencySchema } from "./money.js";
@@ -31,6 +32,18 @@ export const disputeStatusSchema = z.enum(["OPEN", "WON", "LOST"]);
 export const DisputeStatus = disputeStatusSchema.enum;
 
 /**
+ * Who cancelled a stay, mirrored by the `Canceller` enum of the Prisma schema: its guest, the
+ * host of its listing, or an admin. It decides the refund (`refundQuote`) and, for the host,
+ * the fee the cancellation costs them (`hostCancellationFee`).
+ */
+export const cancellerSchema = z.enum(["GUEST", "HOST", "ADMIN"]);
+
+export const Canceller = cancellerSchema.enum;
+
+/** The longest reason a cancellation may carry — a sentence or two, not a letter. */
+export const MAX_CANCELLATION_REASON_LENGTH = 500;
+
+/**
  * Dates are stored as `YYYY-MM-DD`, so they compare lexicographically.
  *
  * A booking names two people-facing rows rather than free text: the listing it takes and
@@ -50,6 +63,12 @@ export const bookingSchema = z.object({
    */
   listing: listingSummarySchema,
   guestId: z.uuid(),
+  /**
+   * Who owns the listing the stay takes — its host. Not a secret from the guest, who writes
+   * to the host about the stay anyway; it is what tells a screen whether its viewer is the
+   * host, who may cancel the stay too, at a fee.
+   */
+  hostId: z.uuid(),
   from: z.iso.date({
     error: dayMessage(
       "A check-in date is required",
@@ -75,8 +94,14 @@ export const bookingSchema = z.object({
    */
   currency: currencySchema,
   /**
-   * What went back to the guest, or `null` when nothing did: a cancellation outside the
-   * free window, a hold that was never paid. See `refundOnCancel` (`refund.ts`).
+   * The listing's cancellation policy when the hold was taken — a copy, like `amountCents`:
+   * a later change of the listing's policy does not restate the stay. `refundQuote`
+   * (`refund.ts`) reads it.
+   */
+  cancellationPolicy: cancellationPolicySchema,
+  /**
+   * What went back to the guest, or `null` when nothing did: a cancellation after every
+   * refund window closed, a hold that was never paid. See `refundQuote` (`refund.ts`).
    */
   refundedAmountCents: centsSchema.nullable(),
   /**
@@ -100,6 +125,15 @@ export const bookingSchema = z.object({
    */
   expiresAt: z.iso.datetime().nullable(),
   createdAt: z.iso.datetime(),
+  /** Who cancelled the stay, or `null` for one nobody cancelled. */
+  cancelledBy: cancellerSchema.nullable(),
+  /** When it was cancelled, or `null`. */
+  cancelledAt: z.iso.datetime().nullable(),
+  /**
+   * Why, as whoever cancelled it put it — always given by a host, optional for the guest
+   * and an admin. Both sides of the stay read it.
+   */
+  cancellationReason: z.string().nullable(),
   /**
    * Which halves of the stay have been reviewed — the guest's word on the listing and the
    * host's word on the guest. Flags rather than the reviews themselves: the reader of a
@@ -118,38 +152,99 @@ export const bookingSchema = z.object({
  * same reason: `listingId` is what a request names, and what that id resolves to is the
  * server's answer rather than the client's claim.
  */
-export const createBookingSchema = bookingSchema
-  .omit({
-    id: true,
-    listing: true,
-    guestId: true,
-    status: true,
-    amountCents: true,
-    currency: true,
-    refundedAmountCents: true,
-    refundOwedCents: true,
-    paid: true,
-    dispute: true,
-    expiresAt: true,
-    createdAt: true,
-    reviewed: true,
-  })
-  // Both rules are about a date and wait for one: without the guard an empty check-in box
-  // reads as a stay in the past — `"" >= today()` is false — and the form puts that under a
-  // box nobody has filled in yet, beside the refusal that is actually true.
-  // `listingQuerySchema` guards its own cross-field rules the same way.
-  .refine(
-    (booking) =>
-      !isDay(booking.from) || !isDay(booking.to) || booking.from < booking.to,
-    {
-      error: "Check-out date must be later than check-in date",
-      path: ["to"],
-    },
-  )
-  .refine((booking) => !isDay(booking.from) || booking.from >= today(), {
-    error: "Check-in date cannot be in the past",
-    path: ["from"],
+const stayRequestFields = bookingSchema.omit({
+  id: true,
+  listing: true,
+  guestId: true,
+  hostId: true,
+  status: true,
+  amountCents: true,
+  currency: true,
+  cancellationPolicy: true,
+  refundedAmountCents: true,
+  refundOwedCents: true,
+  paid: true,
+  dispute: true,
+  expiresAt: true,
+  createdAt: true,
+  cancelledBy: true,
+  cancelledAt: true,
+  cancellationReason: true,
+  reviewed: true,
+});
+
+/**
+ * Both rules are about a date and wait for one: without the guard an empty check-in box
+ * reads as a stay in the past — `"" >= today()` is false — and the form puts that under a
+ * box nobody has filled in yet, beside the refusal that is actually true.
+ * `listingQuerySchema` guards its own cross-field rules the same way.
+ */
+function withStayRules<T extends z.ZodType<{ from: string; to: string }>>(
+  schema: T,
+): T {
+  return schema
+    .refine(
+      (booking) =>
+        !isDay(booking.from) || !isDay(booking.to) || booking.from < booking.to,
+      {
+        error: "Check-out date must be later than check-in date",
+        path: ["to"],
+      },
+    )
+    .refine((booking) => !isDay(booking.from) || booking.from >= today(), {
+      error: "Check-in date cannot be in the past",
+      path: ["from"],
+    });
+}
+
+/**
+ * A listing and a range of nights under the booking's rules, and nothing else — what the
+ * waitlist asks for, so a range the booking form would refuse is refused there in the same
+ * words.
+ */
+export const stayRequestSchema = withStayRules(stayRequestFields);
+
+export const createBookingSchema = withStayRules(
+  stayRequestFields.extend({
+    /**
+     * The listing's `updatedAt` as the page that offered the stay read it — one version of
+     * every term the guest was shown beside the button: the prices the quote was worked
+     * out from and the cancellation policy the hold copies. Every save of the listing
+     * stamps it, so when the listing's is no longer this one the hold is refused rather
+     * than taken at a price, or frozen under a policy, the guest never saw. Optional, so a
+     * client that shows no terms can still book.
+     */
+    listingUpdatedAt: z.iso.datetime().optional(),
+  }),
+);
+
+const cancellationReason = z
+  .string()
+  .trim()
+  .max(MAX_CANCELLATION_REASON_LENGTH, {
+    error: `A reason can be at most ${String(MAX_CANCELLATION_REASON_LENGTH)} characters long`,
   });
+
+/** What a host who cancels without a reason is told — by the API and by the form alike. */
+export const HOST_REASON_REQUIRED =
+  "Say why you are cancelling — the guest is told";
+
+/**
+ * The body of `DELETE /bookings/:id`. A host has to say why they take a stay away from its
+ * guest — the guest is told, and an admin reads it — which is a rule about who is asking,
+ * so the API enforces it (`hostCancelBookingSchema` is the same rule for the host's form); a
+ * guest and an admin may say nothing. Blank is nothing.
+ */
+export const cancelBookingSchema = z.object({
+  reason: cancellationReason
+    .transform((reason) => (reason === "" ? undefined : reason))
+    .optional(),
+});
+
+/** The host's cancellation: the same body, the reason required. */
+export const hostCancelBookingSchema = z.object({
+  reason: cancellationReason.min(1, { error: HOST_REASON_REQUIRED }),
+});
 
 export const bookingListSchema = z.array(bookingSchema);
 
@@ -267,6 +362,8 @@ export const bookingPageSchema = z.object({
 export type StayParty = z.infer<typeof stayPartySchema>;
 export type BookingStatus = z.infer<typeof bookingStatusSchema>;
 export type DisputeStatus = z.infer<typeof disputeStatusSchema>;
+export type Canceller = z.infer<typeof cancellerSchema>;
+export type CancelBookingInput = z.infer<typeof cancelBookingSchema>;
 export type BookingSort = z.infer<typeof bookingSortSchema>;
 export type BookingQuery = z.infer<typeof bookingQuerySchema>;
 export type BookingPage = z.infer<typeof bookingPageSchema>;

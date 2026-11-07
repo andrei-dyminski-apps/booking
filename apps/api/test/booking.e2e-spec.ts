@@ -7,6 +7,7 @@ import {
   bookingDetailSchema,
   bookingPageSchema,
   bookingSchema,
+  listingSchema,
   type Booking,
   type BookingPage,
   type CreateBookingInput,
@@ -230,6 +231,56 @@ describe("BookingController (e2e)", () => {
     expect(error.message).toContain(input.listingId);
   });
 
+  it("refuses a hold on terms other than the ones the guest was shown, and takes it on the ones they were", async () => {
+    const versionOf = (body: unknown): string =>
+      listingSchema.parse(body).updatedAt;
+    const shown = versionOf(
+      (await guest.get(`/listings/${input.listingId}`).expect(200)).body,
+    );
+    const policySaved = versionOf(
+      (
+        await owner
+          .patch(`/listings/${input.listingId}`)
+          .send({ cancellationPolicy: "NON_REFUNDABLE" })
+          .expect(200)
+      ).body,
+    );
+
+    const refused = await guest
+      .post("/bookings")
+      .send({ ...input, listingUpdatedAt: shown })
+      .expect(412);
+
+    expect(apiErrorSchema.parse(refused.body).message).toContain("has changed");
+
+    // A price is a term as much as the policy: the same version covers both.
+    const priceSaved = versionOf(
+      (
+        await owner
+          .patch(`/listings/${input.listingId}`)
+          .send({ pricePerNightCents: cents(15_000) })
+          .expect(200)
+      ).body,
+    );
+
+    await guest
+      .post("/bookings")
+      .send({ ...input, listingUpdatedAt: policySaved })
+      .expect(412);
+
+    const created = bookingSchema.parse(
+      (
+        await guest
+          .post("/bookings")
+          .send({ ...input, listingUpdatedAt: priceSaved })
+          .expect(201)
+      ).body,
+    );
+
+    expect(created.cancellationPolicy).toBe("NON_REFUNDABLE");
+    expect(created.amountCents).toBe(4 * 15_000);
+  });
+
   // The overlap is a pair of strict inequalities, and this is what says so now that the
   // query itself lives in BookingRepository: check-out is the morning the room is free.
   it("lets a stay start on the day another one ends", async () => {
@@ -447,14 +498,14 @@ describe("BookingController (e2e)", () => {
     await otherGuest.get(`/bookings/${id}`).expect(404);
   });
 
-  it("is cancelled by its guest or an admin, and not by the owner of the listing", async () => {
+  it("is cancelled by its guest, an admin, or the owner of the listing with a reason", async () => {
     const first = await guest.post("/bookings").send(input).expect(201);
     const id = (first.body as { id: string }).id;
 
-    // Reading the bookings against your listing is not the same right as cancelling one —
-    // and the owner, who may read this one, is told so. A stranger gets the 404 they get
+    // The owner may cancel, but owes the guest a reason. A stranger gets the 404 they get
     // for reading it.
-    await owner.delete(`/bookings/${id}`).expect(403);
+    await owner.delete(`/bookings/${id}`).expect(400);
+    await owner.delete(`/bookings/${id}`).send({ reason: "   " }).expect(400);
     await otherGuest.delete(`/bookings/${id}`).expect(404);
     await guest.delete(`/bookings/${id}`).expect(204);
 
@@ -470,5 +521,23 @@ describe("BookingController (e2e)", () => {
     await admin
       .delete(`/bookings/${(second.body as { id: string }).id}`)
       .expect(204);
+
+    const third = await guest.post("/bookings").send(input).expect(201);
+    const thirdId = (third.body as { id: string }).id;
+
+    await owner
+      .delete(`/bookings/${thirdId}`)
+      .send({ reason: "The heating has broken down" })
+      .expect(204);
+
+    const declined = bookingSchema.parse(
+      (await guest.get(`/bookings/${thirdId}`).expect(200)).body,
+    );
+
+    expect(declined).toMatchObject({
+      status: "CANCELLED",
+      cancelledBy: "HOST",
+      cancellationReason: "The heating has broken down",
+    });
   });
 });
