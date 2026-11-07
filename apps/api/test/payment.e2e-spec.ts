@@ -571,6 +571,16 @@ describe("Payments (e2e)", () => {
       waiveReason: "A flood the policy could not foresee",
       waivedBy: null,
     });
+
+    // A demotion written in the database leaves the token claiming ADMIN until its next
+    // refresh; the waiver reads the row, so the token is refused — before the fee is read.
+    await app
+      .get(PrismaService)
+      .user.update({ where: { id: me.id }, data: { role: Role.USER } });
+    await admin
+      .post(`/host-fees/${feeId}/waive`)
+      .send({ reason: "After the demotion" })
+      .expect(403);
   });
 
   it("records the charge a payment produced, for the host's transfer", async () => {

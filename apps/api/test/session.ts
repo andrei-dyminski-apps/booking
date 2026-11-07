@@ -54,8 +54,9 @@ export async function signIn(
 
 /**
  * The same, for the role registration cannot produce: `/auth/register` always writes a USER,
- * which is the only safe default for a public endpoint. So the row is promoted directly
- * and the agent logs in again — the access token minted at registration still carries the
+ * which is the only safe default for a public endpoint, and the API grants no other role. So
+ * the role is written into the row directly, the way an admin account is made outside the
+ * API, and the agent logs in again — the access token minted at registration still carries the
  * old role, and JwtStrategy reads no database, which is exactly the lag RolesGuard would
  * otherwise be tested against by accident.
  */

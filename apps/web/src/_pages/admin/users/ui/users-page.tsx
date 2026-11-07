@@ -24,7 +24,7 @@ import { UsersToolbar } from "./users-toolbar";
 
 /**
  * Every account on the site, a keyset page at a time, each leading to its own page where
- * its role is changed and it is blocked or reopened. The screen has the stays screen's
+ * it is blocked or reopened. The screen has the stays screen's
  * shape — the filters in the URL, one search at one address, a page that reads `no-store`
  * — because it is the same kind of list.
  */
@@ -47,7 +47,7 @@ export const UsersPage = async ({
     <div className="flex flex-col gap-6">
       <PageHeading
         title="Users"
-        description="Every account, newest first. Open one to change its role, block it, or see its stays and listings."
+        description="Every account, newest first. Open one to block it, or see its stays and listings."
       />
 
       <UsersToolbar values={values} errors={errors} filters={filters} />

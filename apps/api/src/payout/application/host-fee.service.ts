@@ -48,7 +48,7 @@ export class HostFeeService {
    * The circumstance a policy could not foresee. What was withheld already stays withheld;
    * a fee waived or withheld in full is a `409`, one that is not there a `404`. An admin
    * whose account is gone since the token was issued is a `401`, one demoted or blocked
-   * since a `403`.
+   * since — by a write to `users` outside the API — a `403`.
    */
   async waive(id: string, reason: string, adminId: string): Promise<void> {
     try {

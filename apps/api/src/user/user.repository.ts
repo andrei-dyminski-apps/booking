@@ -35,9 +35,20 @@ export class EmailAlreadyRegisteredError extends Error {
 }
 
 /**
+ * What `update` throws for an admin's account: the API grants no role and takes none away,
+ * so an admin account is out of reach of the block as well — no admin can shut another out.
+ */
+export class AdminAccountError extends Error {
+  constructor(id: string) {
+    super(`User ${id} is an admin, and an admin account cannot be blocked`);
+    this.name = "AdminAccountError";
+  }
+}
+
+/**
  * What `update` throws when the account behind the caller's token is no longer an active
- * admin, read under the same lock the write takes — see `update` for why it is checked
- * there rather than by the service beforehand.
+ * admin: its role or its block was written in the database after the token was issued, and
+ * `JwtStrategy` reads no database, so the token still claims `ADMIN`.
  */
 export class CallerNotAdminError extends Error {
   constructor(callerId: string) {
@@ -45,9 +56,6 @@ export class CallerNotAdminError extends Error {
     this.name = "CallerNotAdminError";
   }
 }
-
-/** One row of the `FOR UPDATE` read in `update` — raw SQL, so the columns keep their stored names. */
-type LockedUser = { id: string; role: Role; blocked_at: Date | null };
 
 /**
  * The columns a page and an account's own page are built from — the hash is not one of
@@ -181,12 +189,12 @@ export class UserRepository {
   }
 
   /**
-   * The role, the block, or both, in one transaction — and blocking reaches into
-   * `refresh_tokens` from here rather than through `RefreshTokenRepository`, because the
-   * two writes are one decision: an account marked blocked with its refresh tokens still
-   * in place could mint a session for a week, and tokens deleted from an account the
-   * update then failed to mark would sign somebody out for nothing. A `where` may cross
-   * between repositories; no row of that table is mapped here.
+   * The block, in one transaction — and blocking reaches into `refresh_tokens` from here
+   * rather than through `RefreshTokenRepository`, because the two writes are one decision:
+   * an account marked blocked with its refresh tokens still in place could mint a session
+   * for a week, and tokens deleted from an account the update then failed to mark would
+   * sign somebody out for nothing. A `where` may cross between repositories; no row of
+   * that table is mapped here.
    *
    * The tokens are deleted rather than revoked. A revoked row is kept to recognise a
    * replay, and a replay of a blocked account's token is not a theft to detect — it is a
@@ -196,65 +204,58 @@ export class UserRepository {
    * that is when access ended, and a second click does not move it. The condition is the
    * `where` of the write rather than a read before it, so two blocks at once cannot both
    * find the column empty — under `READ COMMITTED` the second waits for the first's row
-   * lock, re-checks `blocked_at IS NULL` and writes nothing. `null` is a row that does not
-   * exist, or was deleted on the way.
+   * lock, re-checks `blocked_at IS NULL` and writes nothing.
    *
-   * The caller's row is locked together with the target's, and read under that lock: an
-   * admin who was just blocked or demoted must not get one more change through on the
-   * access token they still hold. A read before the transaction would not do — two admins
-   * blocking each other at once would both find the other still active, and the site would
-   * be left with no admin to undo it. Locked here, the second change waits for the first,
-   * then finds its own caller blocked and throws `CallerNotAdminError`. Both rows are taken
-   * in one statement ordered by id, so two such changes cannot lock them in opposite orders
-   * and deadlock.
+   * The caller's row is read first, in the same transaction: the role in the token is the
+   * row's as it was at issue, and a block cannot be undone for the sessions it deletes, so
+   * an admin demoted or blocked since by a write outside the API gets no change through
+   * (`CallerNotAdminError`).
+   *
+   * Only a `USER`'s row is written, and the role is part of the write's `where` rather than
+   * a read before it, so a promotion committed meanwhile cannot slip between the check and
+   * the write. A write that matched holds the row lock until the commit, so the read back
+   * sees the role it was written against; one that matched nothing — an admin's row, a
+   * block already in place, no row at all — is told apart by that read. The refresh tokens
+   * are deleted only after it, so an admin's sessions are never touched. `null` is a row
+   * that does not exist.
    */
   async update(
     callerId: string,
     id: string,
     change: UpdateUserInput,
   ): Promise<ManagedUser | null> {
-    try {
-      return await this.prismaService.$transaction(async (tx) => {
-        const locked = await tx.$queryRaw<LockedUser[]>`
-          SELECT id, role, blocked_at FROM users
-          WHERE id IN (${callerId}::uuid, ${id}::uuid)
-          ORDER BY id
-          FOR UPDATE
-        `;
-        const caller = locked.find((row) => row.id === callerId);
-
-        if (caller?.role !== Role.ADMIN || caller.blocked_at !== null) {
-          throw new CallerNotAdminError(callerId);
-        }
-
-        if (!locked.some((row) => row.id === id)) return null;
-
-        if (change.blocked === true) {
-          await tx.user.updateMany({
-            where: { id, blockedAt: null },
-            data: { blockedAt: new Date() },
-          });
-          await tx.refreshToken.deleteMany({ where: { userId: id } });
-        }
-
-        // `undefined` is how Prisma spells "leave the column alone": the block was either
-        // just written above or not asked about.
-        const row = await tx.user.update({
-          where: { id },
-          data: {
-            role: change.role,
-            blockedAt: change.blocked === false ? null : undefined,
-          },
-          select: MANAGED_USER,
-        });
-
-        return toManagedUser(row);
+    return this.prismaService.$transaction(async (tx) => {
+      const caller = await tx.user.findUnique({
+        where: { id: callerId },
+        select: { role: true, blockedAt: true },
       });
-    } catch (error) {
-      if (isPrismaError(error, PrismaErrorCode.RecordNotFound)) return null;
 
-      throw error;
-    }
+      if (caller?.role !== Role.ADMIN || caller.blockedAt !== null) {
+        throw new CallerNotAdminError(callerId);
+      }
+
+      await tx.user.updateMany({
+        where: change.blocked
+          ? { id, role: Role.USER, blockedAt: null }
+          : { id, role: Role.USER },
+        data: { blockedAt: change.blocked ? new Date() : null },
+      });
+
+      const row = await tx.user.findUnique({
+        where: { id },
+        select: MANAGED_USER,
+      });
+
+      if (row === null) return null;
+
+      if (row.role === Role.ADMIN) throw new AdminAccountError(id);
+
+      if (change.blocked) {
+        await tx.refreshToken.deleteMany({ where: { userId: id } });
+      }
+
+      return toManagedUser(row);
+    });
   }
 }
 

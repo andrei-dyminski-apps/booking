@@ -13,8 +13,8 @@ import { ROUTES } from "#shared/config";
 import { ButtonLink } from "#shared/ui";
 
 /**
- * One account in the list, and the way to its own page. The role and the block are
- * changed there rather than here, next to the stays and the listings the account has —
+ * One account in the list, and the way to its own page. The block is changed there
+ * rather than here, next to the stays and the listings the account has —
  * what an admin wants to look at before blocking somebody.
  */
 export const UserCard = ({

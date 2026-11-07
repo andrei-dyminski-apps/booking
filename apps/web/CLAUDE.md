@@ -45,7 +45,7 @@ apps/web/
     admin/listings/[id]/loading.tsx
     admin/users/page.tsx      # the accounts, each leading to its own page
     admin/users/loading.tsx
-    admin/users/[id]/page.tsx # one account: its role, its block, its stays and listings
+    admin/users/[id]/page.tsx # one account: its block, its stays and listings
     admin/users/[id]/loading.tsx
     admin/payments/page.tsx   # what the money paths set aside: a tab per list, retried or resolved
     admin/payments/loading.tsx
@@ -220,7 +220,6 @@ apps/web/
         users/lib/users-search.spec.ts
         users/index.ts
         user/ui/user-page.tsx             # one account: access, and links to its activity
-        user/ui/role-form.tsx             # a box and a button, no confirmation
         user/ui/block-button.tsx          # asks before blocking, not before reopening
         user/ui/waive-fee-button.tsx      # forgives what is left of one host fee, the reason in a dialog
         user/ui/user-skeleton.tsx
@@ -860,7 +859,7 @@ this side decided.
 - **The admin's section is `/admin`**, three screens: every listing on offer, each one
   edited and retired through the same `save-listing` and `delete-listing` features the
   owner runs; `/admin/users`, the accounts, each leading to `/admin/users/[id]` — where
-  a role is changed and an account blocked, and its stays and listings are one link away
+  a user's account is blocked, and its stays and listings are one link away
   (`/bookings?guestId=`, `/admin?ownerId=`) rather than listed again; and
   `/admin/payments`, what the money paths set aside (`_pages/admin/payments`). That one is
   four lists of the API behind tabs — the provider's events the worker gave up on, the
@@ -890,9 +889,10 @@ this side decided.
   actions, `save-listing`'s and `delete-listing`'s, send their author back to the section
   of their own role (`listingsSectionFor` in `shared/config/routes.ts`), read off the
   session rather than bound by the page — an action is an endpoint, and a destination it
-  was handed would be one more value to distrust. The admin's own account page carries no controls:
-  the API refuses a change to the caller's own account, and controls that could only
-  reach that `403` are not worth drawing.
+  was handed would be one more value to distrust. An admin's account page — the viewer's own
+  included — carries no controls and no activity: the API refuses to block an admin, a
+  control that could only reach that `403` is not worth drawing, and an admin neither books
+  nor lists.
 - **One link is current in the navigation**, the deepest one containing the path —
   `/admin` contains `/admin/users` as surely as the users link does.
 - **Ownership of a row is read, not guessed** (`_pages/dashboard/listing-edit/api/own-listing.ts`).
@@ -1056,11 +1056,7 @@ characters` reaches the box either way. The number is read off the schema
 
 **A form with no fields is neither of the two** — the confirmations behind a destructive
 action (`delete-listing-button.tsx`, `block-button.tsx`) submit a bound id and
-nothing else, so they stay a plain `action={submit}` with nothing to validate. So does a
-form whose only box is a closed choice — `role-form.tsx` on the admin's page of an account:
-a select of the two roles cannot hold a value the contract refuses, so a browser-side
-parse would have nothing to say, and the action still parses what arrives with
-`updateUserSchema`. A form that gains a box somebody types into stops being this case —
+nothing else, so they stay a plain `action={submit}` with nothing to validate. A form that gains a box somebody types into stops being this case —
 the dialog that cancels a stay was one and is not any more: it carries a reason, required
 of the host and optional for the guest and an admin, so it is `useActionForm` over
 `cancelFormSchema` (`features/cancel-booking/ui/cancel-stay-dialog.tsx`), the contract's
@@ -1393,7 +1389,7 @@ It is what brought TanStack Query in (`_app/providers`), and the reasons are two
   returned rather than thrown, since what an action throws reaches the browser with its
   message hidden. What the two screens share — to whom "Cancel" is offered and in which
   role (`cancellerOf` from `@repo/contracts`, the API's rule: the guest, the host of the
-  listing — each whatever their role — and an admin on somebody else's stay), the refund
+  listing and an admin), the refund
   it is worded with or the fee it costs the host (`hostCancellationFee`, the rule the API
   charges by), and the dialog itself (`CancelStayDialog`: the warning, the reason box, a
   host's hold worded as declining it, and a form inside the popup, so every opening starts

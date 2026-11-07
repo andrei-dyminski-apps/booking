@@ -16,6 +16,7 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import type { Page } from "../common/paging";
 import { decodeCursor, type UserCursor } from "./user-cursor";
 import {
+  AdminAccountError,
   CallerNotAdminError,
   UserRepository,
   type UserCredentials,
@@ -43,10 +44,9 @@ type PublicOf<T> = { [K in keyof T]: T[K] };
 
 /**
  * The role check of the token is `RolesGuard`'s, so what is left here is which account a
- * change lands on, whether the caller's own row still backs the token, and what the page
- * looks like — asserted on what ends up stored rather than on the
- * calls the service makes. The SQL, the session deletion and the filters are the e2e
- * spec's half.
+ * change may land on, whether the caller's own row still backs the token, and what the
+ * page looks like — asserted on what ends up stored rather than on the calls the service
+ * makes. The SQL, the session deletion and the filters are the e2e spec's half.
  */
 class FakeUserRepository implements PublicOf<UserRepository> {
   readonly rows: ManagedUser[] = [];
@@ -125,7 +125,7 @@ class FakeUserRepository implements PublicOf<UserRepository> {
     });
   }
 
-  /** The caller's own row is read before the write, as the lock does in the real one. */
+  /** The caller's own row is read before the write, as the real one does. */
   update(
     callerId: string,
     id: string,
@@ -141,11 +141,15 @@ class FakeUserRepository implements PublicOf<UserRepository> {
 
     if (row === undefined) return Promise.resolve(null);
 
-    if (change.role !== undefined) row.role = change.role;
-    if (change.blocked === true) {
-      row.blockedAt ??= new Date().toISOString();
+    if (row.role === Role.ADMIN) {
+      return Promise.reject(new AdminAccountError(id));
     }
-    if (change.blocked === false) row.blockedAt = null;
+
+    if (change.blocked) {
+      row.blockedAt ??= new Date().toISOString();
+    } else {
+      row.blockedAt = null;
+    }
 
     return Promise.resolve({ ...row });
   }
@@ -172,19 +176,7 @@ describe("UserService", () => {
   const addCaller = (over: Partial<ManagedUser> = {}): ManagedUser =>
     userRepository.add({ id: ADMIN_ID, role: Role.ADMIN, ...over });
 
-  it("changes the role of another account", async () => {
-    addCaller();
-    const guest = userRepository.add();
-
-    const updated = await service.update(admin, guest.id, {
-      role: Role.ADMIN,
-    });
-
-    expect(updated.role).toBe(Role.ADMIN);
-    expect(userRepository.rows[1]?.role).toBe(Role.ADMIN);
-  });
-
-  it("blocks and unblocks another account", async () => {
+  it("blocks and unblocks an account", async () => {
     addCaller();
     const guest = userRepository.add();
 
@@ -197,31 +189,19 @@ describe("UserService", () => {
     expect(reopened.blockedAt).toBeNull();
   });
 
-  it("refuses to change the caller's own account, whatever the change", async () => {
+  it("refuses to block or reopen an admin's account, the caller's own included", async () => {
     const self = addCaller();
+    const otherAdmin = userRepository.add({ role: Role.ADMIN });
 
-    for (const change of [
-      { role: Role.USER },
-      { blocked: true },
-      { role: Role.ADMIN, blocked: false },
-    ] satisfies UpdateUserInput[]) {
-      await expect(service.update(admin, self.id, change)).rejects.toThrow(
-        ForbiddenException,
-      );
+    for (const target of [self, otherAdmin]) {
+      for (const blocked of [true, false]) {
+        await expect(
+          service.update(admin, target.id, { blocked }),
+        ).rejects.toThrow(ForbiddenException);
+      }
     }
 
-    // Refused before anything was written, not undone afterwards.
-    expect(userRepository.rows[0]).toEqual(self);
-  });
-
-  it("refuses the caller's own account spelled in upper case", async () => {
-    // `ParseUUIDPipe` lets it through, and Postgres finds the same row by it.
-    const self = addCaller();
-
-    await expect(
-      service.update(admin, self.id.toUpperCase(), { role: Role.USER }),
-    ).rejects.toThrow(ForbiddenException);
-    expect(userRepository.rows[0]).toEqual(self);
+    expect(userRepository.rows).toEqual([self, otherAdmin]);
   });
 
   it("refuses a token whose account has been blocked or demoted since it was issued", async () => {
@@ -231,22 +211,13 @@ describe("UserService", () => {
     ] satisfies Partial<ManagedUser>[]) {
       userRepository.rows.length = 0;
       addCaller(caller);
-      const victim = userRepository.add({ role: Role.ADMIN });
+      const victim = userRepository.add();
 
       await expect(
         service.update(admin, victim.id, { blocked: true }),
       ).rejects.toThrow(ForbiddenException);
       expect(userRepository.rows[1]).toEqual(victim);
     }
-  });
-
-  it("lets one admin change another — the second pair of eyes is the point", async () => {
-    addCaller();
-    const otherAdmin = userRepository.add({ role: Role.ADMIN });
-
-    await expect(
-      service.update(admin, otherAdmin.id, { role: Role.USER }),
-    ).resolves.toMatchObject({ role: Role.USER });
   });
 
   it("answers 404 for an account that does not exist", async () => {
@@ -257,7 +228,7 @@ describe("UserService", () => {
     ).rejects.toThrow(NotFoundException);
   });
 
-  it("reads one account, blocked or not, the caller's own included", async () => {
+  it("reads one account, blocked or not, an admin's included", async () => {
     const self = addCaller();
     const blocked = userRepository.add({
       blockedAt: new Date().toISOString(),

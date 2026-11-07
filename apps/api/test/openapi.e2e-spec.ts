@@ -168,7 +168,8 @@ describe("OpenAPI document (e2e)", () => {
       operation("/users/{id}", "patch").responses?.["403"] ?? {};
 
     expect(description).toContain("Requires the role ADMIN");
-    expect(description).toContain("the caller's own");
+    expect(description).toContain("an admin's");
+    expect(description).toContain("since the token was issued");
     expect(operation("/users", "get").responses?.["403"]).toBeDefined();
   });
 
