@@ -66,14 +66,16 @@ import {
   type RefundFailure,
 } from "../../infrastructure/refund-failure.repository";
 import { BookingPaymentHandler } from "../booking-payment.handler";
+import { BookingRefundService } from "../booking-refund.service";
 import { BookingService, stayNoticeOf } from "../booking.service";
 import { BookingJobs } from "../ports/booking-jobs";
 import { StayEvents, type StayEventsListener } from "../stay-events";
 
 /*
- * What `booking.service.spec.ts` and `booking-payment.handler.spec.ts` share: the fixtures,
- * the fakes of everything around the two classes, and the module both are built in — one
- * module, because the handler's news and the service's cancellations act on the same rows.
+ * What `booking.service.spec.ts`, `booking-refund.service.spec.ts` and
+ * `booking-payment.handler.spec.ts` share: the fixtures, the fakes of everything around the
+ * three classes, and the module they are built in — one module, because the handler's news,
+ * the cancellations and their refunds act on the same rows.
  * Kept out of the build by `tsconfig.build.json` (`*.fakes.ts`).
  */
 export const GUEST_ID = "1c2d3e4f-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
@@ -1092,9 +1094,10 @@ export class FakeWaitlistService implements Pick<
 export const fromToday = (days: number): string =>
   format(addDays(new Date(), days, IN_UTC), "yyyy-MM-dd");
 
-/** The booking module over the fakes above, as both specs build it before each test. */
+/** The booking module over the fakes above, as the specs build it before each test. */
 export type BookingTestbed = {
   service: BookingService;
+  refundService: BookingRefundService;
   paymentHandler: BookingPaymentHandler;
   bookingRepository: FakeBookingRepository;
   bookingJobs: FakeBookingJobs;
@@ -1118,6 +1121,7 @@ export async function createBookingTestbed(): Promise<BookingTestbed> {
   const moduleRef = await Test.createTestingModule({
     providers: [
       BookingService,
+      BookingRefundService,
       { provide: BookingRepository, useValue: bookingRepository },
       {
         provide: RefundFailureRepository,
@@ -1134,13 +1138,15 @@ export async function createBookingTestbed(): Promise<BookingTestbed> {
     ],
   }).compile();
 
-  const service = moduleRef.get(BookingService);
+  const refundService = moduleRef.get(BookingRefundService);
 
-  bookingJobs.worker = (bookingId) => service.refundCancellation(bookingId);
+  bookingJobs.worker = (bookingId) =>
+    refundService.refundCancellation(bookingId);
   moduleRef.get(StayEvents).register(stayEventsListener);
 
   return {
-    service,
+    service: moduleRef.get(BookingService),
+    refundService,
     paymentHandler: moduleRef.get(BookingPaymentHandler),
     bookingRepository,
     bookingJobs,

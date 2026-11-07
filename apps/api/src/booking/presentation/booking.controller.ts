@@ -35,6 +35,7 @@ import type { AuthenticatedUser } from "../../auth/auth.types";
 import { CurrentUser } from "../../auth/decorators/current-user.decorator";
 import { Roles } from "../../auth/decorators/roles.decorator";
 import { ApiErrorDto } from "../../common/dto/api-error.dto";
+import { BookingRefundService } from "../application/booking-refund.service";
 import { BookingService } from "../application/booking.service";
 import {
   BookingDetailDto,
@@ -54,7 +55,10 @@ import {
  */
 @Controller("bookings")
 export class BookingController {
-  constructor(private readonly bookingService: BookingService) {}
+  constructor(
+    private readonly bookingService: BookingService,
+    private readonly bookingRefundService: BookingRefundService,
+  ) {}
 
   /**
    * One page of the stays this caller may see. The filters, the ordering and the cursor
@@ -93,7 +97,7 @@ export class BookingController {
     type: ApiErrorDto,
   })
   findStuck(@Query() query: StuckStayQueryDto): Promise<StuckStayPage> {
-    return this.bookingService.findStuckPage(query);
+    return this.bookingRefundService.findStuckPage(query);
   }
 
   /**
@@ -113,7 +117,7 @@ export class BookingController {
     type: ApiErrorDto,
   })
   retryStuckRefund(@Param("id", ParseUUIDPipe) id: string): Promise<void> {
-    return this.bookingService.retryStuckRefund(id);
+    return this.bookingRefundService.retryStuckRefund(id);
   }
 
   @Get(":id")

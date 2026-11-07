@@ -52,7 +52,10 @@ Stripe sits behind an interface. And the use cases are one application service r
 a file each: the three entry points share the notices, the payment withdrawals and the
 waitlist hand-over between them, and splitting `BookingService` would have meant those
 helpers living in a fifth file every use case imports — the split the layer exists for is
-between the entry points and the rules, and that one is there. The refund rule went to
+between the entry points and the rules, and that one is there. Sending the refund a
+cancellation owes was later moved out into `BookingRefundService`: it shares none of those
+helpers — the cancellation decides the refund and queues it, the job, its sweep and the
+admin's stuck list only send it — so the cut costs no shared file. The refund rule went to
 `@repo/contracts` (`refundQuote`) rather than `domain/`, because the booking page states
 it to the guest before the API applies it — the reason `nightlyPrice` lives there.
 

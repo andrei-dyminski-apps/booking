@@ -95,9 +95,11 @@ src/
       booking.service.ts   # HTTP and the jobs meet here; sees neither Prisma, Stripe nor BullMQ
       ports/booking-jobs.ts  # BookingJobs — the release, withdrawal and refund jobs, as the service asks for them
       booking.service.spec.ts  # against fakes of the repositories, the gateway and a stay listener
+      booking-refund.service.ts  # sends the refunds cancellations owe: the job, its sweep, the admin's stuck list and retry
+      booking-refund.service.spec.ts
       booking-payment.handler.ts  # succeeded: confirms the hold, or refunds a late payment; refunded: records it, cancels a stay not yet begun refunded in full; a lost dispute: cancels a stay not yet begun
       booking-payment.handler.spec.ts  # the provider's news, in the same module as the service
-      testing/booking.fakes.ts  # the fixtures, fakes and module both specs share; out of the build (`*.fakes.ts`)
+      testing/booking.fakes.ts  # the fixtures, fakes and module the three specs share; out of the build (`*.fakes.ts`)
       stay-events.ts       # confirmed / refunded, announced to whoever follows the stays (payout)
       booking-cursor.ts    # the keyset cursor of GET /bookings, encoded and parsed
       refund-failure.service.ts  # the admin's list of bounced refunds and the record of how each went back
@@ -698,7 +700,7 @@ platform, and the host is paid their share by a transfer once the stay has begun
   over all their stuck payouts, the first set aside first (`shareOutHostFees`), so one debt
   comes off one host's rows once rather than off each, with what a reservation the stay
   outgrew kept back counted back in, since its release hands it back first; `owedOnStuck` in
-  `booking/domain/stuck-stay.ts`, applied by `BookingService`) — the admin's screen draws
+  `booking/domain/stuck-stay.ts`, applied by `BookingRefundService`) — the admin's screen draws
   the figure and does not apply the rule. `domain/payout.ts` applies it to the row's facts
   and adds what only the API decides: nothing leaves while a dispute is open (`mayPayOut`).
 - **A host is an Accounts v2 recipient**, opened by the first

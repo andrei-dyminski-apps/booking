@@ -11,7 +11,6 @@ import {
   UnprocessableEntityException,
 } from "@nestjs/common";
 import {
-  bookingSchema,
   BookingStatus,
   Canceller,
   cancellerOf,
@@ -33,17 +32,9 @@ import {
   type StayNotice,
   type BookingQuery,
   type CreateBookingInput,
-  type StuckStayPage,
-  type StuckStayQuery,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
-import { errorText, type SetAside } from "../../common/job-failure";
 import { readCursor, type Page } from "../../common/paging";
-import { writeOrRefuse } from "../../common/set-aside";
-import {
-  decodeSetAsideCursor,
-  nextSetAsideCursor,
-} from "../../common/set-aside-cursor";
 import { NotificationService } from "../../notification/notification.service";
 import { WaitlistService } from "../../waitlist/waitlist.service";
 import { BookingRepository } from "../infrastructure/booking.repository";
@@ -71,17 +62,9 @@ import {
   type OpenedPayment,
 } from "../../payment/application/ports/payment-gateway";
 import { toIsoDate } from "../../common/iso-date";
-import {
-  addCents,
-  maxCents,
-  minCents,
-  NO_CENTS,
-  type Cents,
-} from "../../payment/domain/money";
+import { NO_CENTS, type Cents } from "../../payment/domain/money";
 import { isCancellable } from "../domain/booking-status";
-import { owedOnStuck } from "../domain/stuck-stay";
 import { BookingJobs } from "./ports/booking-jobs";
-import { StayEvents } from "./stay-events";
 import {
   notifyBothSides,
   notifyBothSidesOfCancellation,
@@ -91,11 +74,11 @@ import { decodeCursor, encodeCursor } from "./booking-cursor";
 
 /**
  * The application layer of the booking module: HTTP takes, reads and cancels stays, and the
- * BullMQ jobs release unpaid holds, withdraw their payments and send the refunds
- * cancellations owe. The provider's news reaches the stays through `BookingPaymentHandler`.
- * It sees neither Prisma, Stripe nor BullMQ — the repositories, the `PaymentGateway` port
- * and the `BookingJobs` port — and knows nothing of the host's payout: a refund is
- * announced to `StayEvents`.
+ * BullMQ jobs release unpaid holds and withdraw their payments. A cancellation decides its
+ * refund and queues it; `BookingRefundService` sends it. The provider's news reaches the
+ * stays through `BookingPaymentHandler`. It sees neither Prisma, Stripe nor BullMQ — the
+ * repositories, the `PaymentGateway` port and the `BookingJobs` port — and knows nothing of
+ * the host's payout.
  */
 @Injectable()
 export class BookingService {
@@ -107,7 +90,6 @@ export class BookingService {
     private readonly bookingJobs: BookingJobs,
     private readonly notificationService: NotificationService,
     private readonly waitlistService: WaitlistService,
-    private readonly stayEvents: StayEvents,
   ) {}
 
   /**
@@ -541,198 +523,6 @@ export class BookingService {
     return refundQuote(booking, now, canceller).cents;
   }
 
-  /**
-   * Under `whileCancelling`, so the refund's webhook reads it as this cancellation's. The
-   * host's share is settled after, best effort — the refund's webhook settles it again.
-   */
-  async refundCancellation(id: string): Promise<boolean> {
-    let refunded: boolean;
-
-    try {
-      refunded = await this.bookingRepository.whileCancelling(id, () =>
-        this.sendOwedRefund(id),
-      );
-    } catch (error) {
-      // Held by another run: nothing failed yet.
-      if (error instanceof CancellationInProgressError) throw error;
-
-      if (await this.setAsideRefundAfter(id, error)) return false;
-
-      throw error;
-    }
-
-    if (!refunded) return false;
-
-    try {
-      await this.stayEvents.refunded(id);
-    } catch (error) {
-      this.logger.warn(
-        `Could not take back the payout of booking ${id} yet, the refund's webhook settles it: ${String(error)}`,
-      );
-    }
-
-    return true;
-  }
-
-  /** One failure is logged and left for the next minute. */
-  async refundOwedCancellations(): Promise<number> {
-    let sent = 0;
-
-    for (const id of await this.bookingRepository.findOwedRefunds(
-      SWEEP_BATCH,
-    )) {
-      try {
-        if (await this.refundCancellation(id)) sent += 1;
-      } catch (error) {
-        // Taken by the refund job meanwhile: not a failure.
-        if (error instanceof CancellationInProgressError) continue;
-
-        this.logger.error(
-          `Could not refund the cancellation of booking ${id}, trying again next sweep: ${String(error)}`,
-        );
-      }
-    }
-
-    return sent;
-  }
-
-  /**
-   * The admin's list of the stays whose refund or payout stopped retrying. The payout's half
-   * is read here too — its columns are on the stay — while its retry is `PayoutService`'s.
-   */
-  async findStuckPage(query: StuckStayQuery): Promise<StuckStayPage> {
-    const resource = `bookings-stuck-${query.kind}`;
-    const cursor = readCursor(query.cursor, "newest", (raw) =>
-      decodeSetAsideCursor(resource, raw, bookingSchema.shape.id),
-    );
-    const page = await this.bookingRepository.findStuckPage(
-      query.kind,
-      cursor,
-      query.limit,
-      query,
-    );
-
-    return {
-      items: page.items.map(({ payout, ...row }) => ({
-        ...row,
-        owedCents: owedOnStuck(row.kind, row.booking, payout),
-      })),
-      nextCursor: nextSetAsideCursor(resource, page, (row) => ({
-        at: row.failedAt,
-        id: row.booking.id,
-      })),
-    };
-  }
-
-  /**
-   * Hands the debt back and queues its job at once rather than waiting for the sweep. The
-   * debt is still on the row, so the job sends exactly what the cancellation decided.
-   */
-  async retryStuckRefund(id: string): Promise<void> {
-    await writeOrRefuse(
-      this.bookingRepository.handBackRefund(id),
-      () => this.bookingRepository.exists(id),
-      {
-        conflict: `The refund owed on booking ${id} is not set aside`,
-        notFound: `Booking ${id} not found`,
-      },
-    );
-
-    this.logger.log(`The refund owed on booking ${id} was handed back`);
-    await this.bookingJobs.refundCancellation(id);
-  }
-
-  /** Whether this failed run set the debt aside. A failure to count it leaves it to retry. */
-  private async setAsideRefundAfter(
-    id: string,
-    error: unknown,
-  ): Promise<boolean> {
-    const message = errorText(error);
-    let failure: SetAside | null;
-
-    try {
-      failure = await this.bookingRepository.recordRefundFailure(
-        id,
-        message,
-        MAX_REFUND_ATTEMPTS,
-      );
-    } catch (recordError) {
-      this.logger.error(
-        `Could not count the failed refund of booking ${id}: ${String(recordError)}`,
-      );
-
-      return false;
-    }
-
-    if (failure === null || !failure.setAside) return false;
-
-    this.logger.error(
-      `The refund owed on booking ${id} failed ${String(failure.attempts)} times and is set aside: ${message}`,
-    );
-    await this.notificationService.notifyAdmins({
-      type: NotificationType.CANCELLATION_REFUND_FAILED,
-      data: { bookingId: id, error: message },
-    });
-
-    return true;
-  }
-
-  /**
-   * Capped by what Stripe says is left too, since a dashboard refund's webhook may be late.
-   * The total recorded starts from the row: the rest is the dashboard's, and its webhook
-   * tells the guest.
-   */
-  private async sendOwedRefund(id: string): Promise<boolean> {
-    const found = await this.bookingRepository.findByIdWithListingOwner(id);
-    const owed = found?.booking.refundOwedCents ?? null;
-
-    if (found === null || owed === null) return false;
-
-    const { booking, paymentId } = found;
-
-    // Opened after the cancellation: Stripe refuses to refund a disputed payment, so the
-    // debt waits for the outcome, which is when the sweep reads it again.
-    if (booking.dispute === DisputeStatus.OPEN) return false;
-
-    if (booking.dispute === DisputeStatus.LOST || paymentId === null) {
-      await this.bookingRepository.settleOwedRefund(id, null);
-
-      return false;
-    }
-
-    const refundedBefore = booking.refundedAmountCents ?? NO_CENTS;
-    const refundedAtProvider =
-      await this.paymentGateway.refundedSoFar(paymentId);
-    // Capped at the stay: whatever the provider reports, nothing past it is left to send.
-    const amount = minCents(
-      owed,
-      notRefunded(
-        booking.amountCents,
-        maxCents(refundedBefore, refundedAtProvider),
-      ),
-    );
-
-    if (amount === 0) {
-      await this.bookingRepository.settleOwedRefund(id, null);
-
-      return false;
-    }
-
-    // One cancellation per booking, so the key needs no amount.
-    const sent = await this.paymentGateway.refund(
-      paymentId,
-      amount,
-      `booking-${id}-cancellation`,
-    );
-
-    await this.bookingRepository.settleOwedRefund(
-      id,
-      sent > 0 ? addCents(refundedBefore, sent) : null,
-    );
-
-    return sent > 0;
-  }
-
   async withdrawPayment(paymentId: string): Promise<void> {
     await this.paymentGateway.cancel(paymentId);
   }
@@ -918,18 +708,6 @@ function readerOf<Found extends BookingWithListingOwner>(
 
   return { found, reader };
 }
-
-/**
- * How many failed runs set an owed refund aside: about half an hour of the minute sweep
- * after the job's own attempts, the bound the payment inbox keeps too.
- */
-export const MAX_REFUND_ATTEMPTS = 30;
-
-/**
- * How many owed refunds one sweep sends: each is a call or two to Stripe, one after another,
- * and the sweep a minute later takes the rest.
- */
-const SWEEP_BATCH = 50;
 
 /** What a notice about a stay copies off it — see `stayNoticeSchema` in the contract. */
 export function stayNoticeOf(booking: Booking): StayNotice {
