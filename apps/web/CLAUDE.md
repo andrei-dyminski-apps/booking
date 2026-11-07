@@ -147,12 +147,13 @@ apps/web/
         overview/lib/bookings-search.spec.ts
         overview/index.ts
         booking/ui/booking-page.tsx       # one stay; the publishable key handed to its guest's hold
-        booking/ui/booking-live.tsx       # the booking in the query cache, polled until the webhook moves it
+        booking/ui/booking-live.tsx       # the stay drawn off what its hook returns
         booking/ui/payment-form.tsx       # opens the payment from the browser, Stripe Elements; success starts the poll and declares nothing; a Stripe.js that never loaded says so
         booking/ui/cancel-stay-button.tsx # the shared dialog over this page's action; a success reads the stay again
         booking/ui/booking-skeleton.tsx
         booking/api/booking-query.ts      # the query keys and the browser's read, shared by the poll and the cancel
         booking/api/cancel-stay-action.ts # cancels, then frees the nights in the Data Cache
+        booking/model/use-booking-live.ts # the booking in the query cache, polled until the webhook moves it; the hold's deadline, the refund note's clock
         booking/index.ts
       waitlist/ui/waitlist-page.tsx       # one page: a user's own ranges and the ones on their listings, an admin's everything
       waitlist/ui/side-tabs.tsx           # …the two halves of a user's waitlist, as links over `?side=HOST`
