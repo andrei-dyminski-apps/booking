@@ -8,6 +8,7 @@ import {
 import { subDays } from "date-fns";
 import type { Page } from "../../common/paging";
 import type { SetAsideCursor } from "../../common/set-aside-cursor";
+import type { PublicOf } from "../../common/testing/public-of.fakes";
 import { NotificationService } from "../../notification/notification.service";
 import { PaymentEventRepository } from "../infrastructure/payment-event.repository";
 import {
@@ -22,9 +23,6 @@ import {
 } from "./payment-event-handler";
 import { PaymentEventJobs } from "./ports/payment-event-jobs";
 import type { PaymentEvent } from "./ports/payment-gateway";
-
-/** See `auth.service.spec.ts` for what this mapped type does and does not catch. */
-type PublicOf<T> = { [K in keyof T]: T[K] };
 
 type StoredEvent = {
   event: PaymentEvent;

@@ -7,9 +7,13 @@ import { WaitlistModule } from "../waitlist/waitlist.module";
 import { BookingController } from "./presentation/booking.controller";
 import { RefundFailureController } from "./presentation/refund-failure.controller";
 import { BookingRepository } from "./infrastructure/booking.repository";
+import { BookingCancellationRepository } from "./infrastructure/booking-cancellation.repository";
+import { BookingRefundRepository } from "./infrastructure/booking-refund.repository";
 import { RefundFailureRepository } from "./infrastructure/refund-failure.repository";
 import { BookingPaymentHandler } from "./application/booking-payment.handler";
 import { BookingService } from "./application/booking.service";
+import { BookingCancellationService } from "./application/booking-cancellation.service";
+import { BookingRefundService } from "./application/booking-refund.service";
 import { RefundFailureService } from "./application/refund-failure.service";
 import { BookingJobs } from "./application/ports/booking-jobs";
 import { StayEvents } from "./application/stay-events";
@@ -34,7 +38,11 @@ import {
   controllers: [BookingController, RefundFailureController],
   providers: [
     BookingService,
+    BookingCancellationService,
+    BookingRefundService,
     BookingRepository,
+    BookingCancellationRepository,
+    BookingRefundRepository,
     RefundFailureRepository,
     RefundFailureService,
     BookingPaymentHandler,

@@ -11,7 +11,7 @@ import { cents } from "../payment/domain/money";
 import {
   holdsTheSlot,
   overlapping,
-} from "../booking/infrastructure/booking.repository";
+} from "../booking/infrastructure/booking-where";
 import { afterCreatedAt, CREATED_AT_ORDER, type Page } from "../common/paging";
 import type {
   Listing as ListingRow,
@@ -104,7 +104,7 @@ const WITH_WAITER = {
 /**
  * The entries and the one question about bookings they need answered: whether a range is
  * held by anybody. That question is a `where` over `bookings`, imported from
- * `BookingRepository` (`holdsTheSlot`, `overlapping`) rather than restated, so a waitlist
+ * `booking-where.ts` (`holdsTheSlot`, `overlapping`) rather than restated, so a waitlist
  * and the transaction that refuses a booking cannot disagree about what "taken" means —
  * the same crossing the catalogue's date filter makes. The module therefore needs nothing
  * of `BookingModule`, which is what lets that module depend on this one.

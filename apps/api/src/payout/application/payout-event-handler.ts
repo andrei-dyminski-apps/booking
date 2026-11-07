@@ -11,6 +11,7 @@ import {
 } from "../../payment/application/payment-event-handler";
 import type { PaymentEvent } from "../../payment/application/ports/payment-gateway";
 import { SettlementInProgressError } from "../domain/payout.errors";
+import { HostAccountService } from "./host-account.service";
 import { PayoutService } from "./payout.service";
 
 /**
@@ -23,6 +24,7 @@ export class PayoutEventHandler
 {
   constructor(
     private readonly payoutService: PayoutService,
+    private readonly hostAccountService: HostAccountService,
     private readonly paymentEventDispatcher: PaymentEventDispatcher,
     private readonly stayEvents: StayEvents,
   ) {}
@@ -40,7 +42,7 @@ export class PayoutEventHandler
           await this.payoutService.handleSettlementEvent(event);
           break;
         case "account":
-          await this.payoutService.handleAccountEvent(event);
+          await this.hostAccountService.handleAccountEvent(event);
           break;
         case "succeeded":
         case "refunded":

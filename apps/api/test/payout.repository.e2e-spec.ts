@@ -10,7 +10,8 @@ import {
   whileLeased,
   type LeaseTiming,
 } from "./../src/booking/infrastructure/booking-lease";
-import { BookingRepository } from "./../src/booking/infrastructure/booking.repository";
+import { BookingCancellationRepository } from "./../src/booking/infrastructure/booking-cancellation.repository";
+import { BookingRefundRepository } from "./../src/booking/infrastructure/booking-refund.repository";
 import { cents } from "./../src/payment/domain/money";
 import {
   WaivingAccountGoneError,
@@ -226,7 +227,8 @@ describe("The money columns of a paid stay (e2e)", () => {
   let app: INestApplication<App>;
   let prismaService: PrismaService;
   let payoutRepository: PayoutRepository;
-  let bookingRepository: BookingRepository;
+  let bookingCancellationRepository: BookingCancellationRepository;
+  let bookingRefundRepository: BookingRefundRepository;
   let bookingId: string;
   let hostId: string;
 
@@ -242,7 +244,8 @@ describe("The money columns of a paid stay (e2e)", () => {
 
     prismaService = app.get(PrismaService);
     payoutRepository = app.get(PayoutRepository);
-    bookingRepository = app.get(BookingRepository);
+    bookingCancellationRepository = app.get(BookingCancellationRepository);
+    bookingRefundRepository = app.get(BookingRefundRepository);
 
     await resetDatabase(app);
     await resetQueue(app);
@@ -305,41 +308,47 @@ describe("The money columns of a paid stay (e2e)", () => {
     ).refundedAmountCents;
 
   it("keeps a dashboard refund when a cancellation gives nothing back", async () => {
-    await bookingRepository.raiseRefunded(bookingId, null, cents(10_000));
+    await bookingRefundRepository.raiseRefunded(bookingId, null, cents(10_000));
 
     await expect(
-      bookingRepository.cancel(bookingId, "CONFIRMED", null),
+      bookingCancellationRepository.cancel(bookingId, "CONFIRMED", null),
     ).resolves.not.toBeNull();
 
     expect(await refundedAmountCents()).toBe(10_000);
   });
 
   it("raises the refund total with a cancellation's refund and never lowers it", async () => {
-    await bookingRepository.settleOwedRefund(bookingId, cents(10_000));
+    await bookingRefundRepository.settleOwedRefund(bookingId, cents(10_000));
     expect(await refundedAmountCents()).toBe(10_000);
 
     // The webhook already recorded Stripe's total of the cancellation's own refund.
-    await bookingRepository.raiseRefunded(
+    await bookingRefundRepository.raiseRefunded(
       bookingId,
       cents(10_000),
       cents(AMOUNT),
     );
-    await bookingRepository.settleOwedRefund(bookingId, cents(38_000));
+    await bookingRefundRepository.settleOwedRefund(bookingId, cents(38_000));
 
     expect(await refundedAmountCents()).toBe(AMOUNT);
   });
 
   it("keeps a stay out of the due payouts while a cancellation's refund is owed", async () => {
-    await bookingRepository.cancel(bookingId, "CONFIRMED", cents(AMOUNT));
+    await bookingCancellationRepository.cancel(
+      bookingId,
+      "CONFIRMED",
+      cents(AMOUNT),
+    );
 
     expect(
       await payoutRepository.findDuePayouts(new Date(), 10, hostId),
     ).toEqual([]);
-    expect(await bookingRepository.findOwedRefunds(10)).toEqual([bookingId]);
+    expect(await bookingRefundRepository.findOwedRefunds(10)).toEqual([
+      bookingId,
+    ]);
 
-    await bookingRepository.settleOwedRefund(bookingId, cents(AMOUNT));
+    await bookingRefundRepository.settleOwedRefund(bookingId, cents(AMOUNT));
 
-    expect(await bookingRepository.findOwedRefunds(10)).toEqual([]);
+    expect(await bookingRefundRepository.findOwedRefunds(10)).toEqual([]);
     expect(await refundedAmountCents()).toBe(AMOUNT);
   });
 
@@ -348,12 +357,12 @@ describe("The money columns of a paid stay (e2e)", () => {
       await payoutRepository.findDuePayouts(new Date(), 10, hostId),
     ).toEqual([bookingId]);
 
-    await bookingRepository.raiseRefunded(bookingId, null, cents(10_000));
+    await bookingRefundRepository.raiseRefunded(bookingId, null, cents(10_000));
     expect(
       await payoutRepository.findDuePayouts(new Date(), 10, hostId),
     ).toEqual([bookingId]);
 
-    await bookingRepository.raiseRefunded(
+    await bookingRefundRepository.raiseRefunded(
       bookingId,
       cents(10_000),
       cents(AMOUNT),
@@ -365,10 +374,10 @@ describe("The money columns of a paid stay (e2e)", () => {
 
   it("refuses money columns past what the guest paid, whoever writes them", async () => {
     await expect(
-      bookingRepository.raiseRefunded(bookingId, null, cents(AMOUNT + 1)),
+      bookingRefundRepository.raiseRefunded(bookingId, null, cents(AMOUNT + 1)),
     ).rejects.toThrow();
     await expect(
-      bookingRepository.cancel(bookingId, "CONFIRMED", cents(0)),
+      bookingCancellationRepository.cancel(bookingId, "CONFIRMED", cents(0)),
     ).rejects.toThrow();
     await expect(
       prismaService.booking.update({
@@ -409,41 +418,57 @@ describe("The money columns of a paid stay (e2e)", () => {
   });
 
   it("sets an owed refund aside on its last failed run, and leaves it out of the sweep", async () => {
-    await bookingRepository.cancel(bookingId, "CONFIRMED", cents(AMOUNT));
+    await bookingCancellationRepository.cancel(
+      bookingId,
+      "CONFIRMED",
+      cents(AMOUNT),
+    );
 
     await expect(
-      bookingRepository.recordRefundFailure(bookingId, "refused", 2),
+      bookingRefundRepository.recordRefundFailure(bookingId, "refused", 2),
     ).resolves.toEqual({ attempts: 1, setAside: false });
-    await expect(bookingRepository.findOwedRefunds(10)).resolves.toEqual([
+    await expect(bookingRefundRepository.findOwedRefunds(10)).resolves.toEqual([
       bookingId,
     ]);
     await expect(
-      bookingRepository.recordRefundFailure(bookingId, "refused", 2),
+      bookingRefundRepository.recordRefundFailure(bookingId, "refused", 2),
     ).resolves.toEqual({ attempts: 2, setAside: true });
-    await expect(bookingRepository.findOwedRefunds(10)).resolves.toEqual([]);
+    await expect(bookingRefundRepository.findOwedRefunds(10)).resolves.toEqual(
+      [],
+    );
     // Set aside already: a later failure is nobody's news.
     await expect(
-      bookingRepository.recordRefundFailure(bookingId, "refused", 2),
+      bookingRefundRepository.recordRefundFailure(bookingId, "refused", 2),
     ).resolves.toBeNull();
   });
 
   it("leaves a refund owed out of the sweep while a dispute is open", async () => {
-    await bookingRepository.cancel(bookingId, "CONFIRMED", cents(AMOUNT));
+    await bookingCancellationRepository.cancel(
+      bookingId,
+      "CONFIRMED",
+      cents(AMOUNT),
+    );
     await payoutRepository.setDisputeStatus(bookingId, "OPEN");
 
-    await expect(bookingRepository.findOwedRefunds(10)).resolves.toEqual([]);
+    await expect(bookingRefundRepository.findOwedRefunds(10)).resolves.toEqual(
+      [],
+    );
 
     await payoutRepository.setDisputeStatus(bookingId, "WON");
 
-    await expect(bookingRepository.findOwedRefunds(10)).resolves.toEqual([
+    await expect(bookingRefundRepository.findOwedRefunds(10)).resolves.toEqual([
       bookingId,
     ]);
   });
 
   it("clears the failures of a refund once it is sent", async () => {
-    await bookingRepository.cancel(bookingId, "CONFIRMED", cents(AMOUNT));
-    await bookingRepository.recordRefundFailure(bookingId, "refused", 5);
-    await bookingRepository.settleOwedRefund(bookingId, cents(AMOUNT));
+    await bookingCancellationRepository.cancel(
+      bookingId,
+      "CONFIRMED",
+      cents(AMOUNT),
+    );
+    await bookingRefundRepository.recordRefundFailure(bookingId, "refused", 5);
+    await bookingRefundRepository.settleOwedRefund(bookingId, cents(AMOUNT));
 
     await expect(
       prismaService.booking.findUniqueOrThrow({ where: { id: bookingId } }),
@@ -820,14 +845,16 @@ describe("The money columns of a paid stay (e2e)", () => {
       },
     });
 
-    await expect(bookingRepository.findOwedRefunds(10)).resolves.toEqual([]);
+    await expect(bookingRefundRepository.findOwedRefunds(10)).resolves.toEqual(
+      [],
+    );
 
     await prismaService.booking.update({
       where: { id: bookingId },
       data: { cancellingUntil: new Date(Date.now() - 1_000) },
     });
 
-    await expect(bookingRepository.findOwedRefunds(10)).resolves.toEqual([
+    await expect(bookingRefundRepository.findOwedRefunds(10)).resolves.toEqual([
       bookingId,
     ]);
   });

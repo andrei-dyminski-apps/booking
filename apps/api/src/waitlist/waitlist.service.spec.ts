@@ -16,6 +16,7 @@ import {
   type WaitlistDemandQuery,
   type WaitlistEntry,
 } from "@repo/contracts";
+import type { PublicOf } from "../common/testing/public-of.fakes";
 import { cents } from "../payment/domain/money";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import type { Page } from "../common/paging";
@@ -61,9 +62,6 @@ const input: JoinWaitlistInput = {
 };
 
 const freed: FreedNights = input;
-
-/** See `auth.service.spec.ts` for what this mapped type does and does not catch. */
-type PublicOf<T> = { [K in keyof T]: T[K] };
 
 /**
  * The repository's rules — the locks, the cap, whether nights are held — are the e2e

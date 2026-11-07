@@ -8,7 +8,7 @@ import { refundFailureQuerySchema } from "@repo/contracts";
 import { CURRENCY, cents } from "../../payment/domain/money";
 import { RefundFailureRepository } from "../infrastructure/refund-failure.repository";
 import { RefundFailureService } from "./refund-failure.service";
-import { FakeRefundFailureRepository } from "./testing/booking.fakes";
+import { FakeRefundFailureRepository } from "./testing/refund-failure-repository.fakes";
 
 /** A query as it reaches the service, parsed by the contract so its defaults are the API's. */
 const query = (search: Record<string, string> = {}) =>

@@ -14,6 +14,7 @@ import {
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import type { Page } from "../common/paging";
+import type { PublicOf } from "../common/testing/public-of.fakes";
 import { decodeCursor, type UserCursor } from "./user-cursor";
 import {
   AdminAccountError,
@@ -38,9 +39,6 @@ const query = (over: Partial<UserQuery> = {}): UserQuery => ({
   sort: "newest",
   ...over,
 });
-
-/** See `auth.service.spec.ts` for what this mapped type does and does not catch. */
-type PublicOf<T> = { [K in keyof T]: T[K] };
 
 /**
  * The role check of the token is `RolesGuard`'s, so what is left here is which account a

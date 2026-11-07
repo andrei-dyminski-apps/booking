@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { NotificationType, BookingStatus } from "@repo/contracts";
+import { type FakeNotificationService } from "../../notification/testing/notification-service.fakes";
 import { PaymentEventBusyError } from "../../payment/application/payment-event-handler";
 import type { PaymentEvent } from "../../payment/application/ports/payment-gateway";
 import {
@@ -11,25 +12,26 @@ import {
 } from "../../payment/domain/money";
 import { PaymentNotConfirmedYetError } from "../domain/booking.errors";
 import type { BookingPaymentHandler } from "./booking-payment.handler";
+import type { BookingCancellationService } from "./booking-cancellation.service";
 import type { BookingService } from "./booking.service";
+import { createBookingTestbed, payForStay } from "./testing/booking.fakes";
+import { type FakeBookingCancellationRepository } from "./testing/booking-cancellation-repository.fakes";
 import {
   admin,
   AMOUNT,
-  createBookingTestbed,
   fromToday,
   GUEST_ID,
   guest,
   input,
   LISTING_ID,
   OWNER_ID,
-  payForStay,
-  type FakeBookingRepository,
-  type FakeNotificationService,
-  type FakePaymentGateway,
-  type FakeRefundFailureRepository,
-  type FakeStayEventsListener,
-  type FakeWaitlistService,
-} from "./testing/booking.fakes";
+} from "./testing/booking-fixtures.fakes";
+import { type FakeBookingRepository } from "./testing/booking-repository.fakes";
+import { type FakeBookingTable } from "./testing/booking-table.fakes";
+import { type FakePaymentGateway } from "./testing/payment-gateway.fakes";
+import { type FakeRefundFailureRepository } from "./testing/refund-failure-repository.fakes";
+import { type FakeStayEventsListener } from "./testing/stay-events.fakes";
+import { type FakeWaitlistService } from "./testing/waitlist-service.fakes";
 
 /** A partial refund, in cents like every amount the provider's news carries. */
 const PART = cents(10_000);
@@ -40,7 +42,10 @@ const PART = cents(10_000);
  */
 describe("BookingPaymentHandler", () => {
   let service: BookingService;
+  let cancellationService: BookingCancellationService;
   let bookingRepository: FakeBookingRepository;
+  let bookingTable: FakeBookingTable;
+  let bookingCancellationRepository: FakeBookingCancellationRepository;
   let notificationService: FakeNotificationService;
   let refundFailureRepository: FakeRefundFailureRepository;
   let waitlistService: FakeWaitlistService;
@@ -63,8 +68,11 @@ describe("BookingPaymentHandler", () => {
   beforeEach(async () => {
     ({
       service,
+      cancellationService,
       paymentHandler,
       bookingRepository,
+      bookingTable,
+      bookingCancellationRepository,
       notificationService,
       refundFailureRepository,
       waitlistService,
@@ -94,7 +102,7 @@ describe("BookingPaymentHandler", () => {
 
       await paymentHandler.handle(succeeded(id));
 
-      expect(bookingRepository.rows.get(id)?.booking.status).toBe(
+      expect(bookingTable.rows.get(id)?.booking.status).toBe(
         BookingStatus.CONFIRMED,
       );
       expect(
@@ -176,7 +184,7 @@ describe("BookingPaymentHandler", () => {
         amount: subtractCents(AMOUNT, cents(1)),
       });
 
-      expect(bookingRepository.rows.get(id)?.booking.status).toBe(
+      expect(bookingTable.rows.get(id)?.booking.status).toBe(
         BookingStatus.PENDING_PAYMENT,
       );
       expect([...paymentGateway.refunds.values()]).toEqual([
@@ -192,7 +200,7 @@ describe("BookingPaymentHandler", () => {
 
       await paymentHandler.handle(succeeded(id));
 
-      const found = bookingRepository.rows.get(id);
+      const found = bookingTable.rows.get(id);
       expect(found?.booking.status).toBe(BookingStatus.EXPIRED);
       expect(found?.booking.refundedAmountCents).toBe(AMOUNT);
       expect([...paymentGateway.refunds.values()]).toEqual([
@@ -208,7 +216,7 @@ describe("BookingPaymentHandler", () => {
 
     it("throws when its refund fails, so the delivery comes again and finishes", async () => {
       const id = await bookedByGuest();
-      await service.remove(id, guest);
+      await cancellationService.remove(id, guest);
       paymentGateway.refusing = true;
 
       await expect(paymentHandler.handle(succeeded(id))).rejects.toThrow();
@@ -222,7 +230,7 @@ describe("BookingPaymentHandler", () => {
     it("tells the guest about a late payment's refund once, however often it arrives", async () => {
       const id = await bookedByGuest();
       await service.payment(id, guest);
-      await service.remove(id, guest);
+      await cancellationService.remove(id, guest);
 
       await paymentHandler.handle(succeeded(id));
       // The same news under another event id, which the ledger has not seen.
@@ -259,7 +267,7 @@ describe("BookingPaymentHandler", () => {
       expect([...paymentGateway.refunds.values()]).toEqual([
         { paymentId: "pi_1", amount: addCents(AMOUNT, cents(1)) },
       ]);
-      expect(bookingRepository.rows.get(id)).toMatchObject({
+      expect(bookingTable.rows.get(id)).toMatchObject({
         booking: {
           status: BookingStatus.PENDING_PAYMENT,
           refundedAmountCents: AMOUNT,
@@ -273,7 +281,7 @@ describe("BookingPaymentHandler", () => {
 
       await paymentHandler.handle(succeeded(id, "pi_2", "evt_stray"));
 
-      expect(bookingRepository.rows.get(id)).toMatchObject({
+      expect(bookingTable.rows.get(id)).toMatchObject({
         booking: {
           status: BookingStatus.PENDING_PAYMENT,
           refundedAmountCents: null,
@@ -287,7 +295,7 @@ describe("BookingPaymentHandler", () => {
       // The hold's own payment still confirms it.
       await paymentHandler.handle(succeeded(id));
 
-      expect(bookingRepository.rows.get(id)?.booking.status).toBe(
+      expect(bookingTable.rows.get(id)?.booking.status).toBe(
         BookingStatus.CONFIRMED,
       );
     });
@@ -295,12 +303,12 @@ describe("BookingPaymentHandler", () => {
     it("hands a payment whose stay a cancellation holds back to the inbox as busy, not failed", async () => {
       const id = await bookedByGuest();
       await service.payment(id, guest);
-      bookingRepository.held.add(id);
+      bookingCancellationRepository.held.add(id);
 
       await expect(paymentHandler.handle(succeeded(id))).rejects.toBeInstanceOf(
         PaymentEventBusyError,
       );
-      expect(bookingRepository.rows.get(id)?.booking.status).toBe(
+      expect(bookingTable.rows.get(id)?.booking.status).toBe(
         BookingStatus.PENDING_PAYMENT,
       );
     });
@@ -340,7 +348,7 @@ describe("BookingPaymentHandler", () => {
 
       await paymentHandler.handle(refunded(AMOUNT));
 
-      expect(bookingRepository.rows.get(id)).toMatchObject({
+      expect(bookingTable.rows.get(id)).toMatchObject({
         booking: {
           status: BookingStatus.CANCELLED,
           refundedAmountCents: AMOUNT,
@@ -366,7 +374,7 @@ describe("BookingPaymentHandler", () => {
       await paymentHandler.handle(refunded(AMOUNT));
 
       // The guest is in: the refund is recorded and told, the nights stay theirs.
-      expect(bookingRepository.rows.get(id)).toMatchObject({
+      expect(bookingTable.rows.get(id)).toMatchObject({
         booking: {
           status: BookingStatus.CONFIRMED,
           refundedAmountCents: AMOUNT,
@@ -405,7 +413,7 @@ describe("BookingPaymentHandler", () => {
       await paymentHandler.handle(failed);
 
       // Neither the guest's claim nor the host's share moves: a person sends it back.
-      expect(bookingRepository.rows.get(id)).toMatchObject({
+      expect(bookingTable.rows.get(id)).toMatchObject({
         booking: { status: BookingStatus.CONFIRMED, refundedAmountCents: PART },
       });
       expect(notificationService.notices).toEqual([]);
@@ -434,7 +442,7 @@ describe("BookingPaymentHandler", () => {
 
       await paymentHandler.handle(refunded(PART));
 
-      expect(bookingRepository.rows.get(id)?.booking.status).toBe(
+      expect(bookingTable.rows.get(id)?.booking.status).toBe(
         BookingStatus.CONFIRMED,
       );
       const refunds = noticesOf(NotificationType.PAYMENT_REFUNDED);
@@ -459,7 +467,7 @@ describe("BookingPaymentHandler", () => {
           ({ content }) => content.data,
         ),
       ).toMatchObject([{ amountCents: PART }, { amountCents: cents(5_000) }]);
-      expect(bookingRepository.rows.get(id)?.booking.refundedAmountCents).toBe(
+      expect(bookingTable.rows.get(id)?.booking.refundedAmountCents).toBe(
         cents(15_000),
       );
     });
@@ -474,7 +482,7 @@ describe("BookingPaymentHandler", () => {
         { bookingId: id, refunded: AMOUNT },
         { bookingId: id, refunded: AMOUNT },
       ]);
-      expect(bookingRepository.rows.get(id)?.booking.refundedAmountCents).toBe(
+      expect(bookingTable.rows.get(id)?.booking.refundedAmountCents).toBe(
         AMOUNT,
       );
     });
@@ -488,9 +496,7 @@ describe("BookingPaymentHandler", () => {
       await paymentHandler.handle(refunded(AMOUNT));
 
       expect(stayEventsListener.settled).toEqual([]);
-      expect(
-        bookingRepository.rows.get(id)?.booking.refundedAmountCents,
-      ).toBeNull();
+      expect(bookingTable.rows.get(id)?.booking.refundedAmountCents).toBeNull();
     });
 
     it("has a refund that arrives before its payment's news come again, and then records it", async () => {
@@ -500,9 +506,7 @@ describe("BookingPaymentHandler", () => {
       await expect(
         paymentHandler.handle(refunded(PART)),
       ).rejects.toBeInstanceOf(PaymentNotConfirmedYetError);
-      expect(
-        bookingRepository.rows.get(id)?.booking.refundedAmountCents,
-      ).toBeNull();
+      expect(bookingTable.rows.get(id)?.booking.refundedAmountCents).toBeNull();
 
       await paymentHandler.handle({
         kind: "succeeded",
@@ -515,7 +519,7 @@ describe("BookingPaymentHandler", () => {
       });
       await paymentHandler.handle(refunded(PART));
 
-      expect(bookingRepository.rows.get(id)).toMatchObject({
+      expect(bookingTable.rows.get(id)).toMatchObject({
         booking: { status: BookingStatus.CONFIRMED, refundedAmountCents: PART },
       });
     });
@@ -534,10 +538,10 @@ describe("BookingPaymentHandler", () => {
     it("reads a cancellation's own refund as no news when its event comes", async () => {
       const id = await paidStay(30);
 
-      await service.remove(id, guest);
+      await cancellationService.remove(id, guest);
       await paymentHandler.handle(cancellationRefunded);
 
-      expect(bookingRepository.rows.get(id)).toMatchObject({
+      expect(bookingTable.rows.get(id)).toMatchObject({
         booking: {
           status: BookingStatus.CANCELLED,
           refundedAmountCents: AMOUNT,
@@ -554,7 +558,7 @@ describe("BookingPaymentHandler", () => {
 
     it("tells the guest about a dashboard refund of a stay already cancelled", async () => {
       const id = await paidStay(1);
-      await service.remove(id, guest);
+      await cancellationService.remove(id, guest);
 
       await paymentHandler.handle({
         kind: "refunded",
@@ -565,7 +569,7 @@ describe("BookingPaymentHandler", () => {
         amountRefunded: AMOUNT,
       });
 
-      expect(bookingRepository.rows.get(id)?.booking.refundedAmountCents).toBe(
+      expect(bookingTable.rows.get(id)?.booking.refundedAmountCents).toBe(
         AMOUNT,
       );
       expect(
@@ -588,7 +592,7 @@ describe("BookingPaymentHandler", () => {
 
       await paymentHandler.handle(disputeLost);
 
-      expect(bookingRepository.rows.get(id)).toMatchObject({
+      expect(bookingTable.rows.get(id)).toMatchObject({
         booking: { status: BookingStatus.CANCELLED, refundedAmountCents: null },
       });
       expect(paymentGateway.refunds.size).toBe(0);
@@ -607,7 +611,7 @@ describe("BookingPaymentHandler", () => {
       await expect(paymentHandler.handle(disputeLost)).rejects.toBeInstanceOf(
         PaymentNotConfirmedYetError,
       );
-      expect(bookingRepository.rows.get(id)?.booking.status).toBe(
+      expect(bookingTable.rows.get(id)?.booking.status).toBe(
         BookingStatus.PENDING_PAYMENT,
       );
     });
@@ -618,7 +622,7 @@ describe("BookingPaymentHandler", () => {
       await paymentHandler.handle(disputeLost);
       await paymentHandler.handle({ ...disputeLost, won: true });
 
-      expect(bookingRepository.rows.get(begun)?.booking.status).toBe(
+      expect(bookingTable.rows.get(begun)?.booking.status).toBe(
         BookingStatus.CONFIRMED,
       );
       expect(noticesOf(NotificationType.BOOKING_CANCELLED)).toEqual([]);
@@ -628,9 +632,9 @@ describe("BookingPaymentHandler", () => {
       const id = await paidStay(1);
       stayEventsListener.refusing = true;
 
-      await service.remove(id, admin);
+      await cancellationService.remove(id, admin);
 
-      expect(bookingRepository.rows.get(id)?.booking.status).toBe(
+      expect(bookingTable.rows.get(id)?.booking.status).toBe(
         BookingStatus.CANCELLED,
       );
 
@@ -648,7 +652,7 @@ describe("BookingPaymentHandler", () => {
 
     it("refunds nothing more when a cancelled stay's payment is delivered again", async () => {
       const id = await paidStay(1);
-      await service.remove(id, guest);
+      await cancellationService.remove(id, guest);
 
       // The confirming delivery again, under an id the ledger never recorded.
       await paymentHandler.handle({

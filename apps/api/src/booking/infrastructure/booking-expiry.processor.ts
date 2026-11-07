@@ -1,6 +1,7 @@
 import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
 import { Logger } from "@nestjs/common";
 import { logJobFailure, unknownJob } from "../../common/job-failure";
+import { BookingRefundService } from "../application/booking-refund.service";
 import { BookingService } from "../application/booking.service";
 import {
   BOOKING_EXPIRY_QUEUE,
@@ -24,7 +25,10 @@ const WORKER_CONCURRENCY = 4;
 export class BookingExpiryProcessor extends WorkerHost {
   private readonly logger = new Logger(BookingExpiryProcessor.name);
 
-  constructor(private readonly bookingService: BookingService) {
+  constructor(
+    private readonly bookingService: BookingService,
+    private readonly bookingRefundService: BookingRefundService,
+  ) {
     super();
   }
 
@@ -37,7 +41,7 @@ export class BookingExpiryProcessor extends WorkerHost {
 
         return;
       case REFUND_CANCELLATION_JOB:
-        await this.bookingService.refundCancellation(data.bookingId);
+        await this.bookingRefundService.refundCancellation(data.bookingId);
 
         return;
       case EXPIRE_HOLD_JOB:
@@ -46,7 +50,8 @@ export class BookingExpiryProcessor extends WorkerHost {
 
         return;
       case SWEEP_OWED_REFUNDS_JOB: {
-        const refunded = await this.bookingService.refundOwedCancellations();
+        const refunded =
+          await this.bookingRefundService.refundOwedCancellations();
 
         if (refunded > 0) {
           this.logger.log(

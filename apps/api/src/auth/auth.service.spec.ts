@@ -10,6 +10,7 @@ import { Test } from "@nestjs/testing";
 import type { ManagedUser, ManagedUserDetail, User } from "@repo/contracts";
 import type { Page } from "../common/paging";
 import * as argon2 from "argon2";
+import type { PublicOf } from "../common/testing/public-of.fakes";
 import { AUTH_CONFIG, type AuthConfig } from "./auth.config";
 import { AuthService } from "./auth.service";
 import type { IssuedRefreshToken } from "./auth.types";
@@ -37,19 +38,6 @@ const credentials = {
   email: "guest@example.com",
   password: "password123",
 };
-
-/**
- * A homomorphic mapped type keeps only the public surface of a class — private members are
- * not part of `keyof`. So a fake can stand in for a repository without extending it, and
- * still stops compiling the moment the real one gains or drops a method, or changes what
- * one returns.
- *
- * What it does not catch is a parameter added to an existing method, or one whose type is
- * widened: a shorter signature stays assignable to a longer one, and method parameters are
- * compared bivariantly even under `strictFunctionTypes`. A changed argument list therefore
- * has to be carried into the fakes by hand.
- */
-type PublicOf<T> = { [K in keyof T]: T[K] };
 
 /**
  * The repositories are faked rather than mocked: the rotation rules are about what ends up

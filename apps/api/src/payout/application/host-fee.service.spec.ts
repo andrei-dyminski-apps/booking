@@ -7,7 +7,8 @@ import {
 import { Test } from "@nestjs/testing";
 import type { HostFee } from "@repo/contracts";
 import { isBefore, parseISO } from "date-fns";
-import { cancellationsWindowStart } from "../../booking/infrastructure/booking.repository";
+import { cancellationsWindowStart } from "../../booking/infrastructure/booking-where";
+import type { PublicOf } from "../../common/testing/public-of.fakes";
 import { cents, CURRENCY } from "../../payment/domain/money";
 import {
   WaivingAccountGoneError,
@@ -22,9 +23,6 @@ const ADMIN_ID = "8b1c2d3e-4f5a-4b6c-9d7e-0f1a2b3c4d5e";
 const DEMOTED_ID = "9c2d3e4f-5a6b-4c7d-8e9f-1a2b3c4d5e6f";
 const GONE_ID = "0d3e4f5a-6b7c-4d8e-9fa0-2b3c4d5e6f7a";
 const NOW = new Date("2026-11-04T12:00:00.000Z");
-
-/** See `auth.service.spec.ts` for what this mapped type does and does not catch. */
-type PublicOf<T> = { [K in keyof T]: T[K] };
 
 /** The ledger in memory, with the cuts of the real one: owed, or written since. */
 class FakeHostFeeRepository implements PublicOf<HostFeeRepository> {

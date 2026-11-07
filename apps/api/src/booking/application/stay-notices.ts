@@ -1,5 +1,6 @@
 import {
   NotificationType,
+  type Booking,
   type Canceller,
   StayParty,
   type NotificationContent,
@@ -25,6 +26,17 @@ export type CancellationNotice = {
   cancelledBy: Canceller | null;
   reason: string | null;
 };
+
+/** What a notice about a stay copies off it — see `stayNoticeSchema` in the contract. */
+export function stayNoticeOf(booking: Booking): StayNotice {
+  return {
+    bookingId: booking.id,
+    listingId: booking.listingId,
+    listingTitle: booking.listing.title,
+    from: booking.from,
+    to: booking.to,
+  };
+}
 
 /** Both sides of a stay, leaving out `except` — whoever made it happen. */
 export async function notifyBothSides(

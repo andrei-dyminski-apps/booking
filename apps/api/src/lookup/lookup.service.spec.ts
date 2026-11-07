@@ -9,6 +9,7 @@ import {
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import type { Page } from "../common/paging";
+import type { PublicOf } from "../common/testing/public-of.fakes";
 import { encodeCursor, type LookupCursor } from "./lookup-cursor";
 import { LookupRepository } from "./lookup.repository";
 import { LookupService } from "./lookup.service";
@@ -40,9 +41,6 @@ const query = (over: Partial<LookupQuery> = {}): LookupQuery => ({
   limit: 20,
   ...over,
 });
-
-/** See `auth.service.spec.ts` for what this mapped type does and does not catch. */
-type PublicOf<T> = { [K in keyof T]: T[K] };
 
 /** A row a lookup can return, and whose stays — by owner and by guest — name it. */
 type Row = { option: LookupOption; stayOwners: string[]; guests: string[] };

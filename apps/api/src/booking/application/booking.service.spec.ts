@@ -13,13 +13,13 @@ import {
   type Booking,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
-import { CURRENCY, cents, subtractCents } from "../../payment/domain/money";
-import type { BookingPaymentHandler } from "./booking-payment.handler";
-import { MAX_REFUND_ATTEMPTS, type BookingService } from "./booking.service";
+import { type FakeNotificationService } from "../../notification/testing/notification-service.fakes";
+import type { BookingCancellationService } from "./booking-cancellation.service";
+import type { BookingService } from "./booking.service";
+import { createBookingTestbed } from "./testing/booking.fakes";
 import {
   admin,
   AMOUNT,
-  createBookingTestbed,
   GUEST_ID,
   guest,
   input,
@@ -28,46 +28,39 @@ import {
   OTHER_LISTING_ID,
   owner,
   OWNER_ID,
-  payForStay,
   searchFor,
   stayAfter,
   stranger,
   STRANGER_ID,
   userWith,
-  type FakeBookingJobs,
-  type FakeBookingRepository,
-  type FakeNotificationService,
-  type FakePaymentGateway,
-  type FakeStayEventsListener,
-  type FakeWaitlistService,
-} from "./testing/booking.fakes";
-
-/** A partial refund of a stay that costs `AMOUNT`, and what it leaves of the payment. */
-const PART = cents(10_000);
-const REST = subtractCents(AMOUNT, PART);
+} from "./testing/booking-fixtures.fakes";
+import { type FakeBookingJobs } from "./testing/booking-jobs.fakes";
+import { type FakeBookingRepository } from "./testing/booking-repository.fakes";
+import { type FakeBookingTable } from "./testing/booking-table.fakes";
+import { type FakePaymentGateway } from "./testing/payment-gateway.fakes";
+import { type FakeWaitlistService } from "./testing/waitlist-service.fakes";
 
 /**
  * The service against fakes of its repositories, the gateway and a stay listener — see
  * `testing/booking.fakes.ts`. What the provider's news does to the stays is
- * `booking-payment.handler.spec.ts`'s.
+ * `booking-payment.handler.spec.ts`'s, the cancellation
+ * `booking-cancellation.service.spec.ts`'s, and how an owed refund is sent, retried and set
+ * aside `booking-refund.service.spec.ts`'s — the cases here cancel a stay only to see what
+ * the rest makes of one.
  */
 describe("BookingService", () => {
   let service: BookingService;
+  let cancellationService: BookingCancellationService;
   let bookingRepository: FakeBookingRepository;
+  let bookingTable: FakeBookingTable;
   let bookingJobs: FakeBookingJobs;
   let notificationService: FakeNotificationService;
   let waitlistService: FakeWaitlistService;
   let paymentGateway: FakePaymentGateway;
-  let stayEventsListener: FakeStayEventsListener;
-  let paymentHandler: BookingPaymentHandler;
 
   /** A booking `guest` took against a listing `owner` owns — the row every rule acts on. */
   const bookedByGuest = async (): Promise<string> =>
     (await service.create(GUEST_ID, input)).id;
-
-  /** A stay `guest` has paid for, starting `days` from today. */
-  const paidStay = (days: number): Promise<string> =>
-    payForStay({ service, paymentHandler }, days);
 
   /** The stays one caller is handed, with a search of their own where one matters. */
   const seenBy = async (
@@ -79,13 +72,13 @@ describe("BookingService", () => {
   beforeEach(async () => {
     ({
       service,
-      paymentHandler,
+      cancellationService,
       bookingRepository,
+      bookingTable,
       bookingJobs,
       notificationService,
       waitlistService,
       paymentGateway,
-      stayEventsListener,
     } = await createBookingTestbed());
   });
 
@@ -133,7 +126,7 @@ describe("BookingService", () => {
     await expect(service.create(GUEST_ID, input)).rejects.toThrow(
       ForbiddenException,
     );
-    expect(bookingRepository.rows.size).toBe(0);
+    expect(bookingTable.rows.size).toBe(0);
     expect(bookingJobs.scheduled).toEqual([]);
     expect(notificationService.notices).toEqual([]);
   });
@@ -144,7 +137,7 @@ describe("BookingService", () => {
     await expect(
       service.create(STRANGER_ID, { ...input, from: "2026-09-04" }),
     ).rejects.toThrow(ConflictException);
-    expect(bookingRepository.rows.size).toBe(1);
+    expect(bookingTable.rows.size).toBe(1);
   });
 
   it("narrows the list to what the role of the caller may see", async () => {
@@ -302,7 +295,7 @@ describe("BookingService", () => {
     await expect(service.findOne(id, stranger)).rejects.toThrow(
       NotFoundException,
     );
-    await expect(service.remove(id, stranger)).rejects.toThrow(
+    await expect(cancellationService.remove(id, stranger)).rejects.toThrow(
       NotFoundException,
     );
     await expect(service.findOne(id, guest)).resolves.toMatchObject({ id });
@@ -322,52 +315,6 @@ describe("BookingService", () => {
     expect(nights.reduce((total, night) => total + night.priceCents, 0)).toBe(
       amountCents,
     );
-  });
-
-  it("lets the guest, an admin and the host with a reason cancel", async () => {
-    const id = await bookedByGuest();
-
-    // A host takes a stay away from its guest, who is owed a reason.
-    await expect(service.remove(id, owner)).rejects.toThrow(
-      BadRequestException,
-    );
-    await expect(service.findOne(id, owner)).resolves.toMatchObject({
-      id,
-      status: BookingStatus.PENDING_PAYMENT,
-    });
-
-    await service.remove(id, guest);
-    expect(bookingJobs.cancelled).toContain(id);
-
-    const second = await bookedByGuest();
-    await service.remove(second, admin);
-
-    const third = await bookedByGuest();
-    await service.remove(third, owner, { reason: "The roof leaks" });
-
-    await expect(seenBy(admin)).resolves.toHaveLength(3);
-    await expect(service.findOne(third, guest)).resolves.toMatchObject({
-      status: BookingStatus.CANCELLED,
-      cancelledBy: "HOST",
-      cancellationReason: "The roof leaks",
-    });
-  });
-
-  // The lease would otherwise let anybody who knows an id keep the guest's own
-  // cancellation and the refund's webhook waiting behind refused requests.
-  it("takes the cancellation lease only for somebody who may cancel", async () => {
-    const id = await bookedByGuest();
-
-    await expect(service.remove(id, owner)).rejects.toThrow(
-      BadRequestException,
-    );
-    await expect(service.remove(id, stranger)).rejects.toThrow(
-      NotFoundException,
-    );
-    expect(bookingRepository.leases).toEqual([]);
-
-    await service.remove(id, guest);
-    expect(bookingRepository.leases).toEqual([id]);
   });
 
   it("tells the host about a hold the moment it is taken", async () => {
@@ -390,53 +337,8 @@ describe("BookingService", () => {
     ]);
   });
 
-  it("tells the host when the guest cancels, and both sides when an admin does", async () => {
-    const recipientsOfCancelling = async (
-      canceller: AuthenticatedUser,
-    ): Promise<{ userId: string; recipient: string }[]> => {
-      const id = await bookedByGuest();
-
-      notificationService.notices.length = 0;
-      await service.remove(id, canceller);
-
-      return notificationService.notices.map(({ userId, content }) => {
-        if (content.type !== NotificationType.BOOKING_CANCELLED) {
-          throw new Error(`Unexpected ${content.type}`);
-        }
-
-        return { userId, recipient: content.data.recipient };
-      });
-    };
-
-    await expect(recipientsOfCancelling(guest)).resolves.toEqual([
-      { userId: OWNER_ID, recipient: StayParty.HOST },
-    ]);
-    await expect(recipientsOfCancelling(admin)).resolves.toEqual([
-      { userId: GUEST_ID, recipient: StayParty.GUEST },
-      { userId: OWNER_ID, recipient: StayParty.HOST },
-    ]);
-  });
-
   describe("the waitlist", () => {
     const nights = { listingId: LISTING_ID, from: input.from, to: input.to };
-
-    it("hands it the nights a cancellation let go of", async () => {
-      const id = await bookedByGuest();
-
-      await service.remove(id, guest);
-
-      expect(waitlistService.freed).toEqual([nights]);
-    });
-
-    it("hands it nothing for a cancellation it refused", async () => {
-      const id = await bookedByGuest();
-
-      await expect(service.remove(id, stranger)).rejects.toThrow(
-        NotFoundException,
-      );
-
-      expect(waitlistService.freed).toEqual([]);
-    });
 
     it("hands it the nights of a lapsed hold, on every path that releases one", async () => {
       const byJob = await bookedByGuest();
@@ -527,7 +429,7 @@ describe("BookingService", () => {
     it("tells nobody when the job lands on a hold no longer pending", async () => {
       const id = await lapsedHold();
 
-      await service.remove(id, guest);
+      await cancellationService.remove(id, guest);
       notificationService.notices.length = 0;
 
       await service.releaseHold(id);
@@ -545,193 +447,11 @@ describe("BookingService", () => {
     });
   });
 
-  it("tells nobody about a cancellation it refused", async () => {
-    const id = await bookedByGuest();
-
-    notificationService.notices.length = 0;
-    await expect(service.remove(id, owner)).rejects.toThrow(
-      BadRequestException,
-    );
-
-    expect(notificationService.notices).toEqual([]);
-  });
-
-  describe("a host's cancellation", () => {
-    const why = { reason: "A pipe burst" };
-
-    it("refunds the guest in full under any policy, and costs the host the fee of its tier", async () => {
-      // Nothing back for a guest inside the last week under FIRM; everything for the host's.
-      bookingRepository.listingPolicy = "FIRM";
-      const id = await paidStay(5);
-
-      await service.remove(id, owner, why);
-
-      expect([...paymentGateway.refunds.values()]).toEqual([
-        { paymentId: "pi_1", amount: AMOUNT },
-      ]);
-      // 48 hours to 30 days before check-in: a quarter of the stay.
-      expect(bookingRepository.hostFees.get(id)).toMatchObject({
-        hostId: OWNER_ID,
-        amountCents: AMOUNT / 4,
-      });
-    });
-
-    it("costs a tenth a month ahead and half inside the last two days", async () => {
-      const early = await paidStay(40);
-      await service.remove(early, owner, why);
-
-      expect(bookingRepository.hostFees.get(early)?.amountCents).toBe(
-        AMOUNT / 10,
-      );
-
-      const late = await paidStay(1);
-      await service.remove(late, owner, why);
-
-      expect(bookingRepository.hostFees.get(late)?.amountCents).toBe(
-        AMOUNT / 2,
-      );
-    });
-
-    it("holds a host promoted to admin to a host's terms: a reason, and the fee", async () => {
-      const id = await paidStay(40);
-      const promoted = { ...owner, role: Role.ADMIN };
-
-      await expect(service.remove(id, promoted)).rejects.toThrow(
-        BadRequestException,
-      );
-
-      await service.remove(id, promoted, why);
-
-      expect(bookingRepository.hostFees.get(id)?.amountCents).toBe(AMOUNT / 10);
-    });
-
-    it("costs nothing for a hold nobody has paid for", async () => {
-      const id = await bookedByGuest();
-
-      await service.remove(id, owner, why);
-
-      expect(bookingRepository.hostFees.size).toBe(0);
-      expect(
-        notificationService.notices.map(({ content }) => content.type),
-      ).not.toContain(NotificationType.HOST_CANCELLATION_FEE);
-    });
-
-    it("tells the guest who cancelled and why, and the host what it costs", async () => {
-      const id = await paidStay(40);
-
-      notificationService.notices.length = 0;
-      await service.remove(id, owner, why);
-
-      expect(notificationService.notices).toEqual([
-        {
-          userId: GUEST_ID,
-          content: expect.objectContaining({
-            type: NotificationType.BOOKING_CANCELLED,
-            data: expect.objectContaining({
-              recipient: StayParty.GUEST,
-              refundCents: AMOUNT,
-              cancelledBy: "HOST",
-              reason: why.reason,
-            }) as unknown,
-          }) as unknown,
-        },
-        {
-          userId: OWNER_ID,
-          content: expect.objectContaining({
-            type: NotificationType.HOST_CANCELLATION_FEE,
-            data: expect.objectContaining({
-              bookingId: id,
-              amountCents: AMOUNT / 10,
-            }) as unknown,
-          }) as unknown,
-        },
-      ]);
-    });
-
-    it("tells every admin from the third paid stay a host cancels", async () => {
-      const thresholdNotices = () =>
-        notificationService.toAdmins.filter(
-          ({ type }) => type === NotificationType.HOST_CANCELLATIONS_THRESHOLD,
-        );
-
-      for (const days of [40, 50]) {
-        await service.remove(await paidStay(days), owner, why);
-      }
-
-      expect(thresholdNotices()).toEqual([]);
-
-      await service.remove(await paidStay(60), owner, why);
-
-      expect(thresholdNotices()).toEqual([
-        {
-          type: NotificationType.HOST_CANCELLATIONS_THRESHOLD,
-          data: { hostId: OWNER_ID, hostName: "Host", cancellations: 3 },
-        },
-      ]);
-    });
-
-    it("leaves a cancellation whose fee an admin waived out of the count", async () => {
-      for (const days of [40, 50]) {
-        await service.remove(await paidStay(days), owner, why);
-      }
-
-      const [waived] = bookingRepository.hostFees.values();
-
-      if (waived !== undefined) waived.waived = true;
-
-      await service.remove(await paidStay(60), owner, why);
-
-      expect(
-        notificationService.toAdmins.filter(
-          ({ type }) => type === NotificationType.HOST_CANCELLATIONS_THRESHOLD,
-        ),
-      ).toEqual([]);
-    });
-
-    it("answers a host with no reason by the row first: a stay cancelled already is a 404", async () => {
-      const id = await paidStay(40);
-
-      await service.remove(id, guest);
-
-      await expect(service.remove(id, owner)).rejects.toThrow(
-        NotFoundException,
-      );
-    });
-
-    it("refuses the host once the stay has begun, as everybody else", async () => {
-      const id = await paidStay(0);
-
-      await expect(service.remove(id, owner, why)).rejects.toThrow(
-        ConflictException,
-      );
-      expect(bookingRepository.hostFees.size).toBe(0);
-    });
-  });
-
-  /**
-   * A cancelled stay is a record, not a deletion — phase 6 refunds against it. So it keeps
-   * answering its guest, with the status saying what happened and the deadline the hold
-   * had still on it, and only a second cancellation is refused.
-   */
-  it("keeps the cancelled booking readable, and refuses to cancel it twice", async () => {
-    const id = await bookedByGuest();
-    const held = await service.findOne(id, guest);
-
-    await service.remove(id, guest);
-
-    await expect(service.findOne(id, guest)).resolves.toMatchObject({
-      id,
-      status: BookingStatus.CANCELLED,
-      expiresAt: held.expiresAt,
-    });
-    await expect(service.remove(id, guest)).rejects.toThrow(NotFoundException);
-  });
-
   it("throws NotFoundException for an unknown id", async () => {
     await expect(service.findOne(LISTING_ID, admin)).rejects.toThrow(
       NotFoundException,
     );
-    await expect(service.remove(LISTING_ID, admin)).rejects.toThrow(
+    await expect(cancellationService.remove(LISTING_ID, admin)).rejects.toThrow(
       NotFoundException,
     );
   });
@@ -764,7 +484,7 @@ describe("BookingService", () => {
         currency: "usd",
       });
       expect(second).toEqual(first);
-      expect(bookingRepository.rows.get(id)?.paymentId).toBe("pi_1");
+      expect(bookingTable.rows.get(id)?.paymentId).toBe("pi_1");
     });
 
     it("answers the guest alone, and hides the stay from a stranger", async () => {
@@ -785,7 +505,7 @@ describe("BookingService", () => {
 
     it("refuses a booking that no longer waits for payment", async () => {
       const cancelled = await bookedByGuest();
-      await service.remove(cancelled, guest);
+      await cancellationService.remove(cancelled, guest);
 
       await expect(service.payment(cancelled, guest)).rejects.toThrow(
         ConflictException,
@@ -793,7 +513,7 @@ describe("BookingService", () => {
 
       // Past its deadline but not released yet: the sweep is about to give the nights away.
       const lapsing = (await service.create(GUEST_ID, stayAfter(1))).id;
-      const found = bookingRepository.rows.get(lapsing);
+      const found = bookingTable.rows.get(lapsing);
 
       if (found === undefined) throw new Error("The hold was not stored");
 
@@ -812,7 +532,7 @@ describe("BookingService", () => {
       await expect(service.payment(id, guest)).rejects.toThrow(
         ConflictException,
       );
-      expect(bookingRepository.rows.get(id)?.paymentId).toBeNull();
+      expect(bookingTable.rows.get(id)?.paymentId).toBeNull();
 
       paymentGateway.openingElsewhere = false;
 
@@ -824,529 +544,13 @@ describe("BookingService", () => {
     it("withdraws a payment opened while the hold was being released", async () => {
       const id = await bookedByGuest();
       bookingRepository.lapsed.add(id);
-      bookingRepository.racing = () => service.releaseHold(id);
+      bookingTable.racing = () => service.releaseHold(id);
 
       await expect(service.payment(id, guest)).rejects.toThrow(
         ConflictException,
       );
-      expect(bookingRepository.rows.get(id)?.paymentId).toBeNull();
+      expect(bookingTable.rows.get(id)?.paymentId).toBeNull();
       expect(bookingJobs.withdrawals).toEqual(["pi_1"]);
-    });
-  });
-
-  describe("cancelling", () => {
-    it("refunds a guest in full inside the free window, by the job the cancellation queues", async () => {
-      const id = await paidStay(30);
-
-      await service.remove(id, guest);
-
-      expect([...paymentGateway.refunds.entries()]).toEqual([
-        [`booking-${id}-cancellation`, { paymentId: "pi_1", amount: AMOUNT }],
-      ]);
-      expect(bookingRepository.rows.get(id)).toMatchObject({
-        booking: {
-          status: BookingStatus.CANCELLED,
-          refundedAmountCents: AMOUNT,
-        },
-      });
-    });
-
-    it("records the refund an earlier attempt sent rather than sending another", async () => {
-      const id = await paidStay(30);
-      // Sent by a run whose answer was lost, for less than the stay — the key is what names it.
-      paymentGateway.refunds.set(`booking-${id}-cancellation`, {
-        paymentId: "pi_1",
-        amount: PART,
-      });
-
-      await service.remove(id, guest);
-
-      expect(paymentGateway.refunds.size).toBe(1);
-      expect(bookingRepository.rows.get(id)).toMatchObject({
-        booking: { refundedAmountCents: PART, refundOwedCents: null },
-      });
-    });
-
-    it("refunds a guest nothing once the window has closed", async () => {
-      const id = await paidStay(1);
-
-      await service.remove(id, guest);
-
-      expect(paymentGateway.refunds.size).toBe(0);
-      expect(bookingRepository.rows.get(id)).toMatchObject({
-        booking: { status: BookingStatus.CANCELLED, refundedAmountCents: null },
-      });
-    });
-
-    it("refunds the share the stay's own policy gives, frozen when it was taken", async () => {
-      // Half back from 14 days before check-in to 7 under LIMITED.
-      bookingRepository.listingPolicy = "LIMITED";
-      const id = await paidStay(10);
-      // A change of the listing's policy afterwards does not restate the stay.
-      bookingRepository.listingPolicy = "FLEXIBLE";
-
-      await service.remove(id, guest);
-
-      expect([...paymentGateway.refunds.values()]).toEqual([
-        { paymentId: "pi_1", amount: AMOUNT / 2 },
-      ]);
-      expect(bookingRepository.rows.get(id)).toMatchObject({
-        booking: {
-          cancellationPolicy: "LIMITED",
-          status: BookingStatus.CANCELLED,
-          refundedAmountCents: AMOUNT / 2,
-        },
-      });
-    });
-
-    it("tells the host what the guest's cancellation gives back", async () => {
-      bookingRepository.listingPolicy = "LIMITED";
-      const paid = await paidStay(10);
-
-      notificationService.notices.length = 0;
-      await service.remove(paid, guest);
-
-      expect(notificationService.notices).toEqual([
-        {
-          userId: OWNER_ID,
-          content: expect.objectContaining({
-            type: NotificationType.BOOKING_CANCELLED,
-            data: expect.objectContaining({
-              refundCents: AMOUNT / 2,
-              currency: CURRENCY,
-            }) as unknown,
-          }) as unknown,
-        },
-      ]);
-
-      // A hold was never paid, so there is nothing to say about money.
-      const hold = await bookedByGuest();
-
-      notificationService.notices.length = 0;
-      await service.remove(hold, guest);
-
-      expect(notificationService.notices).toEqual([
-        {
-          userId: OWNER_ID,
-          content: expect.objectContaining({
-            data: expect.objectContaining({ refundCents: null }) as unknown,
-          }) as unknown,
-        },
-      ]);
-    });
-
-    it("says nothing about money for a stay refunded in full before it was cancelled", async () => {
-      const paid = await paidStay(30);
-      const found = bookingRepository.rows.get(paid);
-
-      if (found === undefined) throw new Error("The stay was not stored");
-
-      // Refunded in full outside the API, the news not acted on yet.
-      found.booking.refundedAmountCents = AMOUNT;
-      notificationService.notices.length = 0;
-      await service.remove(paid, admin);
-
-      expect(notificationService.notices).toEqual(
-        [GUEST_ID, OWNER_ID].map((userId) => ({
-          userId,
-          content: expect.objectContaining({
-            type: NotificationType.BOOKING_CANCELLED,
-            data: expect.objectContaining({ refundCents: null }) as unknown,
-          }) as unknown,
-        })),
-      );
-    });
-
-    it("refunds only what a dashboard refund left of the payment", async () => {
-      const id = await paidStay(30);
-      await paymentHandler.handle({
-        kind: "refunded",
-        eventId: "evt_dashboard",
-        type: "charge.refunded",
-        paymentId: "pi_1",
-        chargeId: "ch_pi_1",
-        amountRefunded: PART,
-      });
-
-      await service.remove(id, guest);
-
-      expect([...paymentGateway.refunds.values()]).toEqual([
-        { paymentId: "pi_1", amount: REST },
-      ]);
-      expect(bookingRepository.rows.get(id)).toMatchObject({
-        booking: {
-          status: BookingStatus.CANCELLED,
-          refundedAmountCents: AMOUNT,
-        },
-      });
-      expect(stayEventsListener.settled.at(-1)).toEqual({
-        bookingId: id,
-        refunded: AMOUNT,
-      });
-    });
-
-    it("refunds only what is left when a dashboard refund has not been reported yet", async () => {
-      const id = await paidStay(30);
-      paymentGateway.refundedUnreported.set("pi_1", PART);
-
-      await service.remove(id, guest);
-
-      expect([...paymentGateway.refunds.values()]).toEqual([
-        { paymentId: "pi_1", amount: REST },
-      ]);
-      // The row counts its own refund only: the dashboard's is its webhook's to tell.
-      expect(bookingRepository.rows.get(id)).toMatchObject({
-        booking: { status: BookingStatus.CANCELLED, refundedAmountCents: REST },
-      });
-    });
-
-    it("keeps a dashboard refund on record when the cancellation refunds nothing", async () => {
-      const id = await paidStay(1);
-      await paymentHandler.handle({
-        kind: "refunded",
-        eventId: "evt_dashboard",
-        type: "charge.refunded",
-        paymentId: "pi_1",
-        chargeId: "ch_pi_1",
-        amountRefunded: PART,
-      });
-
-      await service.remove(id, guest);
-
-      expect(bookingRepository.rows.get(id)).toMatchObject({
-        booking: { status: BookingStatus.CANCELLED, refundedAmountCents: PART },
-      });
-    });
-
-    it("refuses to cancel a stay whose payment is disputed until the bank decides", async () => {
-      const id = await paidStay(30);
-      const found = bookingRepository.rows.get(id);
-
-      if (found !== undefined) found.booking.dispute = "OPEN";
-
-      await expect(service.remove(id, admin)).rejects.toThrow(
-        ConflictException,
-      );
-      expect(paymentGateway.refunds.size).toBe(0);
-      expect(found?.booking.status).toBe(BookingStatus.CONFIRMED);
-    });
-
-    it("cancels a stay whose dispute was lost without refunding it again", async () => {
-      const id = await paidStay(30);
-      const found = bookingRepository.rows.get(id);
-
-      if (found !== undefined) found.booking.dispute = "LOST";
-
-      await service.remove(id, admin);
-
-      expect(paymentGateway.refunds.size).toBe(0);
-      expect(found?.booking.status).toBe(BookingStatus.CANCELLED);
-    });
-
-    it("cancels at once and owes the refund until the job sends it", async () => {
-      const id = await paidStay(30);
-      bookingJobs.worker = null;
-
-      await service.remove(id, guest);
-
-      expect(bookingRepository.rows.get(id)).toMatchObject({
-        booking: {
-          status: BookingStatus.CANCELLED,
-          refundedAmountCents: null,
-          refundOwedCents: AMOUNT,
-        },
-      });
-      expect(paymentGateway.refunds.size).toBe(0);
-      expect(bookingJobs.refunds).toEqual([id]);
-      expect(waitlistService.freed).toHaveLength(1);
-
-      await expect(service.refundCancellation(id)).resolves.toBe(true);
-      // A second run — the sweep racing the job — finds nothing owed.
-      await expect(service.refundCancellation(id)).resolves.toBe(false);
-
-      expect(paymentGateway.refunds.size).toBe(1);
-      expect(bookingRepository.rows.get(id)).toMatchObject({
-        booking: { refundedAmountCents: AMOUNT, refundOwedCents: null },
-      });
-    });
-
-    it("refunds an admin's cancellation in full after the free window", async () => {
-      const id = await paidStay(1);
-
-      await service.remove(id, admin);
-
-      expect(bookingRepository.rows.get(id)?.booking.refundedAmountCents).toBe(
-        AMOUNT,
-      );
-    });
-
-    it("refunds a guest promoted to admin by their stay's policy, not in full", async () => {
-      // Nothing back inside the last week under FIRM, whatever the guest's role now.
-      bookingRepository.listingPolicy = "FIRM";
-      const id = await paidStay(1);
-
-      await service.remove(id, { ...guest, role: Role.ADMIN });
-
-      expect(paymentGateway.refunds.size).toBe(0);
-      expect(bookingRepository.rows.get(id)?.booking).toMatchObject({
-        status: BookingStatus.CANCELLED,
-        cancelledBy: "GUEST",
-      });
-    });
-
-    it("refuses the guest and an admin alike once the stay has begun", async () => {
-      const id = await paidStay(0);
-
-      await expect(service.remove(id, guest)).rejects.toBeInstanceOf(
-        ConflictException,
-      );
-      await expect(service.remove(id, admin)).rejects.toBeInstanceOf(
-        ConflictException,
-      );
-      expect(bookingRepository.rows.get(id)?.booking.status).toBe(
-        BookingStatus.CONFIRMED,
-      );
-      expect(paymentGateway.refunds.size).toBe(0);
-    });
-
-    it("takes the host's share of a cancellation's refund back once it is sent", async () => {
-      const id = await paidStay(1);
-
-      await service.remove(id, admin);
-
-      expect(stayEventsListener.settled).toEqual([
-        { bookingId: id, refunded: AMOUNT },
-      ]);
-    });
-
-    it("settles nothing for a cancellation that refunds nothing", async () => {
-      const id = await paidStay(1);
-
-      await service.remove(id, guest);
-
-      expect(stayEventsListener.settled).toEqual([]);
-    });
-
-    it("cancels when the refund cannot be issued yet, and the sweep sends it later", async () => {
-      const id = await paidStay(30);
-      paymentGateway.refusing = true;
-
-      await service.remove(id, guest);
-
-      expect(bookingJobs.failedRefunds).toHaveLength(1);
-      expect(bookingRepository.rows.get(id)).toMatchObject({
-        booking: { status: BookingStatus.CANCELLED, refundOwedCents: AMOUNT },
-      });
-
-      // Still refused: logged and left for the next minute, not thrown out of the sweep.
-      await expect(service.refundOwedCancellations()).resolves.toBe(0);
-
-      paymentGateway.refusing = false;
-
-      await expect(service.refundOwedCancellations()).resolves.toBe(1);
-      expect(bookingRepository.rows.get(id)).toMatchObject({
-        booking: { refundedAmountCents: AMOUNT, refundOwedCents: null },
-      });
-    });
-
-    it("sets a refund Stripe keeps refusing aside and tells the admins", async () => {
-      const id = await paidStay(30);
-      bookingJobs.worker = null;
-      await service.remove(id, guest);
-      paymentGateway.refusing = true;
-
-      for (let run = 1; run < MAX_REFUND_ATTEMPTS; run += 1) {
-        await expect(service.refundCancellation(id)).rejects.toThrow();
-      }
-
-      expect(notificationService.toAdmins).toEqual([]);
-
-      // The last attempt ends the job's retries instead of failing it once more.
-      await expect(service.refundCancellation(id)).resolves.toBe(false);
-      expect(notificationService.toAdmins).toEqual([
-        {
-          type: NotificationType.CANCELLATION_REFUND_FAILED,
-          data: { bookingId: id, error: expect.any(String) as string },
-        },
-      ]);
-      // Still owed, and left to a person: the sweep no longer reads it.
-      expect(bookingRepository.rows.get(id)?.booking.refundOwedCents).toBe(
-        AMOUNT,
-      );
-      await expect(bookingRepository.findOwedRefunds(50)).resolves.toEqual([]);
-    });
-
-    describe("a refund set aside", () => {
-      /** A cancellation whose refund Stripe refused until it was set aside. */
-      const stuckRefund = async (days: number): Promise<string> => {
-        const id = await paidStay(days);
-        bookingJobs.worker = null;
-        await service.remove(id, guest);
-        paymentGateway.refusing = true;
-
-        for (let run = 1; run <= MAX_REFUND_ATTEMPTS; run += 1) {
-          await service.refundCancellation(id).catch(() => undefined);
-        }
-
-        paymentGateway.refusing = false;
-
-        return id;
-      };
-
-      it("is listed for an admin with the stay, the attempts and the error", async () => {
-        const id = await stuckRefund(30);
-        await paidStay(31);
-
-        const page = await service.findStuckPage({ kind: "refund", limit: 20 });
-
-        expect(page.items).toEqual([
-          expect.objectContaining({
-            kind: "refund",
-            booking: expect.objectContaining({ id }) as Booking,
-            owedCents: AMOUNT,
-            attempts: MAX_REFUND_ATTEMPTS,
-          }),
-        ]);
-        expect(page.nextCursor).toBeNull();
-        await expect(
-          service.findStuckPage({ kind: "payout", limit: 20 }),
-        ).resolves.toEqual({ items: [], nextCursor: null });
-      });
-
-      it("pages by a cursor of its own kind", async () => {
-        const older = await stuckRefund(30);
-        const newer = await stuckRefund(31);
-
-        const first = await service.findStuckPage({ kind: "refund", limit: 1 });
-        const cursor = first.nextCursor ?? undefined;
-        const second = await service.findStuckPage({
-          kind: "refund",
-          limit: 1,
-          cursor,
-        });
-
-        expect(first.items.map(({ booking }) => booking.id)).toEqual([newer]);
-        expect(second.items.map(({ booking }) => booking.id)).toEqual([older]);
-        expect(second.nextCursor).toBeNull();
-        // A place among the stuck refunds names none among the stuck payouts.
-        await expect(
-          service.findStuckPage({ kind: "payout", limit: 1, cursor }),
-        ).rejects.toThrow(BadRequestException);
-      });
-
-      it("is handed back on an admin's word and sent by the job it queues", async () => {
-        const id = await stuckRefund(30);
-        bookingJobs.worker = (bookingId) =>
-          service.refundCancellation(bookingId);
-
-        await service.retryStuckRefund(id);
-
-        expect([...paymentGateway.refunds.values()]).toEqual([
-          { paymentId: "pi_1", amount: AMOUNT },
-        ]);
-        expect(bookingRepository.rows.get(id)).toMatchObject({
-          booking: { refundedAmountCents: AMOUNT, refundOwedCents: null },
-        });
-        await expect(
-          service.findStuckPage({ kind: "refund", limit: 20 }),
-        ).resolves.toEqual({ items: [], nextCursor: null });
-      });
-
-      it("refuses a retry of a refund not set aside, and of a stay that is not there", async () => {
-        const id = await paidStay(30);
-
-        await expect(service.retryStuckRefund(id)).rejects.toThrow(
-          ConflictException,
-        );
-        await expect(service.retryStuckRefund(LISTING_ID)).rejects.toThrow(
-          NotFoundException,
-        );
-      });
-    });
-
-    it("reads the debts that failed least first, so one that keeps failing cannot block the rest", async () => {
-      const failing = await paidStay(30);
-      bookingJobs.worker = null;
-      await service.remove(failing, guest);
-      await bookingRepository.recordRefundFailure(failing, "refused", 99);
-
-      const fresh = await paidStay(31);
-      await service.remove(fresh, guest);
-
-      await expect(bookingRepository.findOwedRefunds(1)).resolves.toEqual([
-        fresh,
-      ]);
-    });
-
-    it("keeps a refund owed while a dispute opened after the cancellation is open", async () => {
-      const id = await paidStay(30);
-      bookingJobs.worker = null;
-      await service.remove(id, guest);
-      const found = bookingRepository.rows.get(id);
-
-      if (found !== undefined) found.booking.dispute = "OPEN";
-
-      await expect(service.refundOwedCancellations()).resolves.toBe(0);
-      expect(paymentGateway.refunds.size).toBe(0);
-      expect(found?.booking.refundOwedCents).toBe(AMOUNT);
-
-      // Won: the money is still the platform's, and it goes back as the cancellation said.
-      if (found !== undefined) found.booking.dispute = "WON";
-
-      await expect(service.refundOwedCancellations()).resolves.toBe(1);
-      expect(found?.booking.refundedAmountCents).toBe(AMOUNT);
-    });
-
-    it("drops a refund owed once a dispute opened after the cancellation is lost", async () => {
-      const id = await paidStay(30);
-      bookingJobs.worker = null;
-      await service.remove(id, guest);
-      const found = bookingRepository.rows.get(id);
-
-      if (found !== undefined) found.booking.dispute = "LOST";
-
-      await expect(service.refundOwedCancellations()).resolves.toBe(0);
-      expect(paymentGateway.refunds.size).toBe(0);
-      expect(found?.booking.refundOwedCents).toBeNull();
-    });
-
-    it("leaves a hold paid for mid-cancellation confirmed, and asks for another try", async () => {
-      const id = await bookedByGuest();
-      await service.payment(id, guest);
-      bookingRepository.racing = async (racedId) => {
-        bookingRepository.racing = null;
-        await bookingRepository.confirmPayment(racedId, "pi_1", null, AMOUNT);
-      };
-
-      await expect(service.remove(id, guest)).rejects.toThrow(
-        ConflictException,
-      );
-      expect(bookingRepository.rows.get(id)?.booking.status).toBe(
-        BookingStatus.CONFIRMED,
-      );
-      expect(bookingJobs.withdrawals).toEqual([]);
-    });
-
-    it("withdraws a payment a payment page opened while the hold was being cancelled", async () => {
-      const id = await bookedByGuest();
-      bookingRepository.racing = async () => {
-        bookingRepository.racing = null;
-        await service.payment(id, guest);
-      };
-
-      await service.remove(id, guest);
-
-      expect(bookingJobs.withdrawals).toEqual(["pi_1"]);
-    });
-
-    it("withdraws the payment of a hold instead of refunding it", async () => {
-      const id = await bookedByGuest();
-      await service.payment(id, guest);
-
-      await service.remove(id, guest);
-
-      expect(bookingJobs.withdrawals).toEqual(["pi_1"]);
-      expect(paymentGateway.refunds.size).toBe(0);
     });
   });
 

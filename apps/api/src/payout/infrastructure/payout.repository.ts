@@ -12,7 +12,7 @@ import {
   owedFeesWhere,
   payoutOwed,
   stuckPayout,
-} from "../../booking/infrastructure/booking.repository";
+} from "../../booking/infrastructure/booking-where";
 import {
   nullableCentsOf,
   RELEASED_HOLD_INCLUDE,

@@ -1,7 +1,7 @@
 import { Test } from "@nestjs/testing";
 import { HostAccountStatus, Role } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
-import { PayoutService } from "../application/payout.service";
+import { HostAccountService } from "../application/host-account.service";
 import { PayoutAccountController } from "./payout-account.controller";
 
 const host: AuthenticatedUser = {
@@ -25,7 +25,7 @@ describe("PayoutAccountController", () => {
       controllers: [PayoutAccountController],
       providers: [
         {
-          provide: PayoutService,
+          provide: HostAccountService,
           useValue: {
             account: (user: AuthenticatedUser) => {
               askedFor.push(user.id);
