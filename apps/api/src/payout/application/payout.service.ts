@@ -285,21 +285,40 @@ export class PayoutService {
   }
 
   /**
-   * Two steps. The reservation fixes what is sent and kept back, in a short transaction under
-   * the host's lock, so two stays of one host cannot keep back the same fee. The transfer then
-   * goes out under the settlement's lease, never a transaction: the stay's own job, the sweep
-   * and a host's newly enabled account may all reach one stay at once, and what keeps that to
-   * one transfer is the transfer itself — an idempotency key per reservation, a lookup by
-   * `transfer_group` before sending for when Stripe has forgotten the key, and the record
-   * written only into a reserved stay not paid out. A retry of a reservation sends its amount
-   * under its key; a reservation made afresh after a release is a new request with a key of
-   * its own. `settle` runs after the lease, which it takes itself.
+   * Four phases, each answering `false` to stop: the stay is payable, its host's account can
+   * receive, the payout is reserved and transferred, then settled and told.
    */
   private async sendPayout(
     bookingId: string,
     now: Date,
     accounts: Map<string, boolean>,
   ): Promise<boolean> {
+    const payable = await this.payableStay(bookingId, now);
+
+    if (payable === false) return false;
+
+    const { stay, chargeId } = payable;
+    const accountId = await this.receivingAccount(stay, accounts);
+
+    if (accountId === false) return false;
+
+    const recorded = await this.reserveAndTransfer(stay, accountId, chargeId);
+
+    if (recorded === false) return false;
+
+    await this.settleAndTell(stay, recorded);
+
+    return true;
+  }
+
+  /**
+   * The stay and the charge a transfer is funded from, or `false` when nothing goes out now:
+   * paid already, refunded or disputed since, not due yet, or nothing to fund it.
+   */
+  private async payableStay(
+    bookingId: string,
+    now: Date,
+  ): Promise<{ stay: SettledStay; chargeId: string } | false> {
     const stay = await this.payoutRepository.findStay(bookingId);
 
     // Paid already: a retry of a run that failed to settle finishes the settlement.
@@ -327,6 +346,17 @@ export class PayoutService {
       return false;
     }
 
+    return { stay, chargeId: stay.chargeId };
+  }
+
+  /**
+   * The host's account when it can receive the transfer, or `false` after releasing the
+   * reservation of one that cannot. `accounts` caches the provider's answer for one run.
+   */
+  private async receivingAccount(
+    stay: SettledStay,
+    accounts: Map<string, boolean>,
+  ): Promise<string | false> {
     const { destination } = stay;
 
     if (destination.accountId === null || !destination.enabled) {
@@ -359,10 +389,31 @@ export class PayoutService {
       return false;
     }
 
+    return destination.accountId;
+  }
+
+  /**
+   * The payout reserved, then transferred and recorded under the settlement's lease. `false`
+   * when another run got there first, or the reservation went stale and back to `settle`.
+   *
+   * Two steps. The reservation fixes what is sent and kept back, in a short transaction under
+   * the host's lock, so two stays of one host cannot keep back the same fee. The transfer then
+   * goes out under the settlement's lease, never a transaction: the stay's own job, the sweep
+   * and a host's newly enabled account may all reach one stay at once, and what keeps that to
+   * one transfer is the transfer itself — an idempotency key per reservation, a lookup by
+   * `transfer_group` before sending for when Stripe has forgotten the key, and the record
+   * written only into a reserved stay not paid out. A retry of a reservation sends its amount
+   * under its key; a reservation made afresh after a release is a new request with a key of
+   * its own. `settle` runs after the lease, which it takes itself.
+   */
+  private async reserveAndTransfer(
+    stay: SettledStay,
+    accountId: string,
+    chargeId: string,
+  ): Promise<RecordedPayoutAmounts | false> {
+    const { bookingId } = stay;
     const owed = owedToHost(stay);
     const hostId = stay.hold.listingOwnerId;
-    const accountId = destination.accountId;
-    const { chargeId } = stay;
     // Fixed first, in a short transaction under the host's lock; the transfer goes out after
     // it, so no connection waits on Stripe. The fees the host owes come off first — nothing
     // of a cancelled stay was ever paid to them, so their earnings are where it is taken from.
@@ -427,11 +478,19 @@ export class PayoutService {
       return false;
     }
 
-    if (recorded === null) return false;
+    return recorded ?? false;
+  }
 
-    // A retry takes the branch above and never gets here again, so the host is told now and
-    // a failed settlement is thrown after the notice. The notice states what the host holds
-    // after it, which is what their list shows.
+  /**
+   * A retry takes the paid-already branch of `payableStay` and never gets here again, so the
+   * host is told now and a failed settlement is thrown after the notice. The notice states
+   * what the host holds after it, which is what their list shows.
+   */
+  private async settleAndTell(
+    stay: SettledStay,
+    recorded: RecordedPayoutAmounts,
+  ): Promise<void> {
+    const { bookingId } = stay;
     const settlement = await this.settle(bookingId).then(
       (held) => ({ settled: true as const, held }),
       (error: unknown) => ({ settled: false as const, error }),
@@ -444,8 +503,6 @@ export class PayoutService {
     );
 
     if (!settlement.settled) throw settlement.error;
-
-    return true;
   }
 
   /**
@@ -458,7 +515,7 @@ export class PayoutService {
    */
   private async tellPaidOut(
     stay: SettledStay,
-    payout: { reserved: Cents; sent: Cents; withheld: Cents },
+    payout: RecordedPayoutAmounts,
     held: Cents | null,
   ): Promise<void> {
     const { bookingId } = stay;
@@ -854,6 +911,9 @@ export class PayoutService {
 
 /** What a transfer's lease answers for a reservation the stay no longer covers. */
 const STALE_RESERVATION = "stale";
+
+/** What a recorded payout amounts to: the reservation, the transfer, the fees kept back. */
+type RecordedPayoutAmounts = { reserved: Cents; sent: Cents; withheld: Cents };
 
 /** A transfer a settlement found for a reservation no run recorded, and what it reserved. */
 type RecoveredPayout = {
