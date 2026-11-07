@@ -7,7 +7,7 @@ import { ACTIVE_STATUSES } from "../domain/booking-status";
 import { CancellationInProgressError } from "../domain/booking.errors";
 import type { CancellationBy, CancelledStay } from "../domain/booking.types";
 import { LeaseBusyError, whileLeased, type LeaseTiming } from "./booking-lease";
-import { countedCancellationsWhere } from "./booking.repository";
+import { countedCancellationsWhere } from "./booking-where";
 
 /**
  * The cancellation of a stay and the lease it is taken under. The lease is the one place

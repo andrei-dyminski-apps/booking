@@ -14,7 +14,7 @@ import {
 } from "../../payment/domain/money";
 import type { RefundTarget, StuckStayRow } from "../domain/booking.types";
 import { hostFeesKey, shareOutHostFees } from "../domain/stuck-stay";
-import { owedFeesWhere, stuckPayout } from "./booking.repository";
+import { owedFeesWhere, stuckPayout } from "./booking-where";
 import {
   BOOKING_INCLUDE,
   nullableCentsOf,

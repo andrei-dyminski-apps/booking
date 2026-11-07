@@ -6,7 +6,7 @@ import {
   cancellationsWindowStart,
   countedCancellationsWhere,
   owedFeesWhere,
-} from "../../booking/infrastructure/booking.repository";
+} from "../../booking/infrastructure/booking-where";
 import { cents, currencySchema } from "../../payment/domain/money";
 import { PrismaService } from "../../prisma/prisma.service";
 import {

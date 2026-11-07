@@ -7,7 +7,7 @@ import {
 import { Test } from "@nestjs/testing";
 import type { HostFee } from "@repo/contracts";
 import { isBefore, parseISO } from "date-fns";
-import { cancellationsWindowStart } from "../../booking/infrastructure/booking.repository";
+import { cancellationsWindowStart } from "../../booking/infrastructure/booking-where";
 import type { PublicOf } from "../../common/testing/public-of.fakes";
 import { cents, CURRENCY } from "../../payment/domain/money";
 import {

@@ -13,7 +13,7 @@ import type {
 import {
   holdsTheSlot,
   overlapping,
-} from "../booking/infrastructure/booking.repository";
+} from "../booking/infrastructure/booking-where";
 import {
   type Prisma,
   type Listing as ListingRow,
@@ -44,7 +44,7 @@ import type { CatalogueCursor } from "./catalogue-cursor";
  * the one place the check has to be atomic.
  *
  * The traffic goes the other way here: the catalogue's date filter asks which listings
- * have no stay holding the slot, and it imports that condition from `BookingRepository`
+ * have no stay holding the slot, and it imports that condition from `booking-where.ts`
  * rather than restating it. A `where` is what may cross between two repositories; a row
  * mapping is not, which is why the availability of one listing is read over there and
  * only injected into `ListingService`.
@@ -213,7 +213,7 @@ export const STILL_OFFERED = {
  * cursor, whose two comparisons are one condition.
  *
  * The dates read as: no stay against this listing both holds its slot and overlaps the
- * window. The two halves come from `BookingRepository`, so the catalogue and the check
+ * window. The two halves come from `booking-where.ts`, so the catalogue and the check
  * that refuses a booking cannot disagree about what "taken" means.
  *
  * The cursor goes under `AND` rather than into this object, and that is not a matter of
