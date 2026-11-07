@@ -35,6 +35,7 @@ import type { AuthenticatedUser } from "../../auth/auth.types";
 import { CurrentUser } from "../../auth/decorators/current-user.decorator";
 import { Roles } from "../../auth/decorators/roles.decorator";
 import { ApiErrorDto } from "../../common/dto/api-error.dto";
+import { BookingCancellationService } from "../application/booking-cancellation.service";
 import { BookingRefundService } from "../application/booking-refund.service";
 import { BookingService } from "../application/booking.service";
 import {
@@ -57,6 +58,7 @@ import {
 export class BookingController {
   constructor(
     private readonly bookingService: BookingService,
+    private readonly bookingCancellationService: BookingCancellationService,
     private readonly bookingRefundService: BookingRefundService,
   ) {}
 
@@ -234,6 +236,6 @@ export class BookingController {
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CancelBookingDto,
   ): Promise<void> {
-    return this.bookingService.remove(id, user, dto);
+    return this.bookingCancellationService.remove(id, user, dto);
   }
 }

@@ -10,6 +10,7 @@ import {
   type BookingRefundService,
 } from "./booking-refund.service";
 import type { BookingPaymentHandler } from "./booking-payment.handler";
+import type { BookingCancellationService } from "./booking-cancellation.service";
 import type { BookingService } from "./booking.service";
 import { createBookingTestbed, payForStay } from "./testing/booking.fakes";
 import { AMOUNT, guest, LISTING_ID } from "./testing/booking-fixtures.fakes";
@@ -20,13 +21,14 @@ import { type FakePaymentGateway } from "./testing/payment-gateway.fakes";
 import { type FakeWaitlistService } from "./testing/waitlist-service.fakes";
 
 /**
- * The refund a cancellation owes, once `BookingService` has written it: the job that sends
- * it, the sweep that retries it, and the admin's list of what was set aside. Built in the
- * same module as the cancellations — see `testing/booking.fakes.ts` — since every case
- * starts from one.
+ * The refund a cancellation owes, once `BookingCancellationService` has written it: the job
+ * that sends it, the sweep that retries it, and the admin's list of what was set aside.
+ * Built in the same module as the cancellations — see `testing/booking.fakes.ts` — since
+ * every case starts from one.
  */
 describe("BookingRefundService", () => {
   let service: BookingService;
+  let cancellationService: BookingCancellationService;
   let refundService: BookingRefundService;
   let bookingTable: FakeBookingTable;
   let bookingRefundRepository: FakeBookingRefundRepository;
@@ -43,6 +45,7 @@ describe("BookingRefundService", () => {
   beforeEach(async () => {
     ({
       service,
+      cancellationService,
       refundService,
       paymentHandler,
       bookingTable,
@@ -58,7 +61,7 @@ describe("BookingRefundService", () => {
     const id = await paidStay(30);
     bookingJobs.worker = null;
 
-    await service.remove(id, guest);
+    await cancellationService.remove(id, guest);
 
     expect(bookingTable.rows.get(id)).toMatchObject({
       booking: {
@@ -85,7 +88,7 @@ describe("BookingRefundService", () => {
     const id = await paidStay(30);
     paymentGateway.refusing = true;
 
-    await service.remove(id, guest);
+    await cancellationService.remove(id, guest);
 
     expect(bookingJobs.failedRefunds).toHaveLength(1);
     expect(bookingTable.rows.get(id)).toMatchObject({
@@ -106,7 +109,7 @@ describe("BookingRefundService", () => {
   it("sets a refund Stripe keeps refusing aside and tells the admins", async () => {
     const id = await paidStay(30);
     bookingJobs.worker = null;
-    await service.remove(id, guest);
+    await cancellationService.remove(id, guest);
     paymentGateway.refusing = true;
 
     for (let run = 1; run < MAX_REFUND_ATTEMPTS; run += 1) {
@@ -135,7 +138,7 @@ describe("BookingRefundService", () => {
     const stuckRefund = async (days: number): Promise<string> => {
       const id = await paidStay(days);
       bookingJobs.worker = null;
-      await service.remove(id, guest);
+      await cancellationService.remove(id, guest);
       paymentGateway.refusing = true;
 
       for (let run = 1; run <= MAX_REFUND_ATTEMPTS; run += 1) {
@@ -227,11 +230,11 @@ describe("BookingRefundService", () => {
   it("reads the debts that failed least first, so one that keeps failing cannot block the rest", async () => {
     const failing = await paidStay(30);
     bookingJobs.worker = null;
-    await service.remove(failing, guest);
+    await cancellationService.remove(failing, guest);
     await bookingRefundRepository.recordRefundFailure(failing, "refused", 99);
 
     const fresh = await paidStay(31);
-    await service.remove(fresh, guest);
+    await cancellationService.remove(fresh, guest);
 
     await expect(bookingRefundRepository.findOwedRefunds(1)).resolves.toEqual([
       fresh,
@@ -241,7 +244,7 @@ describe("BookingRefundService", () => {
   it("keeps a refund owed while a dispute opened after the cancellation is open", async () => {
     const id = await paidStay(30);
     bookingJobs.worker = null;
-    await service.remove(id, guest);
+    await cancellationService.remove(id, guest);
     const found = bookingTable.rows.get(id);
 
     if (found !== undefined) found.booking.dispute = "OPEN";
@@ -260,7 +263,7 @@ describe("BookingRefundService", () => {
   it("drops a refund owed once a dispute opened after the cancellation is lost", async () => {
     const id = await paidStay(30);
     bookingJobs.worker = null;
-    await service.remove(id, guest);
+    await cancellationService.remove(id, guest);
     const found = bookingTable.rows.get(id);
 
     if (found !== undefined) found.booking.dispute = "LOST";

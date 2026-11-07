@@ -12,6 +12,7 @@ import { BookingRefundRepository } from "./infrastructure/booking-refund.reposit
 import { RefundFailureRepository } from "./infrastructure/refund-failure.repository";
 import { BookingPaymentHandler } from "./application/booking-payment.handler";
 import { BookingService } from "./application/booking.service";
+import { BookingCancellationService } from "./application/booking-cancellation.service";
 import { BookingRefundService } from "./application/booking-refund.service";
 import { RefundFailureService } from "./application/refund-failure.service";
 import { BookingJobs } from "./application/ports/booking-jobs";
@@ -37,6 +38,7 @@ import {
   controllers: [BookingController, RefundFailureController],
   providers: [
     BookingService,
+    BookingCancellationService,
     BookingRefundService,
     BookingRepository,
     BookingCancellationRepository,

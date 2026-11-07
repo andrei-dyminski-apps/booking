@@ -2,7 +2,7 @@ import type {
   BookingWithListingOwner,
   ReleasedHold,
 } from "../../domain/booking.types";
-import { stayNoticeOf } from "../booking.service";
+import { stayNoticeOf } from "../stay-notices";
 
 /**
  * The `bookings` table the three repository fakes read and write, as the three repositories

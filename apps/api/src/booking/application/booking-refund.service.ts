@@ -33,9 +33,9 @@ import { StayEvents } from "./stay-events";
 /**
  * Sends the refunds cancellations owe: the job a cancellation queues, the sweep that retries
  * what is still owed, and the admin's list of what stopped retrying. Deciding the refund is
- * the cancellation's and stays in `BookingService`, which writes the debt and queues the job
- * — it never calls this class. A refund is announced to `StayEvents`, so the host's payout
- * follows without this module knowing of it.
+ * the cancellation's and stays in `BookingCancellationService`, which writes the debt and
+ * queues the job — it never calls this class. A refund is announced to `StayEvents`, so the
+ * host's payout follows without this module knowing of it.
  */
 @Injectable()
 export class BookingRefundService {

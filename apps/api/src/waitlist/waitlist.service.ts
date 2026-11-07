@@ -162,10 +162,10 @@ export class WaitlistService {
   }
 
   /**
-   * What `BookingService` calls after nights stopped being held. Never throws, for the
-   * reason `NotificationService.notify` does not: the cancellation or the release is
-   * committed by then, and failing its request would answer a write that happened with a
-   * `500`. A failure costs the notices, and is logged.
+   * What `BookingService` and `BookingCancellationService` call after nights stopped being
+   * held. Never throws, for the reason `NotificationService.notify` does not: the
+   * cancellation or the release is committed by then, and failing its request would answer
+   * a write that happened with a `500`. A failure costs the notices, and is logged.
    *
    * Entries are claimed — deleted — before their owners are told, and only the call that
    * deleted one tells anybody, so two releases racing over the same nights cannot tell one

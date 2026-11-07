@@ -12,6 +12,7 @@ import {
 } from "../../payment/domain/money";
 import { PaymentNotConfirmedYetError } from "../domain/booking.errors";
 import type { BookingPaymentHandler } from "./booking-payment.handler";
+import type { BookingCancellationService } from "./booking-cancellation.service";
 import type { BookingService } from "./booking.service";
 import { createBookingTestbed, payForStay } from "./testing/booking.fakes";
 import { type FakeBookingCancellationRepository } from "./testing/booking-cancellation-repository.fakes";
@@ -41,6 +42,7 @@ const PART = cents(10_000);
  */
 describe("BookingPaymentHandler", () => {
   let service: BookingService;
+  let cancellationService: BookingCancellationService;
   let bookingRepository: FakeBookingRepository;
   let bookingTable: FakeBookingTable;
   let bookingCancellationRepository: FakeBookingCancellationRepository;
@@ -66,6 +68,7 @@ describe("BookingPaymentHandler", () => {
   beforeEach(async () => {
     ({
       service,
+      cancellationService,
       paymentHandler,
       bookingRepository,
       bookingTable,
@@ -213,7 +216,7 @@ describe("BookingPaymentHandler", () => {
 
     it("throws when its refund fails, so the delivery comes again and finishes", async () => {
       const id = await bookedByGuest();
-      await service.remove(id, guest);
+      await cancellationService.remove(id, guest);
       paymentGateway.refusing = true;
 
       await expect(paymentHandler.handle(succeeded(id))).rejects.toThrow();
@@ -227,7 +230,7 @@ describe("BookingPaymentHandler", () => {
     it("tells the guest about a late payment's refund once, however often it arrives", async () => {
       const id = await bookedByGuest();
       await service.payment(id, guest);
-      await service.remove(id, guest);
+      await cancellationService.remove(id, guest);
 
       await paymentHandler.handle(succeeded(id));
       // The same news under another event id, which the ledger has not seen.
@@ -535,7 +538,7 @@ describe("BookingPaymentHandler", () => {
     it("reads a cancellation's own refund as no news when its event comes", async () => {
       const id = await paidStay(30);
 
-      await service.remove(id, guest);
+      await cancellationService.remove(id, guest);
       await paymentHandler.handle(cancellationRefunded);
 
       expect(bookingTable.rows.get(id)).toMatchObject({
@@ -555,7 +558,7 @@ describe("BookingPaymentHandler", () => {
 
     it("tells the guest about a dashboard refund of a stay already cancelled", async () => {
       const id = await paidStay(1);
-      await service.remove(id, guest);
+      await cancellationService.remove(id, guest);
 
       await paymentHandler.handle({
         kind: "refunded",
@@ -629,7 +632,7 @@ describe("BookingPaymentHandler", () => {
       const id = await paidStay(1);
       stayEventsListener.refusing = true;
 
-      await service.remove(id, admin);
+      await cancellationService.remove(id, admin);
 
       expect(bookingTable.rows.get(id)?.booking.status).toBe(
         BookingStatus.CANCELLED,
@@ -649,7 +652,7 @@ describe("BookingPaymentHandler", () => {
 
     it("refunds nothing more when a cancelled stay's payment is delivered again", async () => {
       const id = await paidStay(1);
-      await service.remove(id, guest);
+      await cancellationService.remove(id, guest);
 
       // The confirming delivery again, under an id the ledger never recorded.
       await paymentHandler.handle({

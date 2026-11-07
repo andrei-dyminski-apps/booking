@@ -12,7 +12,8 @@ import { WaitlistService } from "./waitlist.service";
   imports: [PrismaModule, NotificationModule],
   controllers: [WaitlistController],
   providers: [WaitlistService, WaitlistRepository],
-  // `announceFreed` for BookingService, after a cancellation and a lapsed hold.
+  // `announceFreed` for BookingCancellationService and BookingService, after a cancellation
+  // and a lapsed hold.
   exports: [WaitlistService],
 })
 export class WaitlistModule {}

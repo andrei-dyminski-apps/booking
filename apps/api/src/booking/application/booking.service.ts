@@ -1,6 +1,5 @@
 import {
   BadGatewayException,
-  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -12,24 +11,13 @@ import {
 } from "@nestjs/common";
 import {
   BookingStatus,
-  Canceller,
-  cancellerOf,
-  DisputeStatus,
-  HOST_CANCELLATIONS_THRESHOLD,
-  HOST_REASON_REQUIRED,
-  hostCancellationFee,
-  isCancellableOn,
-  notRefunded,
   NotificationType,
-  refundQuote,
   Role,
   StayParty,
   type Booking,
   type BookingDetail,
   type BookingPage,
   type BookingPayment,
-  type CancelBookingInput,
-  type StayNotice,
   type BookingQuery,
   type CreateBookingInput,
 } from "@repo/contracts";
@@ -38,9 +26,7 @@ import { readCursor, type Page } from "../../common/paging";
 import { NotificationService } from "../../notification/notification.service";
 import { WaitlistService } from "../../waitlist/waitlist.service";
 import { BookingRepository } from "../infrastructure/booking.repository";
-import { BookingCancellationRepository } from "../infrastructure/booking-cancellation.repository";
 import {
-  CancellationInProgressError,
   DatesUnavailableError,
   GuestNotFoundError,
   ListingChangedError,
@@ -52,8 +38,6 @@ import {
 import type {
   BookingCursor,
   BookingWithListingOwner,
-  CancellationBy,
-  CancelledStay,
   CreatedBooking,
   ReleasedHold,
 } from "../domain/booking.types";
@@ -62,24 +46,18 @@ import {
   PaymentOpeningInProgressError,
   type OpenedPayment,
 } from "../../payment/application/ports/payment-gateway";
-import { toIsoDate } from "../../common/iso-date";
-import { NO_CENTS, type Cents } from "../../payment/domain/money";
-import { isCancellable } from "../domain/booking-status";
 import { BookingJobs } from "./ports/booking-jobs";
-import {
-  notifyBothSides,
-  notifyBothSidesOfCancellation,
-  type CancellationNotice,
-} from "./stay-notices";
+import { notifyBothSides, stayNoticeOf } from "./stay-notices";
+import { readerOf } from "./stay-reader";
 import { decodeCursor, encodeCursor } from "./booking-cursor";
 
 /**
- * The application layer of the booking module: HTTP takes, reads and cancels stays, and the
- * BullMQ jobs release unpaid holds and withdraw their payments. A cancellation decides its
- * refund and queues it; `BookingRefundService` sends it. The provider's news reaches the
- * stays through `BookingPaymentHandler`. It sees neither Prisma, Stripe nor BullMQ — the
- * repositories, the `PaymentGateway` port and the `BookingJobs` port — and knows nothing of
- * the host's payout.
+ * The application layer of the booking module: HTTP takes, reads and pays for stays, and
+ * the BullMQ jobs release unpaid holds and withdraw their payments. The cancellation is
+ * `BookingCancellationService`'s, the refund it owes `BookingRefundService`'s, and the
+ * provider's news reaches the stays through `BookingPaymentHandler`. It sees neither Prisma,
+ * Stripe nor BullMQ — the repository, the `PaymentGateway` port and the `BookingJobs` port —
+ * and knows nothing of the host's payout.
  */
 @Injectable()
 export class BookingService {
@@ -87,7 +65,6 @@ export class BookingService {
 
   constructor(
     private readonly bookingRepository: BookingRepository,
-    private readonly bookingCancellationRepository: BookingCancellationRepository,
     private readonly paymentGateway: PaymentGateway,
     private readonly bookingJobs: BookingJobs,
     private readonly notificationService: NotificationService,
@@ -340,191 +317,6 @@ export class BookingService {
     return released.length;
   }
 
-  /**
-   * The guest's decision, the host's and an admin's: a stranger may not even read the stay
-   * (`404`). A host has to say why (`400` without a reason), refunds the guest in full under
-   * any policy and pays a fee for a paid stay, written with the cancellation. The refund is
-   * decided here and written with `CANCELLED` (`refund_owed_cents`); a job sends it, so a
-   * slow Stripe slows a refund, not the answer.
-   */
-  async remove(
-    id: string,
-    user: AuthenticatedUser,
-    input: CancelBookingInput = {},
-  ): Promise<void> {
-    const { canceller, booking: read } = await this.mayCancel(id, user);
-    const reason = input.reason ?? null;
-
-    // Before the lease, but only for a row that could be cancelled: one that cannot answers
-    // its own `404` or `409` under the lease, and neither ever becomes cancellable again.
-    if (
-      canceller === Canceller.HOST &&
-      reason === null &&
-      isCancellableOn(read, toIsoDate(new Date()))
-    ) {
-      throw new BadRequestException(HOST_REASON_REQUIRED);
-    }
-    const { found, wasHold, cancelled, refundOwedCents, refundCents } =
-      await this.bookingCancellationRepository
-        .whileCancelling(id, () =>
-          this.cancelReadable(id, user, canceller, reason),
-        )
-        .catch((error: unknown) => {
-          if (error instanceof CancellationInProgressError) {
-            throw new ConflictException(
-              "The booking is being cancelled by another request — try again",
-            );
-          }
-
-          throw error;
-        });
-    const { booking, listingOwnerId } = found;
-
-    await this.bookingJobs.cancelExpiry(id);
-
-    // The payment the cancelled row named, so one attached a moment ago goes too.
-    if (wasHold) {
-      await this.withdrawPayments([cancelled]);
-    }
-
-    if (refundOwedCents !== null) {
-      await this.bookingJobs.refundCancellation(id);
-    }
-
-    await this.notifyCancellation(booking, listingOwnerId, user, {
-      refundCents,
-      currency: booking.currency,
-      cancelledBy: canceller,
-      reason,
-    });
-
-    if (cancelled.fee !== null) {
-      await this.notifyHostFee(booking, listingOwnerId, cancelled.fee);
-    }
-
-    await this.waitlistService.announceFreed([booking]);
-  }
-
-  /**
-   * Who is cancelling, and the row as it was read. Everybody who may read a stay may cancel
-   * it, each on their own terms, so the canceller is the reader `readerOf` names — decided
-   * by the one rule that answers the `404`, never by elimination after it.
-   */
-  private async mayCancel(
-    id: string,
-    user: AuthenticatedUser,
-  ): Promise<{ canceller: Canceller; booking: Booking }> {
-    const { found, reader } = readerOf(
-      user,
-      id,
-      await this.bookingRepository.findByIdWithListingOwner(id),
-    );
-
-    return { canceller: reader, booking: found.booking };
-  }
-
-  private async cancelReadable(
-    id: string,
-    user: AuthenticatedUser,
-    canceller: Canceller,
-    reason: string | null,
-  ): Promise<{
-    found: BookingWithListingOwner;
-    wasHold: boolean;
-    cancelled: CancelledStay;
-    refundOwedCents: Cents | null;
-    refundCents: Cents | null;
-  }> {
-    const found = await this.getReadable(id, user);
-    const { booking } = found;
-
-    if (!isCancellable(booking.status)) {
-      throw new NotFoundException(`Booking ${id} not found`);
-    }
-
-    const now = new Date();
-
-    // The same day for everybody: once the stay has begun, nobody lets it go.
-    if (!isCancellableOn(booking, toIsoDate(now))) {
-      throw new ConflictException(
-        "A stay that has begun can no longer be cancelled",
-      );
-    }
-
-    const wasHold = booking.status === BookingStatus.PENDING_PAYMENT;
-    const refundCents = this.refundOnCancel(found, canceller, now);
-    // The debt the job sends; a refund of nothing is announced but never owed.
-    const refundOwedCents =
-      refundCents !== null && refundCents > 0 ? refundCents : null;
-    const fee =
-      canceller === Canceller.HOST
-        ? hostCancellationFee(booking, now).cents
-        : NO_CENTS;
-    const by: CancellationBy = {
-      canceller,
-      reason,
-      feeCents: fee > 0 ? fee : null,
-    };
-    const cancelled = await this.bookingCancellationRepository.cancel(
-      id,
-      booking.status,
-      refundOwedCents,
-      by,
-    );
-
-    if (cancelled === null) return this.refuseChangedCancellation(id);
-
-    return { found, wasHold, cancelled, refundOwedCents, refundCents };
-  }
-
-  /** Still active means the hold was paid for in between: a `409` worth retrying. */
-  private async refuseChangedCancellation(id: string): Promise<never> {
-    const now = await this.bookingRepository.findByIdWithListingOwner(id);
-
-    if (now !== null && isCancellable(now.booking.status)) {
-      throw new ConflictException(
-        "The booking changed while it was being cancelled — try again",
-      );
-    }
-
-    throw new NotFoundException(`Booking ${id} not found`);
-  }
-
-  /**
-   * What cancelling this stay gives back, decided once for the debt the cancellation writes
-   * and for what `BOOKING_CANCELLED` tells both sides: `null` when there is no money to
-   * speak of — a hold had nothing to give, a lost dispute's money went back through the
-   * bank, and a stay refunded in full before it was cancelled has nothing left, where "no
-   * refund" would read as the guest losing money they already have — otherwise the amount,
-   * nothing included. An open dispute is a `409`: Stripe refuses to refund a disputed
-   * payment.
-   */
-  private refundOnCancel(
-    { booking, paymentId }: BookingWithListingOwner,
-    canceller: Canceller,
-    now: Date,
-  ): Cents | null {
-    if (booking.status !== BookingStatus.CONFIRMED || paymentId === null) {
-      return null;
-    }
-
-    if (booking.dispute === DisputeStatus.OPEN) {
-      throw new ConflictException(
-        "The payment of this stay is disputed with the bank — it can be cancelled once the dispute is settled",
-      );
-    }
-
-    if (
-      booking.dispute === DisputeStatus.LOST ||
-      notRefunded(booking.amountCents, booking.refundedAmountCents) === NO_CENTS
-    ) {
-      return null;
-    }
-
-    // The stay's own policy, frozen when it was taken; what was refunded already comes off.
-    return refundQuote(booking, now, canceller).cents;
-  }
-
   async withdrawPayment(paymentId: string): Promise<void> {
     await this.paymentGateway.cancel(paymentId);
   }
@@ -567,82 +359,6 @@ export class BookingService {
   }
 
   /**
-   * Both sides of the stay hear about a cancellation except the one who made it: a guest's
-   * reaches the host, a host's the guest, an admin's both. Each is told which side of the
-   * stay they are, because "your stay" and "a stay at your listing" are different news, and
-   * who cancelled and why.
-   */
-  private async notifyCancellation(
-    booking: Booking,
-    listingOwnerId: string,
-    canceller: AuthenticatedUser,
-    notice: CancellationNotice,
-  ): Promise<void> {
-    await notifyBothSidesOfCancellation(
-      this.notificationService,
-      {
-        stay: stayNoticeOf(booking),
-        guestId: booking.guestId,
-        listingOwnerId,
-        notice,
-      },
-      canceller.id,
-    );
-  }
-
-  /**
-   * The host is told what their cancellation costs, and every admin once a host has
-   * cancelled `HOST_CANCELLATIONS_THRESHOLD` paid stays within the window — on every
-   * cancellation from then on, since each is news. Neither can fail the cancellation.
-   */
-  private async notifyHostFee(
-    booking: Booking,
-    hostId: string,
-    fee: { id: string; amountCents: Cents },
-  ): Promise<void> {
-    await this.notificationService.notify(hostId, {
-      type: NotificationType.HOST_CANCELLATION_FEE,
-      data: {
-        ...stayNoticeOf(booking),
-        feeId: fee.id,
-        amountCents: fee.amountCents,
-        currency: booking.currency,
-      },
-    });
-
-    let record: { name: string; cancellations: number } | null;
-
-    try {
-      record = await this.bookingCancellationRepository.hostCancellations(
-        hostId,
-        new Date(),
-      );
-    } catch (error) {
-      this.logger.error(
-        `Could not count the cancellations of host ${hostId}: ${String(error)}`,
-      );
-
-      return;
-    }
-
-    if (
-      record === null ||
-      record.cancellations < HOST_CANCELLATIONS_THRESHOLD
-    ) {
-      return;
-    }
-
-    await this.notificationService.notifyAdmins({
-      type: NotificationType.HOST_CANCELLATIONS_THRESHOLD,
-      data: {
-        hostId,
-        hostName: record.name,
-        cancellations: record.cancellations,
-      },
-    });
-  }
-
-  /**
    * Both sides of a lapsed hold hear about it, because nobody let it go on purpose: the
    * guest learns the nights are no longer theirs, the host that they are back on the
    * calendar. The holds are told about one after another rather than all at once — the
@@ -667,7 +383,8 @@ export class BookingService {
    * A cancelled or expired stay is not in that category: its guest may read it, and the
    * `status` on the answer is what says the slot was let go of. Cancelling it a second
    * time is refused one step further on, by the repository, which narrows to the active
-   * set the way every rule about the slot does.
+   * set the way every rule about the slot does. `BookingCancellationService` reads its row
+   * again under the lease by this same rule.
    *
    * Who may read: the guest who booked it, the owner of the listing it takes, an admin
    * (`readerOf`); the owner of the listing is the reason the repository hands the booking
@@ -683,41 +400,4 @@ export class BookingService {
       await this.bookingRepository.findByIdWithListingOwner(id),
     ).found;
   }
-}
-
-/**
- * `getReadable`'s rule over a row already read, whatever else was read beside it, answering
- * which of the stay's three readers the caller is — the roles a cancellation is made in, by
- * `cancellerOf`: the guest and the host by the row whatever their role, an admin on somebody
- * else's stay — and the `404` for anybody else.
- */
-function readerOf<Found extends BookingWithListingOwner>(
-  user: AuthenticatedUser,
-  id: string,
-  found: Found | null,
-): { found: Found; reader: Canceller } {
-  const reader =
-    found === null
-      ? null
-      : cancellerOf(
-          { guestId: found.booking.guestId, hostId: found.listingOwnerId },
-          user,
-        );
-
-  if (found === null || reader === null) {
-    throw new NotFoundException(`Booking ${id} not found`);
-  }
-
-  return { found, reader };
-}
-
-/** What a notice about a stay copies off it — see `stayNoticeSchema` in the contract. */
-export function stayNoticeOf(booking: Booking): StayNotice {
-  return {
-    bookingId: booking.id,
-    listingId: booking.listingId,
-    listingTitle: booking.listing.title,
-    from: booking.from,
-    to: booking.to,
-  };
 }

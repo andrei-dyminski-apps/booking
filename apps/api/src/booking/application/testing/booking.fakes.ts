@@ -8,6 +8,7 @@ import { BookingCancellationRepository } from "../../infrastructure/booking-canc
 import { BookingRefundRepository } from "../../infrastructure/booking-refund.repository";
 import { BookingRepository } from "../../infrastructure/booking.repository";
 import { RefundFailureRepository } from "../../infrastructure/refund-failure.repository";
+import { BookingCancellationService } from "../booking-cancellation.service";
 import { BookingPaymentHandler } from "../booking-payment.handler";
 import { BookingRefundService } from "../booking-refund.service";
 import { BookingService } from "../booking.service";
@@ -31,18 +32,19 @@ import { FakeStayEventsListener } from "./stay-events.fakes";
 import { FakeWaitlistService } from "./waitlist-service.fakes";
 
 /*
- * The module `booking.service.spec.ts`, `booking-refund.service.spec.ts` and
- * `booking-payment.handler.spec.ts` build their classes in — one module, because the
- * handler's news, the cancellations and their refunds act on the same rows. The fixtures
- * and the fakes of everything around the three classes are the files beside this one, one
- * per port — the notifications' is `notification/testing/`'s, shared with the payout specs;
- * the three repository fakes share one `FakeBookingTable`.
+ * The module `booking.service.spec.ts`, `booking-cancellation.service.spec.ts`,
+ * `booking-refund.service.spec.ts` and `booking-payment.handler.spec.ts` build their classes
+ * in — one module, because the handler's news, the cancellations and their refunds act on
+ * the same rows. The fixtures and the fakes of everything around the four classes are the
+ * files beside this one, one per port — the notifications' is `notification/testing/`'s,
+ * shared with the payout specs; the three repository fakes share one `FakeBookingTable`.
  * Kept out of the build by `tsconfig.build.json` (`*.fakes.ts`).
  */
 
 /** The booking module over the fakes, as the specs build it before each test. */
 export type BookingTestbed = {
   service: BookingService;
+  cancellationService: BookingCancellationService;
   refundService: BookingRefundService;
   paymentHandler: BookingPaymentHandler;
   bookingTable: FakeBookingTable;
@@ -75,6 +77,7 @@ export async function createBookingTestbed(): Promise<BookingTestbed> {
   const moduleRef = await Test.createTestingModule({
     providers: [
       BookingService,
+      BookingCancellationService,
       BookingRefundService,
       { provide: BookingRepository, useValue: bookingRepository },
       {
@@ -105,6 +108,7 @@ export async function createBookingTestbed(): Promise<BookingTestbed> {
 
   return {
     service: moduleRef.get(BookingService),
+    cancellationService: moduleRef.get(BookingCancellationService),
     refundService,
     paymentHandler: moduleRef.get(BookingPaymentHandler),
     bookingTable,
