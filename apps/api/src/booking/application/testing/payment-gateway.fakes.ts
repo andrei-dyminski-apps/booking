@@ -2,8 +2,12 @@ import type { PublicOf } from "../../../common/testing/public-of.fakes";
 import {
   PaymentGateway,
   PaymentOpeningInProgressError,
+  RefundExceedsPaymentError,
+  RefundRefusedError,
   type OpenedPayment,
   type PaymentEvent,
+  type PaymentRefunds,
+  type SentRefund,
 } from "../../../payment/application/ports/payment-gateway";
 import { addCents, NO_CENTS, type Cents } from "../../../payment/domain/money";
 
@@ -22,6 +26,15 @@ export class FakePaymentGateway implements PublicOf<PaymentGateway> {
 
   /** Set to have a withdrawal fail, as it does for a payment that completed already. */
   refusingWithdrawal = false;
+
+  /** Set to have `refundNow` find less left on the payment than it asks for. */
+  exceeding = false;
+
+  /** Set to have `refundNow` refused for a reason of the provider's own, this one. */
+  refusingRefund: string | null = null;
+
+  /** Set to have `refundNow` send the refund and lose the answer on the way back. */
+  losingAnswers = false;
 
   /** Set to have `open` find another request opening the same payment under its key. */
   openingElsewhere = false;
@@ -61,6 +74,55 @@ export class FakePaymentGateway implements PublicOf<PaymentGateway> {
     return Promise.resolve(sent.amount);
   }
 
+  refundNow(
+    paymentId: string,
+    amount: Cents,
+    key: string,
+  ): Promise<SentRefund> {
+    if (this.refusing) return Promise.reject(new Error("api_connection_error"));
+
+    if (this.exceeding) {
+      return Promise.reject(new RefundExceedsPaymentError(paymentId));
+    }
+
+    if (this.refusingRefund !== null) {
+      return Promise.reject(
+        new RefundRefusedError(paymentId, this.refusingRefund),
+      );
+    }
+
+    const sent = this.refunds.get(key) ?? { paymentId, amount };
+
+    this.refunds.set(key, sent);
+
+    if (this.losingAnswers) {
+      return Promise.reject(
+        new Error("The connection closed before Stripe answered"),
+      );
+    }
+
+    return Promise.resolve({ id: refundIdOf(key), amount: sent.amount });
+  }
+
+  /** The keys `findRefunds` was asked about, in order. */
+  readonly looked: string[] = [];
+
+  async findRefunds(paymentId: string, key: string): Promise<PaymentRefunds> {
+    this.looked.push(key);
+
+    if (this.refusing) throw new Error("api_connection_error");
+
+    const sent = this.refunds.get(key);
+
+    return {
+      refunded: await this.refundedSoFar(paymentId),
+      sent:
+        sent === undefined || sent.paymentId !== paymentId
+          ? null
+          : { id: refundIdOf(key), amount: sent.amount },
+    };
+  }
+
   /** Refunds made from the dashboard whose webhook has not arrived yet, by payment. */
   readonly refundedUnreported = new Map<string, Cents>();
 
@@ -78,3 +140,6 @@ export class FakePaymentGateway implements PublicOf<PaymentGateway> {
     throw new Error("The webhook controller's to call, not the service's");
   }
 }
+
+/** The provider's id of the refund sent under `key`, one per key as Stripe keeps them. */
+export const refundIdOf = (key: string): string => `re_${key}`;

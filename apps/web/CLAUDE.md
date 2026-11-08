@@ -147,13 +147,19 @@ apps/web/
         overview/lib/bookings-search.spec.ts
         overview/index.ts
         booking/ui/booking-page.tsx       # one stay; the publishable key handed to its guest's hold
-        booking/ui/booking-live.tsx       # the stay drawn off what its hook returns
+        booking/ui/booking-live.tsx       # the stay drawn off what its hook returns, and an admin's refunds under it
         booking/ui/payment-form.tsx       # opens the payment from the browser, Stripe Elements; success starts the poll and declares nothing; a Stripe.js that never loaded says so
         booking/ui/cancel-stay-button.tsx # the shared dialog over this page's action; a success reads the stay again
+        booking/ui/refund-stay-button.tsx # an admin's partial refund: amount and reason, one request id per opening, so a second press is the same refund; an unknown answer holds the boxes until the dialog closes
+        booking/ui/booking-adjustments.tsx # the refunds admins sent, under the stay — an admin's alone; an unconfirmed press, and a refund the bank sent back with the way to its bounced row; a line when the read failed
+        booking/ui/finish-refund-button.tsx # an unconfirmed press pressed again under its own request id: records the refund or sends it, never a second; then waits for its webhook like the dialog
         booking/ui/booking-skeleton.tsx
         booking/api/booking-query.ts      # the query keys and the browser's read, shared by the poll and the cancel
         booking/api/cancel-stay-action.ts # cancels, then frees the nights in the Data Cache
-        booking/model/use-booking-live.ts # the booking in the query cache, polled until the webhook moves it; the hold's deadline, the refund note's clock
+        booking/api/read-booking-adjustments.ts # the admin's list of them, `no-store`, or null — the stay draws without it
+        booking/api/refund-stay-action.ts # the admin's partial refund, from the dialog or the list; refresh() lists it under the stay — an unknown answer too, as unconfirmed, and a `409` that may have let a claim go; `uncertain` past a 4xx
+        booking/model/refund-form.ts      # the amount typed in the currency onto adminRefundSchema
+        booking/model/use-booking-live.ts # the booking in the query cache, polled until the webhook moves it — an admin's refund too, until the refund total moves or a minute passes; the hold's deadline, the refund note's clock
         booking/index.ts
       waitlist/ui/waitlist-page.tsx       # one page: a user's own ranges and the ones on their listings, an admin's everything
       waitlist/ui/side-tabs.tsx           # …the two halves of a user's waitlist, as links over `?side=HOST`
@@ -1352,7 +1358,12 @@ It is what brought TanStack Query in (`_app/providers`), and the reasons are two
   status moves. Declaring the stay paid off the browser's word would be trusting a URL
   anybody can type. The poll is bounded by the hold itself: unpaid, it lapses and `EXPIRED`
   is a change of status too. It also runs while a cancellation's refund is owed, until the
-  job sends it. Either wait slows down past its first minute (`pollDelay`) — a webhook or a
+  job sends it, and after an admin's partial refund from this tab — the dialog's, or a press
+  finished from the list under the stay — until `charge.refunded` moves the refund total:
+  the ceiling the "Refund part" dialog states is measured against it, and would otherwise
+  stay above what is left until a reload. That wait alone ends after a minute
+  (`REFUND_REPORT_WAIT_MS`), since a finished press may name a refund whose webhook the tab
+  has already read, and the API measures the next refund against Stripe's total anyway. Either wait slows down past its first minute (`pollDelay`) — a webhook or a
   refund that late is stuck, and a tab left open must not ask every two seconds forever.
   The form asks Stripe for the intent's status before it draws the boxes: the API answers
   the same secret while the hold is pending, so a reload between a payment confirmed in

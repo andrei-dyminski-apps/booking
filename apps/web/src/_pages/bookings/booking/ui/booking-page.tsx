@@ -1,9 +1,11 @@
 import Link from "next/link";
+import { Role } from "@repo/contracts";
 import { awaitsPaymentFrom } from "#entities/booking";
 import { bookingsApi, requireUser } from "#shared/api";
 import { ROUTES, stripePublishableKey } from "#shared/config";
 import { orNotFound, requireId, singleParam } from "#shared/lib";
 import { BackLink, PageHeading } from "#shared/ui";
+import { readBookingAdjustments } from "../api/read-booking-adjustments";
 import { BookingLive, type BankAnswer } from "./booking-live";
 
 /**
@@ -22,7 +24,13 @@ export const BookingPage = async ({
 }: PageProps<"/bookings/[id]">) => {
   const id = requireId((await params).id);
   const viewer = await requireUser(ROUTES.booking(id));
-  const booking = await orNotFound(bookingsApi.get(id, { cache: "no-store" }));
+  // The refunds admins sent are an admin's to read, as the route behind them is; asked for
+  // beside the stay and outside `orNotFound`: a failure of theirs is drawn as a line in
+  // their place rather than taking the stay down — see `readBookingAdjustments`.
+  const [booking, adjustments] = await Promise.all([
+    orNotFound(bookingsApi.get(id, { cache: "no-store" })),
+    viewer.role === Role.ADMIN ? readBookingAdjustments(id) : [],
+  ]);
   const redirectStatus = singleParam((await searchParams).redirect_status);
   const now = new Date().toISOString();
 
@@ -56,6 +64,7 @@ export const BookingPage = async ({
             : null
         }
         bankAnswer={bankAnswerOf(redirectStatus)}
+        adjustments={adjustments}
       />
     </div>
   );

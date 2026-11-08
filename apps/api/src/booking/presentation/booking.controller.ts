@@ -26,6 +26,7 @@ import {
 import {
   Role,
   type Booking,
+  type BookingAdjustment,
   type BookingDetail,
   type BookingPage,
   type BookingPayment,
@@ -35,10 +36,14 @@ import type { AuthenticatedUser } from "../../auth/auth.types";
 import { CurrentUser } from "../../auth/decorators/current-user.decorator";
 import { Roles } from "../../auth/decorators/roles.decorator";
 import { ApiErrorDto } from "../../common/dto/api-error.dto";
+import { BookingAdjustmentService } from "../application/booking-adjustment.service";
 import { BookingCancellationService } from "../application/booking-cancellation.service";
 import { BookingRefundService } from "../application/booking-refund.service";
 import { BookingService } from "../application/booking.service";
 import {
+  AdminRefundDto,
+  BookingAdjustmentDto,
+  BookingAdjustmentListDto,
   BookingDetailDto,
   BookingDto,
   BookingPageDto,
@@ -60,6 +65,7 @@ export class BookingController {
     private readonly bookingService: BookingService,
     private readonly bookingCancellationService: BookingCancellationService,
     private readonly bookingRefundService: BookingRefundService,
+    private readonly bookingAdjustmentService: BookingAdjustmentService,
   ) {}
 
   /**
@@ -133,6 +139,58 @@ export class BookingController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<BookingDetail> {
     return this.bookingService.findOne(id, user);
+  }
+
+  /**
+   * A part of the payment given back by an admin, the stay left as it is. Sent before it
+   * answers, under a key the dialog's `requestId` makes, so a second press answers the same
+   * refund with `200` rather than sending another. The stay's refund total follows from the
+   * provider's webhook, and so does the guest's notice.
+   */
+  @Post(":id/refunds")
+  @HttpCode(HttpStatus.OK)
+  @Roles(Role.ADMIN)
+  @ApiOkResponse({ type: BookingAdjustmentDto })
+  @ApiNotFoundResponse({
+    description: "The booking does not exist",
+    type: ApiErrorDto,
+  })
+  @ApiUnauthorizedResponse({
+    description: "The caller's account no longer exists",
+    type: ApiErrorDto,
+  })
+  @ApiForbiddenResponse({
+    description: "The caller's account is no longer an active admin's",
+    type: ApiErrorDto,
+  })
+  @ApiConflictResponse({
+    description:
+      "Nobody paid for the stay, its payment is disputed, the amount is more than is left to refund — of a stay not yet begun, all but its last cent — or another request holds the stay",
+    type: ApiErrorDto,
+  })
+  @ApiBadGatewayResponse({
+    description: "The payment provider could not be reached",
+    type: ApiErrorDto,
+  })
+  refund(
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: AdminRefundDto,
+  ): Promise<BookingAdjustment> {
+    return this.bookingAdjustmentService.refund(id, user, dto);
+  }
+
+  @Get(":id/refunds")
+  @Roles(Role.ADMIN)
+  @ApiOkResponse({ type: BookingAdjustmentListDto })
+  @ApiNotFoundResponse({
+    description: "The booking does not exist",
+    type: ApiErrorDto,
+  })
+  findRefunds(
+    @Param("id", ParseUUIDPipe) id: string,
+  ): Promise<BookingAdjustment[]> {
+    return this.bookingAdjustmentService.listOf(id);
   }
 
   /**

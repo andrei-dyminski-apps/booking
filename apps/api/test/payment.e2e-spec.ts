@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
@@ -6,7 +7,10 @@ import { subDays } from "date-fns";
 import {
   BASIS_POINTS,
   Role,
+  bookingAdjustmentListSchema,
+  bookingAdjustmentSchema,
   hostFeeOverviewSchema,
+  hostShare,
   shareOf,
   bookingPaymentSchema,
   bookingSchema,
@@ -16,7 +20,11 @@ import {
 } from "@repo/contracts";
 import { AppModule } from "./../src/app.module";
 import { useBodyParsers } from "./../src/common/body-parsers";
-import type { OpenedPayment } from "./../src/payment/application/ports/payment-gateway";
+import type {
+  OpenedPayment,
+  PaymentRefunds,
+  SentRefund,
+} from "./../src/payment/application/ports/payment-gateway";
 import { PaymentGateway } from "./../src/payment/application/ports/payment-gateway";
 import {
   addCents,
@@ -27,6 +35,8 @@ import {
 import { PAYMENT_CONFIG } from "./../src/payment/infrastructure/payment.config";
 import { createStripeClient } from "./../src/payment/infrastructure/stripe";
 import { StripePaymentGateway } from "./../src/payment/infrastructure/stripe-payment.gateway";
+import { PayoutGateway } from "./../src/payout/application/ports/payout-gateway";
+import { StripePayoutGateway } from "./../src/payout/infrastructure/stripe-payout.gateway";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
@@ -87,6 +97,32 @@ class OfflineStripeGateway extends StripePaymentGateway {
     return Promise.resolve(amount);
   }
 
+  override async refundNow(
+    paymentId: string,
+    amount: Cents,
+    key: string,
+  ): Promise<SentRefund> {
+    return {
+      id: `re_${key}`,
+      amount: await this.refund(paymentId, amount, key),
+    };
+  }
+
+  override async findRefunds(
+    paymentId: string,
+    key: string,
+  ): Promise<PaymentRefunds> {
+    const sent = this.refunds.find(
+      (refund) => refund.key === key && refund.paymentId === paymentId,
+    );
+
+    return {
+      refunded: await this.refundedSoFar(paymentId),
+      sent:
+        sent === undefined ? null : { id: `re_${key}`, amount: sent.amount },
+    };
+  }
+
   override refundedSoFar(paymentId: string): Promise<Cents> {
     // One refund per key, as Stripe keeps them.
     const byKey = new Map(
@@ -101,6 +137,31 @@ class OfflineStripeGateway extends StripePaymentGateway {
         NO_CENTS,
       ),
     );
+  }
+}
+
+/**
+ * The host's half, with only what a settlement sends replaced: what a transfer still holds
+ * and the reversals taken out of it. The account event's signature check stays the real one.
+ */
+class OfflinePayoutGateway extends StripePayoutGateway {
+  readonly sent = new Map<string, Cents>();
+  readonly reversals: { transferId: string; amount: Cents }[] = [];
+
+  override heldOnTransfer(transferId: string): Promise<Cents> {
+    const reversed = this.reversals
+      .filter((reversal) => reversal.transferId === transferId)
+      .reduce((total, reversal) => addCents(total, reversal.amount), NO_CENTS);
+
+    return Promise.resolve(
+      cents((this.sent.get(transferId) ?? NO_CENTS) - reversed),
+    );
+  }
+
+  override reverseTransfer(transferId: string, amount: Cents): Promise<void> {
+    this.reversals.push({ transferId, amount });
+
+    return Promise.resolve();
   }
 }
 
@@ -122,6 +183,7 @@ const listingInput: CreateListingInput = {
 describe("Payments (e2e)", () => {
   let app: NestExpressApplication;
   let gateway: OfflineStripeGateway;
+  let payoutGateway: OfflinePayoutGateway;
   let guest: Agent;
   let owner: Agent;
   let admin: Agent;
@@ -138,6 +200,10 @@ describe("Payments (e2e)", () => {
       site: "e2e",
     };
     gateway = new OfflineStripeGateway(config, createStripeClient(config));
+    payoutGateway = new OfflinePayoutGateway(
+      config,
+      createStripeClient(config),
+    );
 
     const moduleFixture = await Test.createTestingModule({
       imports: [AppModule],
@@ -146,6 +212,8 @@ describe("Payments (e2e)", () => {
       .useValue(config)
       .overrideProvider(PaymentGateway)
       .useValue(gateway)
+      .overrideProvider(PayoutGateway)
+      .useValue(payoutGateway)
       .compile();
 
     // What main.ts does, and what the webhook cannot work without.
@@ -651,6 +719,205 @@ describe("Payments (e2e)", () => {
         where: { type: "PAYMENT_DISPUTED" },
       }),
     ).toBe(1);
+  });
+
+  /** The refund total a `charge.refunded` delivery reports for the stay's charge. */
+  const deliverRefunded = (booking: Booking, total: number, eventId: string) =>
+    settled(
+      deliverChargeEvent(
+        booking,
+        "charge.refunded",
+        {
+          id: chargeIdOf(booking.id),
+          object: "charge",
+          amount_refunded: total,
+        },
+        eventId,
+      ).expect(200),
+    );
+
+  it("refunds part of a stay on an admin's word, once per press, and never past what is left", async () => {
+    const booking = await paid(30, 33);
+    const requestId = randomUUID();
+    const body = {
+      amountCents: 5_000,
+      reason: "The hot water was off for two nights",
+      requestId,
+    };
+
+    await guest.post(`/bookings/${booking.id}/refunds`).send(body).expect(403);
+    await owner.post(`/bookings/${booking.id}/refunds`).send(body).expect(403);
+    await admin
+      .post(`/bookings/${booking.id}/refunds`)
+      .send({ ...body, reason: " " })
+      .expect(400);
+
+    const first = bookingAdjustmentSchema.parse(
+      (
+        await admin
+          .post(`/bookings/${booking.id}/refunds`)
+          .send(body)
+          .expect(200)
+      ).body,
+    );
+    const key = `booking-${booking.id}-adjustment-${requestId}`;
+
+    expect(first).toMatchObject({
+      bookingId: booking.id,
+      amountCents: 5_000,
+      reason: body.reason,
+      refundId: `re_${key}`,
+    });
+
+    // A second press is the same refund: answered with the same row, nothing sent again.
+    const again = bookingAdjustmentSchema.parse(
+      (
+        await admin
+          .post(`/bookings/${booking.id}/refunds`)
+          .send(body)
+          .expect(200)
+      ).body,
+    );
+
+    expect(again.id).toBe(first.id);
+    expect(gateway.refunds).toEqual([
+      { paymentId: paymentIdOf(booking.id), amount: 5_000, key },
+    ]);
+
+    // Before its webhook the stay's record has nothing refunded, but Stripe has: the rest of
+    // the stay would refund it in full and cancel it, so it is refused before it is sent.
+    await admin
+      .post(`/bookings/${booking.id}/refunds`)
+      .send({
+        ...body,
+        amountCents: booking.amountCents - 5_000,
+        requestId: randomUUID(),
+      })
+      .expect(409);
+    expect(gateway.refunds).toHaveLength(1);
+
+    // The total is the provider's news to raise, and the stay stays as it is.
+    await deliverRefunded(booking, 5_000, `evt_refunded_${requestId}`);
+
+    const after = await read(booking.id);
+
+    expect(after.status).toBe("CONFIRMED");
+    expect(after.refundedAmountCents).toBe(5_000);
+
+    // All that is left would cancel a stay not yet begun, so its last cent stays: refused
+    // before anything is sent.
+    await admin
+      .post(`/bookings/${booking.id}/refunds`)
+      .send({
+        ...body,
+        amountCents: booking.amountCents - 5_000,
+        requestId: randomUUID(),
+      })
+      .expect(409);
+    expect(gateway.refunds).toHaveLength(1);
+
+    const listed = bookingAdjustmentListSchema.parse(
+      (await admin.get(`/bookings/${booking.id}/refunds`).expect(200)).body,
+    );
+    const me = userSchema.parse((await admin.get("/auth/me").expect(200)).body);
+
+    expect(listed).toEqual([{ ...first, admin: { id: me.id, name: me.name } }]);
+
+    // The bank sent it back: the list says so, read off the bounced refunds by its id.
+    await app.get(PrismaService).refundFailure.create({
+      data: {
+        refundId: `re_${key}`,
+        paymentId: paymentIdOf(booking.id),
+        bookingId: booking.id,
+        amountCents: 5_000,
+        currency: booking.currency,
+      },
+    });
+
+    expect(
+      bookingAdjustmentListSchema.parse(
+        (await admin.get(`/bookings/${booking.id}/refunds`).expect(200)).body,
+      ),
+    ).toMatchObject([{ id: first.id, bounce: "OPEN" }]);
+    await guest.get(`/bookings/${booking.id}/refunds`).expect(403);
+  });
+
+  it("leaves no room for an admin's refund beside what a cancellation still owes", async () => {
+    const booking = await paid(30, 33);
+
+    // A debt the job has not sent yet: the whole stay is spoken for.
+    await app.get(PrismaService).booking.update({
+      where: { id: booking.id },
+      data: { refundOwedCents: booking.amountCents },
+    });
+
+    await admin
+      .post(`/bookings/${booking.id}/refunds`)
+      .send({ amountCents: 100, reason: "Goodwill", requestId: randomUUID() })
+      .expect(409);
+    expect(gateway.refunds).toEqual([]);
+  });
+
+  it("refuses an admin's refund while the payment is disputed, and of a stay nobody paid for", async () => {
+    const booking = await paid();
+    const body = { amountCents: 1_000, reason: "Goodwill" };
+
+    await settled(
+      deliverChargeEvent(booking, "charge.dispute.created", {
+        id: "dp_e2e",
+        object: "dispute",
+        status: "needs_response",
+      }).expect(200),
+    );
+
+    await admin
+      .post(`/bookings/${booking.id}/refunds`)
+      .send({ ...body, requestId: randomUUID() })
+      .expect(409);
+
+    const unpaid = await hold(20, 22);
+
+    await admin
+      .post(`/bookings/${unpaid.id}/refunds`)
+      .send({ ...body, requestId: randomUUID() })
+      .expect(409);
+    expect(gateway.refunds).toEqual([]);
+  });
+
+  it("takes an admin's refund after the payout back from the host's transfer", async () => {
+    const booking = await paid();
+    const transferId = `tr_${booking.id.replaceAll("-", "")}`;
+    const paidOut = hostShare(booking.amountCents, NO_CENTS);
+
+    payoutGateway.sent.set(transferId, paidOut);
+    await app.get(PrismaService).booking.update({
+      where: { id: booking.id },
+      data: {
+        transferId,
+        paidOutAmountCents: paidOut,
+        paidOutAt: new Date(),
+      },
+    });
+
+    const requestId = randomUUID();
+
+    await admin
+      .post(`/bookings/${booking.id}/refunds`)
+      .send({ amountCents: 6_000, reason: "The heating failed", requestId })
+      .expect(200);
+    await deliverRefunded(booking, 6_000, `evt_refunded_${requestId}`);
+
+    const owed = hostShare(booking.amountCents, cents(6_000));
+
+    expect(payoutGateway.reversals).toEqual([
+      { transferId, amount: paidOut - owed },
+    ]);
+
+    const row = await app
+      .get(PrismaService)
+      .booking.findUniqueOrThrow({ where: { id: booking.id } });
+
+    expect(row.paidOutAmountCents).toBe(owed);
   });
 
   it("takes a signed account event and refuses a forged one", async () => {

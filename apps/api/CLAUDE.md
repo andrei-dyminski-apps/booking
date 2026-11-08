@@ -98,12 +98,14 @@ src/
       booking.service.spec.ts  # against fakes of the repositories, the gateway and a stay listener
       booking-cancellation.service.ts  # the cancellation: who may cancel and on what terms, the refund it owes and the host's fee, the news of it
       booking-cancellation.service.spec.ts
+      booking-adjustment.service.ts  # an admin's partial refund without a cancellation: under the cancellation lease, measured against Stripe's refund total too, at most refundableCents, one refund per requestId
+      booking-adjustment.service.spec.ts
       stay-reader.ts       # readerOf — who of the stay's three readers the caller is, or the 404; both services read through it
       booking-refund.service.ts  # sends the refunds cancellations owe: the job, its sweep, the admin's stuck list and retry
       booking-refund.service.spec.ts
       booking-payment.handler.ts  # succeeded: confirms the hold, or refunds a late payment; refunded: records it, cancels a stay not yet begun refunded in full; a lost dispute: cancels a stay not yet begun
       booking-payment.handler.spec.ts  # the provider's news, in the same module as the service
-      testing/booking.fakes.ts  # the module the four specs share; the fixtures and one fake per port beside it, the three repository fakes over one FakeBookingTable; out of the build (`*.fakes.ts`)
+      testing/booking.fakes.ts  # the module the five specs share; the fixtures and one fake per port beside it, the three repository fakes over one FakeBookingTable; out of the build (`*.fakes.ts`)
       stay-events.ts       # confirmed / refunded, announced to whoever follows the stays (payout)
       booking-cursor.ts    # the keyset cursor of GET /bookings, encoded and parsed
       refund-failure.service.ts  # the admin's list of bounced refunds and the record of how each went back
@@ -112,13 +114,14 @@ src/
       booking-where.ts           # the `where` clauses that cross: the booking repositories, payouts, the catalogue, the waitlist and the lookups read the stays and the host's fees through them
       booking-cancellation.repository.ts  # the cancellation, the host's fee beside it, and the cancellation lease (whileCancelling)
       booking-refund.repository.ts  # the refunds owed and their sweep, the stuck list, the refund targets the provider's news reads
+      booking-adjustment.repository.ts  # booking_adjustments: the refunds admins sent — a press claimed before the provider is asked, completed with its answer; listed with what the bank did with each (refund_failures)
       booking-lease.ts           # whileLeased: the per-booking leases, on the database's clock, renewed while held
       stay-rows.ts               # a stay's money and its two people off a row, the stay as the contract has it (toBooking), and the integer money columns into Cents — the booking repositories and PayoutRepository all map through it; stayMoneyData — what a quote writes, bounded by MIN_CHARGE/MAX_CHARGE, for create and the seed
       refund-failure.repository.ts  # refund_failures: the refunds a guest's bank sent back
       booking-expiry.queue.ts    # BullMQ, behind BookingJobs: the per-hold job, the two sweeps
       booking-expiry.processor.ts
     presentation/
-      booking.controller.ts      # /bookings, POST /bookings/:id/payment, GET /bookings/stuck, POST /bookings/:id/stuck/refund/retry
+      booking.controller.ts      # /bookings, POST /bookings/:id/payment, POST and GET /bookings/:id/refunds, GET /bookings/stuck, POST /bookings/:id/stuck/refund/retry
       refund-failure.controller.ts  # GET /refund-failures, POST /refund-failures/:id/resolve — the admin's
       dto/booking.dto.ts
   payment/               # the guest's half of the money and the provider's front door; knows no stay
@@ -135,6 +138,7 @@ src/
       payment-event.processor.ts
       stripe.ts                  # STRIPE_CLIENT, the one client both adapters inject (STRIPE_API_VERSION)
       stripe-payment.gateway.ts  # the guest's half: PaymentIntents, refunds, snapshot events
+      stripe-payment.gateway.spec.ts  # the refunds' keys and Stripe's refusals — a key in use an unknown outcome, not a refusal — over the SDK with a fake fetch
       payment.config.ts          # STRIPE_SECRET_KEY, STRIPE_PAYMENT_WEBHOOK_SECRET; no fallback (the payout secret and the site only outside production)
     presentation/
       payment-webhook.controller.ts  # POST /payments/webhook — verified, recorded, answered
@@ -576,6 +580,53 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
   waiting on Stripe does not hold a release behind it. A dispute opened after the
   cancellation leaves the debt waiting, out of the sweep — won, it is paid; lost, dropped. A
   disputed payment cannot be refunded: an open dispute is a `409`.
+- **An admin gives back part of a stay without cancelling it** (`POST /bookings/:id/refunds`,
+  `@Roles(ADMIN)`, `adminRefundSchema`; `BookingAdjustmentService`). The caller is read again
+  first (`adminStanding`), before the lease and the stay: an account gone since its token is a
+  `401`, one demoted or blocked a `403`. The refund goes out while the admin waits —
+  `refundNow`, in the request's four seconds — named `booking-<id>-adjustment-<requestId>`
+  (`metadata.key`): the dialog mints `requestId` when it opens, so a second press is the same
+  refund. The idempotency key is that name and the amount (`…-<cents>`), because Stripe keeps
+  a refusal for its key for a day: a lower amount after Stripe refused the first is a request
+  of its own instead of the refusal again. Under `whileCancelling`, so the debt and the refund
+  total hold still — waited for a second (`LEASE_WAIT_MS`) rather than a cancellation's
+  three, so the wait and the two calls to Stripe fit the frontend's ten; a press past it
+  reaches the dialog as an unknown answer, which the claim below makes safe to press again. **A press is claimed
+  before Stripe is asked**: a `booking_adjustments` row with `refund_id` empty and the amount
+  asked for, completed with Stripe's answer. A press already completed answers its row
+  (`200`); one only claimed — the answer was lost — goes on with its claimed amount, and
+  another amount is a `409`, so one `requestId` can never become two refunds whatever the
+  client does. Before anything is sent the payment's refunds are read once (`findRefunds`):
+  the press's own refund found there is recorded as Stripe has it, whatever a dispute or a
+  webhook did since; otherwise the stay is measured against the larger of its recorded
+  refund total and Stripe's, so a refund whose `charge.refunded` has not arrived yet — an
+  admin's a moment ago, the dashboard's — counts. An open dispute is a `409`, and so is more
+  than `refundableCents` on the day — what was paid less what was refunded and what a
+  cancellation still owes, and for a stay that can still be cancelled (`isCancellableOn`) all
+  of it but the last cent, since `charge.refunded` cancels a stay not yet begun once it is
+  refunded in full; refunding all of it is `DELETE`'s. An unclaimed press the record alone
+  refuses is refused before that read, and a stay nobody paid for with no call at all.
+  **Stripe's refusal deletes the claim**, since nothing went out: more than the charge has
+  left (`RefundExceedsPaymentError`) or any other `invalid_request_error`
+  (`RefundRefusedError` — a dispute whose webhook has not arrived, a charge too old), both a
+  `409`; a Stripe that could not be reached, timed out or answered `5xx` (`502`) leaves it for
+  the press again. **The record's refusal deletes a claim only a minute after Stripe was last
+  asked for it** (`CLAIM_SETTLE_MS`, from `attempted_at`): the press's own request may still be
+  carried out by Stripe after the call gave up, and a refund landing after the release would
+  be one no row names — a claim asked for more recently is a `409` to press again shortly.
+  Every press that sends a claim to Stripe once more stamps `attempted_at` first
+  (`markAttempt`), so the minute runs from the latest request, not from the claim's
+  `created_at`. Stripe's own refusal needs no wait: it answered
+  under the press's idempotency key, which a request still in flight would have been refused
+  under instead. `GET /bookings/:id/refunds` lists every row, a claim included with
+  `refundId: null`, so a press whose dialog was closed can still be finished under its own
+  `requestId` from the stay's page; and each refund beside what its bank did with it
+  (`bounce`, read from `refund_failures` by the refund's id). Nothing else is new downstream:
+  `charge.refunded` raises `refunded_amount_cents` and tells the guest (`PAYMENT_REFUNDED`),
+  `StayEvents` reaches `settle`, and a payout already sent is reversed by the difference.
+  The list is newest first.
+  What Stripe answers to the keys is `stripe-payment.gateway.spec.ts`'s, over the SDK with its
+  `fetch` replaced (`Stripe.createFetchHttpClient`), so its own error classes are parsed.
 - **A debt or a payout that keeps failing is set aside**, the way the inbox sets an event
   aside: every failed run counts on the row (`refund_attempts`/`refund_last_error`,
   `payout_attempts`/`payout_last_error`) — a run that only found the stay's lease taken
@@ -823,7 +874,8 @@ platform, and the host is paid their share by a transfer once the stay has begun
 cents>` and lowers `paid_out_amount_cents` from exactly what it read. Two settlements of one stay queue on the lease instead of reversing the same money
   twice; `test/payout.repository.e2e-spec.ts` runs the lease against the real database.
 - **A refund** (`charge.refunded`) is the booking side's: it raises `refunded_amount_cents` to
-  Stripe's total, tells the guest of a refund this API did not send, cancels a stay not yet
+  Stripe's total, tells the guest of a refund no job of this API recorded — the dashboard's
+  or an admin's partial one — cancels a stay not yet
   begun refunded in full — one under way or over keeps its status and its nights, as a lost
   dispute's does — and announces the refund to `StayEvents`, where `PayoutEventHandler`
   settles.

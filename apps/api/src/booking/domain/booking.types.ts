@@ -1,5 +1,6 @@
 import type {
   Booking,
+  BookingAdjustment,
   Canceller,
   BookingStatus,
   PricedNight,
@@ -69,6 +70,21 @@ export type CancelledStay = {
   paymentId: string | null;
   fee: { id: string; amountCents: Cents } | null;
 };
+
+/**
+ * The account behind an admin's token as the row has it now: still an active admin, gone,
+ * or demoted or blocked by a write outside the API since the token was issued.
+ */
+export type AdminStanding = "ACTIVE" | "GONE" | "NOT_ADMIN";
+
+/**
+ * An admin's press as `booking_adjustments` has it: sent, with the refund the provider
+ * answered, or only claimed — the provider was asked for `amountCents`, last at
+ * `attemptedAt`, and no answer was recorded, so the refund may have gone out.
+ */
+export type RecordedPress =
+  | { status: "SENT"; adjustment: BookingAdjustment }
+  | { status: "CLAIMED"; amountCents: Cents; attemptedAt: Date };
 
 /** A stay's money as the payment handlers read it; `SettledStay` extends it. */
 export type RefundTarget = StayMoney & {

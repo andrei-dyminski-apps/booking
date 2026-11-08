@@ -193,9 +193,11 @@ export class BookingPaymentHandler
 
   /**
    * A cancellation's own refund is recorded by its job under the same lease, so whatever
-   * this raises is the dashboard's, and the guest is told. A refund in full cancels a stay
-   * that has not begun; one under way or over stays the record of the nights spent, and
-   * keeps holding them.
+   * this raises is a refund nothing recorded yet — the dashboard's, or an admin's partial
+   * refund (`BookingAdjustmentService`), whose row keeps who sent it and why but not the
+   * total — and the guest is told. A refund in full cancels a stay that has not begun; one
+   * under way or over stays the record of the nights spent, and keeps holding them. An
+   * admin's refund never gets there before check-in: `refundableCents` keeps the last cent.
    */
   private async settleRefund(
     event: Extract<PaymentEvent, { kind: "refunded" }>,

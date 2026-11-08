@@ -32,12 +32,47 @@ export abstract class PaymentGateway {
     key: string,
   ): Promise<Cents>;
 
+  /**
+   * Sends `amount` back while an admin waits on the answer, so in the request's time. `key`
+   * names the refund — `findRefunds` finds it by it — and with the amount it is the request's
+   * idempotency key: a retry of the same amount answers the refund it sent, and another
+   * amount after the provider refused the first is a request of its own rather than the
+   * refusal the provider keeps for the key. Unlike `refund` it looks nothing up — the caller
+   * asked `findRefunds` just before. It throws `RefundExceedsPaymentError` for more than the
+   * provider has left to give back and `RefundRefusedError` for any other refusal of the
+   * request: either way the provider answered, and nothing went out under it.
+   */
+  abstract refundNow(
+    paymentId: string,
+    amount: Cents,
+    key: string,
+  ): Promise<SentRefund>;
+
+  /**
+   * One read of the payment's refunds, in the request's time like `refundNow`: what the
+   * provider has given back so far — a refund whose webhook is late included — and the
+   * refund sent under `key`, or `null`, so a press whose answer was lost is found rather
+   * than sent again.
+   */
+  abstract findRefunds(paymentId: string, key: string): Promise<PaymentRefunds>;
+
   /** Refunded so far as the provider knows it, a dashboard refund whose webhook is late included. */
   abstract refundedSoFar(paymentId: string): Promise<Cents>;
 
   /** Throws `InvalidPaymentEventError` for anything the provider did not sign. */
   abstract readEvent(payload: Buffer, signature: string): PaymentEvent;
 }
+
+/** A refund the provider holds: its id, and what it gave back. */
+export type SentRefund = { id: string; amount: Cents };
+
+/** A payment's refunds as `findRefunds` reads them. */
+export type PaymentRefunds = {
+  /** Given back so far: every refund not cancelled and not failed. */
+  refunded: Cents;
+  /** The refund the key names. */
+  sent: SentRefund | null;
+};
 
 export type OpenedPayment = {
   id: string;
@@ -114,6 +149,33 @@ export class PaymentOpeningInProgressError extends Error {
       `The payment of booking ${bookingId} is being opened by another request`,
     );
     this.name = "PaymentOpeningInProgressError";
+  }
+}
+
+/**
+ * `refundNow` of more than the payment has left: a refund went out between the caller's
+ * `findRefunds` and its `refundNow` — the dashboard's, since every refund this API sends
+ * waits on the stay's lease.
+ */
+export class RefundExceedsPaymentError extends Error {
+  constructor(paymentId: string) {
+    super(`The refund is more than payment ${paymentId} has left to give back`);
+    this.name = "RefundExceedsPaymentError";
+  }
+}
+
+/**
+ * `refundNow` refused by the provider for a reason of its own — a payment disputed before its
+ * webhook arrived, a charge past the provider's window for refunds. An answer rather than a
+ * silence: nothing went out under the request, so the caller may let its claim go.
+ */
+export class RefundRefusedError extends Error {
+  constructor(
+    paymentId: string,
+    readonly reason: string,
+  ) {
+    super(`The refund of payment ${paymentId} was refused: ${reason}`);
+    this.name = "RefundRefusedError";
   }
 }
 
