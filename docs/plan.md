@@ -483,18 +483,20 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
       withholding returns the shortfall to the debt; the old "a host cannot cancel" case is
       rewritten.
 
-### 7.3 — A partial refund by an admin, without a cancellation
+### 7.3 — A partial refund by an admin, without a cancellation ✅
 
-- [ ] `adminRefundSchema { amountCents, reason, requestId }`, at most `notRefunded − refundOwed`.
-- [ ] `POST /bookings/:id/refunds` (`@Roles(ADMIN)`) refunds at once under
+- [x] `adminRefundSchema { amountCents, reason, requestId }`, at most `notRefunded − refundOwed`,
+      less the last cent of a stay that can still be cancelled — a full refund before check-in
+      would cancel it.
+- [x] `POST /bookings/:id/refunds` (`@Roles(ADMIN)`) refunds at once under
       `booking-<id>-adjustment-<requestId>` — the dialog mints the id, so a second press is
       the same refund — and records it in `booking_adjustments` (who, how much, why, the
       provider's refund id). An open dispute is a `409`.
-- [ ] Nothing new downstream: `charge.refunded` raises `refunded_amount_cents`, `StayEvents`
+- [x] Nothing new downstream: `charge.refunded` raises `refunded_amount_cents`, `StayEvents`
       reaches `settle`, and a payout already sent is reversed by the difference.
-- [ ] Web: "Refund part" on the stay's page for an admin (`centsFromInput`, a reason), and the
+- [x] Web: "Refund part" on the stay's page for an admin (`centsFromInput`, a reason), and the
       adjustments listed under the stay.
-- [ ] Specs: e2e — more than is left is refused, a repeated `requestId` refunds once, a
+- [x] Specs: e2e — more than is left is refused, a repeated `requestId` refunds once, a
       refund after the payout reverses the host's share.
 
 ### 7.4 — Ending a stay early, refunding the unused nights

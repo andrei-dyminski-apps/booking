@@ -1,11 +1,15 @@
 import { z } from "zod";
 import {
+  bookingAdjustmentListSchema,
+  bookingAdjustmentSchema,
   bookingDetailSchema,
   bookingPageSchema,
   bookingPaymentSchema,
   bookingSchema,
   stuckStayPageSchema,
+  type AdminRefundInput,
   type Booking,
+  type BookingAdjustment,
   type BookingDetail,
   type BookingPage,
   type BookingPayment,
@@ -75,6 +79,27 @@ export const bookingsApi = {
       path: `/bookings/${encodeURIComponent(id)}`,
       schema: z.void(),
       body: input,
+    }),
+
+  /**
+   * A part of the payment given back by an admin, the stay left as it is. The same
+   * `requestId` again answers the same refund rather than sending another.
+   */
+  refund: (id: string, input: AdminRefundInput): Promise<BookingAdjustment> =>
+    apiRequest({
+      method: "POST",
+      path: `/bookings/${encodeURIComponent(id)}/refunds`,
+      schema: bookingAdjustmentSchema,
+      body: input,
+    }),
+
+  /** The refunds admins sent for the stay, newest first — the admin's alone. */
+  refunds: (id: string, read: ReadOptions): Promise<BookingAdjustment[]> =>
+    apiRequest({
+      method: "GET",
+      path: `/bookings/${encodeURIComponent(id)}/refunds`,
+      schema: bookingAdjustmentListSchema,
+      read,
     }),
 
   /** The stays whose owed refund or host payout stopped retrying — the admin's alone. */

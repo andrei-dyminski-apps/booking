@@ -86,7 +86,16 @@ export class FakeBookingCancellationRepository implements PublicOf<BookingCancel
   /** The bookings a lease was taken for, in order. */
   readonly leases: string[] = [];
 
-  whileCancelling<T>(id: string, work: () => Promise<T>): Promise<T> {
+  /** The wait each lease was asked for with, `undefined` for the cancellation's own. */
+  readonly waits: (number | undefined)[] = [];
+
+  whileCancelling<T>(
+    id: string,
+    work: () => Promise<T>,
+    waitMs?: number,
+  ): Promise<T> {
+    this.waits.push(waitMs);
+
     if (this.held.has(id)) {
       return Promise.reject(new CancellationInProgressError(id));
     }

@@ -161,6 +161,7 @@ model Booking {
   reviews Review[]
 
   refundFailures RefundFailure[]
+  adjustments    BookingAdjustment[]
 
   @@index([listingId, from, to])
   /// Serves both halves of hold expiry: the repeatable sweep, which asks for every lapsed
@@ -427,8 +428,9 @@ model User {
   conversations Conversation[]
   notifications Notification[]
   waitlist      WaitlistEntry[]
-  hostFees      HostFee[]       @relation("HostFeeHost")
-  waivedFees    HostFee[]       @relation("HostFeeWaivedBy")
+  hostFees      HostFee[]           @relation("HostFeeHost")
+  waivedFees    HostFee[]           @relation("HostFeeWaivedBy")
+  adjustments   BookingAdjustment[]
 
   /// `GET /users` is a keyset page ordered by `created_at` with `id` behind it — the pair
   /// `user-cursor.ts` encodes. One index serves both directions, the same arithmetic as the
@@ -689,6 +691,46 @@ model RefundFailure {
   /// `GET /refund-failures`, newest first — the keyset of `common/set-aside-cursor.ts`.
   @@index([failedAt(sort: Desc), refundId(sort: Desc)])
   @@map("refund_failures")
+}
+
+/// A part of a stay's payment an admin gave back without cancelling it
+/// (`POST /bookings/:id/refunds`). Claimed before the provider is asked — `refund_id` empty,
+/// the amount the press asked for — so a press whose answer was lost keeps its amount, and
+/// completed with the provider's answer; a claim nothing went out for is deleted. Only a
+/// completed row names a refund that exists there; a claim is listed as unconfirmed, to be
+/// finished by pressing again under its `request_id`. The refund total on the stay is raised
+/// by its `charge.refunded` like any other refund's.
+model BookingAdjustment {
+  id          String   @id @default(uuid()) @db.Uuid
+  bookingId   String   @map("booking_id") @db.Uuid
+  adminId     String   @map("admin_id") @db.Uuid
+  /// What the press asked for while claimed; what the provider says the refund gave back
+  /// once completed.
+  amountCents Int      @map("amount_cents")
+  /// The stay's currency, as `bookings.currency`.
+  currency    String   @db.Char(3)
+  reason      String
+  /// Minted by the admin's dialog; with the booking it names the refund at the provider
+  /// (`booking-<id>-adjustment-<requestId>`), so a second press records nothing new.
+  requestId   String   @map("request_id") @db.Uuid
+  /// The provider's id of the refund; empty while the press is only claimed. A bounce is
+  /// read from `refund_failures` by it — no key, since the refund is sent back after this
+  /// row is written.
+  refundId    String?  @unique @map("refund_id")
+  /// When the provider was last asked for the press — the claim, and every press of it again
+  /// that sends `refundNow` once more. A claim is released on the record's word only a minute
+  /// after it (`CLAIM_SETTLE_MS`), since the request sent then may still land at the provider.
+  attemptedAt DateTime @default(now()) @map("attempted_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  /// Cascade: the adjustment is about the stay, and only the cleanups delete a booking row.
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  /// Restrict: who sent the money is the record; the cleanups delete bookings before users.
+  admin   User    @relation(fields: [adminId], references: [id], onDelete: Restrict)
+
+  /// One refund per press; its `booking_id` prefix is what the stay's list reads.
+  @@unique([bookingId, requestId])
+  @@map("booking_adjustments")
 }
 
 /// What a host owes for cancelling a paid stay — one row per cancelled stay, written in the

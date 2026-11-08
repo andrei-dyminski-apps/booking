@@ -7,6 +7,7 @@ import {
   BookingStatus,
   refundSchedule,
   type BookingDetail,
+  type Cents,
   type RefundWindow,
 } from "@repo/contracts";
 import { dayStart } from "#shared/lib";
@@ -31,6 +32,15 @@ function pollDelay(waitedMs: number): number {
   return 60_000;
 }
 
+/**
+ * How long the page waits for an admin's refund to be reported. Unlike the other waits this
+ * one can be waiting for nothing: a press finished from the list may name a refund whose
+ * webhook landed long ago and raised the total this tab read already, so no change is
+ * coming. Stripe reports a refund within seconds, and the API measures the next refund
+ * against Stripe's own total anyway, so the wait ends with the fast phase of `pollDelay`.
+ */
+const REFUND_REPORT_WAIT_MS = 60_000;
+
 /** The longest delay `setTimeout` keeps; a longer one fires at once. */
 const MAX_TIMEOUT_MS = 2_147_483_647;
 
@@ -47,7 +57,8 @@ export type BankAnswer = "paid" | "declined";
 /**
  * The stay's page as one machine: the booking in the query cache and the poll that keeps it
  * current, the tab's `paid`/`declined` from the bank's answer, the hold's deadline and the
- * clock the refund note moves on. `BookingLive` draws what this returns.
+ * clock the refund note moves on, and the wait for an admin's refund to be reported.
+ * `BookingLive` draws what this returns.
  */
 export function useBookingLive({
   initial,
@@ -65,6 +76,7 @@ export function useBookingLive({
   declined: boolean;
   markPaid: () => void;
   readAgain: () => void;
+  awaitRefund: () => void;
   lapsed: boolean;
   clock: string;
   schedule: RefundWindow[];
@@ -86,6 +98,14 @@ export function useBookingLive({
   const readAgain = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: bookingKey(initial.id) });
   }, [queryClient, initial.id]);
+  // The refund total an admin's refund went out against, until the webhook raises it: what is
+  // left to refund is measured against that total, and the dialog would offer a ceiling the
+  // refund has already lowered. `since` bounds the wait (`REFUND_REPORT_WAIT_MS`). `null`
+  // while no refund from this tab is waited for.
+  const [refundSentOver, setRefundSentOver] = useState<{
+    total: Cents | null;
+    since: number;
+  } | null>(null);
   // Decided by the server's clock first, so the render and the hydration agree.
   const [lapsed, setLapsed] = useState(
     () =>
@@ -101,14 +121,19 @@ export function useBookingLive({
     // `initialData` only seeds an empty cache: a row kept from an earlier visit would be
     // drawn instead of the render's fresher one. Nothing outside this page reads the key.
     gcTime: 0,
-    // Two things land after the request that set them off: the webhook confirming a paid
-    // hold, and the job sending the refund a cancellation owes. Each is waited for while
-    // it is on its way, and no longer.
+    // Three things land after the request that set them off: the webhook confirming a paid
+    // hold, the job sending the refund a cancellation owes, and the webhook reporting an
+    // admin's refund (`charge.refunded`, which raises the refund total — whatever it raises
+    // it to ends the wait, since that is what the ceiling is measured against). Each is
+    // waited for while it is on its way, and no longer.
     refetchInterval: (query) => {
       const data = query.state.data;
       const waiting =
         ((paid || lapsed) && data?.status === BookingStatus.PENDING_PAYMENT) ||
-        (data?.refundOwedCents ?? null) !== null;
+        (data?.refundOwedCents ?? null) !== null ||
+        (refundSentOver !== null &&
+          data?.refundedAmountCents === refundSentOver.total &&
+          Date.now() - refundSentOver.since < REFUND_REPORT_WAIT_MS);
 
       if (!waiting) {
         waitingSince.current = null;
@@ -141,6 +166,17 @@ export function useBookingLive({
 
     window.history.replaceState(null, "", `${url.pathname}${url.search}`);
   }, []);
+
+  // An admin's refund went out — from the dialog, or a press finished from the list: read the
+  // stay at once — the webhook may have landed already — and go on reading it until the
+  // refund total moves off the one the refund was sent over, for a minute at most.
+  const awaitRefund = useCallback(() => {
+    setRefundSentOver({
+      total: booking.refundedAmountCents,
+      since: Date.now(),
+    });
+    readAgain();
+  }, [booking.refundedAmountCents, readAgain]);
 
   const pending = booking.status === BookingStatus.PENDING_PAYMENT;
   const { expiresAt } = booking;
@@ -206,6 +242,7 @@ export function useBookingLive({
     declined,
     markPaid,
     readAgain,
+    awaitRefund,
     lapsed,
     clock,
     schedule,

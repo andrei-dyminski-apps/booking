@@ -5,10 +5,20 @@ import {
   InvalidPaymentEventError,
   PaymentGateway,
   PaymentOpeningInProgressError,
+  RefundExceedsPaymentError,
+  RefundRefusedError,
   type OpenedPayment,
   type PaymentEvent,
+  type PaymentRefunds,
+  type SentRefund,
 } from "../application/ports/payment-gateway";
-import { cents, NO_CENTS, type Cents, type Currency } from "../domain/money";
+import {
+  addCents,
+  cents,
+  NO_CENTS,
+  type Cents,
+  type Currency,
+} from "../domain/money";
 import { PAYMENT_CONFIG, type PaymentConfig } from "./payment.config";
 import {
   BACKGROUND_REQUEST,
@@ -139,21 +149,14 @@ export class StripePaymentGateway extends PaymentGateway {
   async refund(paymentId: string, amount: Cents, key: string): Promise<Cents> {
     // Looked up first rather than trusted to the idempotency key alone: Stripe forgets a key
     // after 24 hours, and a refund whose answer was lost would be sent again after that.
-    const sent = await this.findRefund(paymentId, key);
+    const sent = await this.findSent(paymentId, key, BACKGROUND_REQUEST);
 
-    if (sent !== null) return sent;
+    if (sent !== null) return sent.amount;
 
     try {
-      const refund = await this.stripe.refunds.create(
-        {
-          payment_intent: paymentId,
-          amount,
-          metadata: { key },
-        },
-        { idempotencyKey: key, ...BACKGROUND_REQUEST },
-      );
-
-      return cents(refund.amount);
+      return (
+        await this.sendRefund(paymentId, amount, key, key, BACKGROUND_REQUEST)
+      ).amount;
     } catch (error) {
       // Everything went back already — a refund from the dashboard in between.
       if (
@@ -163,31 +166,125 @@ export class StripePaymentGateway extends PaymentGateway {
         return NO_CENTS;
       }
 
-      // The key was used with another amount by a run racing this one: that refund stands.
+      // The key used with another amount by a run racing this one: that refund stands.
       if (error instanceof Stripe.errors.StripeIdempotencyError) {
-        const existing = await this.findRefund(paymentId, key);
+        const existing = await this.findSent(
+          paymentId,
+          key,
+          BACKGROUND_REQUEST,
+        );
 
-        if (existing !== null) return existing;
+        if (existing !== null) return existing.amount;
       }
 
       throw error;
     }
   }
 
-  private async findRefund(
+  /**
+   * The amount is in the idempotency key and not in `metadata.key`: Stripe keeps a refusal
+   * for its key for 24 hours, so an admin who lowers an amount Stripe refused would otherwise
+   * be answered the same refusal — and a lower amount, `StripeIdempotencyError` — until the
+   * dialog mints another request. A retry of the same amount is still the same request.
+   *
+   * Neither idempotency refusal is looked behind, unlike in `refund`, and neither releases
+   * the claim. A key in use (`idempotency_key_in_use`) is a `409`, which the SDK makes a
+   * `StripeAPIError` by its status whatever the body's type: the press's own earlier request
+   * is still in flight under it and may yet refund, so it goes up as an unknown outcome and
+   * the next press reads `findRefunds` first. A key reused with other parameters
+   * (`StripeIdempotencyError`) cannot happen here — the key carries every parameter — and
+   * goes up as it is.
+   *
+   * Every other `invalid_request_error` is Stripe's answer about the request — the charge is
+   * disputed, too old, already refunded — not a silence, so it is `RefundRefusedError`: the
+   * request was not carried out, and a refusal saved under the key is the same refusal
+   * again. What stays as it is — a timeout, a `5xx`, a key in use — leaves the outcome
+   * unknown.
+   */
+  async refundNow(
+    paymentId: string,
+    amount: Cents,
+    key: string,
+  ): Promise<SentRefund> {
+    try {
+      return await this.sendRefund(
+        paymentId,
+        amount,
+        key,
+        `${key}-${String(amount)}`,
+      );
+    } catch (error) {
+      if (exceedsPayment(error)) throw new RefundExceedsPaymentError(paymentId);
+
+      if (error instanceof Stripe.errors.StripeInvalidRequestError) {
+        throw new RefundRefusedError(paymentId, error.message);
+      }
+
+      throw error;
+    }
+  }
+
+  findRefunds(paymentId: string, key: string): Promise<PaymentRefunds> {
+    return this.readRefunds(paymentId, key);
+  }
+
+  /** `key` names the refund (`metadata.key`, what `readRefunds` reads); `idempotencyKey` is the request's. */
+  private async sendRefund(
+    paymentId: string,
+    amount: Cents,
+    key: string,
+    idempotencyKey: string,
+    options?: Stripe.RequestOptions,
+  ): Promise<SentRefund> {
+    const refund = await this.stripe.refunds.create(
+      {
+        payment_intent: paymentId,
+        amount,
+        metadata: { key },
+      },
+      { idempotencyKey, ...options },
+    );
+
+    return { id: refund.id, amount: cents(refund.amount) };
+  }
+
+  private async findSent(
     paymentId: string,
     key: string,
-  ): Promise<Cents | null> {
+    options?: Stripe.RequestOptions,
+  ): Promise<SentRefund | null> {
+    return (await this.readRefunds(paymentId, key, options)).sent;
+  }
+
+  /**
+   * Every refund of the payment, read once. A refund the bank sent back (`failed`) or one
+   * cancelled before it went gives nothing back, as `charge.amount_refunded` counts; the one
+   * the key names is any but a cancelled one — a failed refund was still sent.
+   */
+  private async readRefunds(
+    paymentId: string,
+    key: string,
+    options?: Stripe.RequestOptions,
+  ): Promise<PaymentRefunds> {
+    let refunded = NO_CENTS;
+    let sent: SentRefund | null = null;
+
     for await (const refund of this.stripe.refunds.list(
       { payment_intent: paymentId, limit: 100 },
-      BACKGROUND_REQUEST,
+      options,
     )) {
-      if (refund.metadata?.key === key && refund.status !== "canceled") {
-        return cents(refund.amount);
+      if (refund.status === "canceled") continue;
+
+      if (refund.status !== "failed") {
+        refunded = addCents(refunded, cents(refund.amount));
+      }
+
+      if (sent === null && refund.metadata?.key === key) {
+        sent = { id: refund.id, amount: cents(refund.amount) };
       }
     }
 
-    return null;
+    return { refunded, sent };
   }
 
   async refundedSoFar(paymentId: string): Promise<Cents> {
@@ -326,4 +423,20 @@ export class StripePaymentGateway extends PaymentGateway {
       ? (bookingId ?? null)
       : null;
   }
+}
+
+/**
+ * Stripe's refusal of a refund past what the charge has left: fully refunded already
+ * (`charge_already_refunded`), or less left than asked for — an `amount` refusal with no code
+ * of its own, or `amount_too_large`. Any other refusal of the amount (`parameter_invalid_*`)
+ * is not that, and is `RefundRefusedError` like every other refusal.
+ */
+function exceedsPayment(error: unknown): boolean {
+  if (!(error instanceof Stripe.errors.StripeInvalidRequestError)) return false;
+
+  return (
+    error.code === "charge_already_refunded" ||
+    (error.param === "amount" &&
+      (error.code === undefined || error.code === "amount_too_large"))
+  );
 }

@@ -125,15 +125,21 @@ export class BookingCancellationRepository {
 
   /**
    * The cancellation lease, which the refund job and the payment webhooks take too: the
-   * webhook reporting a refund waits here instead of reading the stay half way.
+   * webhook reporting a refund waits here instead of reading the stay half way. `waitMs` is
+   * for a caller whose own budget is shorter than the three seconds of waiting — an admin's
+   * refund, which calls Stripe inside the frontend's ten.
    */
-  async whileCancelling<T>(id: string, work: () => Promise<T>): Promise<T> {
+  async whileCancelling<T>(
+    id: string,
+    work: () => Promise<T>,
+    waitMs: number = CANCEL_LEASE.waitMs,
+  ): Promise<T> {
     try {
       return await whileLeased(
         this.prismaService,
         "cancelling_until",
         id,
-        CANCEL_LEASE,
+        { ...CANCEL_LEASE, waitMs },
         work,
       );
     } catch (error) {
