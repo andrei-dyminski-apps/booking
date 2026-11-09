@@ -10,6 +10,7 @@ import {
   bookingSchema,
   cancelBookingSchema,
   createBookingSchema,
+  endStayEarlySchema,
   refundFailurePageSchema,
   refundFailureQuerySchema,
   resolveRefundFailureSchema,
@@ -33,6 +34,8 @@ export class CreateBookingDto extends createZodDto(createBookingSchema) {}
 export class CancelBookingDto extends createZodDto(
   cancelBookingSchema.default({}),
 ) {}
+
+export class EndStayEarlyDto extends createZodDto(endStayEarlySchema) {}
 
 export class BookingDto extends createZodDto(bookingSchema) {}
 

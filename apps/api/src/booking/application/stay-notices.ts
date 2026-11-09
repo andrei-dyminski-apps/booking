@@ -11,7 +11,8 @@ import type { Cents, Currency } from "../../payment/domain/money";
 
 type BothSidesNotice = Exclude<
   Extract<NotificationContent, { data: { recipient: StayParty } }>["type"],
-  typeof NotificationType.BOOKING_CANCELLED
+  | typeof NotificationType.BOOKING_CANCELLED
+  | typeof NotificationType.STAY_ENDED_EARLY
 >;
 
 type Parties = { stay: StayNotice; guestId: string; listingOwnerId: string };
@@ -59,6 +60,29 @@ export async function notifyBothSidesOfCancellation(
 ): Promise<void> {
   await toBothSides(notificationService, parties, except, (recipient) => ({
     type: NotificationType.BOOKING_CANCELLED,
+    data: { ...parties.stay, recipient, ...notice },
+  }));
+}
+
+/**
+ * What an early end states to both sides beside the stay: the new check-out, who ended it
+ * and what the unused nights give back. `to` on the stay is the check-out it was booked to.
+ */
+export type EarlyEndNotice = {
+  checkOut: string;
+  endedBy: Canceller;
+  refundCents: Cents | null;
+  currency: Currency;
+};
+
+/** The same, for a stay ended early. */
+export async function notifyBothSidesOfEarlyEnd(
+  notificationService: Pick<NotificationService, "notify">,
+  { notice, ...parties }: Parties & { notice: EarlyEndNotice },
+  except?: string,
+): Promise<void> {
+  await toBothSides(notificationService, parties, except, (recipient) => ({
+    type: NotificationType.STAY_ENDED_EARLY,
     data: { ...parties.stay, recipient, ...notice },
   }));
 }

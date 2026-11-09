@@ -31,11 +31,11 @@ import { BookingJobs } from "./ports/booking-jobs";
 import { StayEvents } from "./stay-events";
 
 /**
- * Sends the refunds cancellations owe: the job a cancellation queues, the sweep that retries
- * what is still owed, and the admin's list of what stopped retrying. Deciding the refund is
- * the cancellation's and stays in `BookingCancellationService`, which writes the debt and
- * queues the job — it never calls this class. A refund is announced to `StayEvents`, so the
- * host's payout follows without this module knowing of it.
+ * Sends the refunds cancellations and early ends owe: the job either queues, the sweep that
+ * retries what is still owed, and the admin's list of what stopped retrying. Deciding the
+ * refund is theirs and stays in `BookingCancellationService` and `BookingEarlyEndService`,
+ * which write the debt and queue the job — neither calls this class. A refund is announced
+ * to `StayEvents`, so the host's payout follows without this module knowing of it.
  */
 @Injectable()
 export class BookingRefundService {
@@ -229,11 +229,11 @@ export class BookingRefundService {
       return false;
     }
 
-    // One cancellation per booking, so the key needs no amount.
+    // One cancellation or early end per booking, so the key needs no amount.
     const sent = await this.paymentGateway.refund(
       paymentId,
       amount,
-      `booking-${id}-cancellation`,
+      cancellationRefundKey(id),
     );
 
     await this.bookingRefundRepository.settleOwedRefund(
@@ -243,6 +243,15 @@ export class BookingRefundService {
 
     return sent > 0;
   }
+}
+
+/**
+ * The key the debt of a cancellation or an early end is refunded under. One per booking: a
+ * cancellation happens only before check-in and an early end only after it, and each refuses
+ * a stay the other has spent the key on.
+ */
+export function cancellationRefundKey(id: string): string {
+  return `booking-${id}-cancellation`;
 }
 
 /**

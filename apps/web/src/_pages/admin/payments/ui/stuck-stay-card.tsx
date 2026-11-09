@@ -19,8 +19,8 @@ import { RetryButton } from "./retry-button";
 
 /**
  * A stay whose owed refund or host payout stopped retrying. The money is still on the row —
- * the debt a cancellation left, or the share the host is owed — so the way out is the job
- * again rather than a note: retried, it sends what the row says.
+ * the debt a cancellation or an early end left, or the share the host is owed — so the way
+ * out is the job again rather than a note: retried, it sends what the row says.
  */
 export const StuckStayCard = ({ stuck }: { stuck: StuckStay }) => {
   const { booking } = stuck;

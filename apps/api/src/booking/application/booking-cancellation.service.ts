@@ -79,6 +79,7 @@ export class BookingCancellationService {
     if (
       canceller === Canceller.HOST &&
       reason === null &&
+      read.endedEarlyAt === null &&
       isCancellableOn(read, toIsoDate(new Date()))
     ) {
       throw new BadRequestException(HOST_REASON_REQUIRED);
@@ -160,6 +161,16 @@ export class BookingCancellationService {
 
     if (!isCancellable(booking.status)) {
       throw new NotFoundException(`Booking ${id} not found`);
+    }
+
+    // An early end has spent the refund key a cancellation would send under
+    // (`booking-<id>-cancellation`), so a second debt there would be read as already sent.
+    // Today `isCancellableOn` refuses such a stay anyway — it has begun — but the two rules
+    // are measured from different moments once check-in has a time of its own (7.6).
+    if (booking.endedEarlyAt !== null) {
+      throw new ConflictException(
+        "A stay that was ended early can no longer be cancelled",
+      );
     }
 
     const now = new Date();

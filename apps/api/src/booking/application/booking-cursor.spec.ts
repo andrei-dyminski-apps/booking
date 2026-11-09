@@ -27,6 +27,7 @@ const booking: Booking = {
   cancelledBy: null,
   cancelledAt: null,
   cancellationReason: null,
+  endedEarlyAt: null,
   reviewed: { byGuest: false, byOwner: false },
 };
 

@@ -110,6 +110,13 @@ export const BookingCard = ({
               by {CANCELLER_NAMES[booking.cancelledBy]}
             </span>
           )}
+          {/*
+            The dates and nights above are the stay as it stands, the amount what was bought:
+            this is what says why the two disagree. The stay's page has the rest.
+          */}
+          {booking.endedEarlyAt !== null && (
+            <Badge variant="outline">Ended early</Badge>
+          )}
           {review === "written" && <Badge variant="outline">Reviewed</Badge>}
         </CardAction>
       </CardHeader>

@@ -15,6 +15,7 @@ import { BookingPaymentHandler } from "./application/booking-payment.handler";
 import { BookingService } from "./application/booking.service";
 import { BookingAdjustmentService } from "./application/booking-adjustment.service";
 import { BookingCancellationService } from "./application/booking-cancellation.service";
+import { BookingEarlyEndService } from "./application/booking-early-end.service";
 import { BookingRefundService } from "./application/booking-refund.service";
 import { RefundFailureService } from "./application/refund-failure.service";
 import { BookingJobs } from "./application/ports/booking-jobs";
@@ -41,6 +42,7 @@ import {
   providers: [
     BookingService,
     BookingCancellationService,
+    BookingEarlyEndService,
     BookingRefundService,
     BookingAdjustmentService,
     BookingRepository,

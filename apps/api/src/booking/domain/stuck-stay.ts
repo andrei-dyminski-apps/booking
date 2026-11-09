@@ -30,7 +30,7 @@ export function hostFeesKey(hostId: string, currency: string): string {
 /**
  * What the job would send for a stay set aside.
  *
- * - `refund`: the refund the cancellation owes the guest.
+ * - `refund`: the refund a cancellation or an early end owes the guest.
  * - `payout`: a reservation still standing (`standingReservation`), as it is. Without one, the
  *   host's share by `owedToHost` less the fees left for this stay (`shareOutHostFees`) — the
  *   split `PayoutService` reserves by, so a lost dispute, a refund and the fees count here as

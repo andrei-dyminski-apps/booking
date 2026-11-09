@@ -70,6 +70,15 @@ export {
 } from "./refund.js";
 
 export {
+  earlyCheckOut,
+  endStayEarlySchema,
+  mayEndEarly,
+  unusedNightsRefund,
+  type EndStayEarlyInput,
+  type UnusedNightsRefund,
+} from "./early-end.js";
+
+export {
   CANCELLATION_TERMS,
   CancellationPolicy,
   GRACE_MIN_LEAD_HOURS,

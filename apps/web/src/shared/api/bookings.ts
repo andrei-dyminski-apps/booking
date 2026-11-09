@@ -16,6 +16,7 @@ import {
   type BookingQuery,
   type CancelBookingInput,
   type CreateBookingInput,
+  type EndStayEarlyInput,
   type StuckKind,
   type StuckStayPage,
   type StuckStayQuery,
@@ -77,6 +78,20 @@ export const bookingsApi = {
     apiRequest({
       method: "DELETE",
       path: `/bookings/${encodeURIComponent(id)}`,
+      schema: z.void(),
+      body: input,
+    }),
+
+  /**
+   * The guest leaves before the check-out they paid for: the stay checks out tomorrow and
+   * the unused nights are refunded by its policy. The guest and an admin, not the host.
+   * `checkOut` and `refundCents` are what was stated: a day turned since, or a refund that
+   * has shrunk since, is a `409`.
+   */
+  endEarly: (id: string, input: EndStayEarlyInput): Promise<void> =>
+    apiRequest({
+      method: "POST",
+      path: `/bookings/${encodeURIComponent(id)}/end-early`,
       schema: z.void(),
       body: input,
     }),

@@ -129,6 +129,12 @@ model Booking {
   cancelledAt        DateTime?  @map("cancelled_at")
   cancellationReason String?    @map("cancellation_reason")
 
+  /// When the guest or an admin ended the stay early (`POST /bookings/:id/end-early`), or
+  /// `null`. The stay stays `CONFIRMED` and `to_date` moves to the new check-out, so the
+  /// `EXCLUDE` constraint and the waitlist see the nights after it free and the review opens;
+  /// `booking_nights` keep what was bought, which is what says what was given up.
+  endedEarlyAt DateTime? @map("ended_early_at")
+
   /// What a payout means to send, fixed before the transfer under the host's lock and
   /// cleared once the payout is recorded — so a retry sends the same amount, and the
   /// transfer goes out without a transaction held open across Stripe.
@@ -543,6 +549,7 @@ enum NotificationType {
   BOOKING_CANCELLED
   BOOKING_EXPIRED
   BOOKING_CONFIRMED
+  STAY_ENDED_EARLY
   PAYMENT_REFUNDED
   PAYMENT_DISPUTED
   PAYOUT_SENT

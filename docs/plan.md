@@ -499,23 +499,25 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
 - [x] Specs: e2e — more than is left is refused, a repeated `requestId` refunds once, a
       refund after the payout reverses the host's share.
 
-### 7.4 — Ending a stay early, refunding the unused nights
+### 7.4 — Ending a stay early, refunding the unused nights ✅
 
-- [ ] `@repo/contracts`: `mayEndEarly(booking, today)` — confirmed, begun, at least one night
+- [x] `@repo/contracts`: `mayEndEarly(booking, today)` — confirmed, begun, at least one night
       left — and `unusedNightsRefund(booking, nights, today)`: the `booking_nights` from
-      tomorrow's on, times the policy's `unusedNightsBps`. Tonight is used.
-- [ ] The stay stays `CONFIRMED`; `to` moves to the new check-out and `ended_early_at` is
+      tomorrow's on, times the policy's `unusedNightsBps`. Tonight is used. An earlier partial
+      refund names no nights, so it counts as spread over all of them by price: the unused
+      nights keep `notRefunded / amount` of their worth.
+- [x] The stay stays `CONFIRMED`; `to` moves to the new check-out and `ended_early_at` is
       stamped, so the `EXCLUDE` constraint and the waitlist see the nights free and the
       review opens at once. `booking_nights` keep what was bought. A stay with no nights
       recorded (before `store_money_in_cents`) cannot end early.
-- [ ] `POST /bookings/:id/end-early` (the guest, an admin) under `whileCancelling`: the debt
+- [x] `POST /bookings/:id/end-early` (the guest, an admin) under `whileCancelling`: the debt
       goes into `refund_owed_cents` and out through the same job. The key
       `booking-<id>-cancellation` is shared safely — a cancellation happens only before
       check-in and an early end only after. Then `announceFreed`.
-- [ ] The host's side needs nothing: `owedToHost` already counts a refund owed, and `settle`
+- [x] The host's side needs nothing: `owedToHost` already counts a refund owed, and `settle`
       reverses what was paid out beyond it.
-- [ ] Web: "End stay early" on the stay's page during the stay, with what it refunds.
-- [ ] Specs: the night arithmetic (tonight, the last night); e2e — the nights are free, the
+- [x] Web: "End stay early" on the stay's page during the stay, with what it refunds.
+- [x] Specs: the night arithmetic (tonight, the last night); e2e — the nights are free, the
       refund is right, a payout already sent is reversed.
 
 ### 7.5 — A non-refundable rate for a discount
@@ -543,6 +545,12 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
       (`HH:mm`), frozen onto the booking; `checkInInstant` becomes
       `TZDate(from + checkInTime, timeZone)`. Every refund window, the fee's tiers,
       `isCancellableOn` (the instant, not the UTC day) and `payoutDueAt` follow from it.
+- [ ] `mayEndEarly` and `earlyCheckOut` follow it too: an early end is offered from the
+      instant a cancellation stops, never before it, and "tonight" is the listing's night,
+      not the UTC one. The two share the refund key `booking-<id>-cancellation`, which is
+      safe only while they cannot both happen to one stay; `BookingCancellationService`
+      refuses a stay with `ended_early_at` as the backstop, and the stay's page must not
+      offer "Cancel" for one either (`mayCancel`).
 - [ ] Backfilled `UTC` / `00:00`, so nothing already booked moves.
 - [ ] Left as they are, on UTC days: `createBookingSchema`'s "check-in not in the past" and
       `isReviewable` — they are about calendar days, not about the moment of arrival.

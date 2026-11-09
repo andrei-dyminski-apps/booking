@@ -445,6 +445,7 @@ lapsed hold is still `PENDING_PAYMENT` even though its slot is already free.
 | `BOOKING_CONFIRMED`            | both sides                   | the payment confirmed the stay                          |
 | `BOOKING_CANCELLED`            | the side that did not cancel | a cancellation, with the canceller and reason           |
 | `BOOKING_EXPIRED`              | both sides                   | an unpaid hold lapsed                                   |
+| `STAY_ENDED_EARLY`             | the side that did not end it | a stay ended early, the new check-out and the refund    |
 | `PAYMENT_REFUNDED`             | the guest                    | a late payment refunded, or a refund from the dashboard |
 | `PAYMENT_DISPUTED`             | the host                     | a dispute opened on a payment                           |
 | `PAYOUT_SENT`                  | the host                     | a transfer went out                                     |
@@ -453,7 +454,7 @@ lapsed hold is still `PENDING_PAYMENT` even though its slot is already free.
 | `WAITLIST_AVAILABLE`           | the waiter                   | nights they waited for are free                         |
 | `REFUND_FAILED`                | every admin                  | a guest's bank sent a refund back                       |
 | `PAYMENT_EVENT_FAILED`         | every admin                  | a webhook event was set aside                           |
-| `CANCELLATION_REFUND_FAILED`   | every admin                  | an owed refund was set aside                            |
+| `CANCELLATION_REFUND_FAILED`   | every admin                  | a cancellation's or an early end's refund set aside     |
 | `PAYOUT_FAILED`                | every admin                  | a payout was set aside                                  |
 | `PAYOUT_SHORTFALL`             | every admin                  | a transfer recorded for less than was reserved          |
 | `HOST_CANCELLATIONS_THRESHOLD` | every admin                  | a host's third counted cancellation within a year       |

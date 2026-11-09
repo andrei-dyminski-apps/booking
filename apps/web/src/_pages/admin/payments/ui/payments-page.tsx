@@ -48,7 +48,7 @@ const DESCRIPTIONS: Record<SetAsideView["list"], string> = {
   bounced:
     "Refunds the guest's bank sent back. The same card refuses them again, so the money goes back another way — record how.",
   "stuck-refunds":
-    "Refunds owed for cancelled stays that stopped retrying. Retrying sends what the stay still owes.",
+    "Refunds owed to guests — for a cancelled stay, or for the unused nights of one ended early — that stopped retrying. Retrying sends what the stay still owes.",
   "stuck-payouts":
     "Host payouts that stopped retrying. Retrying sends the host's share again.",
 };

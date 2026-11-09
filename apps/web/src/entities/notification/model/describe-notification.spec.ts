@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { CURRENCY, cents, NotificationType, StayParty } from "@repo/contracts";
+import {
+  CURRENCY,
+  cents,
+  NotificationType,
+  StayParty,
+  type Cents,
+} from "@repo/contracts";
 import { describeNotification } from "./describe-notification";
 
 /**
@@ -94,6 +100,40 @@ describe("describeNotification", () => {
     expect(cancelled(StayParty.GUEST, cents(0))).toMatch(/ · no refund$/);
     expect(cancelled(StayParty.HOST, null)).toMatch(
       /Cabin by the lake · [^·]+$/,
+    );
+  });
+
+  it("tells the host a guest is leaving early, with the new check-out and the refund", () => {
+    const ended = (
+      recipient: StayParty,
+      endedBy: "GUEST" | "ADMIN",
+      refundCents: Cents | null,
+    ) =>
+      describeNotification({
+        ...stored,
+        type: NotificationType.STAY_ENDED_EARLY,
+        data: {
+          ...stay,
+          checkOut: stay.from,
+          recipient,
+          endedBy,
+          refundCents,
+          currency: CURRENCY,
+        },
+      });
+
+    expect(ended(StayParty.HOST, "GUEST", cents(24_070))).toMatchObject({
+      title: "Your guest is leaving early",
+      detail: expect.stringMatching(
+        / · now .+ · \$240\.70 going back to the guest$/,
+      ) as unknown,
+    });
+    expect(ended(StayParty.GUEST, "ADMIN", cents(0))).toMatchObject({
+      title: "Your stay was ended early by the site",
+      detail: expect.stringMatching(/ · no refund$/) as unknown,
+    });
+    expect(ended(StayParty.HOST, "ADMIN", null).detail).toMatch(
+      /Cabin by the lake · now [^·]+$/,
     );
   });
 

@@ -16,6 +16,9 @@ import { PAGING } from "./query.js";
  *   `reason` why, when they said.
  * - `BOOKING_EXPIRED` — a hold the recipient is one side of lapsed unpaid and let its
  *   nights go; nobody did it, so both sides hear, and `recipient` says which one this is.
+ * - `STAY_ENDED_EARLY` — a stay the recipient is one side of was ended before its check-out
+ *   by its guest or an admin; `checkOut` is the day it now ends, and the nights after it are
+ *   on offer again. `to` is the check-out it was booked to.
  * - `BOOKING_CONFIRMED` — a hold the recipient is one side of was paid and is now a stay;
  *   the payment provider said so rather than either of them, so both sides hear.
  * - `PAYMENT_REFUNDED` — money the guest paid went back to them without a cancellation of
@@ -33,8 +36,11 @@ import { PAGING } from "./query.js";
  * - `PAYMENT_EVENT_FAILED` — told to every admin: the worker gave up on a delivery of the
  *   payment provider after failing it again and again, and set it aside. What it would have
  *   done — a confirmation, a refund recorded, a payout taken back — waits for a person.
- * - `CANCELLATION_REFUND_FAILED` — told to every admin: the refund a cancellation owes kept
- *   failing and was set aside; the guest's money waits for a person to send it.
+ * - `CANCELLATION_REFUND_FAILED` — told to every admin: the refund a cancellation or an
+ *   early end owes (`refund_owed_cents`, sent by one job under one key) kept failing and was
+ *   set aside; the guest's money waits for a person to send it. Named for the cancellation,
+ *   which was the only debt when it was written; renaming it would be a migration of the
+ *   enum and of every notice stored under it.
  * - `PAYOUT_FAILED` — told to every admin: the host's transfer for a stay kept failing and
  *   was set aside; the host's share waits for a person.
  * - `PAYOUT_SHORTFALL` — told to every admin: a host's payout found a transfer Stripe already
@@ -60,6 +66,7 @@ export const notificationTypeSchema = z.enum([
   "BOOKING_CANCELLED",
   "BOOKING_EXPIRED",
   "BOOKING_CONFIRMED",
+  "STAY_ENDED_EARLY",
   "PAYMENT_REFUNDED",
   "PAYMENT_DISPUTED",
   "PAYOUT_SENT",
@@ -126,6 +133,23 @@ const bookingCancelledSchema = z.object({
     currency: noticeCurrencySchema,
     cancelledBy: cancellerSchema.nullable().default(null),
     reason: z.string().nullable().default(null),
+  }),
+});
+
+/**
+ * `refundCents` is what the unused nights give back — `0` under a policy that keeps them —
+ * or `null` when there is no money to speak of: a stay nobody paid for, one whose dispute was
+ * lost, one refunded in full already. `endedBy` is the guest or an admin; a host cannot end
+ * a stay early.
+ */
+const stayEndedEarlySchema = z.object({
+  type: z.literal(NotificationType.STAY_ENDED_EARLY),
+  data: stayNoticeSchema.extend({
+    recipient: stayPartySchema,
+    checkOut: z.iso.date(),
+    endedBy: cancellerSchema,
+    refundCents: centsSchema.nullable(),
+    currency: noticeCurrencySchema,
   }),
 });
 
@@ -270,6 +294,7 @@ export const notificationContentSchema = z.discriminatedUnion("type", [
   bookingCancelledSchema,
   bookingExpiredSchema,
   bookingConfirmedSchema,
+  stayEndedEarlySchema,
   paymentRefundedSchema,
   paymentDisputedSchema,
   payoutSentSchema,
@@ -299,6 +324,7 @@ export const notificationSchema = z.discriminatedUnion("type", [
   bookingCancelledSchema.extend(stored),
   bookingExpiredSchema.extend(stored),
   bookingConfirmedSchema.extend(stored),
+  stayEndedEarlySchema.extend(stored),
   paymentRefundedSchema.extend(stored),
   paymentDisputedSchema.extend(stored),
   payoutSentSchema.extend(stored),

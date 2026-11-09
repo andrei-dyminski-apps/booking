@@ -185,6 +185,7 @@ export function toBooking(row: BookingRowWithListing): Booking {
     cancelledBy: row.cancelledBy,
     cancelledAt: row.cancelledAt?.toISOString() ?? null,
     cancellationReason: row.cancellationReason,
+    endedEarlyAt: row.endedEarlyAt?.toISOString() ?? null,
     reviewed: {
       byGuest: row.reviews.some((review) => review.kind === ReviewKind.LISTING),
       byOwner: row.reviews.some((review) => review.kind === ReviewKind.GUEST),

@@ -97,6 +97,7 @@ const stay = (overrides: Partial<Booking> = {}): BookingWithListingOwner => ({
     cancelledBy: null,
     cancelledAt: null,
     cancellationReason: null,
+    endedEarlyAt: null,
     reviewed: { byGuest: false, byOwner: false },
     ...overrides,
   },

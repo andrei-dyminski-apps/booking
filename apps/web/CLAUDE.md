@@ -135,7 +135,7 @@ apps/web/
         overview/ui/side-tabs.tsx           # …the two halves of a user's stays, as links over `?side=HOST`
         overview/ui/bookings-toolbar.tsx    # one row: the filters, the ordering, the chips
         overview/ui/bookings-filters-dialog.tsx  # every filter, in a modal
-        overview/ui/booking-card.tsx
+        overview/ui/booking-card.tsx        # one stay: its dates as they stand, the amount bought, "Ended early" beside the status when it was
         overview/ui/cancel-booking-button.tsx  # the shared dialog over this list's action
         overview/ui/review-booking-button.tsx  # one half of a finished stay, in a dialog
         overview/ui/rating-field.tsx        # …its rating, picked as stars: a radio per star
@@ -150,6 +150,7 @@ apps/web/
         booking/ui/booking-live.tsx       # the stay drawn off what its hook returns, and an admin's refunds under it
         booking/ui/payment-form.tsx       # opens the payment from the browser, Stripe Elements; success starts the poll and declares nothing; a Stripe.js that never loaded says so
         booking/ui/cancel-stay-button.tsx # the shared dialog over this page's action; a success reads the stay again
+        booking/ui/end-stay-early-button.tsx # the guest's or an admin's early end, in a confirmation stating the new check-out and the refund, taken when it opens and held while it is open and sent as they are — a refusal reads the stay again and follows the terms of now; kept on the page while open, so a stay no longer endable leaves the API's reason with nothing to press; the form inside the popup, so every opening starts clean; a success reads the stay again
         booking/ui/refund-stay-button.tsx # an admin's partial refund: amount and reason, one request id per opening, so a second press is the same refund; an unknown answer holds the boxes until the dialog closes
         booking/ui/booking-adjustments.tsx # the refunds admins sent, under the stay — an admin's alone; an unconfirmed press, and a refund the bank sent back with the way to its bounced row; a line when the read failed
         booking/ui/finish-refund-button.tsx # an unconfirmed press pressed again under its own request id: records the refund or sends it, never a second; then waits for its webhook like the dialog
@@ -157,9 +158,12 @@ apps/web/
         booking/api/booking-query.ts      # the query keys and the browser's read, shared by the poll and the cancel
         booking/api/cancel-stay-action.ts # cancels, then frees the nights in the Data Cache
         booking/api/read-booking-adjustments.ts # the admin's list of them, `no-store`, or null — the stay draws without it
+        booking/api/end-stay-early-action.ts # ends the stay early, then frees the nights after the new check-out in the Data Cache
         booking/api/refund-stay-action.ts # the admin's partial refund, from the dialog or the list; refresh() lists it under the stay — an unknown answer too, as unconfirmed, and a `409` that may have let a claim go; `uncertain` past a 4xx
         booking/model/refund-form.ts      # the amount typed in the currency onto adminRefundSchema
-        booking/model/use-booking-live.ts # the booking in the query cache, polled until the webhook moves it — an admin's refund too, until the refund total moves or a minute passes; the hold's deadline, the refund note's clock
+        booking/model/early-end-note.ts   # what ending the stay now does: the terms the dialog sends (the check-out and the refund in cents) beside the note — the check-out, the nights freed, unusedNightsRefund worded — less what earlier refunds gave back of those nights; and the line a stay ended early carries, against the check-out it was booked to
+        booking/model/early-end-note.spec.ts
+        booking/model/use-booking-live.ts # the booking in the query cache, polled until the webhook moves it — an admin's refund too, until the refund total moves or a minute passes; the hold's deadline, the refund note's clock, moved on at every midnight of the stay
         booking/index.ts
       waitlist/ui/waitlist-page.tsx       # one page: a user's own ranges and the ones on their listings, an admin's everything
       waitlist/ui/side-tabs.tsx           # …the two halves of a user's waitlist, as links over `?side=HOST`

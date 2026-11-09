@@ -11,6 +11,7 @@ import { BookingRepository } from "../../infrastructure/booking.repository";
 import { RefundFailureRepository } from "../../infrastructure/refund-failure.repository";
 import { BookingAdjustmentService } from "../booking-adjustment.service";
 import { BookingCancellationService } from "../booking-cancellation.service";
+import { BookingEarlyEndService } from "../booking-early-end.service";
 import { BookingPaymentHandler } from "../booking-payment.handler";
 import { BookingRefundService } from "../booking-refund.service";
 import { BookingService } from "../booking.service";
@@ -36,6 +37,7 @@ import { FakeWaitlistService } from "./waitlist-service.fakes";
 
 /*
  * The module `booking.service.spec.ts`, `booking-cancellation.service.spec.ts`,
+ * `booking-early-end.service.spec.ts`,
  * `booking-refund.service.spec.ts`, `booking-adjustment.service.spec.ts` and
  * `booking-payment.handler.spec.ts` build their classes in — one module, because the
  * handler's news, the cancellations, their refunds and an admin's act on the same rows. The
@@ -50,6 +52,7 @@ import { FakeWaitlistService } from "./waitlist-service.fakes";
 export type BookingTestbed = {
   service: BookingService;
   cancellationService: BookingCancellationService;
+  earlyEndService: BookingEarlyEndService;
   refundService: BookingRefundService;
   adjustmentService: BookingAdjustmentService;
   paymentHandler: BookingPaymentHandler;
@@ -86,6 +89,7 @@ export async function createBookingTestbed(): Promise<BookingTestbed> {
     providers: [
       BookingService,
       BookingCancellationService,
+      BookingEarlyEndService,
       BookingRefundService,
       BookingAdjustmentService,
       { provide: BookingRepository, useValue: bookingRepository },
@@ -122,6 +126,7 @@ export async function createBookingTestbed(): Promise<BookingTestbed> {
   return {
     service: moduleRef.get(BookingService),
     cancellationService: moduleRef.get(BookingCancellationService),
+    earlyEndService: moduleRef.get(BookingEarlyEndService),
     refundService,
     adjustmentService: moduleRef.get(BookingAdjustmentService),
     paymentHandler: moduleRef.get(BookingPaymentHandler),

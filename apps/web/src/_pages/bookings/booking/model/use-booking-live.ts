@@ -10,7 +10,7 @@ import {
   type Cents,
   type RefundWindow,
 } from "@repo/contracts";
-import { dayStart } from "#shared/lib";
+import { addDays, dayOf, dayStart } from "#shared/lib";
 import { bookingKey, readBooking } from "../api/booking-query";
 
 /**
@@ -201,7 +201,7 @@ export function useBookingLive({
   }, [pending, lapsed, expiresAt]);
 
   const confirmed = booking.status === BookingStatus.CONFIRMED;
-  const { from, createdAt, cancellationPolicy } = booking;
+  const { from, to, createdAt, cancellationPolicy } = booking;
   // Read by the timer below and drawn under "Cancellation": one schedule for both, kept
   // across the poll's re-renders, which change none of the three facts it is made of.
   const schedule = useMemo(
@@ -209,14 +209,20 @@ export function useBookingLive({
     [from, createdAt, cancellationPolicy],
   );
 
-  // Every moment the refund falls, then check-in, when the button goes: the note is
+  // Every moment the refund falls, then check-in, when the button goes, and every midnight
+  // of the stay after it, when what ending it early refunds drops by a night: the note is
   // redrawn at each of them, earliest first.
   useEffect(() => {
     if (!confirmed) return;
 
-    const next = [...schedule.map(({ until }) => until), dayStart(from)].find(
-      (moment) => isBefore(parseISO(clock), moment),
-    );
+    const day = dayOf(clock);
+    const midnights =
+      from <= day && day < to ? [dayStart(addDays(day, 1))] : [];
+    const next = [
+      ...schedule.map(({ until }) => until),
+      dayStart(from),
+      ...midnights,
+    ].find((moment) => isBefore(parseISO(clock), moment));
 
     if (next === undefined) return;
 
@@ -234,7 +240,7 @@ export function useBookingLive({
     return () => {
       clearTimeout(timer);
     };
-  }, [confirmed, schedule, from, clock]);
+  }, [confirmed, schedule, from, to, clock]);
 
   return {
     booking,

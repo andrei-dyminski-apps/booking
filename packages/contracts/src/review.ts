@@ -73,7 +73,8 @@ export const createReviewSchema = z.object({
 /**
  * Whether a stay is one somebody can review yet: paid for, and over. A hold, a cancelled
  * stay and an expired one never happened, and a stay still in progress has not finished
- * happening. "Over" is the check-out day, which is when a guest leaves.
+ * happening. "Over" is the check-out day, which is when a guest leaves — or the moment the
+ * stay was ended early: the guest is on their way out, and its check-out is tomorrow.
  *
  * `today` is an argument rather than read here, for the reason `createBookingSchema` gives
  * about its own clock: a calendar day needs a zone chosen for it, UTC is the one both
@@ -81,10 +82,13 @@ export const createReviewSchema = z.object({
  * about the same day.
  */
 export function isReviewable(
-  booking: Pick<Booking, "status" | "to">,
+  booking: Pick<Booking, "status" | "to" | "endedEarlyAt">,
   today: string,
 ): boolean {
-  return booking.status === BookingStatus.CONFIRMED && booking.to <= today;
+  return (
+    booking.status === BookingStatus.CONFIRMED &&
+    (booking.to <= today || booking.endedEarlyAt !== null)
+  );
 }
 
 /** Newest first by default: what was said last is the closest to what the place is now. */

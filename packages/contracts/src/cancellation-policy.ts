@@ -35,11 +35,7 @@ export type RefundTier = {
 export type CancellationTerms = {
   /** The widest window first. Past the last one a guest's cancellation refunds nothing. */
   tiers: readonly RefundTier[];
-  /**
-   * What the nights left of a stay ended early give back. Nothing reads it until a stay can
-   * end early (`docs/plan.md`, 7.4); it is written down now because a row is frozen once a
-   * booking can carry it, so the stays taken from today on are already taken under it.
-   */
+  /** What the nights left of a stay ended early give back — `unusedNightsRefund`. */
   unusedNightsBps: number;
   /** Whether the grace period applies — see `GRACE_PERIOD_HOURS`. */
   grace: boolean;

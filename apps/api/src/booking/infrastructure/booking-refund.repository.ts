@@ -31,10 +31,10 @@ export type StuckStayFilters = Pick<
 >;
 
 /**
- * The money that goes back to a guest: the refund a cancellation owes and the sweep that
- * pays it, the admin's list of what was set aside, and what the provider's news about a
- * payment and its refunds reads and writes. The cancellation lease they run under is
- * `BookingCancellationRepository.whileCancelling`.
+ * The money that goes back to a guest: the refund a cancellation or an early end owes and
+ * the sweep that pays it, the admin's list of what was set aside, and what the provider's
+ * news about a payment and its refunds reads and writes. The cancellation lease they run
+ * under is `BookingCancellationRepository.whileCancelling`.
  */
 @Injectable()
 export class BookingRefundRepository {

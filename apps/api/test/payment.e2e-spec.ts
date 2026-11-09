@@ -11,6 +11,7 @@ import {
   bookingAdjustmentSchema,
   hostFeeOverviewSchema,
   hostShare,
+  notificationPageSchema,
   shareOf,
   bookingPaymentSchema,
   bookingSchema,
@@ -909,6 +910,173 @@ describe("Payments (e2e)", () => {
 
     const owed = hostShare(booking.amountCents, cents(6_000));
 
+    expect(payoutGateway.reversals).toEqual([
+      { transferId, amount: paidOut - owed },
+    ]);
+
+    const row = await app
+      .get(PrismaService)
+      .booking.findUniqueOrThrow({ where: { id: booking.id } });
+
+    expect(row.paidOutAmountCents).toBe(owed);
+  });
+
+  /**
+   * A paid stay of three nights that began today: booked ten days ahead — `POST /bookings`
+   * refuses a check-in in the past — and moved back, its nights with it.
+   */
+  const begun = async (): Promise<Booking> => {
+    const booking = await paid(10, 13);
+    const prisma = app.get(PrismaService);
+
+    await prisma.$executeRaw`
+      UPDATE bookings SET from_date = from_date - 10, to_date = to_date - 10
+      WHERE id = ${booking.id}::uuid
+    `;
+    await prisma.$executeRaw`
+      UPDATE booking_nights SET date = date - 10 WHERE booking_id = ${booking.id}::uuid
+    `;
+
+    return read(booking.id);
+  };
+
+  it("ends a stay early: the nights after tonight come free, their refund goes out and the review opens", async () => {
+    const booking = await begun();
+    const unused = cents(2 * listingInput.pricePerNightCents);
+
+    // Confirmed for more than the unused nights give back, it is refused and ends nothing.
+    await guest
+      .post(`/bookings/${booking.id}/end-early`)
+      .send({ checkOut: inDays(1), refundCents: unused + 1 })
+      .expect(409);
+    await guest
+      .post(`/bookings/${booking.id}/end-early`)
+      .send({ checkOut: inDays(1), refundCents: unused })
+      .expect(204);
+    await refundSent(booking.id);
+
+    const after = await read(booking.id);
+
+    expect(after).toMatchObject({
+      status: "CONFIRMED",
+      from: inDays(0),
+      to: inDays(1),
+      refundedAmountCents: unused,
+      refundOwedCents: null,
+    });
+    expect(after.endedEarlyAt).not.toBeNull();
+    expect(gateway.refunds).toEqual([
+      {
+        paymentId: paymentIdOf(booking.id),
+        amount: unused,
+        key: `booking-${booking.id}-cancellation`,
+      },
+    ]);
+
+    // The host hears of it; the guest, who ended it, does not.
+    const told = notificationPageSchema
+      .parse((await owner.get("/notifications").expect(200)).body)
+      .items.filter(({ type }) => type === "STAY_ENDED_EARLY");
+
+    expect(told.map(({ data }) => data)).toEqual([
+      expect.objectContaining({
+        bookingId: booking.id,
+        recipient: "HOST",
+        endedBy: "GUEST",
+        checkOut: inDays(1),
+        to: inDays(3),
+        refundCents: unused,
+      }),
+    ]);
+    expect(
+      notificationPageSchema
+        .parse((await guest.get("/notifications").expect(200)).body)
+        .items.some(({ type }) => type === "STAY_ENDED_EARLY"),
+    ).toBe(false);
+
+    // What was bought stays on record.
+    const detail = (await guest.get(`/bookings/${booking.id}`).expect(200))
+      .body as { nights: unknown[] };
+
+    expect(detail.nights).toHaveLength(3);
+
+    // The nights from tomorrow on are anybody's again.
+    await guest
+      .post("/bookings")
+      .send({ listingId, from: inDays(1), to: inDays(3) })
+      .expect(201);
+
+    await guest
+      .post(`/bookings/${booking.id}/reviews`)
+      .send({ rating: 5, comment: "Had to leave early, but a lovely place." })
+      .expect(201);
+  });
+
+  it("refuses the host, a stay not begun and a second press, and refunds nothing under a policy that keeps the nights", async () => {
+    const booking = await begun();
+
+    await owner
+      .post(`/bookings/${booking.id}/end-early`)
+      .send({ checkOut: inDays(1), refundCents: 0 })
+      .expect(403);
+
+    const ahead = await paid(20, 23);
+
+    await guest
+      .post(`/bookings/${ahead.id}/end-early`)
+      .send({ checkOut: inDays(1), refundCents: 0 })
+      .expect(409);
+
+    await app.get(PrismaService).booking.update({
+      where: { id: booking.id },
+      data: { cancellationPolicy: "FIRM" },
+    });
+    // Without the check-out it was stated for, and with one the day has left behind.
+    await admin.post(`/bookings/${booking.id}/end-early`).expect(400);
+    await admin
+      .post(`/bookings/${booking.id}/end-early`)
+      .send({ checkOut: inDays(0), refundCents: 0 })
+      .expect(409);
+    await admin
+      .post(`/bookings/${booking.id}/end-early`)
+      .send({ checkOut: inDays(1), refundCents: 0 })
+      .expect(204);
+    await guest
+      .post(`/bookings/${booking.id}/end-early`)
+      .send({ checkOut: inDays(1), refundCents: 0 })
+      .expect(409);
+
+    expect(await read(booking.id)).toMatchObject({
+      to: inDays(1),
+      refundedAmountCents: null,
+      refundOwedCents: null,
+    });
+    expect(gateway.refunds).toEqual([]);
+  });
+
+  it("takes the unused nights' refund after the payout back from the host's transfer", async () => {
+    const booking = await begun();
+    const transferId = `tr_${booking.id.replaceAll("-", "")}`;
+    const paidOut = hostShare(booking.amountCents, NO_CENTS);
+
+    payoutGateway.sent.set(transferId, paidOut);
+    await app.get(PrismaService).booking.update({
+      where: { id: booking.id },
+      data: { transferId, paidOutAmountCents: paidOut, paidOutAt: new Date() },
+    });
+
+    await guest
+      .post(`/bookings/${booking.id}/end-early`)
+      .send({ checkOut: inDays(1), refundCents: 0 })
+      .expect(204);
+    await refundSent(booking.id);
+
+    const owed = hostShare(
+      booking.amountCents,
+      cents(2 * listingInput.pricePerNightCents),
+    );
+
+    await waitUntil(() => Promise.resolve(payoutGateway.reversals.length > 0));
     expect(payoutGateway.reversals).toEqual([
       { transferId, amount: paidOut - owed },
     ]);

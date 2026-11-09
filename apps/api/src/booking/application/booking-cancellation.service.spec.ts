@@ -620,6 +620,23 @@ describe("BookingCancellationService", () => {
       expect(paymentGateway.refunds.size).toBe(0);
     });
 
+    it("refuses a stay ended early whatever its dates: its refund key is spent", async () => {
+      const id = await paidStay(1);
+      const found = bookingTable.rows.get(id);
+
+      // Unreachable while both rules count UTC days; check-in at a time of its own (7.6)
+      // would let a cancellation follow an early end on the check-in day.
+      if (found !== undefined) {
+        found.booking.endedEarlyAt = new Date().toISOString();
+      }
+
+      await expect(
+        cancellationService.remove(id, guest),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(found?.booking.status).toBe(BookingStatus.CONFIRMED);
+      expect(paymentGateway.refunds.size).toBe(0);
+    });
+
     it("takes the host's share of a cancellation's refund back once it is sent", async () => {
       const id = await paidStay(1);
 

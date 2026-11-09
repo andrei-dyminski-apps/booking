@@ -135,6 +135,12 @@ export const bookingSchema = z.object({
    */
   cancellationReason: z.string().nullable(),
   /**
+   * When the stay was ended early, or `null`. `to` is the check-out it moved to then — the
+   * nights after it went back on offer — and `nights` on `bookingDetailSchema` keeps what was
+   * bought, so the two together say what was given up. See `unusedNightsRefund`.
+   */
+  endedEarlyAt: z.iso.datetime().nullable(),
+  /**
    * Which halves of the stay have been reviewed — the guest's word on the listing and the
    * host's word on the guest. Flags rather than the reviews themselves: the reader of a
    * booking is either of the two, and the half written about them is read where it is
@@ -170,6 +176,7 @@ const stayRequestFields = bookingSchema.omit({
   cancelledBy: true,
   cancelledAt: true,
   cancellationReason: true,
+  endedEarlyAt: true,
   reviewed: true,
 });
 

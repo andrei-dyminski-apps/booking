@@ -10,9 +10,10 @@ import { LeaseBusyError, whileLeased, type LeaseTiming } from "./booking-lease";
 import { countedCancellationsWhere } from "./booking-where";
 
 /**
- * The cancellation of a stay and the lease it is taken under. The lease is the one place
- * `cancelling_until` is taken: the refund job and the payment webhooks take it through
- * `whileCancelling` too, so a refund write never lands in the middle of a cancellation.
+ * The cancellation of a stay, the early end of one, and the lease both are taken under. The
+ * lease is the one place `cancelling_until` is taken: the refund job and the payment webhooks
+ * take it through `whileCancelling` too, so a refund write never lands in the middle of a
+ * cancellation or an early end.
  */
 @Injectable()
 export class BookingCancellationRepository {
@@ -95,6 +96,38 @@ export class BookingCancellationRepository {
     return feeCents === null
       ? write(this.prismaService)
       : this.prismaService.$transaction(write);
+  }
+
+  /**
+   * Ending a stay early: `to_date` moves to `checkOut` — the `EXCLUDE` constraint lets the
+   * nights after it go — and the refund of the unused nights is written as the debt in the
+   * same statement, the way `cancel` writes one, so the job sends it whatever happens to this
+   * request after. It matches only the stay as it was read — still confirmed, with the
+   * check-out `to`, never ended early and owing nothing — so a second press or a stay that
+   * changed meanwhile writes nothing: `false`.
+   */
+  async endEarly(
+    id: string,
+    to: string,
+    checkOut: string,
+    refundOwedCents: Cents | null,
+  ): Promise<boolean> {
+    const { count } = await this.prismaService.booking.updateMany({
+      where: {
+        id,
+        status: BookingStatus.CONFIRMED,
+        to: new Date(to),
+        endedEarlyAt: null,
+        refundOwedCents: null,
+      },
+      data: {
+        to: new Date(checkOut),
+        endedEarlyAt: new Date(),
+        refundOwedCents,
+      },
+    });
+
+    return count > 0;
   }
 
   /**

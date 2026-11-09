@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Loader2Icon } from "lucide-react";
 import {
   BookingStatus,
@@ -7,6 +8,7 @@ import {
   cancellerOf,
   DisputeStatus,
   isCancellableOn,
+  mayEndEarly,
   NO_CENTS,
   refundableCents,
   Role,
@@ -32,8 +34,10 @@ import {
 import { dayOf, formatMoment, formatMoney, nightsBreakdown } from "#shared/lib";
 import { DateRange, NightCount } from "#shared/ui";
 import { useBookingLive, type BankAnswer } from "../model/use-booking-live";
+import { earlyEndTerms, endedEarlyNote } from "../model/early-end-note";
 import { BookingAdjustments } from "./booking-adjustments";
 import { CancelStayButton } from "./cancel-stay-button";
+import { EndStayEarlyButton } from "./end-stay-early-button";
 import { PaymentForm } from "./payment-form";
 import { RefundStayButton } from "./refund-stay-button";
 
@@ -87,6 +91,9 @@ export const BookingLive = ({
     clock,
     schedule,
   } = useBookingLive({ initial, now, bankAnswer });
+  // Whether the early-end dialog is open: it stays on the page until it closes, even once
+  // the stay can no longer end early — the day turned under it onto its last night.
+  const [endingEarly, setEndingEarly] = useState(false);
   const pending = booking.status === BookingStatus.PENDING_PAYMENT;
   const confirmed = booking.status === BookingStatus.CONFIRMED;
   const { expiresAt } = booking;
@@ -117,6 +124,16 @@ export const BookingLive = ({
     viewer.role === Role.ADMIN && booking.dispute !== DisputeStatus.OPEN
       ? refundableCents(booking, today)
       : NO_CENTS;
+  // Ending a stay early is the guest's, or an admin's on their behalf — not the host's. A
+  // stay with no nights recorded has nothing to measure a refund by, and the API refuses it,
+  // as it refuses an open dispute.
+  const endable =
+    (canceller === Canceller.GUEST || canceller === Canceller.ADMIN) &&
+    booking.nights.length > 0 &&
+    booking.dispute !== DisputeStatus.OPEN &&
+    mayEndEarly(booking, today);
+  const endTerms = endable ? earlyEndTerms(booking, today) : null;
+  const endedEarly = endedEarlyNote(booking);
 
   return (
     <>
@@ -227,6 +244,12 @@ export const BookingLive = ({
             </p>
           )}
 
+          {endedEarly !== null && (
+            <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+              {endedEarly}
+            </p>
+          )}
+
           {booking.refundedAmountCents !== null && (
             <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
               {formatMoney(booking.refundedAmountCents, booking.currency)} was
@@ -243,13 +266,22 @@ export const BookingLive = ({
           )}
         </CardContent>
 
-        {(cancellable || refundable > 0) && (
+        {(cancellable || endable || endingEarly || refundable > 0) && (
           <CardFooter className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
             {cancellable && canceller !== null && (
               <CancelStayButton
                 booking={booking}
                 canceller={canceller}
                 refundNote={refundNote}
+              />
+            )}
+            {(endable || endingEarly) && (
+              <EndStayEarlyButton
+                bookingId={booking.id}
+                terms={endTerms}
+                onOpenChange={setEndingEarly}
+                onRefused={readAgain}
+                onEnded={readAgain}
               />
             )}
             {refundable > 0 && (
