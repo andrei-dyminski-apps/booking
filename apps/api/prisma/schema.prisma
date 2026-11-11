@@ -48,6 +48,13 @@ model Booking {
   /// and says so in its name, the way the contract's fields do.
   amountCents Int @map("amount_cents")
 
+  /// What the stay's rate took off its nights — `amount_cents` is their sum less this, and
+  /// zero at the standard rate. `bookings_discount_within_amount` (raw SQL) keeps it at
+  /// zero or above and at most half the nights — `amount_cents + 1`, since at
+  /// `MAX_NON_REFUNDABLE_DISCOUNT_BPS` an odd total rounds the odd cent to the guest. No
+  /// default, for the reason `cancellation_policy` has none: `create` has to write it.
+  discountCents Int @map("discount_cents")
+
   /// What `amount_cents` and the columns below are cents of — ISO 4217, lower case, as Stripe
   /// spells it. Stored with the stay rather than read off the site's `CURRENCY`, so a record
   /// of money says on its own what it was paid in. `bookings_currency_supported` (raw SQL)
@@ -59,8 +66,8 @@ model Booking {
   /// restate a stay already taken. No default on purpose: `create` has to write it.
   cancellationPolicy CancellationPolicy @map("cancellation_policy")
 
-  /// What each night of the stay cost when it was quoted — `amount_cents` is their sum,
-  /// written by the same insert. See `BookingNight`.
+  /// What each night of the stay cost when it was quoted — `amount_cents` is their sum less
+  /// `discount_cents`, written by the same insert. See `BookingNight`.
   nights BookingNight[]
 
   /// The Stripe PaymentIntent of this hold — opened under a key named after the booking, so
@@ -302,6 +309,11 @@ model Listing {
   /// How much a guest's cancellation refunds, and until when — `CANCELLATION_TERMS` in
   /// `@repo/contracts`. Every booking copies it when it is taken.
   cancellationPolicy CancellationPolicy @default(FLEXIBLE) @map("cancellation_policy")
+  /// What a stay booked at the non-refundable rate is given off, in basis points; `null` is a
+  /// listing that offers no such rate. `listings_discount_within_contract` (raw SQL) holds
+  /// it to the contract's bounds, and `listings_rate_beside_refundable_policy` to `null`
+  /// under the `NON_REFUNDABLE` policy, whose standard rate already refunds nothing.
+  nonRefundableDiscountBps Int? @map("non_refundable_discount_bps")
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")
   /// When the owner retired it. The row outlives that moment because the bookings above

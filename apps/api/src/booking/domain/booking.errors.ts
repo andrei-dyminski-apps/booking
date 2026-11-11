@@ -1,7 +1,11 @@
 import type { CreateBookingInput } from "@repo/contracts";
 import { RetryLaterError } from "../../common/retry-later.error";
-import { formatCents, type Cents } from "../../payment/domain/money";
-import { MAX_CHARGE, MIN_CHARGE } from "./stay-price";
+import {
+  formatCents,
+  MAX_CHARGE,
+  MIN_CHARGE,
+  type Cents,
+} from "../../payment/domain/money";
 
 /**
  * What `create` throws instead of letting a Prisma error code reach the service. The
@@ -69,22 +73,32 @@ export class ListingChangedError extends Error {
   }
 }
 
-/** Raised under the lock once the quote exists, so nothing is inserted. */
-export class StayTooExpensiveError extends Error {
-  constructor(amount: Cents) {
-    super(
-      `A stay costing ${formatCents(amount)} is more than one payment can carry (${formatCents(MAX_CHARGE)})`,
-    );
-    this.name = "StayTooExpensiveError";
+/**
+ * The request asked for the non-refundable rate on a listing that does not offer one. Read
+ * off the same locked row as the discount it would have taken, so a host withdrawing the
+ * rate either lands before this check or waits for the hold.
+ */
+export class RateNotOfferedError extends Error {
+  constructor(listingId: string) {
+    super(`Listing ${listingId} offers no non-refundable rate`);
+    this.name = "RateNotOfferedError";
   }
 }
 
-export class StayTooCheapError extends Error {
-  constructor(amount: Cents) {
+/**
+ * A quote one payment cannot carry. Raised under the lock once the quote exists, so nothing
+ * is inserted; `refusal` is `chargeRefusal`'s answer, so the bounds and the words the
+ * service refuses the hold with are the contract's — the ones the booking form shows.
+ */
+export class UnchargeableStayError extends Error {
+  constructor(
+    amount: Cents,
+    readonly refusal: string,
+  ) {
     super(
-      `A stay costing ${formatCents(amount)} is less than one payment can carry (${formatCents(MIN_CHARGE)})`,
+      `A stay costing ${formatCents(amount)} is outside what one payment can carry (${formatCents(MIN_CHARGE)} to ${formatCents(MAX_CHARGE)})`,
     );
-    this.name = "StayTooCheapError";
+    this.name = "UnchargeableStayError";
   }
 }
 

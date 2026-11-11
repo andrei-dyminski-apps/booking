@@ -1,25 +1,30 @@
 import { tz } from "@date-fns/tz";
 import { differenceInCalendarDays, parseISO } from "date-fns";
 import { z } from "zod";
-import { cancellationPolicySchema } from "./cancellation-policy.js";
+import {
+  CancellationPolicy,
+  cancellationPolicySchema,
+} from "./cancellation-policy.js";
 import { dayMessage, isDay, today } from "./day.js";
+import { BASIS_POINTS, MAX_CHARGE } from "./money.js";
 import { blank, PAGING } from "./query.js";
 
 /**
  * What a single night may cost, in cents — just under a million in the currency itself.
  * High enough that no real nightly rate reaches it, low enough that a misplaced decimal
  * point still does — which is the only thing a ceiling on a price can usefully catch. It is
- * Stripe's ceiling for one charge (`MAX_CHARGE` in the API), so a night at the ceiling is
- * still a stay one payment can carry.
+ * `MAX_CHARGE` itself, Stripe's ceiling for one charge (`money.ts`), so a night at the
+ * ceiling is still a stay one payment can carry.
  *
  * The column carries the same number as a `CHECK` constraint
  * (`listings_price_within_contract`), and that is what keeps the two ends honest: this
  * schema guards every price that arrives over HTTP, and the constraint guards the writes
  * that never pass through it — the seed, a migration, an import — so a row this schema
  * would refuse to read back cannot be stored in the first place. Raising the ceiling means
- * raising both, in one change.
+ * raising both, in one change — and since this follows `MAX_CHARGE`, so does changing
+ * `MAX_CHARGE`: the constraint is a literal in its migration, and nothing else moves it.
  */
-const MAX_PRICE = 99_999_999;
+const MAX_PRICE = MAX_CHARGE;
 
 /**
  * The same number as a person reads it, in the currency itself. The locale is named rather
@@ -35,6 +40,31 @@ const MAX_PRICE_LABEL = (MAX_PRICE / 100).toLocaleString("en-US");
  * question asked from either end, so the number is written once.
  */
 const MAX_CAPACITY = 50;
+
+/**
+ * The deepest discount a listing may give for its non-refundable rate, in basis points. A
+ * bound because the trade is a cheaper stay for the right to a refund: past half the price
+ * it stops being a rate and becomes a sale nobody can undo. `bookings_discount_within_amount`
+ * holds the same half on the column: rounded half up, the discount of an odd total at this
+ * bound is one cent more than what is left, and never more than that.
+ */
+export const MAX_NON_REFUNDABLE_DISCOUNT_BPS = BASIS_POINTS / 2;
+
+/** The shallowest one — a hundredth of the price; less is not a discount worth a refund. */
+export const MIN_NON_REFUNDABLE_DISCOUNT_BPS = BASIS_POINTS / 100;
+
+const percent = (bps: number): string => `${String(bps / 100)}%`;
+
+const DISCOUNT_RANGE = `A non-refundable discount has to be between ${percent(MIN_NON_REFUNDABLE_DISCOUNT_BPS)} and ${percent(MAX_NON_REFUNDABLE_DISCOUNT_BPS)}`;
+
+/**
+ * Why a listing under the `NON_REFUNDABLE` policy offers no non-refundable rate: its
+ * standard rate already refunds nothing, so the "rate" would be the same terms for less —
+ * the discount pays for giving up a refund, and there is none to give up. The API answers a
+ * `PATCH` that would leave the row so with the same words.
+ */
+export const RATE_UNDER_NON_REFUNDABLE_POLICY =
+  "A listing whose cancellation policy already refunds nothing cannot offer a non-refundable rate";
 
 /**
  * The two rules every price on this contract obeys, as checks rather than as a wrapper
@@ -133,6 +163,16 @@ export const listingSchema = z.object({
    * booking copies it when the hold is taken.
    */
   cancellationPolicy: cancellationPolicySchema,
+  /**
+   * What the listing takes off a stay booked at its non-refundable rate, in basis points,
+   * or `null` when it offers no such rate. A booking at that rate is frozen under the
+   * `NON_REFUNDABLE` policy whatever `cancellationPolicy` says — see `quoteStay`.
+   */
+  nonRefundableDiscountBps: z
+    .int({ error: DISCOUNT_RANGE })
+    .min(MIN_NON_REFUNDABLE_DISCOUNT_BPS, { error: DISCOUNT_RANGE })
+    .max(MAX_NON_REFUNDABLE_DISCOUNT_BPS, { error: DISCOUNT_RANGE })
+    .nullable(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
@@ -282,7 +322,7 @@ export const listingDetailSchema = listingSchema.extend({
  * create a listing in somebody else's name — the same reason the price of a stay is
  * computed by the server in phase 6 instead of being sent along with the booking.
  */
-export const createListingSchema = listingSchema
+const listingInputFields = listingSchema
   .omit({
     id: true,
     ownerId: true,
@@ -298,6 +338,13 @@ export const createListingSchema = listingSchema
      */
     cancellationPolicy: cancellationPolicySchema.optional(),
     /**
+     * Optional for the reason the policy is: a listing created without it offers no
+     * non-refundable rate, and a `PATCH` without it leaves the rate as it was. `null`
+     * withdraws the rate; the stays already booked at it keep their discount and policy.
+     */
+    nonRefundableDiscountBps:
+      listingSchema.shape.nonRefundableDiscountBps.optional(),
+    /**
      * Optional, and replaced whole when present: a listing created without it costs its
      * default price every night, and a `PATCH` without it leaves the exceptions as they
      * were. A `PATCH` with it is the complete set — a date missing from the list is a date
@@ -308,14 +355,43 @@ export const createListingSchema = listingSchema
   });
 
 /**
+ * A body naming both the `NON_REFUNDABLE` policy and a discount is refused here, on the
+ * discount, where the listing form shows the box. A `PATCH` naming one of them can still
+ * meet the other on the row, which no schema sees: `listings_rate_beside_refundable_policy`
+ * holds the pair on the table, and the API answers it with `RATE_UNDER_NON_REFUNDABLE_POLICY`.
+ */
+function withRateRule<
+  T extends z.ZodType<{
+    cancellationPolicy?: CancellationPolicy | undefined;
+    nonRefundableDiscountBps?: number | null | undefined;
+  }>,
+>(schema: T): T {
+  return schema.refine(
+    (listing) =>
+      listing.cancellationPolicy !== CancellationPolicy.NON_REFUNDABLE ||
+      listing.nonRefundableDiscountBps == null,
+    {
+      error: RATE_UNDER_NON_REFUNDABLE_POLICY,
+      path: ["nonRefundableDiscountBps"],
+    },
+  );
+}
+
+export const createListingSchema = withRateRule(listingInputFields);
+
+/**
  * A PATCH body: any subset of the editable fields, but not an empty one — an update that
  * changes nothing is a mistake on the caller's side rather than a no-op worth storing.
+ * Made partial from the fields rather than from `createListingSchema`: zod refuses to make
+ * a schema with a refinement partial, so the rate's rule is applied to each on its own.
  */
-export const updateListingSchema = createListingSchema
-  .partial()
-  .refine((listing) => Object.keys(listing).length > 0, {
-    error: "At least one field must be provided",
-  });
+export const updateListingSchema = withRateRule(
+  listingInputFields
+    .partial()
+    .refine((listing) => Object.keys(listing).length > 0, {
+      error: "At least one field must be provided",
+    }),
+);
 
 export const listingListSchema = z.array(listingSchema);
 

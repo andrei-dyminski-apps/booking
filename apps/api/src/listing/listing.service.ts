@@ -1,23 +1,26 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import type {
-  AvailabilityQuery,
-  CreateListingInput,
-  Listing,
-  ListingAvailability,
-  ListingDetail,
-  ListingPage,
-  ListingQuery,
-  UpdateListingInput,
+import {
+  RATE_UNDER_NON_REFUNDABLE_POLICY,
+  type AvailabilityQuery,
+  type CreateListingInput,
+  type Listing,
+  type ListingAvailability,
+  type ListingDetail,
+  type ListingPage,
+  type ListingQuery,
+  type UpdateListingInput,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { ownsOrIsAdmin } from "../auth/ownership";
 import { BookingRepository } from "../booking/infrastructure/booking.repository";
 import { readCursor } from "../common/paging";
 import { decodeCursor, encodeCursor } from "./catalogue-cursor";
+import { RateUnderNonRefundablePolicyError } from "./listing.errors";
 import { ListingRepository } from "./listing.repository";
 
 /**
@@ -107,7 +110,19 @@ export class ListingService {
   ): Promise<Listing> {
     this.assertMayManage(await this.getListing(id), user);
 
-    const updated = await this.listingRepository.update(id, input);
+    let updated: Listing | null;
+
+    try {
+      updated = await this.listingRepository.update(id, input);
+    } catch (error) {
+      // A policy or a discount the contract passed on its own, refused beside the other
+      // half already on the row — in the contract's words, as if the body had named both.
+      if (error instanceof RateUnderNonRefundablePolicyError) {
+        throw new BadRequestException(RATE_UNDER_NON_REFUNDABLE_POLICY);
+      }
+
+      throw error;
+    }
 
     // Retired between the read above and this update, by its owner or an admin.
     if (updated === null) {

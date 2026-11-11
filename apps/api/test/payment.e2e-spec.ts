@@ -7,14 +7,18 @@ import { subDays } from "date-fns";
 import {
   BASIS_POINTS,
   Role,
+  STAY_TOO_CHEAP,
+  apiErrorSchema,
   bookingAdjustmentListSchema,
   bookingAdjustmentSchema,
   hostFeeOverviewSchema,
   hostShare,
   notificationPageSchema,
   shareOf,
+  bookingDetailSchema,
   bookingPaymentSchema,
   bookingSchema,
+  stayTotal,
   userSchema,
   type Booking,
   type CreateListingInput,
@@ -381,14 +385,58 @@ describe("Payments (e2e)", () => {
       ).body as { id: string }
     ).id;
 
-    await guest
+    const refused = await guest
       .post("/bookings")
       .send({ listingId: cheap, from: inDays(10), to: inDays(11) })
       .expect(422);
+    // The words of `chargeRefusal`, which the booking form shows before the press.
+    expect(apiErrorSchema.parse(refused.body).message).toBe(STAY_TOO_CHEAP);
     await guest
       .post("/bookings")
       .send({ listingId: cheap, from: inDays(10), to: inDays(12) })
       .expect(201);
+  });
+
+  it("bounds a non-refundable stay after its discount, and stores the odd cent of the deepest one", async () => {
+    const publish = async (
+      pricePerNightCents: number,
+      nonRefundableDiscountBps: number,
+    ): Promise<string> =>
+      (
+        (
+          await owner
+            .post("/listings")
+            .send({
+              ...listingInput,
+              pricePerNightCents,
+              nonRefundableDiscountBps,
+            })
+            .expect(201)
+        ).body as { id: string }
+      ).id;
+    const book = (listingId: string, from: number, rate?: string) =>
+      guest
+        .post("/bookings")
+        .send({ listingId, from: inDays(from), to: inDays(from + 1), rate });
+
+    // 50 cents is the floor itself; 1% off it rounds up to a cent and leaves 49.
+    const atTheFloor = await publish(50, 100);
+    const refused = await book(atTheFloor, 10, "NON_REFUNDABLE").expect(422);
+    expect(apiErrorSchema.parse(refused.body).message).toBe(STAY_TOO_CHEAP);
+    await book(atTheFloor, 10).expect(201);
+
+    // Half of 12_001 is 6_000.5, and the guest is given the odd cent: a discount one past
+    // what is charged, which the column's CHECK has to take.
+    const odd = await publish(12_001, 5_000);
+    const booking = bookingSchema.parse(
+      (await book(odd, 10, "NON_REFUNDABLE").expect(201)).body,
+    );
+    const detail = bookingDetailSchema.parse(
+      (await guest.get(`/bookings/${booking.id}`).expect(200)).body,
+    );
+
+    expect(booking.amountCents).toBe(6_000);
+    expect(detail.discountCents).toBe(6_001);
   });
 
   it("confirms the stay on a signed delivery, and once however often it comes", async () => {
@@ -565,6 +613,93 @@ describe("Payments (e2e)", () => {
     await admin.delete(`/bookings/${taken.id}`).expect(204);
     await refundSent(taken.id);
     expect((await read(taken.id)).refundedAmountCents).toBe(taken.amountCents);
+  });
+
+  it("takes the non-refundable rate's discount off the stay, refunds its guest nothing and its host's or an admin's cancellation in full", async () => {
+    await owner
+      .patch(`/listings/${listingId}`)
+      .send({ nonRefundableDiscountBps: 1_000 })
+      .expect(200);
+
+    const nonRefundable = async (
+      from: number,
+      to: number,
+    ): Promise<Booking> => {
+      const booking = bookingSchema.parse(
+        (
+          await guest
+            .post("/bookings")
+            .send({
+              listingId,
+              from: inDays(from),
+              to: inDays(to),
+              rate: "NON_REFUNDABLE",
+            })
+            .expect(201)
+        ).body,
+      );
+      await guest.post(`/bookings/${booking.id}/payment`).expect(200);
+      await settled(deliver(booking).expect(200));
+
+      return booking;
+    };
+
+    // A month ahead and booked a moment ago: a FLEXIBLE stay would refund in full, and the
+    // grace period would too — neither applies to the rate.
+    const kept = await nonRefundable(30, 33);
+    const detail = bookingDetailSchema.parse(
+      (await guest.get(`/bookings/${kept.id}`).expect(200)).body,
+    );
+
+    // Three nights at 12_035 cents, 10% off the 36_105 once: 3_610.5 rounds up to 3_611.
+    expect(kept.cancellationPolicy).toBe("NON_REFUNDABLE");
+    expect(detail.discountCents).toBe(3_611);
+    expect(stayTotal(detail.nights)).toBe(36_105);
+    expect(kept.amountCents).toBe(32_494);
+
+    await guest.delete(`/bookings/${kept.id}`).expect(204);
+
+    const cancelled = await read(kept.id);
+    expect(cancelled.status).toBe("CANCELLED");
+    expect(cancelled.refundedAmountCents).toBeNull();
+    expect(cancelled.refundOwedCents).toBeNull();
+
+    const byHost = await nonRefundable(40, 43);
+    await owner
+      .delete(`/bookings/${byHost.id}`)
+      .send({ reason: "The roof is being replaced" })
+      .expect(204);
+    await refundSent(byHost.id);
+    expect((await read(byHost.id)).refundedAmountCents).toBe(32_494);
+
+    const byAdmin = await nonRefundable(50, 53);
+    await admin.delete(`/bookings/${byAdmin.id}`).expect(204);
+    await refundSent(byAdmin.id);
+    expect((await read(byAdmin.id)).refundedAmountCents).toBe(32_494);
+
+    expect(gateway.refunds.map(({ paymentId }) => paymentId)).toEqual([
+      paymentIdOf(byHost.id),
+      paymentIdOf(byAdmin.id),
+    ]);
+
+    // A listing that withdrew the rate refuses it, and the standard rate is charged in full.
+    await owner
+      .patch(`/listings/${listingId}`)
+      .send({ nonRefundableDiscountBps: null })
+      .expect(200);
+    await guest
+      .post("/bookings")
+      .send({
+        listingId,
+        from: inDays(60),
+        to: inDays(63),
+        rate: "NON_REFUNDABLE",
+      })
+      .expect(400);
+
+    const standard = await hold(60, 63);
+    expect(standard.amountCents).toBe(36_105);
+    expect(standard.cancellationPolicy).toBe("FLEXIBLE");
   });
 
   it("refunds the guest in full when the host cancels, whatever the policy, and charges the host's fee", async () => {

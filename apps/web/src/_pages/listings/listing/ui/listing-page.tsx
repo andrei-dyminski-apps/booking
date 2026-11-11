@@ -13,6 +13,7 @@ import { Separator } from "@repo/ui/components/separator";
 import {
   CancellationTerms,
   CANCELLATION_POLICY_LABELS,
+  sharePercent,
 } from "#entities/booking";
 import { currentUser, listingsApi } from "#shared/api";
 import {
@@ -221,6 +222,7 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
                 earliest={from}
                 booked={availability.booked}
                 policy={listing.cancellationPolicy}
+                discountBps={listing.nonRefundableDiscountBps}
                 listingUpdatedAt={listing.updatedAt}
                 now={now}
               />
@@ -238,6 +240,14 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
           </CardHeader>
           <CardContent>
             <CancellationTerms policy={listing.cancellationPolicy} />
+            {listing.nonRefundableDiscountBps !== null && (
+              <p className="mt-3 text-sm text-muted-foreground">
+                Or book at the non-refundable rate,{" "}
+                {sharePercent(listing.nonRefundableDiscountBps)} off: cancelling
+                then refunds nothing, though a cancellation by the host still
+                refunds in full.
+              </p>
+            )}
           </CardContent>
         </Card>
 

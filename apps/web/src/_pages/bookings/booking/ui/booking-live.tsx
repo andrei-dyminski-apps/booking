@@ -159,6 +159,9 @@ export const BookingLive = ({
           {booking.nights.length > 0 && (
             <p className="text-sm text-muted-foreground">
               {nightsBreakdown(booking.nights, booking.currency)}
+              {/* The non-refundable rate's discount, taken off the nights once. */}
+              {booking.discountCents > 0 &&
+                ` − ${formatMoney(booking.discountCents, booking.currency)} non-refundable discount`}
             </p>
           )}
 

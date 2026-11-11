@@ -19,6 +19,7 @@ import {
   listingFormSchema,
   listingFormValues,
 } from "../model/listing-form-schema";
+import { NonRefundableField } from "./non-refundable-field";
 import { PolicyField } from "./policy-field";
 import { PricingFields } from "./pricing-fields";
 
@@ -140,6 +141,8 @@ export const ListingForm = ({
           </FormField>
 
           <PolicyField form={form} pending={pending} />
+
+          <NonRefundableField form={form} pending={pending} />
 
           <FieldSeparator />
 

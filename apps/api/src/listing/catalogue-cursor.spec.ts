@@ -11,6 +11,7 @@ const listing: Listing = {
   pricePerNightCents: cents(12_050),
   capacity: 4,
   cancellationPolicy: "FLEXIBLE",
+  nonRefundableDiscountBps: null,
   createdAt: "2026-08-20T12:00:00.000Z",
   updatedAt: "2026-08-20T12:00:00.000Z",
 };

@@ -1,4 +1,4 @@
-import type { Booking } from "@repo/contracts";
+import type { Booking, StayQuote } from "@repo/contracts";
 import {
   type Prisma,
   ReviewKind,
@@ -9,20 +9,17 @@ import {
 import { toIsoDate } from "../../common/iso-date";
 import {
   cents,
+  chargeRefusal,
   CURRENCY,
   currencySchema,
   type Cents,
 } from "../../payment/domain/money";
-import {
-  StayTooCheapError,
-  StayTooExpensiveError,
-} from "../domain/booking.errors";
+import { UnchargeableStayError } from "../domain/booking.errors";
 import type {
   ReleasedHold,
   RefundTarget,
   StayMoney,
 } from "../domain/booking.types";
-import { MAX_CHARGE, MIN_CHARGE, type StayQuote } from "../domain/stay-price";
 
 /*
  * A stay's money and its two people off a row, and the stay as the contract answers it. A
@@ -98,27 +95,28 @@ export function toStayMoney(
 }
 
 /**
- * What a stay's quote writes: the amount, the currency it is charged in and the nights it
- * adds up from, in one insert. A quote one payment could not carry is refused before
- * anything is written — `BookingRepository.create` and the seed both write through this, so
- * neither can store a stay the other would price or bound differently.
+ * What a stay's quote writes: the amount, the currency it is charged in, the nights it adds
+ * up from and the discount its rate took off them, in one insert. A quote one payment could
+ * not carry — `chargeRefusal`, the rule the booking form applies, read after the discount
+ * since that is what is charged — is refused before anything is written.
+ * `BookingRepository.create` and the seed both write through this, so neither can store a
+ * stay the other would price or bound differently.
  */
 export function stayMoneyData(
   quote: StayQuote,
 ): Pick<
   Prisma.BookingUncheckedCreateInput,
-  "amountCents" | "currency" | "nights"
+  "amountCents" | "discountCents" | "currency" | "nights"
 > {
-  if (quote.amountCents > MAX_CHARGE) {
-    throw new StayTooExpensiveError(quote.amountCents);
-  }
+  const refusal = chargeRefusal(quote.amountCents);
 
-  if (quote.amountCents < MIN_CHARGE) {
-    throw new StayTooCheapError(quote.amountCents);
+  if (refusal !== null) {
+    throw new UnchargeableStayError(quote.amountCents, refusal);
   }
 
   return {
     amountCents: quote.amountCents,
+    discountCents: quote.discountCents,
     currency: CURRENCY,
     nights: {
       create: quote.nights.map((night) => ({

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import {
+  BookingRate,
   createBookingSchema,
   type BookedRange,
   type CancellationPolicy,
@@ -19,8 +20,10 @@ import { FormField } from "#shared/ui";
 import { createBookingAction } from "../api/create-booking-action";
 import { joinWaitlistAction } from "../api/join-waitlist-action";
 import { callsForWaitlist } from "../lib/months";
+import { offeredRate } from "../lib/stay-rates";
 import { BookingSubmit } from "./booking-submit";
 import { CancellationQuote } from "./cancellation-quote";
+import { RateChoice } from "./rate-choice";
 import { StayQuote } from "./stay-quote";
 
 /**
@@ -30,8 +33,10 @@ import { StayQuote } from "./stay-quote";
  *
  * The price is worked out beside the submit as the dates change (`StayQuote`), by the rule
  * the payment charges by too. Nothing about it is sent: the API quotes the stay off the
- * listing's prices, which is why `createBookingSchema` has no amount on it at all. What a
- * cancellation of those dates would give back is dated under them (`CancellationQuote`).
+ * listing's prices, which is why `createBookingSchema` has no amount on it at all. A listing
+ * with a non-refundable rate offers both rates with their totals (`RateChoice`), and the
+ * rate is the one thing about the money the form does send. What a cancellation of those
+ * dates would give back at the chosen rate is dated under them (`CancellationQuote`).
  *
  * `createBookingSchema` is also what refuses a check-out before the check-in and a stay in
  * the past, here as well as in the action. `listingId` is one of its fields, so the form
@@ -52,6 +57,7 @@ export const BookingForm = ({
   earliest,
   booked,
   policy,
+  discountBps,
   listingUpdatedAt,
   now,
 }: {
@@ -64,6 +70,8 @@ export const BookingForm = ({
   booked: readonly BookedRange[];
   /** The listing's cancellation policy, which the hold copies when it is taken. */
   policy: CancellationPolicy;
+  /** The listing's non-refundable discount, or `null` when it offers no such rate. */
+  discountBps: number | null;
   /**
    * The version of the listing this render read — its prices and its policy. The action
    * sends it as the one the guest was shown, and the API refuses the hold if the listing
@@ -79,7 +87,10 @@ export const BookingForm = ({
       const waits = callsForWaitlist(values.from, values.to, booked, refused);
       const answer = waits
         ? await joinWaitlistAction(listingId, state, values)
-        : await createBookingAction(listingId, listingUpdatedAt, state, values);
+        : await createBookingAction(listingId, listingUpdatedAt, state, {
+            ...values,
+            rate: offeredRate(values.rate, discountBps, waits),
+          });
 
       if (answer.stale) {
         setRefused(waits ? null : { from: values.from, to: values.to });
@@ -88,7 +99,7 @@ export const BookingForm = ({
       return answer;
     },
     schema: createBookingSchema,
-    defaultValues: { from: "", to: "" },
+    defaultValues: { from: "", to: "", rate: BookingRate.STANDARD },
     bound: { listingId },
   });
 
@@ -135,16 +146,41 @@ export const BookingForm = ({
           <div className="flex flex-col gap-4 lg:pt-6.5">
             <BookingSubmit
               control={form.control}
+              prices={prices}
+              discountBps={discountBps}
               booked={booked}
               refused={refused}
               pending={pending}
             />
 
-            <StayQuote control={form.control} prices={prices} />
+            <StayQuote
+              control={form.control}
+              prices={prices}
+              discountBps={discountBps}
+              booked={booked}
+              refused={refused}
+            />
           </div>
         </div>
 
-        <CancellationQuote control={form.control} policy={policy} now={now} />
+        {discountBps !== null && (
+          <RateChoice
+            control={form.control}
+            prices={prices}
+            discountBps={discountBps}
+            booked={booked}
+            refused={refused}
+          />
+        )}
+
+        <CancellationQuote
+          control={form.control}
+          policy={policy}
+          discountBps={discountBps}
+          booked={booked}
+          refused={refused}
+          now={now}
+        />
 
         {message !== null && <FieldError>{message}</FieldError>}
 

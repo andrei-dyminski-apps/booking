@@ -18,7 +18,6 @@ import {
   fromToday,
   guest,
   LISTING_ID,
-  listing,
   GUEST_ID,
   owner,
   OWNER_ID,
@@ -31,8 +30,11 @@ import { type FakePaymentGateway } from "./testing/payment-gateway.fakes";
 import { type FakeStayEventsListener } from "./testing/stay-events.fakes";
 import { type FakeWaitlistService } from "./testing/waitlist-service.fakes";
 
-/** What one night of the fake's stays costs — the listing's default price. */
-const NIGHT = listing.pricePerNightCents;
+/**
+ * What one night of the fake's stays costs: its three nights share the `AMOUNT` it charged,
+ * since the refund is measured by nights that add up to what was paid.
+ */
+const NIGHT = cents(AMOUNT / 3);
 
 /**
  * The terms every early end below is confirmed for: the stay's page states tomorrow, and no
@@ -43,7 +45,7 @@ const TOMORROW = { checkOut: fromToday(1), refundCents: cents(0) };
 
 /**
  * Ending a stay early against the fakes of `testing/booking.fakes.ts`. The fake's stays are
- * three nights at the listing's default price; the refund job runs at once, so what the
+ * three nights of `NIGHT` each; the refund job runs at once, so what the
  * early end decided is read off the gateway's refunds.
  */
 describe("BookingEarlyEndService", () => {
@@ -249,16 +251,16 @@ describe("BookingEarlyEndService", () => {
     const id = await paidStay(0);
     const paymentId = bookingTable.rows.get(id)?.paymentId ?? "";
 
-    // A dashboard refund of one night's worth leaves 36000 of the fixture's 48000, and the
-    // two unused nights keep 24000 × 36000 / 48000 of their worth.
+    // A dashboard refund of a quarter of the fixture's 48000 leaves 36000, and the two
+    // unused nights keep 32000 × 36000 / 48000 of their worth.
     expect(AMOUNT).toBe(48_000);
-    paymentGateway.refundedUnreported.set(paymentId, cents(NIGHT));
+    paymentGateway.refundedUnreported.set(paymentId, cents(12_000));
 
     await earlyEndService.endEarly(id, guest, TOMORROW);
 
     expect(paymentGateway.refunds.get(`booking-${id}-cancellation`)).toEqual({
       paymentId,
-      amount: cents(18_000),
+      amount: cents(24_000),
     });
   });
 
@@ -266,16 +268,16 @@ describe("BookingEarlyEndService", () => {
     const id = await paidStay(0);
     const paymentId = bookingTable.rows.get(id)?.paymentId ?? "";
 
-    // The page stated the two unused nights whole; a dashboard refund of one night's worth
-    // whose news has not arrived leaves them 18000 of it.
-    paymentGateway.refundedUnreported.set(paymentId, cents(NIGHT));
+    // The page stated the two unused nights whole; a dashboard refund of a quarter of the
+    // charge whose news has not arrived leaves them 24000 of it.
+    paymentGateway.refundedUnreported.set(paymentId, cents(12_000));
 
     await expect(
       earlyEndService.endEarly(id, guest, {
         checkOut: fromToday(1),
         refundCents: cents(2 * NIGHT),
       }),
-    ).rejects.toThrow(/refund has changed.*180\.00/);
+    ).rejects.toThrow(/refund has changed.*240\.00/);
     expect(row(id)).toMatchObject({
       to: fromToday(3),
       endedEarlyAt: null,
@@ -285,7 +287,7 @@ describe("BookingEarlyEndService", () => {
 
     await earlyEndService.endEarly(id, guest, {
       checkOut: fromToday(1),
-      refundCents: cents(18_000),
+      refundCents: cents(24_000),
     });
 
     expect(row(id)?.to).toBe(fromToday(1));

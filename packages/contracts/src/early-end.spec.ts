@@ -130,6 +130,32 @@ describe("unusedNightsRefund", () => {
     ).toMatchObject({ cents: 16_000, reduced: true });
   });
 
+  it("gives back the unused nights at the discount, not at their full prices", () => {
+    // 5000 off the 50001 of nights: 45001 paid, so the 40001 unused hold 40001 × 45001 / 50001
+    // = 36000.98 — a share of their full prices would hand back money nobody paid.
+    const discounted = (refundedAmountCents: number | null = null) => ({
+      ...money("FLEXIBLE", refundedAmountCents),
+      amountCents: cents(45_001),
+    });
+
+    expect(
+      unusedNightsRefund(discounted(), nights, "2030-10-14"),
+    ).toMatchObject({ cents: 36_001, reduced: false });
+    // An earlier refund on top of the discount reduces it, and only that does: 40001 left
+    // of the 45001 paid is 40001 × 40001 / 50001 = 32000.96.
+    expect(
+      unusedNightsRefund(discounted(5_000), nights, "2030-10-14"),
+    ).toMatchObject({ cents: 32_001, reduced: true });
+    // A partial share is rounded once: 50% of 36000.98 is 18000.49.
+    expect(
+      unusedNightsRefund(
+        { ...discounted(), cancellationPolicy: "MODERATE" },
+        nights,
+        "2030-10-14",
+      ),
+    ).toMatchObject({ cents: 18_000, reduced: false });
+  });
+
   it("stays clear of the float's limit at the largest charge", () => {
     // 50000000 × 66666666 / 99999999 = 33333333.33, past 2^53 before the division.
     const priced = [

@@ -88,3 +88,18 @@ export const BASIS_POINTS = 10_000;
 export function shareOf(amount: Cents, bps: number): Cents {
   return cents(Math.floor((amount * bps + BASIS_POINTS / 2) / BASIS_POINTS));
 }
+
+/**
+ * Stripe's ceiling for one charge (eight digits of cents). A hold above it could never be
+ * paid and would only keep its nights off the calendar until it lapsed. The contract's
+ * `MAX_PRICE` is the same number, so a single night at the ceiling still fits. On the
+ * contract rather than in the API alone, so the booking form can say before the press that
+ * a stay is outside what one payment carries — see `chargeRefusal`.
+ */
+export const MAX_CHARGE = cents(99_999_999);
+
+/**
+ * Stripe's floor for one charge; the contract lets a night cost a cent. Checked against the
+ * amount after the discount, which is what the payment charges.
+ */
+export const MIN_CHARGE = cents(50);

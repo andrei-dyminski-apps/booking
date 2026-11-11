@@ -10,10 +10,9 @@ import {
   centsSchema,
   minCents,
   NO_CENTS,
-  shareOf,
   type Cents,
 } from "./money.js";
-import type { PricedNight } from "./pricing.js";
+import { stayTotal, type PricedNight } from "./pricing.js";
 import { notRefunded } from "./refund.js";
 
 /**
@@ -83,19 +82,23 @@ export type UnusedNightsRefund = {
   cents: Cents;
   /**
    * Whether earlier refunds took their part of these nights, so `cents` is less than the
-   * share of their prices.
+   * share of what they cost the guest. A rate's discount is part of that cost, not a
+   * reduction.
    */
   reduced: boolean;
 };
 
 /**
- * The share is taken of the nights' own prices — the stay's amount is their sum — so a
- * weekend night left unused gives back what it cost rather than an average. A refund sent
- * earlier (an admin's, the dashboard's) names no nights, so it is read as given back across
- * every night of the stay alike, by price: the unused ones keep `notRefunded / amount` of
- * their worth, and the share is of that. The guest is not handed the night they used for
- * free, and the earlier refund is not taken back out of the nights they leave. Whether there
- * is a payment at all is the caller's to know, as it is for `refundQuote`.
+ * The share is taken of the nights' own prices, so a weekend night left unused gives back
+ * what it cost rather than an average. What the guest holds of them is what was paid and
+ * not refunded, spread over every night of the stay alike by price: the unused ones keep
+ * `notRefunded / Σ nights` of their worth. That one ratio covers both things that make the
+ * payment less than the nights — a rate's discount, taken off the total rather than off any
+ * night, and a refund sent earlier (an admin's, the dashboard's), which names no nights
+ * either — so a discounted stay is given back what its nights cost at the discount, never
+ * their full prices. The guest is not handed the night they used for free, and the earlier
+ * refund is not taken back out of the nights they leave. Whether there is a payment at all
+ * is the caller's to know, as it is for `refundQuote`.
  */
 export function unusedNightsRefund(
   booking: Pick<
@@ -113,10 +116,12 @@ export function unusedNightsRefund(
     (sum, night) => addCents(sum, night.priceCents),
     NO_CENTS,
   );
+  const total = stayTotal(nights);
   const left = notRefunded(booking.amountCents, booking.refundedAmountCents);
-  // Never past what is left, should the nights ever add up to more than the amount.
+  // Never past what is left — the unused nights are a part of the total, so only a set of
+  // nights that is not the stay's could reach it.
   const refund = minCents(
-    proportionalShare(worth, shareBps, left, booking.amountCents),
+    proportionalShare(worth, shareBps, left, total),
     left,
   );
 
@@ -125,24 +130,26 @@ export function unusedNightsRefund(
     nights: unused.length,
     shareBps,
     cents: refund,
-    reduced: refund < shareOf(worth, shareBps),
+    // Against the same share with nothing refunded yet, so a discount alone reduces nothing.
+    reduced:
+      refund < proportionalShare(worth, shareBps, booking.amountCents, total),
   };
 }
 
 /**
- * `bps` of `worth × left / amount`, rounded half up once. In `bigint`, because the product
+ * `bps` of `worth × held / total`, rounded half up once. In `bigint`, because the product
  * of three amounts and a rate passes `Number.MAX_SAFE_INTEGER` near `MAX_CHARGE`.
  */
 function proportionalShare(
   worth: Cents,
   bps: number,
-  left: Cents,
-  amount: Cents,
+  held: Cents,
+  total: Cents,
 ): Cents {
-  if (amount === NO_CENTS) return NO_CENTS;
+  if (total === NO_CENTS) return NO_CENTS;
 
-  const numerator = BigInt(worth) * BigInt(bps) * BigInt(left);
-  const denominator = BigInt(amount) * BigInt(BASIS_POINTS);
+  const numerator = BigInt(worth) * BigInt(bps) * BigInt(held);
+  const denominator = BigInt(total) * BigInt(BASIS_POINTS);
 
   return cents(Number((2n * numerator + denominator) / (2n * denominator)));
 }

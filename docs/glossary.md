@@ -126,7 +126,8 @@ in its name (`amountCents`), so sums are exact and nothing between the database 
 provider converts. Turning cents into a label is the interface's job alone.
 
 **Charge limits** — a stay costs between the payment provider's floor and ceiling for one charge
-(`MIN_CHARGE`, `MAX_CHARGE`); a quote outside them is refused with `422`.
+(`MIN_CHARGE`, `MAX_CHARGE`, after any discount); a quote outside them is refused with `422`,
+and the booking form says so before the press (`chargeRefusal`).
 
 **Currency** — stored with every booking, so a record of money says what it was paid in. Payments
 and transfers are made in the stay's own currency.

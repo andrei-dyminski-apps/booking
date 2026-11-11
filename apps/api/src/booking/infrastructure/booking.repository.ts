@@ -1,8 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import {
+  BookingRate,
   BookingStatus,
+  CancellationPolicy,
+  quoteStay,
   type BookedRange,
-  type CancellationPolicy,
   type Booking,
   type BookingQuery,
   type BookingSort,
@@ -32,6 +34,7 @@ import {
   ListingChangedError,
   ListingNotFoundError,
   OwnListingError,
+  RateNotOfferedError,
 } from "../domain/booking.errors";
 import type {
   BookingCursor,
@@ -41,7 +44,6 @@ import type {
   CreatedBooking,
   ReleasedHold,
 } from "../domain/booking.types";
-import { quoteStay } from "../domain/stay-price";
 import { cents, type Cents } from "../../payment/domain/money";
 import {
   BOOKING_INCLUDE,
@@ -65,6 +67,7 @@ type LockedListing = {
   owner_id: string;
   deleted_at: Date | null;
   cancellation_policy: CancellationPolicy;
+  non_refundable_discount_bps: number | null;
   updated_at: Date;
 };
 
@@ -143,8 +146,8 @@ export class BookingRepository {
 
   /**
    * `findByIdWithListingOwner` with what each night cost when the hold was quoted, in the
-   * order of the stay, read in the same statement. Empty for a stay taken before the nights
-   * were recorded.
+   * order of the stay, and the discount taken off them, read in the same statement. The
+   * nights are empty for a stay taken before they were recorded.
    */
   async findDetailWithListingOwner(
     id: string,
@@ -162,6 +165,7 @@ export class BookingRepository {
             date: toIsoDate(night.date),
             priceCents: cents(night.priceCents),
           })),
+          discountCents: cents(row.discountCents),
         };
   }
 
@@ -235,8 +239,9 @@ export class BookingRepository {
    *     neither blocks the slot nor trips the `EXCLUDE` constraint on the insert below.
    *  3. refuse an overlap with an active stay — the informative `409`.
    *  4. quote the stay off the listing's prices (`quoteStay`), read under the same lock,
-   *     beside the cancellation policy the stay copies — refused first when the listing
-   *     was saved since the version the request names (`listingUpdatedAt`).
+   *     at the rate asked for, beside the cancellation policy the stay copies — refused
+   *     when the listing does not offer the rate, and before anything else when it was
+   *     saved since the version the request names (`listingUpdatedAt`).
    *  5. insert the hold with that amount. The `EXCLUDE` constraint is the last line of
    *     defence if a bug ever reaches here, and it is answered as the same `409`.
    *
@@ -254,7 +259,8 @@ export class BookingRepository {
 
     return this.prismaService.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<LockedListing[]>`
-        SELECT id, owner_id, deleted_at, cancellation_policy, updated_at
+        SELECT id, owner_id, deleted_at, cancellation_policy,
+               non_refundable_discount_bps, updated_at
         FROM listings WHERE id = ${input.listingId}::uuid FOR UPDATE
       `;
 
@@ -297,6 +303,23 @@ export class BookingRepository {
         throw new DatesUnavailableError(input);
       }
 
+      // The rate asked for, off the same locked row: the discount it takes and the policy it
+      // freezes — a non-refundable stay is `NON_REFUNDABLE` whatever the listing's own. After
+      // the overlap, so taken nights are the `409` a stale calendar reads whatever rate the
+      // request named.
+      const nonRefundable = input.rate === BookingRate.NON_REFUNDABLE;
+
+      if (nonRefundable && listing.non_refundable_discount_bps === null) {
+        throw new RateNotOfferedError(input.listingId);
+      }
+
+      const discountBps = nonRefundable
+        ? listing.non_refundable_discount_bps
+        : null;
+      const cancellationPolicy = nonRefundable
+        ? CancellationPolicy.NON_REFUNDABLE
+        : listing.cancellation_policy;
+
       // The quote is taken under the same lock as the nights, so a save of the listing's
       // prices — which writes this row first — either lands before it or waits for it.
       const priced = await readPricedListing(tx, input.listingId, input);
@@ -305,7 +328,9 @@ export class BookingRepository {
         throw new ListingNotFoundError(input.listingId);
       }
 
-      const money = stayMoneyData(quoteStay(priced, input.from, input.to));
+      const money = stayMoneyData(
+        quoteStay(priced, input.from, input.to, discountBps),
+      );
 
       try {
         const row = await tx.booking.create({
@@ -320,7 +345,7 @@ export class BookingRepository {
             ...money,
             // Copied as the amount is, so a later change of the listing's policy does not
             // restate this stay's refunds.
-            cancellationPolicy: listing.cancellation_policy,
+            cancellationPolicy,
           },
           include: BOOKING_INCLUDE,
         });

@@ -90,6 +90,7 @@ describe("PayoutRepository settlement lease (e2e)", () => {
         amountCents: 24_000,
         currency: "usd",
         cancellationPolicy: "FLEXIBLE",
+        discountCents: 0,
       },
     });
 
@@ -286,6 +287,7 @@ describe("The money columns of a paid stay (e2e)", () => {
         amountCents: AMOUNT,
         currency: "usd",
         cancellationPolicy: "FLEXIBLE",
+        discountCents: 0,
         paymentIntentId: "pi_money",
         chargeId: "ch_money",
         paidAt: new Date(),
@@ -526,6 +528,7 @@ describe("The money columns of a paid stay (e2e)", () => {
           amountCents: AMOUNT,
           currency: "usd",
           cancellationPolicy: "FLEXIBLE",
+          discountCents: 0,
           paymentIntentId: `pi_money_${String(stays)}`,
           chargeId: `ch_money_${String(stays)}`,
           paidAt: new Date(),

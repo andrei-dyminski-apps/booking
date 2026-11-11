@@ -81,6 +81,7 @@ describe("What the money paths set aside (e2e)", () => {
         amountCents: 48_000,
         currency: "usd",
         cancellationPolicy: "FLEXIBLE",
+        discountCents: 0,
         paidAt: new Date(),
       },
     });
@@ -401,6 +402,7 @@ describe("What the money paths set aside (e2e)", () => {
           amountCents: 48_000,
           currency: "usd",
           cancellationPolicy: "FLEXIBLE",
+          discountCents: 0,
           paidAt: new Date(),
           refundedAmountCents: 12_000,
           payoutAttempts: 24,

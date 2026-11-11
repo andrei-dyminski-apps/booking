@@ -3,7 +3,9 @@ import { Test, TestingModule } from "@nestjs/testing";
 import request from "supertest";
 import { App } from "supertest/types";
 import {
+  RATE_UNDER_NON_REFUNDABLE_POLICY,
   Role,
+  apiErrorSchema,
   bookingPageSchema,
   listingAvailabilitySchema,
   listingDetailSchema,
@@ -490,6 +492,103 @@ describe("ListingController (e2e)", () => {
       .patch(`/listings/${firm}`)
       .send({ cancellationPolicy: "GENEROUS" })
       .expect(400);
+  });
+
+  it("stores a non-refundable discount within its bounds, none unless one is named, and withdraws it on null", async () => {
+    const read = async (id: string) =>
+      listingDetailSchema.parse(
+        (await anyone().get(`/listings/${id}`).expect(200)).body,
+      ).nonRefundableDiscountBps;
+
+    expect(await read(listingId)).toBeNull();
+
+    const discounted = await publish({ nonRefundableDiscountBps: 1_500 });
+
+    expect(await read(discounted)).toBe(1_500);
+
+    await owner
+      .patch(`/listings/${discounted}`)
+      .send({ capacity: 3 })
+      .expect(200);
+    expect(await read(discounted)).toBe(1_500);
+
+    for (const nonRefundableDiscountBps of [50, 5_001, 12.5]) {
+      await owner
+        .patch(`/listings/${discounted}`)
+        .send({ nonRefundableDiscountBps })
+        .expect(400);
+    }
+
+    await owner
+      .patch(`/listings/${discounted}`)
+      .send({ nonRefundableDiscountBps: null })
+      .expect(200);
+    expect(await read(discounted)).toBeNull();
+  });
+
+  it("offers no non-refundable rate under the non-refundable policy, whichever half a save names", async () => {
+    // The contract's refusal is an issue under the discount; the API's own, the message.
+    const refused = async (
+      response: Promise<{ body: unknown }>,
+    ): Promise<void> => {
+      const { message, errors } = apiErrorSchema.parse((await response).body);
+
+      expect(errors ?? [{ path: [], message }]).toContainEqual(
+        expect.objectContaining({ message: RATE_UNDER_NON_REFUNDABLE_POLICY }),
+      );
+    };
+    const read = async (id: string) =>
+      listingSchema.parse(
+        (await anyone().get(`/listings/${id}`).expect(200)).body,
+      );
+
+    // Both in one body: the contract's refusal, before anything is written.
+    await refused(
+      owner
+        .post("/listings")
+        .send({
+          ...input,
+          cancellationPolicy: "NON_REFUNDABLE",
+          nonRefundableDiscountBps: 1_000,
+        })
+        .expect(400),
+    );
+
+    // One half against the other on the row: the CHECK's, answered in the same words.
+    const discounted = await publish({ nonRefundableDiscountBps: 1_000 });
+
+    await refused(
+      owner
+        .patch(`/listings/${discounted}`)
+        .send({ cancellationPolicy: "NON_REFUNDABLE" })
+        .expect(400),
+    );
+    expect(await read(discounted)).toMatchObject({
+      cancellationPolicy: "FLEXIBLE",
+      nonRefundableDiscountBps: 1_000,
+    });
+
+    const strict = await publish({ cancellationPolicy: "NON_REFUNDABLE" });
+
+    await refused(
+      owner
+        .patch(`/listings/${strict}`)
+        .send({ nonRefundableDiscountBps: 1_000 })
+        .expect(400),
+    );
+
+    // Withdrawing the rate in the same save is what lets the policy through.
+    await owner
+      .patch(`/listings/${discounted}`)
+      .send({
+        cancellationPolicy: "NON_REFUNDABLE",
+        nonRefundableDiscountBps: null,
+      })
+      .expect(200);
+    expect(await read(discounted)).toMatchObject({
+      cancellationPolicy: "NON_REFUNDABLE",
+      nonRefundableDiscountBps: null,
+    });
   });
 
   it("refuses the edit to another owner — the role passes, the ownership does not", async () => {

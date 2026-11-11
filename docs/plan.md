@@ -505,7 +505,8 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
       left — and `unusedNightsRefund(booking, nights, today)`: the `booking_nights` from
       tomorrow's on, times the policy's `unusedNightsBps`. Tonight is used. An earlier partial
       refund names no nights, so it counts as spread over all of them by price: the unused
-      nights keep `notRefunded / amount` of their worth.
+      nights keep `notRefunded / Σ nights` of their worth — which also prices them at the
+      discount of a non-refundable rate (7.5).
 - [x] The stay stays `CONFIRMED`; `to` moves to the new check-out and `ended_early_at` is
       stamped, so the `EXCLUDE` constraint and the waitlist see the nights free and the
       review opens at once. `booking_nights` keep what was bought. A stay with no nights
@@ -520,24 +521,41 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
 - [x] Specs: the night arithmetic (tonight, the last night); e2e — the nights are free, the
       refund is right, a payout already sent is reversed.
 
-### 7.5 — A non-refundable rate for a discount
+### 7.5 — A non-refundable rate for a discount ✅
 
-- [ ] `@repo/contracts`: `listing.nonRefundableDiscountBps` (nullable, at most
-      `MAX_NON_REFUNDABLE_DISCOUNT_BPS`), `createBookingSchema.rate`
-      (`STANDARD | NON_REFUNDABLE`). `quoteStay` takes the discount off the total once, with
-      one rounding; the nights keep their undiscounted prices and `discount_cents` holds the
-      difference, so `amount = Σ nights − discount`, checked against `MIN_CHARGE` /
-      `MAX_CHARGE` after it.
-- [ ] Prisma: `listings.non_refundable_discount_bps`, `bookings.discount_cents` (a `CHECK`
-      within the amount). `create` refuses the rate on a listing that does not offer it
-      (`400`) and freezes `NON_REFUNDABLE` as the booking's policy.
-- [ ] A guest's cancellation refunds nothing, and the grace period does not apply; a host's or
-      an admin's still refunds in full.
-- [ ] Web: the switch and the percentage on the listing form; both rates with their totals on
-      the booking form (`stay-quote.tsx`). The catalogue still shows and filters by the base
-      price.
-- [ ] Specs: `pricing.spec.ts` (the discount, its rounding, the floor); e2e — the guest's
-      cancellation refunds 0, the host's and the admin's 100%.
+- [x] `@repo/contracts`: `listing.nonRefundableDiscountBps` (nullable, 1% to
+      `MAX_NON_REFUNDABLE_DISCOUNT_BPS` = 50%), `createBookingSchema.rate`
+      (`STANDARD | NON_REFUNDABLE`, optional, `STANDARD` when left out). `quoteStay` moved
+      into the contract so the booking form quotes both rates by the rule the hold is
+      charged by: it takes the discount off the total once, with one rounding (half up, in
+      the guest's favour); the nights keep their undiscounted prices and `discountCents`
+      holds the difference, so `amount = Σ nights − discount`, checked against
+      `MIN_CHARGE` / `MAX_CHARGE` after it. `bookingDetailSchema.discountCents`.
+- [x] Prisma: `listings.non_refundable_discount_bps`
+      (`listings_discount_within_contract`), `bookings.discount_cents`
+      (`bookings_discount_within_amount`). `create` reads the discount under the same
+      `FOR UPDATE` as the policy, refuses the rate on a listing that does not offer it
+      (`400`) and freezes `NON_REFUNDABLE` as the booking's policy. A listing under the
+      `NON_REFUNDABLE` policy offers no such rate (`listings_rate_beside_refundable_policy`,
+      the contract's refinement for a body naming both, a `400` for a `PATCH` naming one).
+- [x] A guest's cancellation refunds nothing, and the grace period does not apply; a host's or
+      an admin's still refunds in full — `CANCELLATION_TERMS.NON_REFUNDABLE` already says
+      so, nothing new in `refundQuote`.
+- [x] Web: the switch and the percentage on the listing form; both rates with their totals on
+      the booking form (`RateChoice`, `stay-quote.tsx`), the cancellation quote under the
+      chosen rate; the discount on the stay's page. A rate whose total one payment cannot
+      carry is disabled unless chosen, its terms still shown, and the quote says why — naming the other
+      rate when that one fits (`stayCharge`) — while the submit is withheld; `MIN_CHARGE` /
+      `MAX_CHARGE` moved into the contract beside `chargeRefusal`, which the API applies
+      itself and answers in a `422`. The catalogue still
+      shows and filters by the base price. `switch` and `radio-group` added to `@repo/ui`.
+- [x] The seed: two listings offer the rate, one stay is booked at it.
+- [x] Specs: `pricing.spec.ts` (the discount, its rounding, the odd cent at the deepest
+      discount); e2e — the guest's cancellation refunds 0, the host's and the admin's 100%, a
+      listing without the rate refuses it, the floor applies after the discount, a 50%
+      discount of an odd total is stored, the discount round-trips through
+      `POST`/`PATCH`/`GET /listings`, the rate is refused beside the non-refundable policy
+      whichever half a save names, the three `CHECK`s hold against raw writes.
 
 ### 7.6 — Check-in in the listing's own time zone
 

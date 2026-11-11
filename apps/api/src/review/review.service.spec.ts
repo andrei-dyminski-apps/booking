@@ -289,6 +289,7 @@ class FakeListingRepository implements Pick<
       pricePerNightCents: cents(12_000),
       capacity: 4,
       cancellationPolicy: "FLEXIBLE",
+      nonRefundableDiscountBps: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });

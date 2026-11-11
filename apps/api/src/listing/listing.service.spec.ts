@@ -20,6 +20,7 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { BookingRepository } from "../booking/infrastructure/booking.repository";
 import type { Page } from "../common/paging";
 import { decodeCursor, type CatalogueCursor } from "./catalogue-cursor";
+import { RateUnderNonRefundablePolicyError } from "./listing.errors";
 import { ListingRepository } from "./listing.repository";
 import { ListingService } from "./listing.service";
 
@@ -140,6 +141,7 @@ class FakeListingRepository implements PublicOf<ListingRepository> {
       ownerId,
       ...fields,
       cancellationPolicy: fields.cancellationPolicy ?? "FLEXIBLE",
+      nonRefundableDiscountBps: fields.nonRefundableDiscountBps ?? null,
       createdAt: "2026-08-20T12:00:00.000Z",
       updatedAt: "2026-08-20T12:00:00.000Z",
     };
@@ -163,6 +165,14 @@ class FakeListingRepository implements PublicOf<ListingRepository> {
       ...fields,
       updatedAt: "2026-08-21T12:00:00.000Z",
     };
+
+    // `listings_rate_beside_refundable_policy`, as the real update translates it.
+    if (
+      updated.cancellationPolicy === "NON_REFUNDABLE" &&
+      updated.nonRefundableDiscountBps !== null
+    ) {
+      return Promise.reject(new RateUnderNonRefundablePolicyError(id));
+    }
 
     this.rows.set(id, updated);
 
@@ -311,6 +321,25 @@ describe("ListingService", () => {
       NotFoundException,
     );
     await expect(service.remove(id, owner)).rejects.toThrow(NotFoundException);
+  });
+
+  it("refuses a policy or a discount that would meet the other half on the row", async () => {
+    const id = await listedByOwner();
+
+    await service.update(id, { nonRefundableDiscountBps: 1_000 }, owner);
+    await expect(
+      service.update(id, { cancellationPolicy: "NON_REFUNDABLE" }, owner),
+    ).rejects.toThrow(BadRequestException);
+
+    await service.update(id, { nonRefundableDiscountBps: null }, owner);
+    await service.update(id, { cancellationPolicy: "NON_REFUNDABLE" }, owner);
+    await expect(
+      service.update(id, { nonRefundableDiscountBps: 1_000 }, owner),
+    ).rejects.toThrow(/already refunds nothing/);
+    await expect(service.findOne(id)).resolves.toMatchObject({
+      cancellationPolicy: "NON_REFUNDABLE",
+      nonRefundableDiscountBps: null,
+    });
   });
 
   it("answers 404 when the listing is retired just before the write", async () => {

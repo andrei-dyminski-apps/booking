@@ -22,9 +22,13 @@ export type BookingWithListingOwner = {
   paymentId: string | null;
 };
 
-/** The same, with the nights the stay's amount adds up from — what `GET /bookings/:id` answers. */
+/**
+ * The same, with the nights the stay's amount adds up from and the discount its rate took
+ * off them — what `GET /bookings/:id` answers.
+ */
 export type BookingDetailWithListingOwner = BookingWithListingOwner & {
   nights: PricedNight[];
+  discountCents: Cents;
 };
 
 /**

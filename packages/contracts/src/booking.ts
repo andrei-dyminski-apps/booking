@@ -3,7 +3,7 @@ import { cancellationPolicySchema } from "./cancellation-policy.js";
 import { dayMessage, isDay, today } from "./day.js";
 import { listingSummarySchema } from "./listing.js";
 import { centsSchema, currencySchema } from "./money.js";
-import { pricedNightSchema } from "./pricing.js";
+import { bookingRateSchema, pricedNightSchema } from "./pricing.js";
 import { blank, PAGING } from "./query.js";
 
 /**
@@ -222,6 +222,12 @@ export const createBookingSchema = withStayRules(
      * client that shows no terms can still book.
      */
     listingUpdatedAt: z.iso.datetime().optional(),
+    /**
+     * The rate the stay is booked at — `STANDARD` when left out. `NON_REFUNDABLE` takes the
+     * listing's discount off the total and freezes the `NON_REFUNDABLE` policy onto the
+     * stay; a listing that offers no such rate refuses it.
+     */
+    rate: bookingRateSchema.optional(),
   }),
 );
 
@@ -257,13 +263,18 @@ export const bookingListSchema = z.array(bookingSchema);
 
 /**
  * One stay as its own page reads it: the booking, and what each of its nights cost when the
- * hold was quoted — `amountCents` is their sum. Only `GET /bookings/:id` answers with it, for
- * the reason a listing's exceptions travel with one listing: a page of stays would carry a
- * list per row that nobody reading the page looks at. Empty for a stay taken before the
- * nights were recorded.
+ * hold was quoted — `amountCents` is their sum less `discountCents`. Only
+ * `GET /bookings/:id` answers with it, for the reason a listing's exceptions travel with one
+ * listing: a page of stays would carry a list per row that nobody reading the page looks
+ * at. The nights are empty for a stay taken before they were recorded.
  */
 export const bookingDetailSchema = bookingSchema.extend({
   nights: z.array(pricedNightSchema),
+  /**
+   * What the stay's rate took off the nights — `amountCents` is their sum less this. Zero
+   * for a stay at the standard rate.
+   */
+  discountCents: centsSchema,
 });
 
 /**

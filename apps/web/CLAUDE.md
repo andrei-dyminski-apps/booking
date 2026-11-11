@@ -115,9 +115,10 @@ apps/web/
         listing/ui/listing-page.tsx       # one listing: the calendar and the form
         listing/ui/availability-calendar.tsx # the nights already taken, drawn
         listing/ui/booking-form.tsx       # the only thing here that creates a booking — or joins the waitlist for taken nights
-        listing/ui/booking-submit.tsx     # …its button, worded by which of the two the dates call for
-        listing/ui/stay-quote.tsx         # …what its dates cost, night by night, redrawn on its own
-        listing/ui/cancellation-quote.tsx # …what cancelling them would refund, dated for the check-in
+        listing/ui/booking-submit.tsx     # …its button, worded by which of the two the dates call for; withheld while one payment could not carry the hold (stayCharge)
+        listing/ui/stay-quote.tsx         # …what its dates cost, night by night, less the discount at the non-refundable rate, redrawn on its own; a total one payment cannot carry followed by why (stayCharge) and by the other rate when that one fits
+        listing/ui/rate-choice.tsx        # …the standard and the non-refundable rate with their totals, for a listing that offers the second; none for dates the waitlist takes; a rate whose total one payment cannot carry is disabled and says why under its terms unless it is the one chosen (a disabled checked radio would take the group out of the tab order), whose reason StayQuote alone states
+        listing/ui/cancellation-quote.tsx # …what cancelling them would refund at the rate chosen, dated for the check-in
         listing/ui/listing-reviews.tsx    # the guests' reviews: the summary and the newest page
         listing/ui/listing-skeleton.tsx
         listing/ui/ask-host.tsx           # a guest's question, or the way back to their thread; streamed, degrades
@@ -128,7 +129,9 @@ apps/web/
         listing/api/read-listing-reviews.ts # the cached page, or null — the screen draws without it
         listing/api/start-conversation-action.ts # opens the thread, redirects into it
         listing/lib/months.ts             # the booked ranges laid out as month grids; whether a stay calls for the waitlist
+        listing/lib/stay-rates.ts         # both rates by quoteStay as the dates are typed; offeredRate — the chosen one while the listing still offers it and the dates call for a hold, which the quotes and the request all read; stayCharge — the quote at that rate, why one payment cannot carry it and the other rate when only it fits, read by the quote and the submit; RATE_TITLES — what the form calls each rate; stayRates remembers its last call, since the quote, the rates and the submit each ask for the same one
         listing/lib/months.spec.ts
+        listing/lib/stay-rates.spec.ts
         listing/index.ts
       bookings/                         # a group, not a slice: the /bookings routes
         overview/ui/bookings-page.tsx       # one page: a user's Trips and Hosting, an admin's everything
@@ -272,6 +275,7 @@ apps/web/
       save-listing/ui/listing-form.tsx    # the one form the new and the edit screen run
       save-listing/ui/pricing-fields.tsx  # …its weekday and date prices, saved with the row
       save-listing/ui/policy-field.tsx    # …its cancellation policy, a select under a controller
+      save-listing/ui/non-refundable-field.tsx  # …its non-refundable rate: a switch under a controller, and the discount in percent while it is on; off and disabled under the non-refundable policy
       save-listing/ui/listing-form-skeleton.tsx  # its wait, box for box; each screen frames it
       save-listing/ui/listing-form-card.tsx  # …the card both are drawn in; the title and line are the screen's
       save-listing/lib/to-number.ts       # a number box's text onto the contract's number
@@ -1758,9 +1762,10 @@ component:
   (the trailing slash, the missing-env failure, the module-level cache) and
   `_pages/listings/listing/lib/months.ts` (the half-open range the calendar shades, the month
   rollover, the Monday-first offset — a stay's check-out day drawn as taken would be a
-  free night the screen refuses to sell). What a night of a stay costs is not here: the
-  booking form quotes by `nightlyPrice` from `@repo/contracts`, and its spec lives there,
-  because the payment has to charge by the same rule.
+  free night the screen refuses to sell). What a stay costs is not here: the booking form
+  quotes both rates by `quoteStay` from `@repo/contracts` (`nightlyPrice` per night, the
+  non-refundable discount off the total), and its spec lives there, because the payment
+  has to charge by the same rule.
 
 A component is not tested: one that would break is one `check-types` and Steiger already
 refuse. Nor is a Server Action's own body once it is only forwarding to `authApi` and

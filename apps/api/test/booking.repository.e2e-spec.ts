@@ -165,9 +165,9 @@ describe("BookingRepository foreign keys (e2e)", () => {
   it("refuses a hold with no deadline at all", async () => {
     await expect(
       prismaService.$executeRaw`
-        INSERT INTO bookings (id, listing_id, guest_id, from_date, to_date, status, expires_at, amount_cents, currency, cancellation_policy)
+        INSERT INTO bookings (id, listing_id, guest_id, from_date, to_date, status, expires_at, amount_cents, discount_cents, currency, cancellation_policy)
         VALUES (gen_random_uuid(), ${listingId}::uuid, ${guestId}::uuid,
-                ${dates.from}::date, ${dates.to}::date, 'PENDING_PAYMENT', NULL, 480, 'usd', 'FLEXIBLE')
+                ${dates.from}::date, ${dates.to}::date, 'PENDING_PAYMENT', NULL, 480, 0, 'usd', 'FLEXIBLE')
       `,
     ).rejects.toThrow(/bookings_hold_has_deadline/);
 
@@ -175,11 +175,57 @@ describe("BookingRepository foreign keys (e2e)", () => {
     // is what the seed writes.
     await expect(
       prismaService.$executeRaw`
-        INSERT INTO bookings (id, listing_id, guest_id, from_date, to_date, status, expires_at, amount_cents, currency, cancellation_policy)
+        INSERT INTO bookings (id, listing_id, guest_id, from_date, to_date, status, expires_at, amount_cents, discount_cents, currency, cancellation_policy)
         VALUES (gen_random_uuid(), ${listingId}::uuid, ${guestId}::uuid,
-                ${dates.from}::date, ${dates.to}::date, 'CONFIRMED', NULL, 480, 'usd', 'FLEXIBLE')
+                ${dates.from}::date, ${dates.to}::date, 'CONFIRMED', NULL, 480, 0, 'usd', 'FLEXIBLE')
       `,
     ).resolves.toBe(1);
+  });
+
+  /**
+   * The bounds of the non-refundable rate on the columns, for the writes that go around the
+   * API — the contract refuses every one of these before a row is written, so the inserts
+   * are raw. Each stay gets nights of its own, so the `EXCLUDE` constraint stays out of it.
+   */
+  it("holds a stay's discount and a listing's rate to the contract's bounds", async () => {
+    let week = 0;
+    const stay = (amountCents: number, discountCents: number) => {
+      week += 1;
+
+      return prismaService.$executeRaw`
+        INSERT INTO bookings (id, listing_id, guest_id, from_date, to_date, status, amount_cents, discount_cents, currency, cancellation_policy)
+        VALUES (gen_random_uuid(), ${listingId}::uuid, ${guestId}::uuid,
+                ${inDays(7 * week)}::date, ${inDays(7 * week + 1)}::date, 'CONFIRMED',
+                ${amountCents}, ${discountCents}, 'usd', 'NON_REFUNDABLE')
+      `;
+    };
+
+    // Half of an odd total rounded to the guest is one cent past what is charged, and no more.
+    await expect(stay(6_000, 6_001)).resolves.toBe(1);
+    await expect(stay(6_000, 6_002)).rejects.toThrow(
+      /bookings_discount_within_amount/,
+    );
+    await expect(stay(6_000, -1)).rejects.toThrow(
+      /bookings_discount_within_amount/,
+    );
+
+    const rate = (bps: number, policy = "FLEXIBLE") =>
+      prismaService.$executeRaw`
+        UPDATE listings
+        SET non_refundable_discount_bps = ${bps},
+            cancellation_policy = ${policy}::"CancellationPolicy"
+        WHERE id = ${listingId}::uuid
+      `;
+
+    await expect(rate(100)).resolves.toBe(1);
+    await expect(rate(5_000)).resolves.toBe(1);
+    await expect(rate(99)).rejects.toThrow(/listings_discount_within_contract/);
+    await expect(rate(5_001)).rejects.toThrow(
+      /listings_discount_within_contract/,
+    );
+    await expect(rate(1_000, "NON_REFUNDABLE")).rejects.toThrow(
+      /listings_rate_beside_refundable_policy/,
+    );
   });
 
   // Both at once resolves to whichever key Postgres checks first, and the point is only

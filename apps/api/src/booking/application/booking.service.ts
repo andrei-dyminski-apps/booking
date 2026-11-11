@@ -1,5 +1,6 @@
 import {
   BadGatewayException,
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -12,6 +13,7 @@ import {
 import {
   BookingStatus,
   NotificationType,
+  RATE_NOT_OFFERED,
   Role,
   StayParty,
   type Booking,
@@ -32,8 +34,8 @@ import {
   ListingChangedError,
   ListingNotFoundError,
   OwnListingError,
-  StayTooCheapError,
-  StayTooExpensiveError,
+  RateNotOfferedError,
+  UnchargeableStayError,
 } from "../domain/booking.errors";
 import type {
   BookingCursor,
@@ -144,13 +146,13 @@ export class BookingService {
 
   /** The stay with the nights it was quoted by — read only once the caller may read it. */
   async findOne(id: string, user: AuthenticatedUser): Promise<BookingDetail> {
-    const { booking, nights } = readerOf(
+    const { booking, nights, discountCents } = readerOf(
       user,
       id,
       await this.bookingRepository.findDetailWithListingOwner(id),
     ).found;
 
-    return { ...booking, nights };
+    return { ...booking, nights, discountCents };
   }
 
   /**
@@ -205,17 +207,15 @@ export class BookingService {
         );
       }
 
-      // Valid dates on a valid listing that add up to more than a payment can carry.
-      if (error instanceof StayTooExpensiveError) {
-        throw new UnprocessableEntityException(
-          "This stay costs more than one payment can carry — book fewer nights",
-        );
+      // A rate the listing does not offer is the request's mistake rather than a change of
+      // terms: a client that read the listing before it withdrew the rate gets the `412` above.
+      if (error instanceof RateNotOfferedError) {
+        throw new BadRequestException(RATE_NOT_OFFERED);
       }
 
-      if (error instanceof StayTooCheapError) {
-        throw new UnprocessableEntityException(
-          "This stay costs less than one payment can carry — book more nights",
-        );
+      // Valid dates on a valid listing that add up to more, or less, than a payment can carry.
+      if (error instanceof UnchargeableStayError) {
+        throw new UnprocessableEntityException(error.refusal);
       }
 
       throw error;
