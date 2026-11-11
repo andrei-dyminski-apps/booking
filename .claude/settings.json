@@ -19,7 +19,6 @@
     "deny": [
       "Read(./.env)",
       "Read(./.env.*.local)",
-      "Read(./node_modules/**)",
       "Read(./**/.next/**)",
       "Read(./**/dist/**)",
       "Read(./.turbo/**)"
