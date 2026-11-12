@@ -12,8 +12,9 @@ import {
 import { ROUTES } from "#shared/config";
 import {
   filtersHref,
-  formatMoment,
+  formatMomentIn,
   orNotFound,
+  readerTimeZone,
   requireId,
   singleParam,
 } from "#shared/lib";
@@ -47,7 +48,7 @@ export const ConversationPage = async ({
     cursor: singleParam((await searchParams).cursor),
   });
 
-  const [conversation, page] = await Promise.all([
+  const [conversation, page, zone] = await Promise.all([
     orNotFound(conversationsApi.get(id, THREAD_READ)),
     orNotFound(
       pageOrNullOnStaleCursor(
@@ -55,6 +56,7 @@ export const ConversationPage = async ({
         query.cursor,
       ),
     ),
+    readerTimeZone(),
   ]);
   const latestHref = ROUTES.conversation(id);
   const { side } = conversation;
@@ -126,7 +128,7 @@ export const ConversationPage = async ({
                   >
                     <span className="text-xs text-muted-foreground">
                       {authorLabel(conversation, message.sender)} ·{" "}
-                      {formatMoment(message.createdAt)} UTC
+                      {formatMomentIn(message.createdAt, zone)}
                     </span>
                     <p
                       className={cn(

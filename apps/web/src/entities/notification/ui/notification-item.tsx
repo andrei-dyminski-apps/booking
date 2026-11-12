@@ -4,7 +4,7 @@ import Link from "next/link";
 import type { Notification, UnreadCount } from "@repo/contracts";
 import { cn } from "@repo/ui/lib/utils";
 import { notificationsApi } from "#shared/api";
-import { formatMoment } from "#shared/lib";
+import { formatMomentIn } from "#shared/lib";
 import { describeNotification } from "../model/describe-notification";
 
 /**
@@ -18,11 +18,17 @@ import { describeNotification } from "../model/describe-notification";
  */
 export const NotificationItem = ({
   notification,
+  readerTimeZone,
   onNavigate,
   onRead,
   className,
 }: {
   notification: Notification;
+  /**
+   * The reader's zone, which the notice's moment is stated in: `readerTimeZone` for the
+   * feed's server render, the browser's own for the bell's popup, which only a browser draws.
+   */
+  readerTimeZone: string;
   /** Called on the click itself — the bell closes its popup. */
   onNavigate?: () => void;
   onRead?: (left: UnreadCount) => void;
@@ -71,7 +77,7 @@ export const NotificationItem = ({
           dateTime={notification.createdAt}
           className="text-xs text-muted-foreground"
         >
-          {formatMoment(notification.createdAt)} UTC
+          {formatMomentIn(notification.createdAt, readerTimeZone)}
         </time>
       </span>
     </Link>

@@ -14,7 +14,7 @@ import { toast } from "@repo/ui/components/sonner";
 import { NotificationItem } from "#entities/notification";
 import { notificationsApi } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { useLatestCount } from "#shared/lib";
+import { browserTimeZone, useLatestCount } from "#shared/lib";
 import { CountBadge } from "./count-badge";
 import { useLatestNotifications } from "./use-latest-notifications";
 
@@ -107,6 +107,7 @@ export const NotificationBell = () => {
               <li key={notification.id}>
                 <NotificationItem
                   notification={notification}
+                  readerTimeZone={browserTimeZone()}
                   onNavigate={() => onOpenChange(false)}
                   onRead={countUnread}
                 />

@@ -11,4 +11,5 @@ export {
 } from "./model/cancellation-policy";
 export { BookingStatusBadge } from "./ui/booking-status-badge";
 export { CancellationTerms } from "./ui/cancellation-terms";
+export { HoldDeadline } from "./ui/hold-deadline";
 export { RefundScheduleList } from "./ui/refund-schedule-list";

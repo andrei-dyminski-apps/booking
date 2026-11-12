@@ -9,7 +9,7 @@ import {
 import { HostFees } from "#entities/host-fee";
 import { hostFeesApi, payoutsApi, requireRole } from "#shared/api";
 import { ROUTES, stripePublishableKey } from "#shared/config";
-import { countOf } from "#shared/lib";
+import { countOf, readerTimeZone } from "#shared/lib";
 import { BackLink, PageHeading } from "#shared/ui";
 import { PayoutsPanel } from "./payouts-panel";
 
@@ -25,7 +25,10 @@ import { PayoutsPanel } from "./payouts-panel";
 export const PayoutsPage = async () => {
   await requireRole(Role.USER, ROUTES.payouts);
 
-  const { status } = await payoutsApi.account();
+  const [{ status }, zone] = await Promise.all([
+    payoutsApi.account(),
+    readerTimeZone(),
+  ]);
   // Divided once, by the basis points in a percent: a rate taken as a fraction and then
   // multiplied back is 14.499999999999998 for 1450.
   const feePercent = PLATFORM_FEE_BPS / (BASIS_POINTS / 100);
@@ -42,7 +45,11 @@ export const PayoutsPage = async () => {
 
       {/* Streamed after the page: the panel does not wait for the fees. */}
       <Suspense fallback={null}>
-        <HostFees read={hostFeesApi.mine} audience="host" />
+        <HostFees
+          read={hostFeesApi.mine}
+          audience="host"
+          readerTimeZone={zone}
+        />
       </Suspense>
 
       <PayoutsPanel

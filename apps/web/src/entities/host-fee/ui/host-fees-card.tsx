@@ -13,7 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
-import { countOf, formatMoment, formatMoney } from "#shared/lib";
+import { countOf, formatMomentIn, formatMoney } from "#shared/lib";
 import { DateRange } from "#shared/ui";
 
 /**
@@ -26,11 +26,14 @@ import { DateRange } from "#shared/ui";
 export const HostFeesCard = ({
   overview,
   audience,
+  readerTimeZone,
   action,
 }: {
   overview: HostFeeOverview;
   /** Who reads it: the host is told about their own payouts, an admin about the host's. */
   audience: "host" | "admin";
+  /** The reader's zone, which the moments are stated in (`readerTimeZone`). */
+  readerTimeZone: string;
   action?: (fee: HostFee) => ReactNode;
 }) => {
   if (overview.fees.length === 0) return null;
@@ -70,7 +73,12 @@ export const HostFeesCard = ({
       <CardContent>
         <ul role="list" className="flex flex-col divide-y">
           {overview.fees.map((fee) => (
-            <HostFeeRow key={fee.id} fee={fee} action={action?.(fee)} />
+            <HostFeeRow
+              key={fee.id}
+              fee={fee}
+              readerTimeZone={readerTimeZone}
+              action={action?.(fee)}
+            />
           ))}
         </ul>
       </CardContent>
@@ -78,7 +86,15 @@ export const HostFeesCard = ({
   );
 };
 
-const HostFeeRow = ({ fee, action }: { fee: HostFee; action: ReactNode }) => {
+const HostFeeRow = ({
+  fee,
+  readerTimeZone,
+  action,
+}: {
+  fee: HostFee;
+  readerTimeZone: string;
+  action: ReactNode;
+}) => {
   const left = stillOwed(fee);
 
   return (
@@ -87,7 +103,7 @@ const HostFeeRow = ({ fee, action }: { fee: HostFee; action: ReactNode }) => {
         <span className="font-medium break-words">{fee.listingTitle}</span>
         <span className="flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground">
           <DateRange from={fee.from} to={fee.to} />
-          <span>cancelled {formatMoment(fee.createdAt)} UTC</span>
+          <span>cancelled {formatMomentIn(fee.createdAt, readerTimeZone)}</span>
         </span>
         {fee.cancellationReason !== null && (
           <span className="break-words text-muted-foreground">
@@ -102,7 +118,7 @@ const HostFeeRow = ({ fee, action }: { fee: HostFee; action: ReactNode }) => {
         </span>
         {fee.waivedAt !== null && (
           <span className="break-words text-muted-foreground">
-            Waived {formatMoment(fee.waivedAt)} UTC
+            Waived {formatMomentIn(fee.waivedAt, readerTimeZone)}
             {/* Only an admin's overview names who waived it. */}
             {fee.waivedBy !== null && ` by ${fee.waivedBy.name}`}
             {fee.waiveReason === null ? "" : `: “${fee.waiveReason}”`}

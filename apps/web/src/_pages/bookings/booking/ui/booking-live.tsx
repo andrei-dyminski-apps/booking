@@ -31,13 +31,9 @@ import {
   BookingStatusBadge,
   CANCELLER_NAMES,
   CancellationTerms,
+  HoldDeadline,
 } from "#entities/booking";
-import {
-  formatMoment,
-  formatMomentIn,
-  formatMoney,
-  nightsBreakdown,
-} from "#shared/lib";
+import { formatMomentIn, formatMoney, nightsBreakdown } from "#shared/lib";
 import { DateRange, NightCount } from "#shared/ui";
 import { useBookingLive, type BankAnswer } from "../model/use-booking-live";
 import { earlyEndTerms, endedEarlyNote } from "../model/early-end-note";
@@ -70,12 +66,15 @@ export const BookingLive = ({
   publishableKey,
   bankAnswer,
   now,
+  readerTimeZone,
   adjustments,
 }: {
   initial: BookingDetail;
   viewer: User;
   /** The server's clock at the render, which the refund note and `mayCancel` start from. */
   now: string;
+  /** The reader's zone, which the hold's deadline is stated in (`readerTimeZone`). */
+  readerTimeZone: string;
   /** Handed over only to the guest of a hold still waiting for payment. */
   publishableKey: string | null;
   /** The bank sent the visitor back here after a payment step of its own, or `null`. */
@@ -184,8 +183,13 @@ export const BookingLive = ({
 
           {pending && !paid && !lapsed && expiresAt !== null && (
             <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-              The nights are held until {formatMoment(expiresAt)} UTC. Unpaid by
-              then, they go back on offer.
+              The nights are held until{" "}
+              <HoldDeadline
+                expiresAt={expiresAt}
+                now={now}
+                readerTimeZone={readerTimeZone}
+              />
+              . Unpaid by then, they go back on offer.
             </p>
           )}
 
@@ -194,8 +198,8 @@ export const BookingLive = ({
               role="status"
               className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground"
             >
-              The hold lapsed at {formatMoment(expiresAt)} UTC and the nights
-              went back on offer.
+              The hold lapsed at {formatMomentIn(expiresAt, readerTimeZone)} and
+              the nights went back on offer.
             </p>
           )}
 

@@ -657,13 +657,19 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
     the sweep takes the row again. Retried rather than resolved by hand: the debt and the
     transfer are still on the row, and the sweep is what sends them.
   - The frontend renders the four admin notices with a link to the screen.
-- [ ] **The payment form opens the payment once.** `POST /bookings/:id/payment` is safe to
+- [x] **The payment form opens the payment once.** `POST /bookings/:id/payment` is safe to
       repeat one after another, but not at the same moment: Stripe refuses a second request
       under the same idempotency key while the first is in flight, and the API answers it
       `409` ("being opened by another request — try again"). The form has to call it once per
       mount — single-flight, the way the transport refreshes a session — survive React's
       Strict Mode running the effect twice and a double click, and read that `409` as a
       retry after a short pause rather than as a hold that stopped waiting for payment.
+      Done in the form alone: the query cache already reuses a request in flight, so the
+      Strict Mode mount and a remount land on the one `POST`, and "Try again" puts the
+      query back to pending, which takes the button away; what changed is the `409`. Each one has the page read the booking again and is asked
+      again a second later, up to four times, the skeleton still drawn — a hold that moved
+      on takes the form off the page, which stops the retries, and one still waiting gets
+      the secret from the request that won (`CONFLICT_RETRIES` in `payment-form.tsx`).
 - [ ] **Authorize the hold, capture the stay.** The guest is charged at once today, so a
       payment that lands on a lapsed or cancelled hold is a full charge and a full refund,
       and Stripe keeps its processing fee on both. Opening the intent with
@@ -733,9 +739,9 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
       exist, and `availability` on the offer — that would be a promise about dates the
       calendar answers per window and a document cannot state for a stay as a whole.
 
-- [ ] **An account's moments on the reader's clock.** The notices, the messages, "Blocked
+- [x] **An account's moments on the reader's clock.** The notices, the messages, "Blocked
       since", a host's fees, the admin's lists of what was set aside and a hold's deadline
-      are said in UTC today (`formatMoment` + ` UTC`): they have no place of their own, so
+      were said in UTC (`formatMoment` + ` UTC`): they have no place of their own, so
       the reader's zone is the right one, and a server render does not know it — formatting
       in the browser's zone on one side only is a hydration error. A stay's moments stay on
       the listing's clock (7.6) and a calendar day on none; this is the third kind only.
@@ -750,6 +756,17 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
     asks of the guest is to pay now.
   - Not a profile setting: that is a column, a contract field and a screen for what the
     browser already knows.
+  - Done: `TimeZoneCookie` in the shell writes the cookie (`time_zone`) whenever it is
+    missing or differs and refreshes a signed-in render once; `readerTimeZone()` reads it
+    on each personal page, which hands it down as a prop to whatever states such a moment
+    (`formatMomentIn`), and the bell's popup, drawn only in a browser, uses
+    `browserTimeZone()`. The cookie is checked by `canonicalTimeZone` and, past it, takes
+    the fixed offsets a reader's clock may be on and a listing's may not (`Etc/GMT-3`,
+    stated as `UTC+3`). "Joined" and "Member since" are read on the reader's clock too
+    (`formatDate`); a review's date stays UTC's, since the listing's reviews are a public
+    cached read. The hold's deadline is `HoldDeadline` (`entities/booking`): the time and
+    the minutes left, counted from the server's `now` and then the browser's clock, at
+    once when that already says otherwise.
 
 - [ ] Optional: reviews with ratings, email notifications through BullMQ.
 
@@ -814,7 +831,7 @@ of its pieces were written in advance, each with a note saying so.
       catalogue replace its body and nothing else; `formatMoney` names `en-GB` explicitly
       so the server and the browser agree on the separators, and localizing it means
       choosing the locale rather than dropping the argument — a `undefined` locale is the
-      runtime's, and the server's runtime is not the visitor's. `shared/lib/dates.ts` is
+      runtime's, and the server's runtime is not the visitor's. `shared/lib/dates/dates.ts` is
       the one that stays: a calendar day is a `YYYY-MM-DD` string read as midnight UTC,
       and which check-in day is gone is the listing's to say (`isCheckInDayPast`), never
       the visitor's. Only its display is localized; parsing one in the visitor's zone

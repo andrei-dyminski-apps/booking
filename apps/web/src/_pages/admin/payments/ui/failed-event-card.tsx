@@ -7,7 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
-import { countOf, formatMoment } from "#shared/lib";
+import { countOf, formatMomentIn } from "#shared/lib";
 import { retryPaymentEventAction } from "../api/set-aside-actions";
 import { LastError } from "./last-error";
 import { RetryButton } from "./retry-button";
@@ -17,7 +17,14 @@ import { RetryButton } from "./retry-button";
  * when. Not its payload — what the event says is Stripe's to show, under the id below. The
  * usual order is a fix deployed first and the event retried after it.
  */
-export const FailedEventCard = ({ event }: { event: FailedPaymentEvent }) => (
+export const FailedEventCard = ({
+  event,
+  readerTimeZone,
+}: {
+  event: FailedPaymentEvent;
+  /** The reader's zone, which the moments are stated in (`readerTimeZone`). */
+  readerTimeZone: string;
+}) => (
   <Card>
     <CardHeader>
       <CardTitle className="font-mono break-all">{event.type}</CardTitle>
@@ -25,9 +32,9 @@ export const FailedEventCard = ({ event }: { event: FailedPaymentEvent }) => (
         <span>
           Event <span className="font-mono break-all">{event.id}</span>
         </span>
-        <span>Received {formatMoment(event.receivedAt)} UTC</span>
+        <span>Received {formatMomentIn(event.receivedAt, readerTimeZone)}</span>
         <span>
-          Set aside {formatMoment(event.failedAt)} UTC after{" "}
+          Set aside {formatMomentIn(event.failedAt, readerTimeZone)} after{" "}
           {countOf(event.attempts, "attempt")}
         </span>
       </CardDescription>

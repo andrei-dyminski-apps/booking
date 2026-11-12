@@ -11,7 +11,7 @@ import {
 } from "@repo/ui/components/card";
 import { authorLabel, counterpartName } from "#entities/conversation";
 import { ROUTES } from "#shared/config";
-import { formatMoment } from "#shared/lib";
+import { formatMomentIn } from "#shared/lib";
 
 /**
  * One thread: the listing it is about, the person on the other side of it — by name, so a
@@ -22,8 +22,11 @@ import { formatMoment } from "#shared/lib";
  */
 export const ConversationCard = ({
   conversation,
+  readerTimeZone,
 }: {
   conversation: Conversation;
+  /** The reader's zone, which the last message's moment is stated in (`readerTimeZone`). */
+  readerTimeZone: string;
 }) => {
   const { lastMessage } = conversation;
 
@@ -41,7 +44,7 @@ export const ConversationCard = ({
         </CardTitle>
         <CardDescription>
           With {counterpartName(conversation)} ·{" "}
-          {formatMoment(lastMessage.createdAt)} UTC
+          {formatMomentIn(lastMessage.createdAt, readerTimeZone)}
         </CardDescription>
         {conversation.unread && (
           <CardAction>

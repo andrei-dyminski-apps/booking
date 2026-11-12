@@ -11,7 +11,7 @@ import {
 } from "@repo/ui/components/empty";
 import { lookupsApi, requireUser } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { lookupOptionText, today } from "#shared/lib";
+import { lookupOptionText, readerTimeZone, today } from "#shared/lib";
 import {
   ButtonLink,
   NoMatchesNotice,
@@ -92,7 +92,7 @@ export const BookingsPage = async ({
   // The API ignores `side` for an admin, so the page does too.
   const side = viewer.role === Role.ADMIN ? null : sideOf(values);
   const byGuest = side !== StayParty.GUEST;
-  // Computed here and handed down rather than read by each card — see `shared/lib/dates.ts`.
+  // Computed here and handed down rather than read by each card — see `shared/lib/dates/dates.ts`.
   const day = today();
   const now = new Date().toISOString();
   // A question the contract refuses is not put to the API at all: the messages are under
@@ -100,12 +100,13 @@ export const BookingsPage = async ({
   // of the rows the filters name are read beside it — the chips read them, and so do the
   // boxes in the dialog, which would otherwise ask again each time it opens. A guest has
   // nobody to look up, so their `?guestId=` stays an id.
-  const [page, listing, guest] = await Promise.all([
+  const [page, listing, guest, zone] = await Promise.all([
     query === null ? null : readBookingsPage(query),
     lookupsApi.optionOf(LookupKind.listings, values.listingId, side),
     byGuest
       ? lookupsApi.optionOf(LookupKind.guests, values.guestId)
       : undefined,
+    readerTimeZone(),
   ]);
   const staleCursor = query !== null && page === null;
   const scope = side === null ? ADMIN_SCOPE : SCOPE[side];
@@ -171,6 +172,7 @@ export const BookingsPage = async ({
                   side={side}
                   today={day}
                   now={now}
+                  readerTimeZone={zone}
                 />
               </li>
             ))}

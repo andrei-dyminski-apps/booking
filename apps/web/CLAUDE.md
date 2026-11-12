@@ -70,6 +70,7 @@ apps/web/
       layout/header.tsx       # the bar: the menu button, the theme, the two CTAs
       layout/site-footer.tsx  # the quiet end, and the third thing given the session
       layout/session-recovery.tsx  # the one rotation a server-rendered header cannot run
+      layout/time-zone-cookie.tsx  # the browser's zone written into the cookie an account's moments are stated by
       layout/theme-toggle.tsx
       layout/notification-bell.tsx  # the unread count off the event stream, the latest in a popup
       layout/notification-toasts.tsx  # a toast per notice off the stream, beside the bell
@@ -151,7 +152,7 @@ apps/web/
         overview/index.ts
         booking/ui/booking-page.tsx       # one stay; the publishable key handed to its guest's hold
         booking/ui/booking-live.tsx       # the stay drawn off what its hook returns, and an admin's refunds under it
-        booking/ui/payment-form.tsx       # opens the payment from the browser, Stripe Elements; success starts the poll and declares nothing; a Stripe.js that never loaded says so
+        booking/ui/payment-form.tsx       # opens the payment from the browser once per hold, a `409` read again and retried after a pause; Stripe Elements; success starts the poll and declares nothing; a Stripe.js that never loaded says so
         booking/ui/cancel-stay-button.tsx # the shared dialog over this page's action; a success reads the stay again
         booking/ui/end-stay-early-button.tsx # the guest's or an admin's early end, in a confirmation stating the new check-out and the refund, taken when it opens and held while it is open and sent as they are — a refusal reads the stay again and follows the terms of now; kept on the page while open, so a stay no longer endable leaves the API's reason with nothing to press; the form inside the popup, so every opening starts clean; a success reads the stay again
         booking/ui/refund-stay-button.tsx # an admin's partial refund: amount and reason, one request id per opening, so a second press is the same refund; an unknown answer holds the boxes until the dialog closes
@@ -310,6 +311,7 @@ apps/web/
       booking/model/cancellation-policy.ts  # the policies named, their terms, the check-in and a stay's schedule as sentences, dated on the listing's clock
       booking/ui/cancellation-terms.tsx     # a policy, or one stay's dated windows: the listing page and the stay's page
       booking/ui/refund-schedule-list.tsx   # …those windows as lines, also the listing page's quote for the dates being chosen
+      booking/ui/hold-deadline.tsx  # a hold's deadline on the reader's clock and the minutes left: the stay's page and the list
       booking/index.ts
       host-fee/ui/host-fees.tsx       # the section both screens stream: the read they hand it, a line when the API cannot answer
       host-fee/ui/host-fees-card.tsx  # …and what a host owes for cancelling paid stays, drawn: their payouts screen and the admin's page of the account
@@ -355,12 +357,14 @@ apps/web/
       config/cache-tags.ts    # the names the cached public reads are stored under
       config/cache-lifetimes.ts  # the one lifetime the API's own clock decides
       config/stripe.ts        # stripePublishableKey() — read on the server, handed to the form; the tokens Stripe's iframes are drawn in
+      config/time-zone.ts     # the cookie the browser writes its zone into, and how long it lives
       config/index.ts
       lib/form-errors.ts      # zod issues, API errors and field state onto one shape
       lib/use-action-form.ts  # the contract, react-hook-form and a Server Action, tied
       lib/next-path.ts        # a `?next=` that cannot leave this site
       lib/search-params.ts    # searchParams onto a URL and back: the domain-free half
-      lib/dates.ts            # a calendar day is a YYYY-MM-DD string, read as UTC; formatMomentIn — a moment on a listing's clock, its zone named
+      lib/dates/dates.ts      # a calendar day is a YYYY-MM-DD string, read as UTC; formatMomentIn — a moment on a given clock, its zone named; readerTimeZone — the reader's, off the cookie
+      lib/dates/dates.spec.ts
       lib/money.ts            # cents onto the screen and typed text back into cents, in one place
       lib/not-found.ts        # a 404 from the API, and an id a URL cannot carry
       lib/plural.ts           # a count and the noun it counts, made to agree
@@ -639,7 +643,7 @@ is the wrong shape for a list that keeps growing.
   all — is a drift from the contract and has to propagate.
 - Response types and request schemas come from `@repo/contracts`. Do not describe the shape
   of a response by hand — that is the main source of drift from the backend.
-- **A calendar day is a `YYYY-MM-DD` string, and `shared/lib/dates.ts` is the only place
+- **A calendar day is a `YYYY-MM-DD` string, and `shared/lib/dates/dates.ts` is the only place
   that turns one into an instant.** Midnight UTC is what each of them names, the instant a
   review compares by. A date price is bounded by the earliest today of any zone
   (`earliestToday`) instead, which the listing form is handed as `earliest`: tonight west
@@ -673,12 +677,22 @@ is the wrong shape for a list that keeps growing.
     `Intl` directly. A zone newer than the browser's data altogether is the one case left:
     `formatMomentIn` states such a moment in UTC, named as such, but the rules refuse the
     zone (`RangeError`), so a page computing a schedule in it fails.
-  - **An account's moments are UTC for now, named as such** (`formatMoment` and ` UTC`
-    after it): the notices, the messages, "Blocked since", a host's fees, the admin's lists,
-    and a hold's deadline, which is about the guest paying in the next fifteen minutes
-    rather than about the place. Nothing gives them a place of their own, so the reader's
-    zone is the right one, and the server does not know it; `docs/plan.md` (phase 8) has
-    the step that does.
+  - **An account's moments are on the reader's clock**: the notices, the messages,
+    "Blocked since", a host's fees, the admin's lists, and a hold's deadline, which is about
+    the guest paying in the next fifteen minutes rather than about the place. Nothing gives
+    them a place of their own, so the reader's zone is the right one, and a server render
+    does not know it by itself: the browser writes it into a cookie (`TimeZoneCookie` in
+    the shell, whenever it is missing or differs, refreshing a signed-in render once), and
+    a page reads it through `readerTimeZone()` — checked by `canonicalTimeZone`, plus the
+    fixed offsets a reader's clock may be on and a listing's may not (`Etc/GMT-3`, named
+    `UTC+3`), UTC before the first write — and hands it down as a prop to whatever states
+    such a moment (`formatMomentIn`), or the day of one ("Joined", `formatDate`), so both
+    sides render the same text. **Only a page that is personal already reads it**:
+    `cookies()` makes a render dynamic, and the public cached reads — the catalogue, a
+    listing, its reviews — must not depend on it; a review's date is UTC's for that
+    reason. A list drawn only in a browser — the bell's popup, read when it opens — uses
+    `browserTimeZone()` instead. A hold's deadline also counts down beside the time
+    (`HoldDeadline`), from the server's `now` and then the browser's clock.
   - **A calendar day has no zone at all** — a check-in, a check-out, "today" in a date box,
     `isReviewable` — and is never converted into one (see the rule above): 1 December in
     Honolulu is not 2 December anywhere.
@@ -1134,7 +1148,7 @@ filters plus `ownerId` — the one the catalogue's contract takes and only an ad
 use for, shown as a chip named by the owner's name and address. In `shared/lib`
 and `shared/api`, the domain-free mechanics the two slices' search modules would otherwise
 each spell: `filtersHref` and `singleParam` and `searchParamsHref` (`search-params.ts`),
-`dayLabelOrAny` (`dates.ts`), `messagesExcept` (`form-errors.ts`), `pageOrNullOnStaleCursor`
+`dayLabelOrAny` (`dates/dates.ts`), `messagesExcept` (`form-errors.ts`), `pageOrNullOnStaleCursor`
 (`api/keyset-page.ts`).
 
 What is _not_ shared is anything that knows what is being filtered — the field set, the

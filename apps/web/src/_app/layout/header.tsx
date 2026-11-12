@@ -8,6 +8,7 @@ import { NotificationBell } from "./notification-bell";
 import { NotificationToasts } from "./notification-toasts";
 import { SessionRecovery } from "./session-recovery";
 import { ThemeToggle } from "./theme-toggle";
+import { TimeZoneCookie } from "./time-zone-cookie";
 
 /**
  * The bar above the page. Most of the navigation moved into the sidebar beside it, so
@@ -18,7 +19,7 @@ import { ThemeToggle } from "./theme-toggle";
  * It is handed the session instead of reading one — `AppShell` asks once for the whole
  * shell. `null` there means "no live access token", which is not the same as signed out,
  * hence `SessionRecovery` beside it: the one thing about a session that only the browser
- * can settle.
+ * can settle. `TimeZoneCookie` is the other thing only the browser knows: its own clock.
  */
 export const Header = ({ user }: { user: User | null }) => (
   <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -35,6 +36,7 @@ export const Header = ({ user }: { user: User | null }) => (
       </Link>
 
       <SessionRecovery signedIn={user !== null} />
+      <TimeZoneCookie signedIn={user !== null} />
 
       <div className="ml-auto flex items-center gap-2">
         {/*

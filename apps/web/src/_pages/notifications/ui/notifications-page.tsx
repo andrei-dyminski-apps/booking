@@ -2,7 +2,7 @@ import { Card, CardContent } from "@repo/ui/components/card";
 import { NotificationItem } from "#entities/notification";
 import { notificationsApi, requireUser } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { singleParam } from "#shared/lib";
+import { readerTimeZone, singleParam } from "#shared/lib";
 import { LiveRefresh, PageHeading, Pager, StalePageNotice } from "#shared/ui";
 import { readNotifications } from "../api/read-notifications";
 import { MarkAllReadButton } from "./mark-all-read-button";
@@ -22,9 +22,10 @@ export const NotificationsPage = async ({
   const cursor = singleParam((await searchParams).cursor) || undefined;
   // The count of the whole feed rather than of this page: the unread ones are often the
   // older ones, a page or more below the notices the bell already marked.
-  const [page, { unread }] = await Promise.all([
+  const [page, { unread }, zone] = await Promise.all([
     readNotifications({ limit: PAGE_SIZE, cursor }),
     notificationsApi.unreadCount(),
+    readerTimeZone(),
   ]);
   const first = ROUTES.notifications;
 
@@ -55,7 +56,10 @@ export const NotificationsPage = async ({
               <ul role="list" className="flex flex-col divide-y divide-border">
                 {page.items.map((notification) => (
                   <li key={notification.id}>
-                    <NotificationItem notification={notification} />
+                    <NotificationItem
+                      notification={notification}
+                      readerTimeZone={zone}
+                    />
                   </li>
                 ))}
               </ul>

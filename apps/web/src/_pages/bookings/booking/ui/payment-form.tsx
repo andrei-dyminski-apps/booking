@@ -41,6 +41,18 @@ async function loadStripeOrFail(publishableKey: string): Promise<Stripe> {
   return stripe;
 }
 
+/** A conflict from the API: the hold moved on, or another request is opening its payment. */
+const isConflict = (error: unknown): boolean =>
+  error instanceof ApiResponseError && error.status === HTTP_STATUS.CONFLICT;
+
+/**
+ * How long a conflict waits before the payment is asked for again, and how many times. Stripe
+ * refuses a second request under the same idempotency key only while the first is in flight,
+ * which is a second or two — a hold that moved on has taken the form off the page by then.
+ */
+const CONFLICT_RETRY_DELAY_MS = 1_000;
+const CONFLICT_RETRIES = 4;
+
 /**
  * What an intent is in once the guest's part is done; the webhook says the rest.
  * `processing` belongs here only while every method the API offers is an instant one — see
@@ -58,12 +70,19 @@ const PAID: ReadonlySet<PaymentIntent.Status> = new Set([
  * browser, once the form is on the screen — `POST /bookings/:id/payment` opens it the first
  * time and answers the same one after that, so a reload or a second tab pays the same intent.
  *
+ * Opened once per hold, whatever asks: the query cache reuses a request in flight, so React's
+ * Strict Mode mounting the form twice and a remount land on the one `POST`, and the secret
+ * it answered is kept for the life of the tab. "Try again" cannot be pressed twice either:
+ * the first press puts the query back to pending, and the skeleton takes the button away.
+ *
  * Success here is the browser's word, and the page does not take it: `onPaid` only starts
  * the poll that waits for the webhook. A `409` is either a hold that stopped waiting for
- * payment — paid, cancelled or lapsed — or a second request racing the first to open it,
- * and only the booking tells the two apart: `onRefused` has the page read it again. A hold
- * that moved on takes this form off the page; one still waiting leaves it here with the
- * API's reason and the way to ask again.
+ * payment — paid, cancelled or lapsed — or another tab opening the same payment at the same
+ * moment, and only the booking tells the two apart. So every `409` has the page read it
+ * again (`onRefused`) and is asked again after a pause, the skeleton still drawn: a hold
+ * that moved on takes this form off the page, which stops the retries, and one still
+ * waiting gets its secret from the request that won. Past the last retry the form shows
+ * the API's reason and the way to ask again.
  */
 export const PaymentForm = ({
   bookingId,
@@ -83,9 +102,13 @@ export const PaymentForm = ({
   const payment = useQuery({
     queryKey: bookingPaymentKey(bookingId),
     queryFn: () => bookingsApi.payment(bookingId),
-    // One intent per hold, which does not change: nothing to refetch on focus or remount.
+    // One intent per hold, which does not change: nothing to refetch on focus or remount,
+    // and nothing to forget either — a form remounted later reuses the secret, not a `POST`.
     staleTime: Infinity,
-    retry: false,
+    gcTime: Infinity,
+    retry: (failures, error) =>
+      isConflict(error) && failures < CONFLICT_RETRIES,
+    retryDelay: CONFLICT_RETRY_DELAY_MS,
     refetchOnWindowFocus: false,
   });
   const stripeJs = useQuery({
@@ -96,16 +119,13 @@ export const PaymentForm = ({
     retry: false,
     refetchOnWindowFocus: false,
   });
-  const refused =
-    payment.error instanceof ApiResponseError &&
-    payment.error.status === HTTP_STATUS.CONFLICT;
-
-  // Per refusal rather than once: a "Try again" refused again reads the booking again too.
-  const refusedAt = refused ? payment.errorUpdatedAt : null;
+  // Per attempt rather than once: each conflict, retried or final, reads the booking again.
+  // The count starts over with every fetch, so a "Try again" refused again reads it too.
+  const refusals = isConflict(payment.failureReason) ? payment.failureCount : 0;
 
   useEffect(() => {
-    if (refusedAt !== null) onRefused();
-  }, [refusedAt, onRefused]);
+    if (refusals > 0) onRefused();
+  }, [refusals, onRefused]);
 
   if (payment.isError) {
     return (

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Review } from "@repo/contracts";
+import { DEFAULT_TIME_ZONE, type Review } from "@repo/contracts";
 import { Card, CardContent } from "@repo/ui/components/card";
 import { formatDate } from "#shared/lib";
 import { RatingStars } from "./rating-stars";
@@ -28,7 +28,8 @@ export const ReviewCard = ({
             dateTime={review.createdAt}
             className="text-xs text-muted-foreground"
           >
-            {formatDate(review.createdAt)}
+            {/* UTC's day: a listing's reviews are a public cached read, with no reader to ask. */}
+            {formatDate(review.createdAt, DEFAULT_TIME_ZONE)}
           </time>
         </div>
         {action}
