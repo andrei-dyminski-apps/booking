@@ -165,9 +165,9 @@ describe("BookingRepository foreign keys (e2e)", () => {
   it("refuses a hold with no deadline at all", async () => {
     await expect(
       prismaService.$executeRaw`
-        INSERT INTO bookings (id, listing_id, guest_id, from_date, to_date, status, expires_at, amount_cents, discount_cents, currency, cancellation_policy)
+        INSERT INTO bookings (id, listing_id, guest_id, from_date, to_date, status, expires_at, amount_cents, discount_cents, currency, cancellation_policy, time_zone, check_in_time, check_in_at)
         VALUES (gen_random_uuid(), ${listingId}::uuid, ${guestId}::uuid,
-                ${dates.from}::date, ${dates.to}::date, 'PENDING_PAYMENT', NULL, 480, 0, 'usd', 'FLEXIBLE')
+                ${dates.from}::date, ${dates.to}::date, 'PENDING_PAYMENT', NULL, 480, 0, 'usd', 'FLEXIBLE', 'UTC', '00:00', ${dates.from}::timestamp)
       `,
     ).rejects.toThrow(/bookings_hold_has_deadline/);
 
@@ -175,9 +175,9 @@ describe("BookingRepository foreign keys (e2e)", () => {
     // is what the seed writes.
     await expect(
       prismaService.$executeRaw`
-        INSERT INTO bookings (id, listing_id, guest_id, from_date, to_date, status, expires_at, amount_cents, discount_cents, currency, cancellation_policy)
+        INSERT INTO bookings (id, listing_id, guest_id, from_date, to_date, status, expires_at, amount_cents, discount_cents, currency, cancellation_policy, time_zone, check_in_time, check_in_at)
         VALUES (gen_random_uuid(), ${listingId}::uuid, ${guestId}::uuid,
-                ${dates.from}::date, ${dates.to}::date, 'CONFIRMED', NULL, 480, 0, 'usd', 'FLEXIBLE')
+                ${dates.from}::date, ${dates.to}::date, 'CONFIRMED', NULL, 480, 0, 'usd', 'FLEXIBLE', 'UTC', '00:00', ${dates.from}::timestamp)
       `,
     ).resolves.toBe(1);
   });
@@ -189,14 +189,19 @@ describe("BookingRepository foreign keys (e2e)", () => {
    */
   it("holds a stay's discount and a listing's rate to the contract's bounds", async () => {
     let week = 0;
-    const stay = (amountCents: number, discountCents: number) => {
+    const stay = (
+      amountCents: number,
+      discountCents: number,
+      checkInTime = "00:00",
+    ) => {
       week += 1;
 
       return prismaService.$executeRaw`
-        INSERT INTO bookings (id, listing_id, guest_id, from_date, to_date, status, amount_cents, discount_cents, currency, cancellation_policy)
+        INSERT INTO bookings (id, listing_id, guest_id, from_date, to_date, status, amount_cents, discount_cents, currency, cancellation_policy, time_zone, check_in_time, check_in_at)
         VALUES (gen_random_uuid(), ${listingId}::uuid, ${guestId}::uuid,
                 ${inDays(7 * week)}::date, ${inDays(7 * week + 1)}::date, 'CONFIRMED',
-                ${amountCents}, ${discountCents}, 'usd', 'NON_REFUNDABLE')
+                ${amountCents}, ${discountCents}, 'usd', 'NON_REFUNDABLE', 'UTC', ${checkInTime},
+                ${inDays(7 * week)}::timestamp)
       `;
     };
 
@@ -207,6 +212,10 @@ describe("BookingRepository foreign keys (e2e)", () => {
     );
     await expect(stay(6_000, -1)).rejects.toThrow(
       /bookings_discount_within_amount/,
+    );
+    // The check-in time the stay copied is `HH:mm` on the column too.
+    await expect(stay(6_000, 0, "24:00")).rejects.toThrow(
+      /bookings_check_in_time_format/,
     );
 
     const rate = (bps: number, policy = "FLEXIBLE") =>

@@ -74,6 +74,18 @@ export class ListingChangedError extends Error {
 }
 
 /**
+ * A check-in day already gone where the listing is — its today, read off the locked row's
+ * zone (`isCheckInDayPast`). The schema refuses only a day gone everywhere, since it knows no
+ * listing, so this is the half of "not in the past" that needs the row.
+ */
+export class CheckInDayPastError extends Error {
+  constructor(listingId: string, from: string) {
+    super(`Check-in ${from} has already passed where listing ${listingId} is`);
+    this.name = "CheckInDayPastError";
+  }
+}
+
+/**
  * The request asked for the non-refundable rate on a listing that does not offer one. Read
  * off the same locked row as the discount it would have taken, so a host withdrawing the
  * rate either lands before this check or waits for the hold.

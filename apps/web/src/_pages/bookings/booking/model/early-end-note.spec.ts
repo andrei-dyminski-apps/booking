@@ -14,22 +14,26 @@ const stay = {
   currency: CURRENCY,
   paid: true,
   dispute: null,
+  timeZone: "UTC",
 };
+
+/** Noon UTC of a day. */
+const at = (day: string): Date => new Date(`${day}T12:00:00.000Z`);
 
 const LEAVING =
   "The stay checks out tomorrow, 11 Nov 2026, and the 2 nights after tonight go back on offer.";
 
 describe("earlyEndTerms", () => {
   it("sends the check-out and the refund the note states", () => {
-    expect(earlyEndTerms(stay, "2026-11-10")).toEqual({
+    expect(earlyEndTerms(stay, at("2026-11-10"))).toEqual({
       checkOut: "2026-11-11",
       refundCents: cents(27_035),
-      note: earlyEndNote(stay, "2026-11-10"),
+      note: earlyEndNote(stay, at("2026-11-10")),
     });
     expect(
       earlyEndTerms(
         { ...stay, refundedAmountCents: cents(30_000) },
-        "2026-11-10",
+        at("2026-11-10"),
       ).refundCents,
     ).toBe(6257);
   });
@@ -41,27 +45,27 @@ describe("earlyEndTerms", () => {
       { ...stay, refundedAmountCents: stay.amountCents },
       { ...stay, cancellationPolicy: "FIRM" as const },
     ]) {
-      expect(earlyEndTerms(nothing, "2026-11-10").refundCents).toBe(0);
+      expect(earlyEndTerms(nothing, at("2026-11-10")).refundCents).toBe(0);
     }
   });
 });
 
 describe("earlyEndNote", () => {
   it("uses tonight and states the share of the nights after it", () => {
-    expect(earlyEndNote(stay, "2026-11-10")).toBe(
+    expect(earlyEndNote(stay, at("2026-11-10"))).toBe(
       `${LEAVING} The stay's cancellation policy refunds 100% of them: $270.35 back to the card it was paid with.`,
     );
   });
 
   it("names a single night on the night before the last", () => {
-    expect(earlyEndNote(stay, "2026-11-11")).toMatch(
+    expect(earlyEndNote(stay, at("2026-11-11"))).toMatch(
       /tomorrow, 12 Nov 2026, and the 1 night after tonight goes back on offer\./,
     );
   });
 
   it("says so when the policy keeps the unused nights", () => {
     expect(
-      earlyEndNote({ ...stay, cancellationPolicy: "FIRM" }, "2026-11-10"),
+      earlyEndNote({ ...stay, cancellationPolicy: "FIRM" }, at("2026-11-10")),
     ).toBe(
       `${LEAVING} The stay's cancellation policy refunds nothing for unused nights.`,
     );
@@ -71,7 +75,7 @@ describe("earlyEndNote", () => {
     expect(
       earlyEndNote(
         { ...stay, refundedAmountCents: cents(30_000) },
-        "2026-11-10",
+        at("2026-11-10"),
       ),
     ).toBe(
       `${LEAVING} The stay's cancellation policy refunds 100% of what is left of them after the earlier refunds, which gave back part of every night: $62.57 back to the card it was paid with.`,
@@ -79,16 +83,16 @@ describe("earlyEndNote", () => {
   });
 
   it("promises no refund of a stay nobody paid, a lost dispute or one refunded in full", () => {
-    expect(earlyEndNote({ ...stay, paid: false }, "2026-11-10")).toBe(
+    expect(earlyEndNote({ ...stay, paid: false }, at("2026-11-10"))).toBe(
       `${LEAVING} Nothing was paid for the stay.`,
     );
     expect(
-      earlyEndNote({ ...stay, dispute: DisputeStatus.LOST }, "2026-11-10"),
+      earlyEndNote({ ...stay, dispute: DisputeStatus.LOST }, at("2026-11-10")),
     ).toMatch(/returned the payment after a dispute/);
     expect(
       earlyEndNote(
         { ...stay, refundedAmountCents: stay.amountCents },
-        "2026-11-10",
+        at("2026-11-10"),
       ),
     ).toMatch(/refunded in full already/);
   });

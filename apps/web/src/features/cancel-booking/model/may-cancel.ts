@@ -1,3 +1,4 @@
+import { parseISO } from "date-fns";
 import {
   BookingStatus,
   cancellerOf,
@@ -7,7 +8,6 @@ import {
   type User,
 } from "@repo/contracts";
 import { isHoldOpen } from "#entities/booking";
-import { dayOf } from "#shared/lib";
 
 /**
  * Whether "Cancel" is worth offering, which is not the same as whether it is allowed: the
@@ -18,8 +18,9 @@ import { dayOf } from "#shared/lib";
  * to the same people.
  *
  * The stay half is every rule the API refuses by: `isCancellableOn` — a hold, or a
- * confirmed stay whose check-in day has not come —, a hold still before its deadline, and
- * a payment not disputed with the bank. `now` is the server's at the render.
+ * confirmed stay not ended early whose moment of check-in, on the listing's clock, has not
+ * come —, a hold still before its deadline, and a payment not disputed with the bank. `now`
+ * is the server's at the render.
  *
  * What it does not carry is the stay's page hiding the button from a hold whose payment
  * was sent from that tab and waits for its webhook: that is state of the tab, which neither
@@ -29,7 +30,15 @@ import { dayOf } from "#shared/lib";
 export function mayCancel(
   booking: Pick<
     Booking,
-    "status" | "from" | "expiresAt" | "dispute" | "guestId" | "hostId"
+    | "status"
+    | "from"
+    | "timeZone"
+    | "checkInTime"
+    | "endedEarlyAt"
+    | "expiresAt"
+    | "dispute"
+    | "guestId"
+    | "hostId"
   >,
   viewer: Pick<User, "id" | "role">,
   now: string,
@@ -39,7 +48,7 @@ export function mayCancel(
     !isHoldOpen(booking, now);
 
   return (
-    isCancellableOn(booking, dayOf(now)) &&
+    isCancellableOn(booking, parseISO(now)) &&
     !holdLapsed &&
     booking.dispute !== DisputeStatus.OPEN &&
     cancellerOf(booking, viewer) !== null

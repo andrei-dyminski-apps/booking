@@ -12,6 +12,7 @@ import {
 } from "@nestjs/common";
 import {
   BookingStatus,
+  CHECK_IN_DAY_PAST,
   NotificationType,
   RATE_NOT_OFFERED,
   Role,
@@ -29,6 +30,7 @@ import { NotificationService } from "../../notification/notification.service";
 import { WaitlistService } from "../../waitlist/waitlist.service";
 import { BookingRepository } from "../infrastructure/booking.repository";
 import {
+  CheckInDayPastError,
   DatesUnavailableError,
   GuestNotFoundError,
   ListingChangedError,
@@ -157,7 +159,7 @@ export class BookingService {
 
   /**
    * The atomicity lives one layer down: `BookingRepository.create` locks the listing row
-   * and settles overlaps inside a transaction, and this method only translates the four
+   * and settles overlaps inside a transaction, and this method only translates the
    * failures it can raise. On success it schedules the hold's expiry, and that call cannot
    * fail this request: the booking is committed by then, so a Redis that is down would
    * otherwise answer an existing booking with a 500 and never hand the caller its id. The
@@ -205,6 +207,11 @@ export class BookingService {
         throw new PreconditionFailedException(
           "The host has changed this listing since it was shown — review its price and cancellation terms and book again",
         );
+      }
+
+      // In the schema's words: the same rule, the half of it that needs the listing's zone.
+      if (error instanceof CheckInDayPastError) {
+        throw new BadRequestException(CHECK_IN_DAY_PAST);
       }
 
       // A rate the listing does not offer is the request's mistake rather than a change of

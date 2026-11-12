@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -7,6 +8,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import {
+  CHECK_IN_DAY_PAST,
   NotificationType,
   Role,
   type JoinWaitlistInput,
@@ -27,6 +29,7 @@ import {
   NightsAvailableError,
   WaiterHoldsNightsError,
   WaiterNotFoundError,
+  WaitlistCheckInPastError,
   WaitlistFullError,
   WaitlistListingNotFoundError,
   WaitlistOwnListingError,
@@ -134,6 +137,10 @@ export class WaitlistService {
 
       if (error instanceof WaiterNotFoundError) {
         throw new UnauthorizedException("Session no longer exists");
+      }
+
+      if (error instanceof WaitlistCheckInPastError) {
+        throw new BadRequestException(CHECK_IN_DAY_PAST);
       }
 
       if (

@@ -3,6 +3,8 @@ import {
   BASIS_POINTS,
   CancellationPolicy,
   createListingSchema,
+  DEFAULT_TIME_ZONE,
+  NEW_LISTING_CHECK_IN_TIME,
   type CancellationPolicy as PolicyName,
   type CreateListingInput,
   type ListingDetail,
@@ -33,6 +35,10 @@ export type ListingFormValues = {
    * name for the reason the prices keep theirs. Read only while the switch is on.
    */
   nonRefundableDiscountBps: string;
+  /** An IANA zone, typed or picked out of the browser's suggestions. */
+  timeZone: string;
+  /** `HH:mm`, as a time box hands it over. */
+  checkInTime: string;
   pricing: {
     weekdays: Partial<Record<Weekday, string>>;
     dates: { date: string; priceCents: string }[];
@@ -60,6 +66,8 @@ export const listingFormSchema = z
     cancellationPolicy: z.custom<PolicyName>(),
     offersNonRefundable: z.boolean(),
     nonRefundableDiscountBps: z.string().catch(""),
+    timeZone: z.custom<string>(),
+    checkInTime: z.custom<string>(),
     pricing: z.object({
       weekdays: z.partialRecord(weekdaySchema, priceBox),
       dates: z.array(
@@ -119,6 +127,10 @@ export function listingFormValues(
       listing?.cancellationPolicy ?? CancellationPolicy.FLEXIBLE,
     offersNonRefundable: discount !== null,
     nonRefundableDiscountBps: discount === null ? "" : percentOfBps(discount),
+    // A new listing starts at the database's defaults; `CheckInFields` moves the zone to
+    // the browser's own once it is known.
+    timeZone: listing?.timeZone ?? DEFAULT_TIME_ZONE,
+    checkInTime: listing?.checkInTime ?? NEW_LISTING_CHECK_IN_TIME,
     pricing: {
       weekdays: Object.fromEntries(
         Object.entries(listing?.pricing.weekdays ?? {}).map(

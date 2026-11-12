@@ -3,6 +3,7 @@ import {
   BookingRate,
   BookingStatus,
   CancellationPolicy,
+  isCheckInDayPast,
   quoteStay,
   type BookedRange,
   type Booking,
@@ -29,6 +30,7 @@ import { toIsoDate } from "../../common/iso-date";
 import { PrismaService } from "../../prisma/prisma.service";
 import { holdExpiry } from "../domain/booking-status";
 import {
+  CheckInDayPastError,
   DatesUnavailableError,
   GuestNotFoundError,
   ListingChangedError,
@@ -47,6 +49,7 @@ import type {
 import { cents, type Cents } from "../../payment/domain/money";
 import {
   BOOKING_INCLUDE,
+  checkInData,
   RELEASED_HOLD_INCLUDE,
   stayMoneyData,
   toBooking,
@@ -68,6 +71,8 @@ type LockedListing = {
   deleted_at: Date | null;
   cancellation_policy: CancellationPolicy;
   non_refundable_discount_bps: number | null;
+  time_zone: string;
+  check_in_time: string;
   updated_at: Date;
 };
 
@@ -260,7 +265,7 @@ export class BookingRepository {
     return this.prismaService.$transaction(async (tx) => {
       const locked = await tx.$queryRaw<LockedListing[]>`
         SELECT id, owner_id, deleted_at, cancellation_policy,
-               non_refundable_discount_bps, updated_at
+               non_refundable_discount_bps, time_zone, check_in_time, updated_at
         FROM listings WHERE id = ${input.listingId}::uuid FOR UPDATE
       `;
 
@@ -282,6 +287,14 @@ export class BookingRepository {
         !isEqual(parseISO(input.listingUpdatedAt), listing.updated_at)
       ) {
         throw new ListingChangedError(input.listingId);
+      }
+
+      // The listing's today, off its zone under the lock a host moving the listing to
+      // another zone waits for: a night already over there is not for sale, and tonight
+      // there is, whatever day UTC has reached. After the version: a form read before the
+      // listing moved east is told to read it again (`412`), not that its day has passed.
+      if (isCheckInDayPast({ timeZone: listing.time_zone }, input.from, now)) {
+        throw new CheckInDayPastError(input.listingId, input.from);
       }
 
       const released = await tx.booking.updateManyAndReturn({
@@ -346,6 +359,13 @@ export class BookingRepository {
             // Copied as the amount is, so a later change of the listing's policy does not
             // restate this stay's refunds.
             cancellationPolicy,
+            // The moment the stay begins, copied for the same reason: a later move of the
+            // listing's check-in does not move this stay's windows or its payout.
+            ...checkInData({
+              from: input.from,
+              timeZone: listing.time_zone,
+              checkInTime: listing.check_in_time,
+            }),
           },
           include: BOOKING_INCLUDE,
         });

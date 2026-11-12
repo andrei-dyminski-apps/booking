@@ -202,9 +202,9 @@ export class BookingController {
    * give back (`unusedNightsRefund`). Ended when it answers; the refund is sent after it by
    * the cancellation's job, and the booking says so in `refundOwedCents` until it has gone
    * out. The guest and an admin may end it, not the host. The body names the check-out and
-   * the refund the caller was shown, so a confirmation that crossed midnight UTC, or one a
-   * refund recorded meanwhile made worth less, is refused rather than carried out on terms
-   * other than the ones it said.
+   * the refund the caller was shown, so a confirmation that crossed the listing's midnight,
+   * or one a refund recorded meanwhile made worth less, is refused rather than carried out
+   * on terms other than the ones it said.
    */
   @Post(":id/end-early")
   @HttpCode(HttpStatus.NO_CONTENT)

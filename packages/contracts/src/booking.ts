@@ -1,6 +1,13 @@
 import { z } from "zod";
 import { cancellationPolicySchema } from "./cancellation-policy.js";
-import { dayMessage, isDay, today } from "./day.js";
+import {
+  CHECK_IN_DAY_PAST,
+  checkInTimeSchema,
+  isCheckInDayPast,
+  storedTimeZoneSchema,
+  type CheckIn,
+} from "./check-in.js";
+import { dayMessage, earliestToday, isDay } from "./day.js";
 import { listingSummarySchema } from "./listing.js";
 import { centsSchema, currencySchema } from "./money.js";
 import { bookingRateSchema, pricedNightSchema } from "./pricing.js";
@@ -100,6 +107,13 @@ export const bookingSchema = z.object({
    */
   cancellationPolicy: cancellationPolicySchema,
   /**
+   * The listing's time zone and check-in time when the hold was taken — copies, like the
+   * policy. Together with `from` they are the moment the stay begins (`checkInInstant`),
+   * which every refund window, the host's fee and the payout are measured from.
+   */
+  timeZone: storedTimeZoneSchema,
+  checkInTime: checkInTimeSchema,
+  /**
    * What went back to the guest, or `null` when nothing did: a cancellation after every
    * refund window closed, a hold that was never paid. See `refundQuote` (`refund.ts`).
    */
@@ -167,6 +181,8 @@ const stayRequestFields = bookingSchema.omit({
   amountCents: true,
   currency: true,
   cancellationPolicy: true,
+  timeZone: true,
+  checkInTime: true,
   refundedAmountCents: true,
   refundOwedCents: true,
   paid: true,
@@ -182,26 +198,32 @@ const stayRequestFields = bookingSchema.omit({
 
 /**
  * Both rules are about a date and wait for one: without the guard an empty check-in box
- * reads as a stay in the past — `"" >= today()` is false — and the form puts that under a
+ * reads as a stay in the past — `"" >= earliestToday()` is false — and the form puts that under a
  * box nobody has filled in yet, beside the refusal that is actually true.
  * `listingQuerySchema` guards its own cross-field rules the same way.
  */
 function withStayRules<T extends z.ZodType<{ from: string; to: string }>>(
   schema: T,
 ): T {
-  return schema
-    .refine(
-      (booking) =>
-        !isDay(booking.from) || !isDay(booking.to) || booking.from < booking.to,
-      {
-        error: "Check-out date must be later than check-in date",
-        path: ["to"],
-      },
-    )
-    .refine((booking) => !isDay(booking.from) || booking.from >= today(), {
-      error: "Check-in date cannot be in the past",
-      path: ["from"],
-    });
+  return (
+    schema
+      .refine(
+        (booking) =>
+          !isDay(booking.from) ||
+          !isDay(booking.to) ||
+          booking.from < booking.to,
+        {
+          error: "Check-out date must be later than check-in date",
+          path: ["to"],
+        },
+      )
+      // Only what is gone everywhere: the listing's own today is read under the lock that
+      // takes the hold (`isCheckInDayPast`), since this schema does not know where it is.
+      .refine(
+        (booking) => !isDay(booking.from) || booking.from >= earliestToday(),
+        { error: CHECK_IN_DAY_PAST, path: ["from"] },
+      )
+  );
 }
 
 /**
@@ -230,6 +252,23 @@ export const createBookingSchema = withStayRules(
     rate: bookingRateSchema.optional(),
   }),
 );
+
+/**
+ * `createBookingSchema` with the listing's own today beside the earliest one — what the
+ * booking form, which knows where the listing is, checks before a request is spent. The API
+ * checks the same day under the lock that takes the hold (`isCheckInDayPast`), so this is a
+ * convenience of the form and never the check. A day gone everywhere is left to the rule
+ * above, so the box is not told the same thing twice.
+ */
+export function createBookingSchemaIn(listing: Pick<CheckIn, "timeZone">) {
+  return createBookingSchema.refine(
+    (booking) =>
+      !isDay(booking.from) ||
+      booking.from < earliestToday() ||
+      !isCheckInDayPast(listing, booking.from, new Date()),
+    { error: CHECK_IN_DAY_PAST, path: ["from"] },
+  );
+}
 
 const cancellationReason = z
   .string()

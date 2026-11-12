@@ -11,6 +11,7 @@ export {
   cancelBookingSchema,
   cancellerSchema,
   createBookingSchema,
+  createBookingSchemaIn,
   hostCancelBookingSchema,
   HOST_REASON_REQUIRED,
   stayPartySchema,
@@ -58,9 +59,27 @@ export {
   type BookingAdjustment,
 } from "./adjustment.js";
 
+export { earliestToday } from "./day.js";
+
+export {
+  CHECK_IN_DAY_PAST,
+  DEFAULT_TIME_ZONE,
+  NEW_LISTING_CHECK_IN_TIME,
+  canonicalTimeZone,
+  checkInDayEnd,
+  checkInInstant,
+  checkInTimeSchema,
+  isCheckInDayPast,
+  isTimeZone,
+  runtimeTimeZone,
+  stayDay,
+  storedTimeZoneSchema,
+  timeZoneSchema,
+  type CheckIn,
+} from "./check-in.js";
+
 export {
   cancellerOf,
-  checkInInstant,
   isCancellableOn,
   notRefunded,
   refundQuote,

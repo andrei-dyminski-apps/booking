@@ -81,6 +81,10 @@ describe("What the money paths set aside (e2e)", () => {
         amountCents: 48_000,
         currency: "usd",
         cancellationPolicy: "FLEXIBLE",
+        timeZone: "UTC",
+        checkInTime: "00:00",
+        // Midnight UTC of `from`, as `checkInData` makes it of the two above.
+        checkInAt: parseISO(inDays(-10), { in: tz("UTC") }),
         discountCents: 0,
         paidAt: new Date(),
       },
@@ -402,6 +406,10 @@ describe("What the money paths set aside (e2e)", () => {
           amountCents: 48_000,
           currency: "usd",
           cancellationPolicy: "FLEXIBLE",
+          timeZone: "UTC",
+          checkInTime: "00:00",
+          // Midnight UTC of `from`, as `checkInData` makes it of the two above.
+          checkInAt: parseISO(inDays(-20), { in: tz("UTC") }),
           discountCents: 0,
           paidAt: new Date(),
           refundedAmountCents: 12_000,

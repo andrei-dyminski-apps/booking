@@ -317,6 +317,39 @@ describe("PayoutService", () => {
       expect(payoutGateway.transfers.size).toBe(0);
     });
 
+    it("sends nothing before a day has passed since check-in on the listing's clock", async () => {
+      hostWith(ACCOUNT_ID, true);
+      paidStay("2030-10-14");
+
+      const row = stored();
+
+      if (row === undefined) throw new Error("No stay stored");
+
+      // 15:00 in Honolulu (UTC−10) on the 14th is 01:00 UTC on the 15th: the payout falls
+      // due at 01:00 UTC on the 16th, a whole day after a midnight-UTC check-in would.
+      payoutRepository.stays.set(BOOKING_ID, {
+        ...row,
+        hold: {
+          ...row.hold,
+          checkIn: {
+            from: "2030-10-14",
+            timeZone: "Pacific/Honolulu",
+            checkInTime: "15:00",
+          },
+        },
+      });
+
+      await expect(
+        service.payOut(BOOKING_ID, new Date("2030-10-16T00:59:59.999Z")),
+      ).resolves.toBe(false);
+      expect(payoutGateway.transfers.size).toBe(0);
+
+      await expect(
+        service.payOut(BOOKING_ID, new Date("2030-10-16T01:00:00.000Z")),
+      ).resolves.toBe(true);
+      expect(payoutGateway.transfers.size).toBe(1);
+    });
+
     it("pays once however many runs reach the same stay", async () => {
       hostWith(ACCOUNT_ID, true);
       paidStay(PAST);
@@ -1234,10 +1267,29 @@ describe("PayoutService", () => {
   });
 
   it("schedules a stay's payout a day after its check-in", async () => {
-    await service.schedule({ bookingId: BOOKING_ID, from: "2030-10-14" });
+    await service.schedule({
+      bookingId: BOOKING_ID,
+      checkIn: { from: "2030-10-14", timeZone: "UTC", checkInTime: "00:00" },
+    });
 
     expect(payoutJobs.scheduled).toEqual([
       { bookingId: BOOKING_ID, runAt: new Date("2030-10-15T00:00:00.000Z") },
+    ]);
+  });
+
+  it("schedules it a day after the moment of check-in on the listing's clock", async () => {
+    // 15:00 in Kiritimati (UTC+14) on the 14th is 01:00 UTC that day.
+    await service.schedule({
+      bookingId: BOOKING_ID,
+      checkIn: {
+        from: "2030-10-14",
+        timeZone: "Pacific/Kiritimati",
+        checkInTime: "15:00",
+      },
+    });
+
+    expect(payoutJobs.scheduled).toEqual([
+      { bookingId: BOOKING_ID, runAt: new Date("2030-10-15T01:00:00.000Z") },
     ]);
   });
 });

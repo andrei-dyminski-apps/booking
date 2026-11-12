@@ -142,6 +142,8 @@ class FakeListingRepository implements PublicOf<ListingRepository> {
       ...fields,
       cancellationPolicy: fields.cancellationPolicy ?? "FLEXIBLE",
       nonRefundableDiscountBps: fields.nonRefundableDiscountBps ?? null,
+      timeZone: fields.timeZone ?? "UTC",
+      checkInTime: fields.checkInTime ?? "15:00",
       createdAt: "2026-08-20T12:00:00.000Z",
       updatedAt: "2026-08-20T12:00:00.000Z",
     };

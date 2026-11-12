@@ -85,7 +85,12 @@ only informs; the decision to refuse a booking is made when the hold is taken.
 
 **Check-in / check-out** — the first and last day of a stay. Check-out is exclusive: a stay from
 the 1st to the 4th occupies three nights. Check-out must be later than check-in, and check-in may
-not be in the past.
+not be in the past where the listing is: a day before the listing's today in its time zone is
+refused, whatever day it is in UTC.
+
+**Check-in time / time zone** — a listing names where it is (an IANA zone such as
+`Europe/Berlin`) and when a guest may arrive (`HH:mm` on that clock); every booking copies both
+when it is taken, like its policy. Listings and stays from before them carry `UTC` / `00:00`.
 
 **Concurrent booking** — how two guests are kept from the same nights, in three layers: the request
 that takes the nights first locks the listing, so competing requests queue and the second gets an
@@ -170,8 +175,10 @@ follows it: the amount owed is written on the booking, and a job sends it afterw
 **Cancellation reason** — free text a host must give when cancelling. Stored with who cancelled
 and when, and carried to the other side in the notice.
 
-**Check-in instant** — the moment a stay begins, from which refund windows are measured. Neither a
-guest nor a host nor an admin may cancel a stay once its check-in day has come.
+**Check-in instant** — the moment a stay begins: its check-in day at the check-in time in the
+listing's time zone. Refund windows, the host's fee and the payout are measured from it. Neither a
+guest nor a host nor an admin may cancel a stay once it has come, and a stay can be ended early only
+from it on — "tonight" being the listing's night.
 
 **Grace period** — a full refund within 24 hours of booking, provided check-in is more than 7 days
 away. Every policy but `NON_REFUNDABLE` has it.
@@ -234,7 +241,7 @@ its intent withdrawn.
 `processing` for days would outlive the 15-minute hold.
 
 **Payout** — the transfer of the host's share to their connected account, due 24 hours after
-midnight UTC of check-in. A timed job per stay sends it when due and an hourly sweep sends whatever
+the check-in instant. A timed job per stay sends it when due and an hourly sweep sends whatever
 the jobs missed. A refund after the payout takes the host's share of it back by a reversal.
 
 **Payout reservation** — what a payout means to send, fixed before the transfer under a lock on the
@@ -468,7 +475,7 @@ lapsed hold is still `PENDING_PAYMENT` even though its slot is already free.
 | `GRACE_PERIOD_HOURS`             | 24              | full refund within a day of booking            |
 | `GRACE_MIN_LEAD_HOURS`           | 7 days          | grace applies only if check-in is further away |
 | `PLATFORM_FEE_BPS`               | 1 500 (15%)     | taken from the host's share                    |
-| `PAYOUT_DELAY_HOURS`             | 24              | after midnight UTC of check-in                 |
+| `PAYOUT_DELAY_HOURS`             | 24              | after the check-in instant                     |
 | `HOST_CANCELLATIONS_THRESHOLD`   | 3               | counted cancellations within a year            |
 | `HOST_CANCELLATIONS_WINDOW_DAYS` | 365             | the window those are counted in                |
 | `MAX_WAITLIST_ENTRIES`           | 20              | per account                                    |

@@ -1,8 +1,9 @@
 import { tz } from "@date-fns/tz";
-import { addDays, format, parseISO } from "date-fns";
+import { addDays, format, isBefore, parseISO } from "date-fns";
 import { z } from "zod";
 import { BookingStatus, type Booking } from "./booking.js";
 import { CANCELLATION_TERMS } from "./cancellation-policy.js";
+import { checkInInstant, stayDay, type CheckIn } from "./check-in.js";
 import {
   addCents,
   BASIS_POINTS,
@@ -21,24 +22,32 @@ import { notRefunded } from "./refund.js";
  *
  * A stay ended early checks out tomorrow: tonight is used — the guest is in the place when
  * they press the button — and every night from tomorrow's on is given back at the policy's
- * `unusedNightsBps`. Days are UTC calendar days, like `isCancellableOn`'s.
+ * `unusedNightsBps`. "Tonight" is the listing's: the day `now` falls on in its time zone
+ * (`stayDay`), not the UTC one.
  */
 
 const IN_UTC = { in: tz("UTC") };
 
-/** The day after `today`: the check-out of a stay ended early on it. */
-export function earlyCheckOut(today: string): string {
-  return format(addDays(parseISO(today, IN_UTC), 1, IN_UTC), "yyyy-MM-dd");
+/** The day after the listing's today: the check-out of a stay ended early at `now`. */
+export function earlyCheckOut(
+  stay: Pick<CheckIn, "timeZone">,
+  now: Date,
+): string {
+  return format(
+    addDays(parseISO(stayDay(stay, now), IN_UTC), 1, IN_UTC),
+    "yyyy-MM-dd",
+  );
 }
 
 /**
  * The body of `POST /bookings/:id/end-early`: the terms the stay's page stated — the
  * check-out and the refund. The API ends the stay only while that check-out is still
- * `earlyCheckOut` of its own day — a confirmation pressed after midnight UTC would otherwise
- * end the stay a day later and refund a night less than the dialog said — and only while the
- * refund is not less than `refundCents`: a refund recorded since the page read the stay (an
- * admin's, the dashboard's) takes its part of the unused nights too. Either is a `409` to read
- * the terms again. A larger refund is no reason to refuse; it is `0` when the page stated none.
+ * `earlyCheckOut` of its own day — a confirmation pressed after the listing's midnight would
+ * otherwise end the stay a day later and refund a night less than the dialog said — and only
+ * while the refund is not less than `refundCents`: a refund recorded since the page read the
+ * stay (an admin's, the dashboard's) takes its part of the unused nights too. Either is a
+ * `409` to read the terms again. A larger refund is no reason to refuse; it is `0` when the
+ * page stated none.
  */
 export const endStayEarlySchema = z.object({
   checkOut: z.iso.date({
@@ -50,23 +59,24 @@ export const endStayEarlySchema = z.object({
 export type EndStayEarlyInput = z.infer<typeof endStayEarlySchema>;
 
 /**
- * Whether a stay can end early on `today`: confirmed, begun — its check-in day has come,
- * where a cancellation is refused from — and with at least one night left after tonight. A
- * stay ended early already checks out tomorrow, so it has none left and is refused too.
+ * Whether a stay can end early at `now`: confirmed, begun — the moment of check-in has come,
+ * the very moment a cancellation is refused from, so there is never a time when both or
+ * neither is offered — and with at least one night left after tonight. A stay ended early
+ * already checks out tomorrow, so it has none left and is refused too.
  */
 export function mayEndEarly(
-  booking: Pick<Booking, "status" | "from" | "to">,
-  today: string,
+  booking: Pick<Booking, "status" | "from" | "to" | "timeZone" | "checkInTime">,
+  now: Date,
 ): boolean {
   return (
     booking.status === BookingStatus.CONFIRMED &&
-    booking.from <= today &&
-    earlyCheckOut(today) < booking.to
+    !isBefore(now, checkInInstant(booking)) &&
+    earlyCheckOut(booking, now) < booking.to
   );
 }
 
 /**
- * What ending a stay early on `today` gives back, and the new check-out: the nights it no
+ * What ending a stay early at `now` gives back, and the new check-out: the nights it no
  * longer uses (`booking_nights` from tomorrow's on, at the prices they were bought at), the
  * policy's share of them and that share in cents.
  */
@@ -103,12 +113,12 @@ export type UnusedNightsRefund = {
 export function unusedNightsRefund(
   booking: Pick<
     Booking,
-    "cancellationPolicy" | "amountCents" | "refundedAmountCents"
+    "cancellationPolicy" | "amountCents" | "refundedAmountCents" | "timeZone"
   >,
   nights: readonly PricedNight[],
-  today: string,
+  now: Date,
 ): UnusedNightsRefund {
-  const checkOut = earlyCheckOut(today);
+  const checkOut = earlyCheckOut(booking, now);
   const unused = nights.filter((night) => night.date >= checkOut);
   const shareBps =
     CANCELLATION_TERMS[booking.cancellationPolicy].unusedNightsBps;

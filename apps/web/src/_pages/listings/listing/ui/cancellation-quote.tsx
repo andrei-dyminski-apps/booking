@@ -33,6 +33,7 @@ const CLOCK_TICK_MS = 30_000;
 export const CancellationQuote = ({
   control,
   policy,
+  checkIn,
   discountBps,
   booked,
   refused,
@@ -40,6 +41,8 @@ export const CancellationQuote = ({
 }: {
   control: Control<CreateBookingInput>;
   policy: CancellationPolicy;
+  /** The listing's time zone and check-in time, which every window is measured from. */
+  checkIn: { timeZone: string; checkInTime: string };
   /** The listing's non-refundable discount, or `null` when it offers no such rate. */
   discountBps: number | null;
   booked: readonly BookedRange[];
@@ -62,6 +65,8 @@ export const CancellationQuote = ({
       <RefundScheduleList
         schedule={refundSchedule({
           from,
+          timeZone: checkIn.timeZone,
+          checkInTime: checkIn.checkInTime,
           createdAt: moment,
           // The non-refundable rate freezes its own policy onto the stay, as the API does.
           cancellationPolicy:
@@ -69,6 +74,7 @@ export const CancellationQuote = ({
               ? CancellationPolicy.NON_REFUNDABLE
               : policy,
         })}
+        timeZone={checkIn.timeZone}
       />
     </div>
   );

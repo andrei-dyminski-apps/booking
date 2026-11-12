@@ -66,6 +66,23 @@ model Booking {
   /// restate a stay already taken. No default on purpose: `create` has to write it.
   cancellationPolicy CancellationPolicy @map("cancellation_policy")
 
+  /// The listing's time zone and check-in time when the hold was taken — copied under the
+  /// same lock as the policy, so a later change of the listing does not move this stay's
+  /// windows. `from` at `check_in_time` in `time_zone` is the moment it begins
+  /// (`checkInInstant`). No defaults, for the reason `cancellation_policy` has none.
+  /// `bookings_check_in_time_format` (raw SQL) holds the time to `HH:mm`.
+  timeZone    String @map("time_zone")
+  checkInTime String @map("check_in_time") @db.Char(5)
+  /// That moment, `checkInInstant` of the three above, written by the insert that copies
+  /// them and never again — none of them changes on a stay. Only the payout sweep reads it,
+  /// to cut by when a payout falls due rather than by a day; every rule reads the three.
+  /// Should the zone's rules change in the runtime's zone data between the booking and the
+  /// check-in, the two drift apart by the change: the sweep then reads the stay up to that
+  /// much early — `PayoutService` checks `payoutDueAt` again and leaves it for a later
+  /// run — or that much late, since the stay's own job was scheduled from the same moment.
+  /// Either is bounded by the change itself, an hour or so, and not worth a rewrite.
+  checkInAt   DateTime @map("check_in_at")
+
   /// What each night of the stay cost when it was quoted — `amount_cents` is their sum less
   /// `discount_cents`, written by the same insert. See `BookingNight`.
   nights BookingNight[]
@@ -314,6 +331,12 @@ model Listing {
   /// it to the contract's bounds, and `listings_rate_beside_refundable_policy` to `null`
   /// under the `NON_REFUNDABLE` policy, whose standard rate already refunds nothing.
   nonRefundableDiscountBps Int? @map("non_refundable_discount_bps")
+  /// Where the place is, an IANA zone, and when a guest may arrive, `HH:mm` on its clock —
+  /// `timeZoneSchema` and `checkInTimeSchema` in `@repo/contracts`. Every booking copies
+  /// both. `listings_check_in_time_format` (raw SQL) holds the time to `HH:mm`; the zone is
+  /// checked by the contract, which knows the names `Intl` converts with.
+  timeZone                 String @default("UTC") @map("time_zone")
+  checkInTime              String @default("15:00") @map("check_in_time") @db.Char(5)
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")
   /// When the owner retired it. The row outlives that moment because the bookings above
@@ -620,6 +643,13 @@ model WaitlistEntry {
   from      DateTime @map("from_date") @db.Date
   to        DateTime @map("to_date") @db.Date
   createdAt DateTime @default(now()) @map("created_at")
+  /// When `from` stops being a check-in day where the listing is (`checkInDayEnd`): the
+  /// first moment of the next day in the listing's zone, written by `join` off the zone it
+  /// reads under the listing's lock. Every read drops an entry from this moment on — a
+  /// query cannot convert a day into the listing's zone, and Postgres's zone data is not
+  /// the `Intl` every other rule converts with. Like a booking's `check_in_at`, it keeps
+  /// the zone it was written in when the host later moves the listing.
+  checkInDayEndsAt DateTime @map("check_in_day_ends_at")
 
   /// Cascade on both sides, unlike a booking: an entry is its owner's wish about one
   /// listing and is no record of anything, so it goes with either. Nothing in the API

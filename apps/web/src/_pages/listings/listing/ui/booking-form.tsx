@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   BookingRate,
-  createBookingSchema,
+  createBookingSchemaIn,
   type BookedRange,
   type CancellationPolicy,
   type CreateBookingInput,
@@ -39,9 +39,12 @@ import { StayQuote } from "./stay-quote";
  * dates would give back at the chosen rate is dated under them (`CancellationQuote`).
  *
  * `createBookingSchema` is also what refuses a check-out before the check-in and a stay in
- * the past, here as well as in the action. `listingId` is one of its fields, so the form
- * is handed it as a bound value rather than as a box — it is what the schema needs to parse
- * at all, and the action ignores what arrives and uses the id the page bound to it.
+ * the past, here as well as in the action — here with the listing's own today beside it
+ * (`createBookingSchemaIn`), since the form knows where the listing is and the action is
+ * handed nothing it could trust about that; the API checks the same day. `listingId` is one
+ * of its fields, so the form is handed it as a bound value rather than as a box — it is what
+ * the schema needs to parse at all, and the action ignores what arrives and uses the id the
+ * page bound to it.
  *
  * Dates the calendar draws as taken are not refused here: the form offers the waitlist for
  * them instead of a hold, and submits to that action. Which of the two is decided off the
@@ -57,6 +60,7 @@ export const BookingForm = ({
   earliest,
   booked,
   policy,
+  checkIn,
   discountBps,
   listingUpdatedAt,
   now,
@@ -64,12 +68,17 @@ export const BookingForm = ({
   listingId: string;
   /** The default price and the exceptions to it, off the listing being booked. */
   prices: PricedListing;
-  /** Today in UTC, from the server — see `shared/lib/dates.ts`. */
+  /**
+   * The listing's today, from the server — the first night it still sells, which UTC's
+   * today is not (`isCheckInDayPast`).
+   */
   earliest: string;
   /** The nights the calendar draws as taken — what decides between a hold and the waitlist. */
   booked: readonly BookedRange[];
   /** The listing's cancellation policy, which the hold copies when it is taken. */
   policy: CancellationPolicy;
+  /** The listing's time zone and check-in time, which the hold copies with the policy. */
+  checkIn: { timeZone: string; checkInTime: string };
   /** The listing's non-refundable discount, or `null` when it offers no such rate. */
   discountBps: number | null;
   /**
@@ -82,6 +91,8 @@ export const BookingForm = ({
   now: string;
 }) => {
   const [refused, setRefused] = useState<BookedRange | null>(null);
+  const { timeZone } = checkIn;
+  const schema = useMemo(() => createBookingSchemaIn({ timeZone }), [timeZone]);
   const { form, submit, pending, message } = useActionForm<CreateBookingInput>({
     action: async (state, values) => {
       const waits = callsForWaitlist(values.from, values.to, booked, refused);
@@ -98,7 +109,7 @@ export const BookingForm = ({
 
       return answer;
     },
-    schema: createBookingSchema,
+    schema,
     defaultValues: { from: "", to: "", rate: BookingRate.STANDARD },
     bound: { listingId },
   });
@@ -176,6 +187,7 @@ export const BookingForm = ({
         <CancellationQuote
           control={form.control}
           policy={policy}
+          checkIn={checkIn}
           discountBps={discountBps}
           booked={booked}
           refused={refused}

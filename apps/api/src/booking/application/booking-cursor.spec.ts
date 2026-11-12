@@ -18,6 +18,8 @@ const booking: Booking = {
   amountCents: cents(48_200),
   currency: CURRENCY,
   cancellationPolicy: "FLEXIBLE",
+  timeZone: "UTC",
+  checkInTime: "00:00",
   refundedAmountCents: null,
   refundOwedCents: null,
   paid: false,

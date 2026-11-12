@@ -98,6 +98,7 @@ export function storePaidStay(
         from,
         to: "2099-12-31",
       },
+      checkIn: { from, timeZone: "UTC", checkInTime: "00:00" },
       guestId: GUEST_ID,
       listingOwnerId: HOST_ID,
       paymentId: PAYMENT_ID,

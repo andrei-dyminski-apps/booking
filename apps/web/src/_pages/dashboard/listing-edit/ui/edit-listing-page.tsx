@@ -1,9 +1,9 @@
-import { Role } from "@repo/contracts";
+import { earliestToday, Role } from "@repo/contracts";
 import { DeleteListingButton } from "#features/delete-listing";
 import { ListingForm } from "#features/save-listing";
 import { requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { requireId, today } from "#shared/lib";
+import { requireId } from "#shared/lib";
 import { ownListing } from "../api/own-listing";
 import { EditListingCard } from "./edit-listing-card";
 
@@ -18,7 +18,7 @@ export const EditListingPage = async ({
     <EditListingCard>
       <ListingForm
         listing={listing}
-        earliest={today()}
+        earliest={earliestToday()}
         extraAction={<DeleteListingButton listingId={listing.id} />}
       />
     </EditListingCard>

@@ -8,6 +8,7 @@ import { BookingStatus, NotificationType, StayParty } from "@repo/contracts";
 import { type FakeNotificationService } from "../../notification/testing/notification-service.fakes";
 import { cents } from "../../payment/domain/money";
 import type { BookingEarlyEndService } from "./booking-early-end.service";
+import type { BookingCancellationService } from "./booking-cancellation.service";
 import type { BookingPaymentHandler } from "./booking-payment.handler";
 import type { BookingService } from "./booking.service";
 import { createBookingTestbed, payForStay } from "./testing/booking.fakes";
@@ -51,6 +52,7 @@ const TOMORROW = { checkOut: fromToday(1), refundCents: cents(0) };
 describe("BookingEarlyEndService", () => {
   let service: BookingService;
   let earlyEndService: BookingEarlyEndService;
+  let cancellationService: BookingCancellationService;
   let paymentHandler: BookingPaymentHandler;
   let bookingTable: FakeBookingTable;
   let bookingRepository: FakeBookingRepository;
@@ -71,6 +73,7 @@ describe("BookingEarlyEndService", () => {
     ({
       service,
       earlyEndService,
+      cancellationService,
       paymentHandler,
       bookingTable,
       bookingRepository,
@@ -224,6 +227,22 @@ describe("BookingEarlyEndService", () => {
       earlyEndService.endEarly(id, guest, TOMORROW),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(paymentGateway.refunds.size).toBe(0);
+  });
+
+  it("refuses a stay on its check-in day before the check-in time on the listing's clock", async () => {
+    // 23:59 in Honolulu (UTC−10) on today's UTC date is 09:59 UTC tomorrow: still ahead.
+    bookingRepository.listingTimeZone = "Pacific/Honolulu";
+    bookingRepository.listingCheckInTime = "23:59";
+    const id = await paidStay(0);
+
+    await expect(earlyEndService.endEarly(id, guest, TOMORROW)).rejects.toThrow(
+      "The stay has not begun yet",
+    );
+    expect(row(id)?.endedEarlyAt).toBeNull();
+
+    // A cancellation is what the stay still takes.
+    await cancellationService.remove(id, guest);
+    expect(row(id)?.status).toBe(BookingStatus.CANCELLED);
   });
 
   it("refuses a stay on its last night: nothing is left after tonight", async () => {

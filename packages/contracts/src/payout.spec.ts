@@ -55,9 +55,30 @@ describe("owedToHost", () => {
 });
 
 describe("payoutDueAt", () => {
-  it("falls due a day after midnight UTC of the check-in day", () => {
-    expect(payoutDueAt("2030-10-14").toISOString()).toBe(
-      "2030-10-15T00:00:00.000Z",
-    );
+  it("falls due a day after midnight UTC of the check-in day for a stay from before the time zones", () => {
+    expect(
+      payoutDueAt({
+        from: "2030-10-14",
+        timeZone: "UTC",
+        checkInTime: "00:00",
+      }).toISOString(),
+    ).toBe("2030-10-15T00:00:00.000Z");
+  });
+
+  it("falls due a day after the moment of check-in on the listing's clock", () => {
+    expect(
+      payoutDueAt({
+        from: "2030-10-14",
+        timeZone: "Pacific/Kiritimati",
+        checkInTime: "15:00",
+      }).toISOString(),
+    ).toBe("2030-10-15T01:00:00.000Z");
+    expect(
+      payoutDueAt({
+        from: "2030-10-14",
+        timeZone: "Pacific/Honolulu",
+        checkInTime: "15:00",
+      }).toISOString(),
+    ).toBe("2030-10-16T01:00:00.000Z");
   });
 });

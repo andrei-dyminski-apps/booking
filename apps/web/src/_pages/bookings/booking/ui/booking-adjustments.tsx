@@ -9,7 +9,7 @@ import {
   CardTitle,
 } from "@repo/ui/components/card";
 import { setAsideHref } from "#shared/config";
-import { formatMoment, formatMoney } from "#shared/lib";
+import { formatMomentIn, formatMoney } from "#shared/lib";
 import { FinishRefundButton } from "./finish-refund-button";
 
 /**
@@ -23,6 +23,8 @@ import { FinishRefundButton } from "./finish-refund-button";
  * sent back says so and leads to its row on the bounced refunds list, where the money is
  * sent back some other way.
  *
+ * Each refund is dated on the stay's own clock, as its cancellation and its windows are.
+ *
  * Drawn by `BookingLive` rather than the page, so a press finished here starts the same wait
  * for the refund total that a refund from the dialog does (`onRefunded`).
  *
@@ -32,10 +34,13 @@ import { FinishRefundButton } from "./finish-refund-button";
  */
 export const BookingAdjustments = ({
   bookingId,
+  timeZone,
   adjustments,
   onRefunded,
 }: {
   bookingId: string;
+  /** The stay's copy of its listing's zone, which every refund is dated in. */
+  timeZone: string;
   adjustments: BookingAdjustment[] | null;
   /** A press finished from the list — the page waits for its webhook. */
   onRefunded: () => void;
@@ -93,7 +98,7 @@ export const BookingAdjustments = ({
                 )}
               </span>
               <span className="text-muted-foreground">
-                {formatMoment(adjustment.createdAt)} UTC
+                {formatMomentIn(adjustment.createdAt, timeZone)}
                 {adjustment.refundId !== null && (
                   <>
                     {" "}

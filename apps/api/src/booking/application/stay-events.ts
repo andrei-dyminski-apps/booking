@@ -1,9 +1,12 @@
 import { Injectable } from "@nestjs/common";
-import type { StayNotice } from "@repo/contracts";
+import type { CheckIn } from "@repo/contracts";
+
+/** A stay a payment confirmed, and when it begins — what its payout falls due by. */
+export type ConfirmedStayEvent = { bookingId: string; checkIn: CheckIn };
 
 /** `payout` registers in its own `onModuleInit`, so `booking` knows nobody on the other end. */
 export interface StayEventsListener {
-  confirmed?(stay: StayNotice): Promise<void>;
+  confirmed?(stay: ConfirmedStayEvent): Promise<void>;
 
   /**
    * The refund job only logs a failure here; the refund's webhook calls it again, and
@@ -24,7 +27,7 @@ export class StayEvents {
     this.listeners.push(listener);
   }
 
-  async confirmed(stay: StayNotice): Promise<void> {
+  async confirmed(stay: ConfirmedStayEvent): Promise<void> {
     for (const listener of this.listeners) {
       await listener.confirmed?.(stay);
     }

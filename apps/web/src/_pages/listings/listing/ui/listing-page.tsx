@@ -1,6 +1,7 @@
 import { Suspense } from "react";
+import { parseISO } from "date-fns";
 import { UsersIcon } from "lucide-react";
-import { Role, weekdaySchema } from "@repo/contracts";
+import { earliestToday, Role, stayDay, weekdaySchema } from "@repo/contracts";
 import { Badge } from "@repo/ui/components/badge";
 import {
   Card,
@@ -28,7 +29,6 @@ import {
   countOf,
   orNotFound,
   requireId,
-  today,
   WEEKDAY_NAMES,
 } from "#shared/lib";
 import { BackLink, ButtonLink } from "#shared/ui";
@@ -51,12 +51,20 @@ import { ListingReviews } from "./listing-reviews";
 const CALENDAR_MONTHS = 3;
 const CALENDAR_DAYS = 92;
 
+/**
+ * The window is asked for before the listing is read, so before its today is known — it
+ * opens at the earliest today of any zone and runs two days past the calendar, since the
+ * listing's today is between a day behind UTC and a day ahead of it. Every night the
+ * calendar draws is inside it, whichever zone the listing is in.
+ */
+const WINDOW_DAYS = CALENDAR_DAYS + 2;
+
 /** How many reviews the listing's screen draws under the summary of all of them. */
 const REVIEWS_SHOWN = 10;
 
 export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
   const id = requireId((await params).id);
-  const from = today();
+  const from = earliestToday();
   const now = new Date().toISOString();
 
   // Both listing reads are public, cached under their own URL and tagged separately,
@@ -85,7 +93,7 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
         }),
         listingsApi.availability(
           id,
-          { from, to: addDays(from, CALENDAR_DAYS) },
+          { from, to: addDays(from, WINDOW_DAYS) },
           {
             next: {
               revalidate: HOLD_SWEEP_REVALIDATE,
@@ -99,12 +107,22 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
     currentUser(),
   ]);
 
+  // The first night this listing still sells: its own today, not the UTC one — a night
+  // already over where it is, or tonight there while UTC is on tomorrow. The calendar draws
+  // the days before it as past, and the form starts at it; the API checks the same day.
+  const listingToday = stayDay(listing, parseISO(now));
+
   // The days of the week priced differently from the default, in the order of the week.
   const weekdayPrices = weekdaySchema.options.flatMap((weekday) => {
     const price = listing.pricing.weekdays[weekday];
 
     return price === undefined ? [] : [{ weekday, price }];
   });
+  // The read starts at the earliest today of any zone, so it can hold a night already over
+  // where this listing is; the count is of the nights it still sells.
+  const pricedDates = listing.pricing.dates.filter(
+    ({ date }) => date >= listingToday,
+  ).length;
 
   return (
     <div className="flex flex-col gap-8">
@@ -128,17 +146,17 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
               cancellation
             </Badge>
           </div>
-          {(weekdayPrices.length > 0 || listing.pricing.dates.length > 0) && (
+          {(weekdayPrices.length > 0 || pricedDates > 0) && (
             <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
               {weekdayPrices.map(({ weekday, price }) => (
                 <Badge key={weekday} variant="outline" className="h-6">
                   {WEEKDAY_NAMES[weekday]} {formatMoney(price)}
                 </Badge>
               ))}
-              {listing.pricing.dates.length > 0 && (
+              {pricedDates > 0 && (
                 <span>
-                  {countOf(listing.pricing.dates.length, "date")} priced on
-                  their own — the form below counts every night.
+                  {countOf(pricedDates, "date")} priced on their own — the form
+                  below counts every night.
                 </span>
               )}
             </div>
@@ -164,10 +182,10 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
 
           <AvailabilityCalendar
             months={buildMonths(
-              from,
+              listingToday,
               CALENDAR_MONTHS,
               availability.booked,
-              from,
+              listingToday,
             )}
           />
         </div>
@@ -219,9 +237,14 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
               <BookingForm
                 listingId={listing.id}
                 prices={listing}
-                earliest={from}
+                earliest={listingToday}
                 booked={availability.booked}
                 policy={listing.cancellationPolicy}
+                // The two fields alone: a client component's props are serialized whole.
+                checkIn={{
+                  timeZone: listing.timeZone,
+                  checkInTime: listing.checkInTime,
+                }}
                 discountBps={listing.nonRefundableDiscountBps}
                 listingUpdatedAt={listing.updatedAt}
                 now={now}
@@ -239,7 +262,10 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <CancellationTerms policy={listing.cancellationPolicy} />
+            <CancellationTerms
+              policy={listing.cancellationPolicy}
+              checkIn={listing}
+            />
             {listing.nonRefundableDiscountBps !== null && (
               <p className="mt-3 text-sm text-muted-foreground">
                 Or book at the non-refundable rate,{" "}

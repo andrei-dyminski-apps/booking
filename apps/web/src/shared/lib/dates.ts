@@ -1,8 +1,9 @@
 /**
  * A calendar day is a `YYYY-MM-DD` string on both sides of the wire — that is what the
  * contract carries and what `@db.Date` stores — so everything here works on that string
- * and never on a local `Date`. Midnight UTC is the instant each of them names, which is
- * the clock `createBookingSchema` compares a check-in against.
+ * and never on a local `Date`. Midnight UTC is the instant each of them names. Which
+ * check-in day is already gone is the listing's to say (`isCheckInDayPast` in the
+ * contract), not this file's.
  *
  * Parsing a day into the runtime's own time zone instead would be wrong twice over: it
  * moves a stay by a day for anybody west of Greenwich, and it makes the server and the
@@ -11,7 +12,7 @@
  */
 
 import { tz } from "@date-fns/tz";
-import type { Weekday } from "@repo/contracts";
+import { runtimeTimeZone, type Weekday } from "@repo/contracts";
 import {
   addDays as addDaysTo,
   differenceInCalendarDays,
@@ -34,20 +35,6 @@ const DAY_FORMAT = "yyyy-MM-dd";
  */
 export function today(): string {
   return format(new Date(), DAY_FORMAT, IN_UTC);
-}
-
-/**
- * The day an instant falls on, in UTC — `today()` for a moment handed over rather than read
- * off this runtime's clock, so a client component can move on from the server's.
- */
-export function dayOf(moment: string): string {
-  return format(parseISO(moment), DAY_FORMAT, IN_UTC);
-}
-
-/** The instant a day begins: midnight UTC, the moment it names. */
-export function dayStart(day: string): Date {
-  // A plain `Date`: a `TZDate` spells even its ISO string its own way.
-  return new Date(startOf(day).getTime());
 }
 
 export function addDays(day: string, days: number): string {
@@ -114,6 +101,42 @@ export function formatDate(moment: string): string {
  */
 export function formatMoment(moment: string): string {
   return momentFormat.format(new Date(moment));
+}
+
+/**
+ * A moment on a listing's own clock, its zone named after it — how every date of a stay's
+ * cancellation or refund is stated, since those are measured from the moment of check-in
+ * there (`checkInInstant`). The zone is written into the text rather than left to the
+ * reader's runtime, so the server and the browser spell it identically, and it is the name
+ * the API stored even where this runtime converts by an older one (`runtimeTimeZone`). A
+ * zone newer than this runtime's data altogether is stated in UTC, named as such, which is
+ * still the same moment.
+ */
+export function formatMomentIn(moment: string, timeZone: string): string {
+  const spelling = runtimeTimeZone(timeZone);
+
+  return spelling === null
+    ? `${formatMoment(moment)} UTC`
+    : `${zonedMomentFormat(spelling).format(new Date(moment))} ${timeZone}`;
+}
+
+const zonedMomentFormats = new Map<string, Intl.DateTimeFormat>();
+
+/** One formatter per zone, for a spelling `runtimeTimeZone` has found this runtime knows. */
+function zonedMomentFormat(timeZone: string): Intl.DateTimeFormat {
+  const known = zonedMomentFormats.get(timeZone);
+
+  if (known !== undefined) return known;
+
+  const made = new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone,
+  });
+
+  zonedMomentFormats.set(timeZone, made);
+
+  return made;
 }
 
 const dayFormat = new Intl.DateTimeFormat("en-GB", {

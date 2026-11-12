@@ -13,8 +13,8 @@ import { NO_FORM_ERRORS, toFormErrors, type FormErrors } from "#shared/lib";
  * is no endpoint for emptying the catalogue's cache in a loop. The listing is read off the
  * API's answer; the id and the terms the dialog stated travel, bound by the page — the API
  * refuses a check-out the day has left behind and a refund that has shrunk since, so a dialog
- * left open past midnight UTC, or past a refund recorded meanwhile, never ends the stay on
- * terms it did not show.
+ * left open past the listing's midnight, or past a refund recorded meanwhile, never ends the
+ * stay on terms it did not show.
  */
 export async function endStayEarlyAction(
   bookingId: string,

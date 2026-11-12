@@ -419,8 +419,9 @@ What else moves money:
   full up to 14 days, half up to 7), `FIRM` (in full up to 30 days, half up to 7) or
   `NON_REFUNDABLE`. Every policy but the last also refunds in full within 24 hours of
   booking while check-in is more than 7 days away (`refundQuote` and `CANCELLATION_TERMS` in
-  `@repo/contracts`, the rule the pages state). An admin's cancellation refunds in full. Neither may cancel a stay
-  once its check-in day has come. The
+  `@repo/contracts`, the rule the pages state). An admin's cancellation refunds in full. Nobody may cancel a stay
+  once its moment of check-in has come — the check-in day at the listing's check-in time, in
+  the listing's own time zone, both copied onto the booking when it is taken. The
   cancellation answers at once and writes what it owes on the booking (`refundOwedCents`); a
   job sends the refund, and a sweep of its own sends any refund Stripe refused until it
   goes through. A refund the guest's bank sends back is kept on record (`refund_failures`)

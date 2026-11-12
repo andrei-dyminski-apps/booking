@@ -108,6 +108,10 @@ describe("ReviewController (e2e)", () => {
         amountCents: 48_000,
         currency: "usd",
         cancellationPolicy: "FLEXIBLE",
+        timeZone: "UTC",
+        checkInTime: "00:00",
+        // Midnight UTC of `from`, as `checkInData` makes it of the two above.
+        checkInAt: new Date(inDays(overrides.from ?? -6)),
         discountCents: 0,
         expiresAt:
           overrides.status === BookingStatus.PENDING_PAYMENT

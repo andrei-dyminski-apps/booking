@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { parseISO } from "date-fns";
 import { Loader2Icon } from "lucide-react";
 import {
   BookingStatus,
@@ -31,7 +32,12 @@ import {
   CANCELLER_NAMES,
   CancellationTerms,
 } from "#entities/booking";
-import { dayOf, formatMoment, formatMoney, nightsBreakdown } from "#shared/lib";
+import {
+  formatMoment,
+  formatMomentIn,
+  formatMoney,
+  nightsBreakdown,
+} from "#shared/lib";
 import { DateRange, NightCount } from "#shared/ui";
 import { useBookingLive, type BankAnswer } from "../model/use-booking-live";
 import { earlyEndTerms, endedEarlyNote } from "../model/early-end-note";
@@ -117,12 +123,12 @@ export const BookingLive = ({
     mayCancel(booking, viewer, clock) &&
     !(pending && (lapsed || paid));
   // An admin's partial refund: nothing while the bank holds the payment in a dispute, which
-  // Stripe refuses to refund — the API answers it with a `409` either way. The day is the
+  // Stripe refuses to refund — the API answers it with a `409` either way. The moment is the
   // server's clock's, as `mayCancel`'s is: a stay not begun keeps its last cent.
-  const today = dayOf(clock);
+  const moment = parseISO(clock);
   const refundable =
     viewer.role === Role.ADMIN && booking.dispute !== DisputeStatus.OPEN
-      ? refundableCents(booking, today)
+      ? refundableCents(booking, moment)
       : NO_CENTS;
   // Ending a stay early is the guest's, or an admin's on their behalf — not the host's. A
   // stay with no nights recorded has nothing to measure a refund by, and the API refuses it,
@@ -131,8 +137,8 @@ export const BookingLive = ({
     (canceller === Canceller.GUEST || canceller === Canceller.ADMIN) &&
     booking.nights.length > 0 &&
     booking.dispute !== DisputeStatus.OPEN &&
-    mayEndEarly(booking, today);
-  const endTerms = endable ? earlyEndTerms(booking, today) : null;
+    mayEndEarly(booking, moment);
+  const endTerms = endable ? earlyEndTerms(booking, moment) : null;
   const endedEarly = endedEarlyNote(booking);
 
   return (
@@ -231,6 +237,7 @@ export const BookingLive = ({
               )}
               <CancellationTerms
                 policy={booking.cancellationPolicy}
+                checkIn={booking}
                 schedule={schedule}
               />
             </div>
@@ -240,7 +247,7 @@ export const BookingLive = ({
           {booking.cancelledBy !== null && booking.cancelledAt !== null && (
             <p className="rounded-lg bg-muted px-3 py-2 text-sm break-words text-muted-foreground">
               Cancelled by {CANCELLER_NAMES[booking.cancelledBy]} on{" "}
-              {formatMoment(booking.cancelledAt)} UTC
+              {formatMomentIn(booking.cancelledAt, booking.timeZone)}
               {booking.cancellationReason === null
                 ? "."
                 : `: “${booking.cancellationReason}”`}
@@ -292,7 +299,7 @@ export const BookingLive = ({
                 bookingId={booking.id}
                 refundableCents={refundable}
                 currency={booking.currency}
-                keepsLastCent={isCancellableOn(booking, today)}
+                keepsLastCent={isCancellableOn(booking, moment)}
                 onRefunded={awaitRefund}
               />
             )}
@@ -302,6 +309,7 @@ export const BookingLive = ({
 
       <BookingAdjustments
         bookingId={booking.id}
+        timeZone={booking.timeZone}
         adjustments={adjustments}
         onRefunded={awaitRefund}
       />

@@ -5,7 +5,12 @@ import {
   CancellationPolicy,
   cancellationPolicySchema,
 } from "./cancellation-policy.js";
-import { dayMessage, isDay, today } from "./day.js";
+import {
+  checkInTimeSchema,
+  storedTimeZoneSchema,
+  timeZoneSchema,
+} from "./check-in.js";
+import { dayMessage, earliestToday, isDay } from "./day.js";
 import { BASIS_POINTS, MAX_CHARGE } from "./money.js";
 import { blank, PAGING } from "./query.js";
 
@@ -173,6 +178,14 @@ export const listingSchema = z.object({
     .min(MIN_NON_REFUNDABLE_DISCOUNT_BPS, { error: DISCOUNT_RANGE })
     .max(MAX_NON_REFUNDABLE_DISCOUNT_BPS, { error: DISCOUNT_RANGE })
     .nullable(),
+  /**
+   * Where the place is, as an IANA zone (`Europe/Berlin`), and when a guest may arrive on
+   * the check-in day, `HH:mm` on that zone's clock. Every booking copies both: the moment
+   * of arrival is what a stay's refund windows and its payout are measured from
+   * (`checkInInstant`).
+   */
+  timeZone: storedTimeZoneSchema,
+  checkInTime: checkInTimeSchema,
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
@@ -239,13 +252,17 @@ const datePriceSchema = z.object({
 });
 
 /**
- * What a write may set a date price for. Yesterday's price is a rule nobody can meet any
- * more, so a write refuses one; the read does not, because a cached answer outlives the
- * midnight that made one of its dates the past, and refusing to parse it would take the
- * whole listing page down for a night that no longer matters.
+ * What a write may set a date price for. A night already over everywhere is a rule nobody
+ * can meet any more, so a write refuses one; the read does not, because a cached answer
+ * outlives the midnight that made one of its dates the past, and refusing to parse it would
+ * take the whole listing page down for a night that no longer matters.
+ *
+ * The bound is the earliest today of any zone (`earliestToday`), not UTC's: a listing west
+ * of Greenwich still sells tonight after midnight UTC (`isCheckInDayPast`), and the price of
+ * that night has to stay settable — and survive a save, which replaces the dates whole.
  */
 const datePriceInputSchema = datePriceSchema.refine(
-  (entry) => !isDay(entry.date) || entry.date >= today(),
+  (entry) => !isDay(entry.date) || entry.date >= earliestToday(),
   { error: "A date price cannot be in the past", path: ["date"] },
 );
 
@@ -344,6 +361,13 @@ const listingInputFields = listingSchema
      */
     nonRefundableDiscountBps:
       listingSchema.shape.nonRefundableDiscountBps.optional(),
+    /**
+     * Optional for the reason the policy is: a listing created without them is in UTC with
+     * check-in at 15:00, the database's defaults, and a `PATCH` without them leaves them as
+     * they were. The stays already booked keep the ones they copied.
+     */
+    timeZone: timeZoneSchema.optional(),
+    checkInTime: checkInTimeSchema.optional(),
     /**
      * Optional, and replaced whole when present: a listing created without it costs its
      * default price every night, and a `PATCH` without it leaves the exceptions as they

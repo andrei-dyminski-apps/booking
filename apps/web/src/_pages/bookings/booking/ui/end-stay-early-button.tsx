@@ -29,12 +29,12 @@ import type { EarlyEndTerms } from "../model/early-end-note";
  *
  * The terms are taken when the dialog opens and held while it is open: the page's clock moves
  * on at midnight and its poll may read a refund in, and a sentence rewritten under the reader
- * would be agreed to unread. So a dialog left open past midnight UTC or past a refund still
- * sends the terms it states, and the API refuses them (`409`). The refusal is what restates
- * them: the page reads the stay again, the dialog shows the terms of now beside the API's
- * words from then on, and a second press agrees to those. A stay that has stopped being
- * endable meanwhile — the day turned onto its last night — keeps the dialog up with the API's
- * reason, and nothing left to press.
+ * would be agreed to unread. So a dialog left open past the listing's midnight or past a
+ * refund still sends the terms it states, and the API refuses them (`409`). The refusal is
+ * what restates them: the page reads the stay again, the dialog shows the terms of now
+ * beside the API's words from then on, and a second press agrees to those. A stay that has
+ * stopped being endable meanwhile — the day turned onto its last night — keeps the dialog up
+ * with the API's reason, and nothing left to press.
  */
 export const EndStayEarlyButton = ({
   bookingId,

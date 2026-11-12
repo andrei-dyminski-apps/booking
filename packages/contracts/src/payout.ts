@@ -1,7 +1,7 @@
-import { tz } from "@date-fns/tz";
-import { addHours, parseISO } from "date-fns";
+import { addHours } from "date-fns";
 import { z } from "zod";
 import { DisputeStatus, type Booking } from "./booking.js";
+import { checkInInstant, type CheckIn } from "./check-in.js";
 import {
   addCents,
   BASIS_POINTS,
@@ -25,8 +25,6 @@ export const PLATFORM_FEE_BPS = 1_500;
 
 /** A guest who arrives to a place not as described has that day to say so. */
 export const PAYOUT_DELAY_HOURS = 24;
-
-const IN_UTC = { in: tz("UTC") };
 
 /**
  * What the host is paid of what the guest kept paying: 85% of 36105 cents is 30689, rounded
@@ -68,11 +66,12 @@ export function owedToHost(
   );
 }
 
-/** Midnight UTC of the check-in day, the clock every rule about a calendar day reads. */
-export function payoutDueAt(from: string): Date {
-  return new Date(
-    addHours(parseISO(from, IN_UTC), PAYOUT_DELAY_HOURS, IN_UTC).getTime(),
-  );
+/**
+ * `PAYOUT_DELAY_HOURS` after the moment of check-in (`checkInInstant`) — the guest's day to
+ * say the place is not as described starts when they arrive, wherever that is.
+ */
+export function payoutDueAt(stay: CheckIn): Date {
+  return addHours(checkInInstant(stay), PAYOUT_DELAY_HOURS);
 }
 
 /**

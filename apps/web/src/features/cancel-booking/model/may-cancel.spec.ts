@@ -9,6 +9,9 @@ const ADMIN = { id: "admin", role: Role.ADMIN };
 const hold = {
   status: BookingStatus.PENDING_PAYMENT,
   from: "2026-11-10",
+  timeZone: "UTC",
+  checkInTime: "00:00",
+  endedEarlyAt: null,
   expiresAt: "2026-11-01T12:15:00.000Z",
   dispute: null,
   guestId: GUEST.id,
@@ -38,6 +41,28 @@ describe("mayCancel", () => {
   it("offers a confirmed stay until its check-in day, the deadline of its hold long past", () => {
     expect(mayCancel(stay, GUEST, "2026-11-09T23:59:59.000Z")).toBe(true);
     expect(mayCancel(stay, ADMIN, "2026-11-10T00:00:00.000Z")).toBe(false);
+  });
+
+  it("offers a confirmed stay until the check-in time on the listing's clock, not the UTC day", () => {
+    // 15:00 in Honolulu (UTC−10) on the 10th is 01:00 UTC on the 11th.
+    const honolulu = {
+      ...stay,
+      timeZone: "Pacific/Honolulu",
+      checkInTime: "15:00",
+    };
+
+    expect(mayCancel(honolulu, GUEST, "2026-11-11T00:59:59.000Z")).toBe(true);
+    expect(mayCancel(honolulu, GUEST, "2026-11-11T01:00:00.000Z")).toBe(false);
+  });
+
+  it("does not offer a stay ended early, whatever its dates say", () => {
+    expect(
+      mayCancel(
+        { ...stay, endedEarlyAt: "2026-11-01T09:00:00.000Z" },
+        GUEST,
+        "2026-11-01T10:00:00.000Z",
+      ),
+    ).toBe(false);
   });
 
   it("does not offer a stay whose payment is disputed until the bank decides", () => {

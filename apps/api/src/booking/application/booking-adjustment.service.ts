@@ -16,7 +16,6 @@ import {
   type BookingAdjustment,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
-import { toIsoDate } from "../../common/iso-date";
 import {
   PaymentGateway,
   RefundExceedsPaymentError,
@@ -172,10 +171,10 @@ export class BookingAdjustmentService {
 
     const { booking } = found;
     const paymentId = paidWith(found);
-    const today = toIsoDate(new Date());
+    const now = new Date();
 
     if (press === null) {
-      const refusal = refusalOf(booking, NO_CENTS, amountCents, today);
+      const refusal = refusalOf(booking, NO_CENTS, amountCents, now);
 
       if (refusal !== null) throw refusal;
     }
@@ -195,7 +194,7 @@ export class BookingAdjustmentService {
 
     if (refunds.sent !== null) return this.record(claim, refunds.sent);
 
-    const refusal = refusalOf(booking, refunds.refunded, amountCents, today);
+    const refusal = refusalOf(booking, refunds.refunded, amountCents, now);
 
     if (refusal !== null) {
       if (
@@ -268,7 +267,7 @@ export class BookingAdjustmentService {
 }
 
 /**
- * Why the stay refuses the amount on `today`, or `null`: nothing while the bank holds the
+ * Why the stay refuses the amount at `now`, or `null`: nothing while the bank holds the
  * payment in a dispute — Stripe refuses to refund a disputed payment, and the bank may give
  * the guest everything anyway — and at most what is left (`refundableCents`), counting the
  * larger of the recorded refund total and `refundedAtProvider`.
@@ -277,7 +276,7 @@ function refusalOf(
   booking: Booking,
   refundedAtProvider: Cents,
   amount: AdminRefundInput["amountCents"],
-  today: string,
+  now: Date,
 ): ConflictException | null {
   if (booking.dispute === DisputeStatus.OPEN) {
     return new ConflictException(
@@ -293,7 +292,7 @@ function refusalOf(
         refundedAtProvider,
       ),
     },
-    today,
+    now,
   );
 
   if (left === NO_CENTS) {
@@ -303,7 +302,7 @@ function refusalOf(
   if (amount <= left) return null;
 
   return new ConflictException(
-    isCancellableOn(booking, today)
+    isCancellableOn(booking, now)
       ? `At most ${formatCents(left)} of this stay is left to refund without cancelling it — refunding all of a stay not yet begun is cancelling it`
       : `At most ${formatCents(left)} of this stay is left to refund`,
   );

@@ -557,25 +557,58 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
       `POST`/`PATCH`/`GET /listings`, the rate is refused beside the non-refundable policy
       whichever half a save names, the three `CHECK`s hold against raw writes.
 
-### 7.6 — Check-in in the listing's own time zone
+### 7.6 — Check-in in the listing's own time zone ✅
 
-- [ ] `listingSchema` gains `timeZone` (IANA, checked through `Intl`) and `checkInTime`
-      (`HH:mm`), frozen onto the booking; `checkInInstant` becomes
-      `TZDate(from + checkInTime, timeZone)`. Every refund window, the fee's tiers,
-      `isCancellableOn` (the instant, not the UTC day) and `payoutDueAt` follow from it.
-- [ ] `mayEndEarly` and `earlyCheckOut` follow it too: an early end is offered from the
-      instant a cancellation stops, never before it, and "tonight" is the listing's night,
-      not the UTC one. The two share the refund key `booking-<id>-cancellation`, which is
-      safe only while they cannot both happen to one stay; `BookingCancellationService`
-      refuses a stay with `ended_early_at` as the backstop, and the stay's page must not
-      offer "Cancel" for one either (`mayCancel`).
-- [ ] Backfilled `UTC` / `00:00`, so nothing already booked moves.
-- [ ] Left as they are, on UTC days: `createBookingSchema`'s "check-in not in the past" and
-      `isReviewable` — they are about calendar days, not about the moment of arrival.
-- [ ] Web: the two fields on the listing form; every date of a cancellation or a refund shown
-      in the listing's time with the zone named.
-- [ ] Specs: a DST change and the far zones (UTC−10, UTC+14); e2e — a payout due by the new
-      `payoutDueAt`.
+- [x] `listingSchema` gains `timeZone` (an IANA name or `UTC`, never an offset, checked
+      through `Intl` — `timeZoneSchema`) and `checkInTime` (`HH:mm`), both optional on a save
+      (`UTC` / `15:00` for a new listing) and frozen onto the booking under the policy's lock;
+      `checkInInstant` (`check-in.ts`) is `from` at `checkInTime` in `timeZone`. Every refund
+      window, the fee's tiers, `isCancellableOn` (the instant, not the UTC day — and never a
+      stay ended early) and `payoutDueAt` follow from it; the payout sweep cuts by the
+      moment itself, stored as `bookings.check_in_at` when the hold is taken. A zone is
+      stored as `Intl` resolves it, a renamed one under IANA's name of today, and an offset
+      is refused however it is spelled — `+05:00`, `Etc/GMT±N`, or `EST`, which `Intl` turns
+      into `America/Panama`. A response carries the zone unchecked, since the reader's
+      `Intl` is not the API's.
+- [x] `mayEndEarly` and `earlyCheckOut` follow it too: an early end is offered from the
+      instant a cancellation stops, never before it, and "tonight" is the listing's night
+      (`stayDay`), not the UTC one. `BookingCancellationService` refuses a stay with
+      `ended_early_at` as the backstop, and `isCancellableOn` refuses it too, so neither the
+      API nor the stay's page (`mayCancel`) offers "Cancel" for one.
+- [x] Backfilled `UTC` / `00:00`, so nothing already booked moves.
+- [x] Which check-in day is gone is the listing's too: a day before its today
+      (`isCheckInDayPast`, `stayDay`) is refused under the lock that takes the hold —
+      a night already over in Adelaide is not sold, tonight in Honolulu is, whatever day
+      UTC has reached. `createBookingSchema`, which knows no listing, refuses only a day
+      gone everywhere (`earliestToday`, UTC−12); the booking form checks the listing's day
+      too (`createBookingSchemaIn`), and the listing page draws the calendar and starts the
+      form at it. The waitlist refuses the same day, and writes when it ends there on the
+      entry (`waitlist_entries.check_in_day_ends_at`, `checkInDayEnd`): every read of the
+      list, and the search for waiters when nights come free, drops an entry from that
+      moment, since a query cannot convert a day into the listing's zone. A date price
+      is bounded by `earliestToday` too — written and read from it, not from UTC's today
+      — or tonight in Honolulu after midnight UTC would be quoted at the default price,
+      charged at its date's, and lose that price at the host's next save. The catalogue's
+      date boxes start at `earliestToday` as well, so tonight in Honolulu can be searched
+      for; a listing further east where that night is over may still be answered, and its
+      page draws the night as past and the form refuses it — a filter by each listing's
+      own today would be raw SQL on Postgres's zone data, which is not the `Intl` every
+      other rule converts with. Left on UTC days: `isReviewable`, which is about no place.
+- [x] Web: the two fields on the listing form (`CheckInFields`); the check-in beside every
+      policy, and every date of a cancellation or a refund on the stay's page and the
+      listing's — the windows, the cancellation, the early end, an admin's partial refunds —
+      shown in the listing's time with the zone named (`formatMomentIn`). A zone is stored
+      under IANA's name of today and read through `runtimeTimeZone`, which falls back to
+      the older name IANA keeps as a link where a browser's zone data predates the rename
+      (`Europe/Kiev` for `Europe/Kyiv`). A host's fees keep UTC: the ledger spans every
+      listing of theirs and carries no zone, and it is an account's moment, the step in
+      phase 8.
+- [x] The seed spreads the listings over zones from UTC−10 to UTC+10:30.
+- [x] Specs: `checkInInstant` across a change to summer time, a time the clock skips and the
+      far zones (UTC−10, UTC+14), the windows, `isCancellableOn`, `mayEndEarly` and
+      `payoutDueAt` measured on the listing's clock; e2e — a payout due by the new
+      `payoutDueAt` found by the sweep to the millisecond, the fields round-trip and are
+      copied onto a stay, the `CHECK`s on the format.
 
 ## Phase 8 — Production polish
 
@@ -700,6 +733,24 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
       exist, and `availability` on the offer — that would be a promise about dates the
       calendar answers per window and a document cannot state for a stay as a whole.
 
+- [ ] **An account's moments on the reader's clock.** The notices, the messages, "Blocked
+      since", a host's fees, the admin's lists of what was set aside and a hold's deadline
+      are said in UTC today (`formatMoment` + ` UTC`): they have no place of their own, so
+      the reader's zone is the right one, and a server render does not know it — formatting
+      in the browser's zone on one side only is a hydration error. A stay's moments stay on
+      the listing's clock (7.6) and a calendar day on none; this is the third kind only.
+  - The browser writes its zone into a cookie (`Intl.DateTimeFormat().resolvedOptions()`,
+    checked by `canonicalTimeZone`), and a server render reads it through `cookies()` and
+    formats in it with the zone named, so both sides render the same text and nothing
+    flickers. No cookie yet — a first visit — is UTC, as now.
+  - Only on pages that are personal already: `cookies()` makes a render dynamic, and the
+    public cached reads (the catalogue, a listing, its reviews) must not depend on it.
+    None of them states such a moment; the rule goes into `apps/web/CLAUDE.md` with it.
+  - A hold's deadline also counts down ("12 minutes left") beside the time, since what it
+    asks of the guest is to pay now.
+  - Not a profile setting: that is a column, a contract field and a screen for what the
+    browser already knows.
+
 - [ ] Optional: reviews with ratings, email notifications through BullMQ.
 
 ## Phase 9 — Deployment and presentation
@@ -765,8 +816,9 @@ of its pieces were written in advance, each with a note saying so.
       choosing the locale rather than dropping the argument — a `undefined` locale is the
       runtime's, and the server's runtime is not the visitor's. `shared/lib/dates.ts` is
       the one that stays: a calendar day is a `YYYY-MM-DD` string read as midnight UTC,
-      because that is the clock the contract compares a check-in against. Only its display
-      is localized; parsing one in the visitor's zone moves a stay by a day.
+      and which check-in day is gone is the listing's to say (`isCheckInDayPast`), never
+      the visitor's. Only its display is localized; parsing one in the visitor's zone
+      moves a stay by a day.
 - [ ] **The SEO of two languages**, and it is the other half of the JSON-LD item in phase 8.
       `<html lang>` comes from the resolved locale instead of the literal `en` it carries
       now, `generateMetadata` emits `alternates.languages` so each page names its

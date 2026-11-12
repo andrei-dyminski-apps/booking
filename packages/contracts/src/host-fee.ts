@@ -11,7 +11,8 @@ import {
   subtractCents,
   type Cents,
 } from "./money.js";
-import { checkInInstant, notRefunded } from "./refund.js";
+import { checkInInstant } from "./check-in.js";
+import { notRefunded } from "./refund.js";
 
 /**
  * Here for the reason `refundQuote` is: the API charges a host by it, and the host's dialog
@@ -68,6 +69,8 @@ export function hostCancellationFee(
     | "paid"
     | "dispute"
     | "from"
+    | "timeZone"
+    | "checkInTime"
     | "amountCents"
     | "refundedAmountCents"
   >,

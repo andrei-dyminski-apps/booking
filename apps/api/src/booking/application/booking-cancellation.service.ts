@@ -20,7 +20,6 @@ import {
   type CancelBookingInput,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
-import { toIsoDate } from "../../common/iso-date";
 import { NotificationService } from "../../notification/notification.service";
 import { NO_CENTS, type Cents } from "../../payment/domain/money";
 import { WaitlistService } from "../../waitlist/waitlist.service";
@@ -80,7 +79,7 @@ export class BookingCancellationService {
       canceller === Canceller.HOST &&
       reason === null &&
       read.endedEarlyAt === null &&
-      isCancellableOn(read, toIsoDate(new Date()))
+      isCancellableOn(read, new Date())
     ) {
       throw new BadRequestException(HOST_REASON_REQUIRED);
     }
@@ -165,8 +164,8 @@ export class BookingCancellationService {
 
     // An early end has spent the refund key a cancellation would send under
     // (`booking-<id>-cancellation`), so a second debt there would be read as already sent.
-    // Today `isCancellableOn` refuses such a stay anyway — it has begun — but the two rules
-    // are measured from different moments once check-in has a time of its own (7.6).
+    // `isCancellableOn` refuses such a stay too, and an early end is offered only from the
+    // moment a cancellation stops; this says why in words of its own.
     if (booking.endedEarlyAt !== null) {
       throw new ConflictException(
         "A stay that was ended early can no longer be cancelled",
@@ -175,8 +174,8 @@ export class BookingCancellationService {
 
     const now = new Date();
 
-    // The same day for everybody: once the stay has begun, nobody lets it go.
-    if (!isCancellableOn(booking, toIsoDate(now))) {
+    // The same moment for everybody: once the stay has begun, nobody lets it go.
+    if (!isCancellableOn(booking, now)) {
       throw new ConflictException(
         "A stay that has begun can no longer be cancelled",
       );

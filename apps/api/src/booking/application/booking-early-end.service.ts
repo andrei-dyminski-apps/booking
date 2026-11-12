@@ -5,9 +5,11 @@ import {
   Injectable,
   Logger,
 } from "@nestjs/common";
+import { isBefore } from "date-fns";
 import {
   BookingStatus,
   Canceller,
+  checkInInstant,
   DisputeStatus,
   earlyCheckOut,
   mayEndEarly,
@@ -18,7 +20,6 @@ import {
   type StayNotice,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
-import { toIsoDate } from "../../common/iso-date";
 import { NotificationService } from "../../notification/notification.service";
 import { PaymentGateway } from "../../payment/application/ports/payment-gateway";
 import {
@@ -137,13 +138,13 @@ export class BookingEarlyEndService {
       await this.bookingRepository.findDetailWithListingOwner(id),
     );
     const { booking, nights } = found;
-    const today = toIsoDate(new Date());
-    const checkOut = earlyCheckOut(today);
+    const now = new Date();
+    const checkOut = earlyCheckOut(booking, now);
     const expectedCheckOut = stated.checkOut;
 
-    if (!mayEndEarly(booking, today)) {
+    if (!mayEndEarly(booking, now)) {
       throw new ConflictException(
-        whyNotEndable(booking, today, expectedCheckOut),
+        whyNotEndable(booking, now, expectedCheckOut),
       );
     }
 
@@ -168,7 +169,7 @@ export class BookingEarlyEndService {
     // end at `to`, and the notice names the stay that was taken.
     const { to } = booking;
     const stay = stayNoticeOf(booking);
-    const refundCents = await this.refundOnEnd(id, found, today);
+    const refundCents = await this.refundOnEnd(id, found, now);
 
     // A refund recorded since the page read the stay took its part of the unused nights: the
     // caller agreed to more than ending the stay gives back now. More than stated is not a
@@ -231,7 +232,7 @@ export class BookingEarlyEndService {
   private async refundOnEnd(
     id: string,
     { booking, paymentId, nights }: BookingDetailWithListingOwner,
-    today: string,
+    now: Date,
   ): Promise<Cents | null> {
     if (!booking.paid || paymentId === null) return null;
 
@@ -268,7 +269,7 @@ export class BookingEarlyEndService {
       return null;
     }
 
-    return unusedNightsRefund(refunded, nights, today).cents;
+    return unusedNightsRefund(refunded, nights, now).cents;
   }
 
   /** The provider's failures are a `502`; nothing has been written by then. */
@@ -289,25 +290,28 @@ export class BookingEarlyEndService {
 
 /**
  * Why `mayEndEarly` refused, in the words of the case the caller is most likely in: a stay
- * ended early already — a second press, another tab — says so; a stay in progress whose day
- * turned under the dialog onto its last night says that, since the caller was right a moment
- * ago; anything else hears the rule.
+ * ended early already — a second press, another tab — says so; a confirmed stay not begun
+ * yet is pointed at cancelling, which it still can; one in progress whose day turned under
+ * the dialog onto its last night says that, since the caller was right a moment ago;
+ * anything else hears the rule.
  */
 function whyNotEndable(
   booking: Booking,
-  today: string,
+  now: Date,
   expectedCheckOut: string,
 ): string {
   if (booking.endedEarlyAt !== null) {
     return `This stay has been ended early already — it checks out on ${booking.to}`;
   }
 
-  if (
-    booking.status === BookingStatus.CONFIRMED &&
-    booking.from <= today &&
-    expectedCheckOut < earlyCheckOut(today)
-  ) {
-    return `The day has turned since the refund was stated, and tonight is now the stay's last night — it checks out on ${booking.to} as booked`;
+  if (booking.status === BookingStatus.CONFIRMED) {
+    if (isBefore(now, checkInInstant(booking))) {
+      return "The stay has not begun yet — until check-in it can be cancelled instead";
+    }
+
+    if (expectedCheckOut < earlyCheckOut(booking, now)) {
+      return `The day has turned since the refund was stated, and tonight is now the stay's last night — it checks out on ${booking.to} as booked`;
+    }
   }
 
   return "Only a confirmed stay in progress with a night left after tonight can end early";

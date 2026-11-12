@@ -1058,14 +1058,18 @@ describe("Payments (e2e)", () => {
 
   /**
    * A paid stay of three nights that began today: booked ten days ahead — `POST /bookings`
-   * refuses a check-in in the past — and moved back, its nights with it.
+   * refuses a check-in in the past — and moved back, its nights with it. Its check-in moves
+   * to midnight UTC as well, the moment included, or a run before the listing's 15:00 would
+   * find the stay not begun yet.
    */
   const begun = async (): Promise<Booking> => {
     const booking = await paid(10, 13);
     const prisma = app.get(PrismaService);
 
     await prisma.$executeRaw`
-      UPDATE bookings SET from_date = from_date - 10, to_date = to_date - 10
+      UPDATE bookings
+      SET from_date = from_date - 10, to_date = to_date - 10,
+          time_zone = 'UTC', check_in_time = '00:00', check_in_at = (from_date - 10)::timestamp
       WHERE id = ${booking.id}::uuid
     `;
     await prisma.$executeRaw`

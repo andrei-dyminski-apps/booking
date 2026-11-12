@@ -1,5 +1,8 @@
 import { Injectable } from "@nestjs/common";
 import {
+  checkInDayEnd,
+  earliestToday,
+  isCheckInDayPast,
   MAX_WAITLIST_ENTRIES,
   type JoinWaitlistInput,
   type WaitlistDemandEntry,
@@ -19,7 +22,7 @@ import type {
   WaitlistEntry as WaitlistEntryRow,
 } from "../generated/prisma/client";
 import { STILL_OFFERED } from "../listing/listing.repository";
-import { startOfToday, toIsoDate } from "../common/iso-date";
+import { toIsoDate } from "../common/iso-date";
 import { PrismaService } from "../prisma/prisma.service";
 import type { WaitlistCursor } from "./waitlist-cursor";
 import type { FreedNights, WaitingEntry } from "./waitlist.types";
@@ -29,6 +32,17 @@ export class WaitlistListingNotFoundError extends Error {
   constructor(listingId: string) {
     super(`Listing ${listingId} not found`);
     this.name = "WaitlistListingNotFoundError";
+  }
+}
+
+/**
+ * A range whose check-in day is gone where the listing is (`isCheckInDayPast`) — the day a
+ * booking of it is refused on too, so the waitlist and the booking form agree about tonight.
+ */
+export class WaitlistCheckInPastError extends Error {
+  constructor(listingId: string, from: string) {
+    super(`Check-in ${from} has already passed for listing ${listingId}`);
+    this.name = "WaitlistCheckInPastError";
   }
 }
 
@@ -82,7 +96,12 @@ export class WaitlistFullError extends Error {
 }
 
 /** The rows of the two `FOR UPDATE` reads — raw SQL, so the columns keep their stored names. */
-type LockedListing = { id: string; owner_id: string; deleted_at: Date | null };
+type LockedListing = {
+  id: string;
+  owner_id: string;
+  deleted_at: Date | null;
+  time_zone: string;
+};
 type LockedUser = { id: string };
 type ClaimedEntry = { id: string };
 
@@ -119,7 +138,8 @@ export class WaitlistRepository {
    *  1. the listing row, `FOR UPDATE` — the lock `BookingRepository.create` takes, so the
    *     "is it taken" read below cannot interleave with a booking or a lapsing hold being
    *     replaced on the same listing. `deleted_at` and `owner_id` are read under it, as
-   *     the booking reads them;
+   *     the booking reads them, and so is the zone — whether the check-in day is gone and
+   *     when it will be (`check_in_day_ends_at`) are the listing's to say;
    *  2. the caller's own row — which serialises two joins of one account, so the cap and
    *     the duplicate check are counted against what the other one wrote, and which reads
    *     whether the account still exists.
@@ -140,7 +160,8 @@ export class WaitlistRepository {
 
     return this.prismaService.$transaction(async (tx) => {
       const [listing] = await tx.$queryRaw<LockedListing[]>`
-        SELECT id, owner_id, deleted_at FROM listings WHERE id = ${input.listingId}::uuid FOR UPDATE
+        SELECT id, owner_id, deleted_at, time_zone
+        FROM listings WHERE id = ${input.listingId}::uuid FOR UPDATE
       `;
 
       if (listing === undefined || listing.deleted_at !== null) {
@@ -149,6 +170,12 @@ export class WaitlistRepository {
 
       if (listing.owner_id === userId) {
         throw new WaitlistOwnListingError(input.listingId);
+      }
+
+      const zone = { timeZone: listing.time_zone };
+
+      if (isCheckInDayPast(zone, input.from, now)) {
+        throw new WaitlistCheckInPastError(input.listingId, input.from);
       }
 
       const [user] = await tx.$queryRaw<LockedUser[]>`
@@ -160,7 +187,7 @@ export class WaitlistRepository {
       }
 
       await tx.waitlistEntry.deleteMany({
-        where: { userId, from: { lt: startOfToday(now) } },
+        where: { userId, checkInDayEndsAt: { lte: now } },
       });
 
       const existing = await tx.waitlistEntry.findFirst({
@@ -196,7 +223,13 @@ export class WaitlistRepository {
       }
 
       const row = await tx.waitlistEntry.create({
-        data: { listingId: input.listingId, userId, from, to },
+        data: {
+          listingId: input.listingId,
+          userId,
+          from,
+          to,
+          checkInDayEndsAt: checkInDayEnd(zone, input.from),
+        },
         include: LISTING_SUMMARY,
       });
 
@@ -211,11 +244,7 @@ export class WaitlistRepository {
    */
   async findFor(userId: string): Promise<WaitlistEntry[]> {
     const rows = await this.prismaService.waitlistEntry.findMany({
-      where: {
-        userId,
-        from: { gte: startOfToday(new Date()) },
-        listing: STILL_OFFERED,
-      },
+      where: { userId, ...stillAhead(new Date()) },
       include: LISTING_SUMMARY,
       orderBy: [{ from: "asc" }, { id: "asc" }],
     });
@@ -299,11 +328,7 @@ export class WaitlistRepository {
     const candidates = await this.prismaService.waitlistEntry.findMany({
       where: {
         AND: [
-          {
-            listingId: freed.listingId,
-            from: { gte: startOfToday(now) },
-            listing: STILL_OFFERED,
-          },
+          { listingId: freed.listingId, ...stillAhead(now) },
           overlappingEntries(freed.from, freed.to),
         ],
       },
@@ -361,6 +386,21 @@ export class WaitlistRepository {
 }
 
 /**
+ * An entry whose check-in day has not ended where its listing is, on a listing still
+ * offered — what every read of the list, and the search for waiters when nights come free,
+ * is narrowed by. The day is the exact cut; the bound on `from` is implied by it — no
+ * listing's today is before `earliestToday` — and is the half an index on `from_date` can
+ * seek, so a read does not walk every entry that has gone by.
+ */
+function stillAhead(now: Date): Prisma.WaitlistEntryWhereInput {
+  return {
+    from: { gte: new Date(earliestToday()) },
+    checkInDayEndsAt: { gt: now },
+    listing: STILL_OFFERED,
+  };
+}
+
+/**
  * A page of the waitlist on somebody's listings: the scope, the entries still ahead on a
  * listing still offered — what the caller's own list shows of theirs — and the cursor,
  * `AND`-ed for the reason `BookingRepository.findPage` gives, with `limit + 1` rows so the
@@ -377,7 +417,7 @@ function demandPage(
     where: {
       AND: [
         scope,
-        { from: { gte: startOfToday(new Date()) }, listing: STILL_OFFERED },
+        stillAhead(new Date()),
         ...(cursor === null ? [] : [afterCursor(cursor)]),
       ],
     },

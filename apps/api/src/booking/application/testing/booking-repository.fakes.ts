@@ -63,6 +63,11 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
   /** The listing's policy, which `create` copies onto the stay as the transaction does. */
   listingPolicy: CancellationPolicy = "FLEXIBLE";
 
+  /** The listing's time zone and check-in time, which `create` copies as it copies the policy. */
+  listingTimeZone = "UTC";
+
+  listingCheckInTime = "00:00";
+
   /** Set to have `create` lose the race the pre-flight check cannot close. */
   vanishingListing = false;
 
@@ -204,6 +209,8 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
       amountCents: AMOUNT,
       currency: CURRENCY,
       cancellationPolicy: this.listingPolicy,
+      timeZone: this.listingTimeZone,
+      checkInTime: this.listingCheckInTime,
       refundedAmountCents: null,
       refundOwedCents: null,
       paid: false,

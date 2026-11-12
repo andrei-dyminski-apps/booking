@@ -1,4 +1,9 @@
-import type { Booking, StayQuote } from "@repo/contracts";
+import {
+  checkInInstant,
+  type Booking,
+  type CheckIn,
+  type StayQuote,
+} from "@repo/contracts";
 import {
   type Prisma,
   ReviewKind,
@@ -127,6 +132,25 @@ export function stayMoneyData(
   };
 }
 
+/**
+ * What a stay copies of its listing's check-in, and the moment that makes of its check-in
+ * day (`checkInInstant`) — written beside them once, since none of the three ever changes
+ * on a stay. `BookingRepository.create` and the seed both write through this, so the moment
+ * the payout sweep cuts by is never out of step with the one every rule reads.
+ */
+export function checkInData(
+  checkIn: CheckIn,
+): Pick<
+  Prisma.BookingUncheckedCreateInput,
+  "timeZone" | "checkInTime" | "checkInAt"
+> {
+  return {
+    timeZone: checkIn.timeZone,
+    checkInTime: checkIn.checkInTime,
+    checkInAt: checkInInstant(checkIn),
+  };
+}
+
 /** The one reading of a stay's money, which `PayoutRepository` extends with its own. */
 export function toRefundTarget(
   row: BookingRow & { listing: Pick<ListingRow, "title" | "ownerId"> },
@@ -152,6 +176,11 @@ export function toReleasedHold(
       from: toIsoDate(row.from),
       to: toIsoDate(row.to),
     },
+    checkIn: {
+      from: toIsoDate(row.from),
+      timeZone: row.timeZone,
+      checkInTime: row.checkInTime,
+    },
     guestId: row.guestId,
     listingOwnerId: row.listing.ownerId,
     paymentId: row.paymentIntentId,
@@ -176,6 +205,8 @@ export function toBooking(row: BookingRowWithListing): Booking {
     status: row.status,
     ...toStayMoney(row),
     cancellationPolicy: row.cancellationPolicy,
+    timeZone: row.timeZone,
+    checkInTime: row.checkInTime,
     paid: row.paidAt !== null,
     dispute: row.disputeStatus,
     expiresAt: row.expiresAt?.toISOString() ?? null,

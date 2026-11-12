@@ -1,5 +1,10 @@
 import { Injectable, Logger, type OnModuleInit } from "@nestjs/common";
-import { BookingStatus, NotificationType } from "@repo/contracts";
+import { isBefore } from "date-fns";
+import {
+  BookingStatus,
+  checkInInstant,
+  NotificationType,
+} from "@repo/contracts";
 import { NotificationService } from "../../notification/notification.service";
 import { PaymentEventDispatcher } from "../../payment/application/payment-event-dispatcher";
 import {
@@ -17,7 +22,6 @@ import {
   NO_CENTS,
   subtractCents,
 } from "../../payment/domain/money";
-import { toIsoDate } from "../../common/iso-date";
 import { WaitlistService } from "../../waitlist/waitlist.service";
 import { awaitsItsPayment } from "../domain/booking-status";
 import {
@@ -382,7 +386,10 @@ export class BookingPaymentHandler
 
   /** Marked done last, so a run that dies before that repeats it. */
   private async announceConfirmed(confirmed: ConfirmedStay): Promise<void> {
-    await this.stayEvents.confirmed(confirmed.stay);
+    await this.stayEvents.confirmed({
+      bookingId: confirmed.stay.bookingId,
+      checkIn: confirmed.checkIn,
+    });
     await notifyBothSides(
       this.notificationService,
       NotificationType.BOOKING_CONFIRMED,
@@ -394,7 +401,7 @@ export class BookingPaymentHandler
   }
 }
 
-/** Before the check-in day, UTC — the day `isCancellableOn` stops letting a stay go. */
+/** Before the moment of check-in — the moment `isCancellableOn` stops letting a stay go. */
 function notBegunYet(stay: RefundTarget): boolean {
-  return toIsoDate(new Date()) < stay.hold.stay.from;
+  return isBefore(new Date(), checkInInstant(stay.hold.checkIn));
 }

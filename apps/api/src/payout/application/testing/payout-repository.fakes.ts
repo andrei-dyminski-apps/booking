@@ -212,7 +212,7 @@ export class FakePayoutRepository implements PublicOf<PayoutRepository> {
             stay.paidOutAmountCents === null &&
             this.payoutFailures.get(stay.bookingId)?.setAside !== true &&
             stay.refundOwedCents === null &&
-            payoutDueAt(stay.hold.stay.from) <= now &&
+            payoutDueAt(stay.hold.checkIn) <= now &&
             (stay.disputeStatus === null || stay.disputeStatus === "WON") &&
             (stay.refundedAmountCents === null ||
               stay.refundedAmountCents < stay.amountCents) &&

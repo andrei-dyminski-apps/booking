@@ -13,7 +13,7 @@ import {
   addDays,
   countOf,
   formatDay,
-  formatMoment,
+  formatMomentIn,
   formatMoney,
   nightsBetween,
 } from "#shared/lib";
@@ -30,21 +30,22 @@ type EarlyEndFacts = Pick<
   | "currency"
   | "paid"
   | "dispute"
+  | "timeZone"
 >;
 
 /**
- * Ending the stay on `today`, as the dialog states it and the API is asked to keep to: the
+ * Ending the stay at `now`, as the dialog states it and the API is asked to keep to: the
  * check-out, the refund `earlyEndNote` words and the note itself, from one reading of the
  * stay.
  */
 export function earlyEndTerms(
   booking: EarlyEndFacts,
-  today: string,
+  now: Date,
 ): EarlyEndTerms {
   return {
-    checkOut: earlyCheckOut(today),
-    refundCents: earlyEndRefundCents(booking, today),
-    note: earlyEndNote(booking, today),
+    checkOut: earlyCheckOut(booking, now),
+    refundCents: earlyEndRefundCents(booking, now),
+    note: earlyEndNote(booking, now),
   };
 }
 
@@ -53,17 +54,14 @@ export function earlyEndTerms(
  * dispute was lost — the cases the API gives nothing back for whatever the nights are worth —
  * else `unusedNightsRefund`, which is nothing for a stay refunded in full already.
  */
-export function earlyEndRefundCents(
-  booking: EarlyEndFacts,
-  today: string,
-): Cents {
+export function earlyEndRefundCents(booking: EarlyEndFacts, now: Date): Cents {
   if (!booking.paid || booking.dispute === DisputeStatus.LOST) return NO_CENTS;
 
-  return unusedNightsRefund(booking, booking.nights, today).cents;
+  return unusedNightsRefund(booking, booking.nights, now).cents;
 }
 
 /**
- * What ending the stay on `today` does, worded before the button: the new check-out, the
+ * What ending the stay at `now` does, worded before the button: the new check-out, the
  * nights that go back on offer and what they give back. It reads `unusedNightsRefund`, the
  * rule the API refunds by, over the stay's frozen policy and the nights it bought, so the
  * sentence and the refund are one decision. A stay nobody paid for, one whose dispute was
@@ -71,8 +69,8 @@ export function earlyEndRefundCents(
  * not offered the button at all, since the API refuses it. A share of nights earlier refunds
  * already gave part of back says so, rather than naming a percentage the amount is not.
  */
-export function earlyEndNote(booking: EarlyEndFacts, today: string): string {
-  const refund = unusedNightsRefund(booking, booking.nights, today);
+export function earlyEndNote(booking: EarlyEndFacts, now: Date): string {
+  const refund = unusedNightsRefund(booking, booking.nights, now);
   const leaving = `The stay checks out tomorrow, ${formatDay(refund.checkOut)}, and the ${countOf(refund.nights, "night")} after tonight ${refund.nights === 1 ? "goes" : "go"} back on offer.`;
 
   if (!booking.paid) return `${leaving} Nothing was paid for the stay.`;
@@ -106,11 +104,11 @@ export function earlyEndNote(booking: EarlyEndFacts, today: string): string {
  * after the last night bought — every stay that can end early has its nights recorded.
  */
 export function endedEarlyNote(
-  booking: Pick<BookingDetail, "endedEarlyAt" | "to" | "nights">,
+  booking: Pick<BookingDetail, "endedEarlyAt" | "to" | "nights" | "timeZone">,
 ): string | null {
   if (booking.endedEarlyAt === null) return null;
 
-  const ended = `Ended early on ${formatMoment(booking.endedEarlyAt)} UTC`;
+  const ended = `Ended early on ${formatMomentIn(booking.endedEarlyAt, booking.timeZone)}`;
   const last = booking.nights.at(-1);
 
   if (last === undefined) return `${ended}.`;
