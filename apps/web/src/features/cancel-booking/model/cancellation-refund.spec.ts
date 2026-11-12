@@ -20,6 +20,9 @@ const stay = {
   paid: true,
   dispute: null,
   from: "2026-11-10",
+  timeZone: "UTC",
+  checkInTime: "00:00",
+  endedEarlyAt: null,
   guestId: GUEST.id,
   hostId: HOST.id,
   // Booked long before, so the grace period is over.
@@ -35,6 +38,20 @@ describe("cancellationRefundNote", () => {
   it("names the end of the free window to a guest still inside it", () => {
     expect(cancellationRefundNote(stay, GUEST, INSIDE)).toMatch(
       /^Cancelling before .+ UTC refunds the stay in full/,
+    );
+  });
+
+  it("dates the window on the listing's own clock and names its zone", () => {
+    // 15:00 in Honolulu on the 10th: the free window closes 48 hours before, 15:00 on the
+    // 8th there — 01:00 UTC on the 9th, so OUTSIDE is still inside it.
+    const honolulu = {
+      ...stay,
+      timeZone: "Pacific/Honolulu",
+      checkInTime: "15:00",
+    };
+
+    expect(cancellationRefundNote(honolulu, GUEST, OUTSIDE)).toBe(
+      "Cancelling before 8 Nov 2026, 15:00 Pacific/Honolulu refunds the stay in full; after that, nothing comes back.",
     );
   });
 

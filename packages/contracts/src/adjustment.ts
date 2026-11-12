@@ -26,7 +26,7 @@ const KEPT_BEFORE_CHECK_IN = cents(1);
  * way out through its own job. Nothing for a stay nobody paid for, nor for one whose dispute
  * was lost: the bank gave that money back already.
  *
- * A stay that can still be cancelled on `today` (`isCancellableOn`) keeps its last cent:
+ * A stay that can still be cancelled at `now` (`isCancellableOn`) keeps its last cent:
  * `charge.refunded` cancels a stay not yet begun once it is refunded in full, so giving all of
  * it back would be a cancellation nobody asked for — no canceller, no reason, the nights let
  * go. Refunding all of it is `DELETE /bookings/:id`'s.
@@ -36,13 +36,16 @@ export function refundableCents(
     Booking,
     | "status"
     | "from"
+    | "timeZone"
+    | "checkInTime"
+    | "endedEarlyAt"
     | "paid"
     | "dispute"
     | "amountCents"
     | "refundedAmountCents"
     | "refundOwedCents"
   >,
-  today: string,
+  now: Date,
 ): Cents {
   if (!stay.paid || stay.dispute === DisputeStatus.LOST) return NO_CENTS;
 
@@ -52,7 +55,7 @@ export function refundableCents(
     minCents(notGone, stay.refundOwedCents ?? NO_CENTS),
   );
 
-  return isCancellableOn(stay, today)
+  return isCancellableOn(stay, now)
     ? subtractCents(left, minCents(left, KEPT_BEFORE_CHECK_IN))
     : left;
 }

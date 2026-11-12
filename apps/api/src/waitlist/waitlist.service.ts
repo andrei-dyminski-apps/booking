@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -7,6 +8,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import {
+  CHECK_IN_DAY_PAST,
   NotificationType,
   Role,
   type JoinWaitlistInput,
@@ -27,6 +29,7 @@ import {
   NightsAvailableError,
   WaiterHoldsNightsError,
   WaiterNotFoundError,
+  WaitlistCheckInPastError,
   WaitlistFullError,
   WaitlistListingNotFoundError,
   WaitlistOwnListingError,
@@ -136,6 +139,10 @@ export class WaitlistService {
         throw new UnauthorizedException("Session no longer exists");
       }
 
+      if (error instanceof WaitlistCheckInPastError) {
+        throw new BadRequestException(CHECK_IN_DAY_PAST);
+      }
+
       if (
         error instanceof WaitlistFullError ||
         error instanceof WaiterHoldsNightsError
@@ -162,10 +169,11 @@ export class WaitlistService {
   }
 
   /**
-   * What `BookingService` and `BookingCancellationService` call after nights stopped being
-   * held. Never throws, for the reason `NotificationService.notify` does not: the
-   * cancellation or the release is committed by then, and failing its request would answer
-   * a write that happened with a `500`. A failure costs the notices, and is logged.
+   * What `BookingService`, `BookingCancellationService` and `BookingEarlyEndService` call
+   * after nights stopped being held. Never throws, for the reason
+   * `NotificationService.notify` does not: the cancellation or the release is committed by
+   * then, and failing its request would answer a write that happened with a `500`. A
+   * failure costs the notices, and is logged.
    *
    * Entries are claimed — deleted — before their owners are told, and only the call that
    * deleted one tells anybody, so two releases racing over the same nights cannot tell one

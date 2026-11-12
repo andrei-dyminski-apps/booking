@@ -5,12 +5,14 @@ import { differenceInMilliseconds, isBefore, parseISO } from "date-fns";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookingStatus,
+  checkInDayEnd,
+  checkInInstant,
   refundSchedule,
+  stayDay,
   type BookingDetail,
   type Cents,
   type RefundWindow,
 } from "@repo/contracts";
-import { dayStart } from "#shared/lib";
 import { bookingKey, readBooking } from "../api/booking-query";
 
 /**
@@ -201,22 +203,39 @@ export function useBookingLive({
   }, [pending, lapsed, expiresAt]);
 
   const confirmed = booking.status === BookingStatus.CONFIRMED;
-  const { from, createdAt, cancellationPolicy } = booking;
+  const { from, to, createdAt, cancellationPolicy, timeZone, checkInTime } =
+    booking;
   // Read by the timer below and drawn under "Cancellation": one schedule for both, kept
-  // across the poll's re-renders, which change none of the three facts it is made of.
+  // across the poll's re-renders, which change none of the facts it is made of.
   const schedule = useMemo(
-    () => refundSchedule({ from, createdAt, cancellationPolicy }),
-    [from, createdAt, cancellationPolicy],
+    () =>
+      refundSchedule({
+        from,
+        timeZone,
+        checkInTime,
+        createdAt,
+        cancellationPolicy,
+      }),
+    [from, timeZone, checkInTime, createdAt, cancellationPolicy],
   );
 
-  // Every moment the refund falls, then check-in, when the button goes: the note is
-  // redrawn at each of them, earliest first.
+  // Every moment the refund falls, then check-in, when "Cancel" goes and "End stay early"
+  // comes, and every midnight of the stay after it on the listing's clock, when what ending
+  // it early refunds drops by a night: the note is redrawn at each of them, earliest first.
   useEffect(() => {
     if (!confirmed) return;
 
-    const next = [...schedule.map(({ until }) => until), dayStart(from)].find(
-      (moment) => isBefore(parseISO(clock), moment),
-    );
+    const now = parseISO(clock);
+    const day = stayDay({ timeZone }, now);
+    // Where the listing's night turns: the first moment of its tomorrow, which on a night a
+    // clock skips midnight is whatever moment the day begins with.
+    const midnights =
+      from <= day && day < to ? [checkInDayEnd({ timeZone }, day)] : [];
+    const next = [
+      ...schedule.map(({ until }) => until),
+      checkInInstant({ from, timeZone, checkInTime }),
+      ...midnights,
+    ].find((moment) => isBefore(now, moment));
 
     if (next === undefined) return;
 
@@ -234,7 +253,7 @@ export function useBookingLive({
     return () => {
       clearTimeout(timer);
     };
-  }, [confirmed, schedule, from, clock]);
+  }, [confirmed, schedule, from, to, timeZone, checkInTime, clock]);
 
   return {
     booking,

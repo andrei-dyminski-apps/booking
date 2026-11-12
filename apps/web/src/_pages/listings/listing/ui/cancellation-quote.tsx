@@ -4,12 +4,16 @@ import { useEffect, useState } from "react";
 import { addMilliseconds, differenceInMilliseconds, parseISO } from "date-fns";
 import { useWatch, type Control } from "react-hook-form";
 import {
+  BookingRate,
+  CancellationPolicy,
   refundSchedule,
-  type CancellationPolicy,
+  type BookedRange,
   type CreateBookingInput,
 } from "@repo/contracts";
 import { RefundScheduleList } from "#entities/booking";
 import { isDay } from "#shared/lib";
+import { callsForWaitlist } from "../lib/months";
+import { offeredRate } from "../lib/stay-rates";
 
 /** Often enough that a window is not shown for long after it closed: they end on minutes. */
 const CLOCK_TICK_MS = 30_000;
@@ -23,22 +27,36 @@ const CLOCK_TICK_MS = 30_000;
  * moves on with the clock instead (`useHoldMoment`); what is left is the few seconds between
  * a tick and the press.
  *
- * It subscribes to the check-in on its own, as `StayQuote` does.
+ * It subscribes to the dates and the rate on its own, as `StayQuote` does — the check-out
+ * only to tell a hold from dates the waitlist takes, which no rate applies to.
  */
 export const CancellationQuote = ({
   control,
   policy,
+  checkIn,
+  discountBps,
+  booked,
+  refused,
   now,
 }: {
   control: Control<CreateBookingInput>;
   policy: CancellationPolicy;
+  /** The listing's time zone and check-in time, which every window is measured from. */
+  checkIn: { timeZone: string; checkInTime: string };
+  /** The listing's non-refundable discount, or `null` when it offers no such rate. */
+  discountBps: number | null;
+  booked: readonly BookedRange[];
+  /** The nights a hold was last refused for — see `BookingForm`. */
+  refused: BookedRange | null;
   /** The server's clock at the render, handed down like `today()`. */
   now: string;
 }) => {
-  const from = useWatch({ control, name: "from" });
+  const [from, to, rate] = useWatch({ control, name: ["from", "to", "rate"] });
   const moment = useHoldMoment(now);
 
   if (!isDay(from)) return null;
+
+  const waits = isDay(to) && callsForWaitlist(from, to, booked, refused);
 
   // Named, or the lines under the dates read as a list of nobody knows what.
   return (
@@ -47,9 +65,16 @@ export const CancellationQuote = ({
       <RefundScheduleList
         schedule={refundSchedule({
           from,
+          timeZone: checkIn.timeZone,
+          checkInTime: checkIn.checkInTime,
           createdAt: moment,
-          cancellationPolicy: policy,
+          // The non-refundable rate freezes its own policy onto the stay, as the API does.
+          cancellationPolicy:
+            offeredRate(rate, discountBps, waits) === BookingRate.NON_REFUNDABLE
+              ? CancellationPolicy.NON_REFUNDABLE
+              : policy,
         })}
+        timeZone={checkIn.timeZone}
       />
     </div>
   );

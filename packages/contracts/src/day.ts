@@ -34,10 +34,21 @@ const DAY = z.iso.date();
 export const isDay = (value: string): boolean => DAY.safeParse(value).success;
 
 /**
- * A calendar date has no time zone, so "today" needs one chosen for it, and UTC is the
- * only clock both sides of the wire share. The check is therefore a guard against an
- * obvious mistake — a stay booked for last year — and not a precise deadline: within a day
- * of the boundary it can refuse what is still today somewhere. The exact cut-off belongs
- * with the availability rules of phase 4, which know the listing's own time zone.
+ * A calendar date has no time zone, so "today" needs one chosen for it. A check-in belongs
+ * to its listing's place and is measured by its today (`isCheckInDayPast`); a review
+ * belongs to no place and the API measures it by UTC's.
+ *
+ * The westernmost clock there is, twelve hours behind UTC: no listing's today is earlier
+ * than its today. Named as an offset on purpose — it is a bound, not a place a listing can
+ * be in (`timeZoneSchema` refuses it).
  */
-export const today = (): string => format(TZDate.tz("UTC"), "yyyy-MM-dd");
+const WESTERNMOST_ZONE = "Etc/GMT+12";
+
+/**
+ * The earliest day that is still today for some listing — what a schema that does not know
+ * the listing can refuse a check-in or a date price before. It refuses a stay booked for last
+ * year, and never tonight in Honolulu after midnight UTC, nor that night's price; the
+ * listing's own today is checked where its zone is read (`isCheckInDayPast`).
+ */
+export const earliestToday = (): string =>
+  format(TZDate.tz(WESTERNMOST_ZONE), "yyyy-MM-dd");

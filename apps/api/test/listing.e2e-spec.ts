@@ -3,8 +3,11 @@ import { Test, TestingModule } from "@nestjs/testing";
 import request from "supertest";
 import { App } from "supertest/types";
 import {
+  RATE_UNDER_NON_REFUNDABLE_POLICY,
   Role,
+  apiErrorSchema,
   bookingPageSchema,
+  earliestToday,
   listingAvailabilitySchema,
   listingDetailSchema,
   listingListSchema,
@@ -492,6 +495,171 @@ describe("ListingController (e2e)", () => {
       .expect(400);
   });
 
+  it("stores a time zone and a check-in time, UTC at 15:00 unless named, and keeps them through an edit that does not name them", async () => {
+    const read = async (id: string) => {
+      const { timeZone, checkInTime } = listingDetailSchema.parse(
+        (await anyone().get(`/listings/${id}`).expect(200)).body,
+      );
+
+      return { timeZone, checkInTime };
+    };
+
+    expect(await read(listingId)).toEqual({
+      timeZone: "UTC",
+      checkInTime: "15:00",
+    });
+
+    const honolulu = await publish({
+      timeZone: "Pacific/Honolulu",
+      checkInTime: "16:30",
+    });
+
+    expect(await read(honolulu)).toEqual({
+      timeZone: "Pacific/Honolulu",
+      checkInTime: "16:30",
+    });
+
+    await owner
+      .patch(`/listings/${honolulu}`)
+      .send({ pricePerNightCents: 13_550 })
+      .expect(200);
+    expect(await read(honolulu)).toEqual({
+      timeZone: "Pacific/Honolulu",
+      checkInTime: "16:30",
+    });
+
+    await owner
+      .patch(`/listings/${honolulu}`)
+      .send({ timeZone: "Pacific/Kiritimati" })
+      .expect(200);
+    expect((await read(honolulu)).timeZone).toBe("Pacific/Kiritimati");
+
+    // An offset does not follow summer time, and a name nobody knows converts nothing.
+    for (const timeZone of ["+05:00", "Etc/GMT+5", "Mars/Olympus_Mons", ""]) {
+      await owner.patch(`/listings/${honolulu}`).send({ timeZone }).expect(400);
+    }
+
+    // Stored as `Intl` spells it, whatever the case or the alias it was typed in.
+    await owner
+      .patch(`/listings/${honolulu}`)
+      .send({ timeZone: "us/eastern" })
+      .expect(200);
+    expect((await read(honolulu)).timeZone).toBe("America/New_York");
+
+    for (const checkInTime of ["24:00", "9:00", "15:00:00"]) {
+      await owner
+        .patch(`/listings/${honolulu}`)
+        .send({ checkInTime })
+        .expect(400);
+    }
+  });
+
+  it("refuses a check-in time out of HH:mm on the column too, whoever writes it", async () => {
+    await expect(
+      app.get(PrismaService).listing.update({
+        where: { id: listingId },
+        data: { checkInTime: "25:00" },
+      }),
+    ).rejects.toThrow("listings_check_in_time_format");
+  });
+
+  it("stores a non-refundable discount within its bounds, none unless one is named, and withdraws it on null", async () => {
+    const read = async (id: string) =>
+      listingDetailSchema.parse(
+        (await anyone().get(`/listings/${id}`).expect(200)).body,
+      ).nonRefundableDiscountBps;
+
+    expect(await read(listingId)).toBeNull();
+
+    const discounted = await publish({ nonRefundableDiscountBps: 1_500 });
+
+    expect(await read(discounted)).toBe(1_500);
+
+    await owner
+      .patch(`/listings/${discounted}`)
+      .send({ capacity: 3 })
+      .expect(200);
+    expect(await read(discounted)).toBe(1_500);
+
+    for (const nonRefundableDiscountBps of [50, 5_001, 12.5]) {
+      await owner
+        .patch(`/listings/${discounted}`)
+        .send({ nonRefundableDiscountBps })
+        .expect(400);
+    }
+
+    await owner
+      .patch(`/listings/${discounted}`)
+      .send({ nonRefundableDiscountBps: null })
+      .expect(200);
+    expect(await read(discounted)).toBeNull();
+  });
+
+  it("offers no non-refundable rate under the non-refundable policy, whichever half a save names", async () => {
+    // The contract's refusal is an issue under the discount; the API's own, the message.
+    const refused = async (
+      response: Promise<{ body: unknown }>,
+    ): Promise<void> => {
+      const { message, errors } = apiErrorSchema.parse((await response).body);
+
+      expect(errors ?? [{ path: [], message }]).toContainEqual(
+        expect.objectContaining({ message: RATE_UNDER_NON_REFUNDABLE_POLICY }),
+      );
+    };
+    const read = async (id: string) =>
+      listingSchema.parse(
+        (await anyone().get(`/listings/${id}`).expect(200)).body,
+      );
+
+    // Both in one body: the contract's refusal, before anything is written.
+    await refused(
+      owner
+        .post("/listings")
+        .send({
+          ...input,
+          cancellationPolicy: "NON_REFUNDABLE",
+          nonRefundableDiscountBps: 1_000,
+        })
+        .expect(400),
+    );
+
+    // One half against the other on the row: the CHECK's, answered in the same words.
+    const discounted = await publish({ nonRefundableDiscountBps: 1_000 });
+
+    await refused(
+      owner
+        .patch(`/listings/${discounted}`)
+        .send({ cancellationPolicy: "NON_REFUNDABLE" })
+        .expect(400),
+    );
+    expect(await read(discounted)).toMatchObject({
+      cancellationPolicy: "FLEXIBLE",
+      nonRefundableDiscountBps: 1_000,
+    });
+
+    const strict = await publish({ cancellationPolicy: "NON_REFUNDABLE" });
+
+    await refused(
+      owner
+        .patch(`/listings/${strict}`)
+        .send({ nonRefundableDiscountBps: 1_000 })
+        .expect(400),
+    );
+
+    // Withdrawing the rate in the same save is what lets the policy through.
+    await owner
+      .patch(`/listings/${discounted}`)
+      .send({
+        cancellationPolicy: "NON_REFUNDABLE",
+        nonRefundableDiscountBps: null,
+      })
+      .expect(200);
+    expect(await read(discounted)).toMatchObject({
+      cancellationPolicy: "NON_REFUNDABLE",
+      nonRefundableDiscountBps: null,
+    });
+  });
+
   it("refuses the edit to another owner — the role passes, the ownership does not", async () => {
     await otherOwner
       .patch(`/listings/${listingId}`)
@@ -635,6 +803,24 @@ describe("ListingController (e2e)", () => {
     ).toBe(1);
   });
 
+  it("keeps the price of a night still sold west of Greenwich, though UTC is on the next day", async () => {
+    // The earliest today of any zone: tonight in Honolulu after midnight UTC, which a
+    // listing there still sells and `create` prices by this row.
+    const tonight = earliestToday();
+    const pricing = {
+      weekdays: {},
+      dates: [{ date: tonight, priceCents: cents(25_000) }],
+    };
+
+    await owner.patch(`/listings/${listingId}`).send({ pricing }).expect(200);
+
+    expect(
+      listingDetailSchema.parse(
+        (await anyone().get(`/listings/${listingId}`).expect(200)).body,
+      ).pricing.dates,
+    ).toEqual(pricing.dates);
+  });
+
   it("queues parallel saves of one listing's prices instead of colliding on the key", async () => {
     // The same days in every set, so two saves interleaved between clearing and inserting
     // would both insert `fri` and one of them would fail on the primary key.
@@ -663,9 +849,10 @@ describe("ListingController (e2e)", () => {
     const send = (pricing: unknown) =>
       owner.patch(`/listings/${listingId}`).send({ pricing });
 
+    // Two days back: yesterday in UTC is still today west of Greenwich until noon UTC.
     await send({
       weekdays: {},
-      dates: [{ date: inDays(-1), priceCents: 10_000 }],
+      dates: [{ date: inDays(-2), priceCents: 10_000 }],
     }).expect(400);
     await send({
       weekdays: {},

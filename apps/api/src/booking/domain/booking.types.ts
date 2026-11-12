@@ -2,6 +2,7 @@ import type {
   Booking,
   BookingAdjustment,
   Canceller,
+  CheckIn,
   BookingStatus,
   PricedNight,
   StayNotice,
@@ -22,9 +23,13 @@ export type BookingWithListingOwner = {
   paymentId: string | null;
 };
 
-/** The same, with the nights the stay's amount adds up from — what `GET /bookings/:id` answers. */
+/**
+ * The same, with the nights the stay's amount adds up from and the discount its rate took
+ * off them — what `GET /bookings/:id` answers.
+ */
 export type BookingDetailWithListingOwner = BookingWithListingOwner & {
   nights: PricedNight[];
+  discountCents: Cents;
 };
 
 /**
@@ -46,6 +51,12 @@ export type StayMoney = {
  */
 export type ReleasedHold = {
   stay: StayNotice;
+  /**
+   * When the stay begins — what is decided by the moment of arrival rather than by a day: a
+   * refund that cancels a stay not yet begun, the payout's due time. Beside the notice
+   * rather than in it, since a notice copies what a person reads.
+   */
+  checkIn: CheckIn;
   guestId: string;
   listingOwnerId: string;
   /** Withdrawn now that it can never complete. */

@@ -76,3 +76,9 @@ The base tsconfig enables `strict` and `noUncheckedIndexedAccess`. Indexed acces
 ## What not to touch
 
 `node_modules`, `.turbo`, `.next`, `dist`, `coverage`, `pnpm-lock.yaml` (changed only through pnpm commands), `.idea`.
+
+Not touching `node_modules` means not editing it — reading it is allowed and expected. When a
+question turns on how an installed dependency actually behaves (what a Base UI primitive does
+with a disabled item, which props a component forwards), read its sources under
+`node_modules/.pnpm/<pkg>@<version>/...` rather than guessing or leaving it unverified. The
+installed version is the one that runs, which docs for another version may not describe.

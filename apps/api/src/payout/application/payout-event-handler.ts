@@ -1,7 +1,7 @@
 import { Injectable, type OnModuleInit } from "@nestjs/common";
-import type { StayNotice } from "@repo/contracts";
 import {
   StayEvents,
+  type ConfirmedStayEvent,
   type StayEventsListener,
 } from "../../booking/application/stay-events";
 import { PaymentEventDispatcher } from "../../payment/application/payment-event-dispatcher";
@@ -53,7 +53,7 @@ export class PayoutEventHandler
     });
   }
 
-  confirmed(stay: StayNotice): Promise<void> {
+  confirmed(stay: ConfirmedStayEvent): Promise<void> {
     return this.payoutService.schedule(stay);
   }
 

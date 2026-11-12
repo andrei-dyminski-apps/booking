@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { CalendarCheckIcon, WarehouseIcon } from "lucide-react";
-import { Role, type LookupOption } from "@repo/contracts";
+import { earliestToday, Role, type LookupOption } from "@repo/contracts";
 import {
   Empty,
   EmptyDescription,
@@ -12,7 +12,7 @@ import { ListingCard } from "#entities/listing";
 import { anyUser } from "#entities/user";
 import { requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { filtersHref, lookupOptionText, today } from "#shared/lib";
+import { filtersHref, lookupOptionText } from "#shared/lib";
 import {
   BackLink,
   ButtonLink,
@@ -98,7 +98,7 @@ export const ListingsPage = async ({ searchParams }: PageProps<"/admin">) => {
         values={values}
         errors={errors}
         filters={filters}
-        earliest={today()}
+        earliest={earliestToday()}
         owner={ownerOption}
       />
 

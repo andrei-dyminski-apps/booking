@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { WarehouseIcon } from "lucide-react";
+import { earliestToday } from "@repo/contracts";
 import {
   Empty,
   EmptyDescription,
@@ -7,7 +8,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@repo/ui/components/empty";
-import { today } from "#shared/lib";
 import {
   NoMatchesNotice,
   PageHeading,
@@ -65,7 +65,7 @@ export const CataloguePage = async ({
         values={values}
         errors={errors}
         filters={filters}
-        earliest={today()}
+        earliest={earliestToday()}
       />
 
       {staleCursor && <StalePageNotice firstPageHref={catalogueHref(values)} />}

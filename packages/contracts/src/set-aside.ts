@@ -156,8 +156,9 @@ export const resolveRefundFailureSchema = z.object({
 });
 
 /**
- * Which of a stay's two background payments stopped retrying: the refund a cancellation owes
- * the guest, or the host's payout. Lower case, because it is a segment of the retry's path.
+ * Which of a stay's two background payments stopped retrying: the refund a cancellation or
+ * an early end owes the guest, or the host's payout. Lower case, because it is a segment of
+ * the retry's path.
  */
 export const stuckKindSchema = z.enum(["refund", "payout"]);
 
@@ -165,8 +166,9 @@ export const StuckKind = stuckKindSchema.enum;
 
 /**
  * The stay whole, since the screen links to it, and `owedCents` — what the job would send:
- * the refund a cancellation owes the guest, or what the host is owed (`owedToHost`). The API
- * states it so the screen draws a figure instead of knowing the rule behind it.
+ * the refund a cancellation or an early end owes the guest, or what the host is owed
+ * (`owedToHost`). The API states it so the screen draws a figure instead of knowing the
+ * rule behind it.
  */
 export const stuckStaySchema = z.object({
   kind: stuckKindSchema,

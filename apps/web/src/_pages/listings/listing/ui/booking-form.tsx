@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
-  createBookingSchema,
+  BookingRate,
+  createBookingSchemaIn,
   type BookedRange,
   type CancellationPolicy,
   type CreateBookingInput,
@@ -19,8 +20,10 @@ import { FormField } from "#shared/ui";
 import { createBookingAction } from "../api/create-booking-action";
 import { joinWaitlistAction } from "../api/join-waitlist-action";
 import { callsForWaitlist } from "../lib/months";
+import { offeredRate } from "../lib/stay-rates";
 import { BookingSubmit } from "./booking-submit";
 import { CancellationQuote } from "./cancellation-quote";
+import { RateChoice } from "./rate-choice";
 import { StayQuote } from "./stay-quote";
 
 /**
@@ -30,13 +33,18 @@ import { StayQuote } from "./stay-quote";
  *
  * The price is worked out beside the submit as the dates change (`StayQuote`), by the rule
  * the payment charges by too. Nothing about it is sent: the API quotes the stay off the
- * listing's prices, which is why `createBookingSchema` has no amount on it at all. What a
- * cancellation of those dates would give back is dated under them (`CancellationQuote`).
+ * listing's prices, which is why `createBookingSchema` has no amount on it at all. A listing
+ * with a non-refundable rate offers both rates with their totals (`RateChoice`), and the
+ * rate is the one thing about the money the form does send. What a cancellation of those
+ * dates would give back at the chosen rate is dated under them (`CancellationQuote`).
  *
  * `createBookingSchema` is also what refuses a check-out before the check-in and a stay in
- * the past, here as well as in the action. `listingId` is one of its fields, so the form
- * is handed it as a bound value rather than as a box — it is what the schema needs to parse
- * at all, and the action ignores what arrives and uses the id the page bound to it.
+ * the past, here as well as in the action — here with the listing's own today beside it
+ * (`createBookingSchemaIn`), since the form knows where the listing is and the action is
+ * handed nothing it could trust about that; the API checks the same day. `listingId` is one
+ * of its fields, so the form is handed it as a bound value rather than as a box — it is what
+ * the schema needs to parse at all, and the action ignores what arrives and uses the id the
+ * page bound to it.
  *
  * Dates the calendar draws as taken are not refused here: the form offers the waitlist for
  * them instead of a hold, and submits to that action. Which of the two is decided off the
@@ -52,18 +60,27 @@ export const BookingForm = ({
   earliest,
   booked,
   policy,
+  checkIn,
+  discountBps,
   listingUpdatedAt,
   now,
 }: {
   listingId: string;
   /** The default price and the exceptions to it, off the listing being booked. */
   prices: PricedListing;
-  /** Today in UTC, from the server — see `shared/lib/dates.ts`. */
+  /**
+   * The listing's today, from the server — the first night it still sells, which UTC's
+   * today is not (`isCheckInDayPast`).
+   */
   earliest: string;
   /** The nights the calendar draws as taken — what decides between a hold and the waitlist. */
   booked: readonly BookedRange[];
   /** The listing's cancellation policy, which the hold copies when it is taken. */
   policy: CancellationPolicy;
+  /** The listing's time zone and check-in time, which the hold copies with the policy. */
+  checkIn: { timeZone: string; checkInTime: string };
+  /** The listing's non-refundable discount, or `null` when it offers no such rate. */
+  discountBps: number | null;
   /**
    * The version of the listing this render read — its prices and its policy. The action
    * sends it as the one the guest was shown, and the API refuses the hold if the listing
@@ -74,12 +91,17 @@ export const BookingForm = ({
   now: string;
 }) => {
   const [refused, setRefused] = useState<BookedRange | null>(null);
+  const { timeZone } = checkIn;
+  const schema = useMemo(() => createBookingSchemaIn({ timeZone }), [timeZone]);
   const { form, submit, pending, message } = useActionForm<CreateBookingInput>({
     action: async (state, values) => {
       const waits = callsForWaitlist(values.from, values.to, booked, refused);
       const answer = waits
         ? await joinWaitlistAction(listingId, state, values)
-        : await createBookingAction(listingId, listingUpdatedAt, state, values);
+        : await createBookingAction(listingId, listingUpdatedAt, state, {
+            ...values,
+            rate: offeredRate(values.rate, discountBps, waits),
+          });
 
       if (answer.stale) {
         setRefused(waits ? null : { from: values.from, to: values.to });
@@ -87,8 +109,8 @@ export const BookingForm = ({
 
       return answer;
     },
-    schema: createBookingSchema,
-    defaultValues: { from: "", to: "" },
+    schema,
+    defaultValues: { from: "", to: "", rate: BookingRate.STANDARD },
     bound: { listingId },
   });
 
@@ -135,16 +157,42 @@ export const BookingForm = ({
           <div className="flex flex-col gap-4 lg:pt-6.5">
             <BookingSubmit
               control={form.control}
+              prices={prices}
+              discountBps={discountBps}
               booked={booked}
               refused={refused}
               pending={pending}
             />
 
-            <StayQuote control={form.control} prices={prices} />
+            <StayQuote
+              control={form.control}
+              prices={prices}
+              discountBps={discountBps}
+              booked={booked}
+              refused={refused}
+            />
           </div>
         </div>
 
-        <CancellationQuote control={form.control} policy={policy} now={now} />
+        {discountBps !== null && (
+          <RateChoice
+            control={form.control}
+            prices={prices}
+            discountBps={discountBps}
+            booked={booked}
+            refused={refused}
+          />
+        )}
+
+        <CancellationQuote
+          control={form.control}
+          policy={policy}
+          checkIn={checkIn}
+          discountBps={discountBps}
+          booked={booked}
+          refused={refused}
+          now={now}
+        />
 
         {message !== null && <FieldError>{message}</FieldError>}
 

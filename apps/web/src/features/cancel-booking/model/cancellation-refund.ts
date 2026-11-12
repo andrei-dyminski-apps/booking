@@ -20,7 +20,7 @@ import {
   sharePercent,
   windowEnd,
 } from "#entities/booking";
-import { dayOf, formatMoney } from "#shared/lib";
+import { formatMoney } from "#shared/lib";
 
 /**
  * What cancelling a paid stay would give back, said to whoever is looking — or `null` when
@@ -47,6 +47,9 @@ export function cancellationRefundNote(
     | "paid"
     | "dispute"
     | "from"
+    | "timeZone"
+    | "checkInTime"
+    | "endedEarlyAt"
     | "guestId"
     | "hostId"
     | "createdAt"
@@ -61,8 +64,10 @@ export function cancellationRefundNote(
 
   if (booking.status !== BookingStatus.CONFIRMED || !booking.paid) return null;
 
+  const moment = parseISO(now);
+
   // A stay that has begun can no longer be cancelled, so there is no refund to word.
-  if (!isCancellableOn(booking, dayOf(now))) {
+  if (!isCancellableOn(booking, moment)) {
     return null;
   }
 
@@ -79,8 +84,6 @@ export function cancellationRefundNote(
   if (left === 0) {
     return "The stay has been refunded in full already: cancelling refunds nothing more.";
   }
-
-  const moment = parseISO(now);
 
   if (admin) {
     return `Cancelled by an admin, it refunds ${whatComesBack(booking, left)}.`;
@@ -112,12 +115,12 @@ export function cancellationRefundNote(
     quote.next.shareBps > 0
       ? `${shareInWords(quote.next.shareBps)} comes back`
       : "nothing comes back";
-  const sentence = `Cancelling before ${windowEnd(quote.next.until)} refunds ${what}; after that, ${after}.`;
+  const sentence = `Cancelling before ${windowEnd(quote.next.until, booking.timeZone)} refunds ${what}; after that, ${after}.`;
 
   // The window that closed last, if one has: what waiting cost.
   return quote.closed === null
     ? sentence
-    : `${sentence} Before ${windowEnd(quote.closed.until)} it would have been ${shareInWords(quote.closed.shareBps)}.`;
+    : `${sentence} Before ${windowEnd(quote.closed.until, booking.timeZone)} it would have been ${shareInWords(quote.closed.shareBps)}.`;
 }
 
 /**
@@ -135,6 +138,9 @@ function hostCancellationNote(
     | "refundedAmountCents"
     | "currency"
     | "from"
+    | "timeZone"
+    | "checkInTime"
+    | "endedEarlyAt"
   >,
   now: string,
 ): string | null {
@@ -143,9 +149,11 @@ function hostCancellationNote(
   }
 
   // A stay nobody paid for (the seed's) has nothing to say, as it has nothing for the guest.
-  if (!booking.paid || !isCancellableOn(booking, dayOf(now))) return null;
+  const moment = parseISO(now);
 
-  const fee = hostCancellationFee(booking, parseISO(now));
+  if (!booking.paid || !isCancellableOn(booking, moment)) return null;
+
+  const fee = hostCancellationFee(booking, moment);
 
   // Paid, and still no fee: the money has gone back already, one way or the other.
   if (fee.cents === 0) {

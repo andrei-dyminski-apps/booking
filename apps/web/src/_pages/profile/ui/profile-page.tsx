@@ -9,13 +9,16 @@ import { ReviewSummary } from "#entities/review";
 import { LogoutButton } from "#features/logout";
 import { requireUser } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { formatDate } from "#shared/lib";
+import { formatDate, readerTimeZone } from "#shared/lib";
 import { ButtonLink } from "#shared/ui";
 import { readReviewSummaryOf } from "../api/read-review-summary-of";
 
 export const ProfilePage = async () => {
   const user = await requireUser(ROUTES.profile);
-  const reviews = await readReviewSummaryOf(user.id);
+  const [reviews, zone] = await Promise.all([
+    readReviewSummaryOf(user.id),
+    readerTimeZone(),
+  ]);
   // What hosts said about this account as a guest — any account that has stayed somewhere.
   const reviewed = reviews !== null && reviews.count > 0;
 
@@ -40,7 +43,7 @@ export const ProfilePage = async () => {
           <dd>{user.role}</dd>
 
           <dt className="text-muted-foreground">Member since</dt>
-          <dd>{formatDate(user.createdAt)}</dd>
+          <dd>{formatDate(user.createdAt, zone)}</dd>
 
           {reviewed && (
             <>

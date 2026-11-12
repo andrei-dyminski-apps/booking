@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import { parseISO } from "date-fns";
 import { Loader2Icon } from "lucide-react";
 import {
   BookingStatus,
@@ -7,6 +9,7 @@ import {
   cancellerOf,
   DisputeStatus,
   isCancellableOn,
+  mayEndEarly,
   NO_CENTS,
   refundableCents,
   Role,
@@ -28,12 +31,15 @@ import {
   BookingStatusBadge,
   CANCELLER_NAMES,
   CancellationTerms,
+  HoldDeadline,
 } from "#entities/booking";
-import { dayOf, formatMoment, formatMoney, nightsBreakdown } from "#shared/lib";
+import { formatMomentIn, formatMoney, nightsBreakdown } from "#shared/lib";
 import { DateRange, NightCount } from "#shared/ui";
 import { useBookingLive, type BankAnswer } from "../model/use-booking-live";
+import { earlyEndTerms, endedEarlyNote } from "../model/early-end-note";
 import { BookingAdjustments } from "./booking-adjustments";
 import { CancelStayButton } from "./cancel-stay-button";
+import { EndStayEarlyButton } from "./end-stay-early-button";
 import { PaymentForm } from "./payment-form";
 import { RefundStayButton } from "./refund-stay-button";
 
@@ -60,12 +66,15 @@ export const BookingLive = ({
   publishableKey,
   bankAnswer,
   now,
+  readerTimeZone,
   adjustments,
 }: {
   initial: BookingDetail;
   viewer: User;
   /** The server's clock at the render, which the refund note and `mayCancel` start from. */
   now: string;
+  /** The reader's zone, which the hold's deadline is stated in (`readerTimeZone`). */
+  readerTimeZone: string;
   /** Handed over only to the guest of a hold still waiting for payment. */
   publishableKey: string | null;
   /** The bank sent the visitor back here after a payment step of its own, or `null`. */
@@ -87,6 +96,9 @@ export const BookingLive = ({
     clock,
     schedule,
   } = useBookingLive({ initial, now, bankAnswer });
+  // Whether the early-end dialog is open: it stays on the page until it closes, even once
+  // the stay can no longer end early — the day turned under it onto its last night.
+  const [endingEarly, setEndingEarly] = useState(false);
   const pending = booking.status === BookingStatus.PENDING_PAYMENT;
   const confirmed = booking.status === BookingStatus.CONFIRMED;
   const { expiresAt } = booking;
@@ -110,13 +122,23 @@ export const BookingLive = ({
     mayCancel(booking, viewer, clock) &&
     !(pending && (lapsed || paid));
   // An admin's partial refund: nothing while the bank holds the payment in a dispute, which
-  // Stripe refuses to refund — the API answers it with a `409` either way. The day is the
+  // Stripe refuses to refund — the API answers it with a `409` either way. The moment is the
   // server's clock's, as `mayCancel`'s is: a stay not begun keeps its last cent.
-  const today = dayOf(clock);
+  const moment = parseISO(clock);
   const refundable =
     viewer.role === Role.ADMIN && booking.dispute !== DisputeStatus.OPEN
-      ? refundableCents(booking, today)
+      ? refundableCents(booking, moment)
       : NO_CENTS;
+  // Ending a stay early is the guest's, or an admin's on their behalf — not the host's. A
+  // stay with no nights recorded has nothing to measure a refund by, and the API refuses it,
+  // as it refuses an open dispute.
+  const endable =
+    (canceller === Canceller.GUEST || canceller === Canceller.ADMIN) &&
+    booking.nights.length > 0 &&
+    booking.dispute !== DisputeStatus.OPEN &&
+    mayEndEarly(booking, moment);
+  const endTerms = endable ? earlyEndTerms(booking, moment) : null;
+  const endedEarly = endedEarlyNote(booking);
 
   return (
     <>
@@ -142,6 +164,9 @@ export const BookingLive = ({
           {booking.nights.length > 0 && (
             <p className="text-sm text-muted-foreground">
               {nightsBreakdown(booking.nights, booking.currency)}
+              {/* The non-refundable rate's discount, taken off the nights once. */}
+              {booking.discountCents > 0 &&
+                ` − ${formatMoney(booking.discountCents, booking.currency)} non-refundable discount`}
             </p>
           )}
 
@@ -158,8 +183,13 @@ export const BookingLive = ({
 
           {pending && !paid && !lapsed && expiresAt !== null && (
             <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-              The nights are held until {formatMoment(expiresAt)} UTC. Unpaid by
-              then, they go back on offer.
+              The nights are held until{" "}
+              <HoldDeadline
+                expiresAt={expiresAt}
+                now={now}
+                readerTimeZone={readerTimeZone}
+              />
+              . Unpaid by then, they go back on offer.
             </p>
           )}
 
@@ -168,8 +198,8 @@ export const BookingLive = ({
               role="status"
               className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground"
             >
-              The hold lapsed at {formatMoment(expiresAt)} UTC and the nights
-              went back on offer.
+              The hold lapsed at {formatMomentIn(expiresAt, readerTimeZone)} and
+              the nights went back on offer.
             </p>
           )}
 
@@ -211,6 +241,7 @@ export const BookingLive = ({
               )}
               <CancellationTerms
                 policy={booking.cancellationPolicy}
+                checkIn={booking}
                 schedule={schedule}
               />
             </div>
@@ -220,10 +251,16 @@ export const BookingLive = ({
           {booking.cancelledBy !== null && booking.cancelledAt !== null && (
             <p className="rounded-lg bg-muted px-3 py-2 text-sm break-words text-muted-foreground">
               Cancelled by {CANCELLER_NAMES[booking.cancelledBy]} on{" "}
-              {formatMoment(booking.cancelledAt)} UTC
+              {formatMomentIn(booking.cancelledAt, booking.timeZone)}
               {booking.cancellationReason === null
                 ? "."
                 : `: “${booking.cancellationReason}”`}
+            </p>
+          )}
+
+          {endedEarly !== null && (
+            <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
+              {endedEarly}
             </p>
           )}
 
@@ -243,7 +280,7 @@ export const BookingLive = ({
           )}
         </CardContent>
 
-        {(cancellable || refundable > 0) && (
+        {(cancellable || endable || endingEarly || refundable > 0) && (
           <CardFooter className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
             {cancellable && canceller !== null && (
               <CancelStayButton
@@ -252,12 +289,21 @@ export const BookingLive = ({
                 refundNote={refundNote}
               />
             )}
+            {(endable || endingEarly) && (
+              <EndStayEarlyButton
+                bookingId={booking.id}
+                terms={endTerms}
+                onOpenChange={setEndingEarly}
+                onRefused={readAgain}
+                onEnded={readAgain}
+              />
+            )}
             {refundable > 0 && (
               <RefundStayButton
                 bookingId={booking.id}
                 refundableCents={refundable}
                 currency={booking.currency}
-                keepsLastCent={isCancellableOn(booking, today)}
+                keepsLastCent={isCancellableOn(booking, moment)}
                 onRefunded={awaitRefund}
               />
             )}
@@ -267,6 +313,7 @@ export const BookingLive = ({
 
       <BookingAdjustments
         bookingId={booking.id}
+        timeZone={booking.timeZone}
         adjustments={adjustments}
         onRefunded={awaitRefund}
       />

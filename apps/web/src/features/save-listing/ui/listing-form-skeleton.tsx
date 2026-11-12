@@ -2,10 +2,10 @@ import type { ReactNode } from "react";
 import { Skeleton } from "@repo/ui/components/skeleton";
 
 /**
- * The wait of `ListingForm`, box for box — the four fields, both price groups and the
- * button row. It draws the form and nothing around it: the card, the title and the line
- * under it belong to each screen, which puts this inside the same frame its page draws
- * the form in, so the two cannot drift apart.
+ * The wait of `ListingForm`, box for box — the four fields, the time zone and the check-in
+ * beside each other, both price groups and the button row. It draws the form and nothing
+ * around it: the card, the title and the line under it belong to each screen, which puts
+ * this inside the same frame its page draws the form in, so the two cannot drift apart.
  *
  * `editing` is a screen that waits for a listing, and that wait ends at the legend of the
  * date prices. How many rows the listing has is not known until it arrives, and every
@@ -24,6 +24,10 @@ export const ListingFormSkeleton = ({
       <BoxSkeleton label="w-24" box="h-24" />
       <BoxSkeleton label="w-40" />
       <BoxSkeleton label="w-20" />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <BoxSkeleton label="w-20" />
+        <BoxSkeleton label="w-24" />
+      </div>
 
       <Skeleton className="h-px w-full" />
 

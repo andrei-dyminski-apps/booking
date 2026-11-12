@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { tz } from "@date-fns/tz";
 import { INestApplication } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
-import { parseISO } from "date-fns";
+import { differenceInHours, format, parseISO, subMilliseconds } from "date-fns";
 import { App } from "supertest/types";
+import { payoutDueAt } from "@repo/contracts";
 import { AppModule } from "./../src/app.module";
 import {
   LeaseBusyError,
@@ -12,6 +13,7 @@ import {
 } from "./../src/booking/infrastructure/booking-lease";
 import { BookingCancellationRepository } from "./../src/booking/infrastructure/booking-cancellation.repository";
 import { BookingRefundRepository } from "./../src/booking/infrastructure/booking-refund.repository";
+import { checkInData } from "./../src/booking/infrastructure/stay-rows";
 import { cents } from "./../src/payment/domain/money";
 import {
   WaivingAccountGoneError,
@@ -90,6 +92,11 @@ describe("PayoutRepository settlement lease (e2e)", () => {
         amountCents: 24_000,
         currency: "usd",
         cancellationPolicy: "FLEXIBLE",
+        timeZone: "UTC",
+        checkInTime: "00:00",
+        // Midnight UTC of `from`, as `checkInData` makes it of the two above.
+        checkInAt: parseISO(inDays(10), { in: tz("UTC") }),
+        discountCents: 0,
       },
     });
 
@@ -286,6 +293,11 @@ describe("The money columns of a paid stay (e2e)", () => {
         amountCents: AMOUNT,
         currency: "usd",
         cancellationPolicy: "FLEXIBLE",
+        timeZone: "UTC",
+        checkInTime: "00:00",
+        // Midnight UTC of `from`, as `checkInData` makes it of the two above.
+        checkInAt: parseISO(inDays(-10), { in: tz("UTC") }),
+        discountCents: 0,
         paymentIntentId: "pi_money",
         chargeId: "ch_money",
         paidAt: new Date(),
@@ -350,6 +362,78 @@ describe("The money columns of a paid stay (e2e)", () => {
 
     expect(await bookingRefundRepository.findOwedRefunds(10)).toEqual([]);
     expect(await refundedAmountCents()).toBe(AMOUNT);
+  });
+
+  it("finds a stay due by the moment of check-in on its listing's clock, not by its UTC day", async () => {
+    // Midnight in Kiritimati (UTC+14) is 10:00 UTC the day before, so the payout falls due
+    // at 10:00 UTC of the check-in date itself — before a cut by the UTC day would let it.
+    const { from: day } = await prismaService.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+    });
+    const from = format(day, "yyyy-MM-dd", { in: tz("UTC") });
+    // Rewritten as `create` would have written it, the moment included.
+    const row = await prismaService.booking.update({
+      where: { id: bookingId },
+      data: checkInData({
+        from,
+        timeZone: "Pacific/Kiritimati",
+        checkInTime: "00:00",
+      }),
+    });
+    const due = payoutDueAt({
+      from,
+      timeZone: row.timeZone,
+      checkInTime: row.checkInTime,
+    });
+
+    expect(due.toISOString()).toBe(`${from}T10:00:00.000Z`);
+    expect(
+      await payoutRepository.findDuePayouts(
+        subMilliseconds(due, 1),
+        10,
+        hostId,
+      ),
+    ).toEqual([]);
+    expect(await payoutRepository.findDuePayouts(due, 10, hostId)).toEqual([
+      bookingId,
+    ]);
+  });
+
+  it("leaves out a stay checking in late on a clock behind UTC until it is due", async () => {
+    // 23:00 in Honolulu (UTC−10) is 09:00 UTC the day after, so the payout falls due 57
+    // hours after midnight UTC of the check-in date — a stay a cut by the day reads two
+    // days early, where it takes a place in the batch from one that is due.
+    const { from: day } = await prismaService.booking.findUniqueOrThrow({
+      where: { id: bookingId },
+    });
+    const from = format(day, "yyyy-MM-dd", { in: tz("UTC") });
+
+    await prismaService.booking.update({
+      where: { id: bookingId },
+      data: checkInData({
+        from,
+        timeZone: "Pacific/Honolulu",
+        checkInTime: "23:00",
+      }),
+    });
+
+    const due = payoutDueAt({
+      from,
+      timeZone: "Pacific/Honolulu",
+      checkInTime: "23:00",
+    });
+
+    expect(differenceInHours(due, day)).toBe(57);
+    expect(
+      await payoutRepository.findDuePayouts(
+        subMilliseconds(due, 1),
+        10,
+        hostId,
+      ),
+    ).toEqual([]);
+    expect(await payoutRepository.findDuePayouts(due, 10, hostId)).toEqual([
+      bookingId,
+    ]);
   });
 
   it("leaves a stay refunded in full out of the due payouts", async () => {
@@ -526,6 +610,11 @@ describe("The money columns of a paid stay (e2e)", () => {
           amountCents: AMOUNT,
           currency: "usd",
           cancellationPolicy: "FLEXIBLE",
+          timeZone: "UTC",
+          checkInTime: "00:00",
+          // Midnight UTC of `from`, as `checkInData` makes it of the two above.
+          checkInAt: parseISO(inDays(-20 * stays), { in: tz("UTC") }),
+          discountCents: 0,
           paymentIntentId: `pi_money_${String(stays)}`,
           chargeId: `ch_money_${String(stays)}`,
           paidAt: new Date(),

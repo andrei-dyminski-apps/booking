@@ -1,17 +1,22 @@
 import { INestApplication } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { App } from "supertest/types";
+import { tz } from "@date-fns/tz";
+import { addDays, format, parseISO } from "date-fns";
 import {
+  CHECK_IN_DAY_PAST,
   Role,
   apiErrorSchema,
   bookingDetailSchema,
   bookingPageSchema,
   bookingSchema,
+  earliestToday,
   listingSchema,
   type Booking,
   type BookingPage,
   type CreateBookingInput,
   type CreateListingInput,
+  stayDay,
 } from "@repo/contracts";
 import { cents } from "./../src/payment/domain/money";
 import { AppModule } from "./../src/app.module";
@@ -27,6 +32,8 @@ import {
   signInAs,
   type Agent,
 } from "./session";
+
+const IN_UTC = { in: tz("UTC") };
 
 const listingInput: CreateListingInput = {
   title: "Loft above the harbour",
@@ -279,6 +286,117 @@ describe("BookingController (e2e)", () => {
 
     expect(created.cancellationPolicy).toBe("NON_REFUNDABLE");
     expect(created.amountCents).toBe(4 * 15_000);
+  });
+
+  it("copies the listing's time zone and check-in time onto the stay, and a later change moves no stay", async () => {
+    await owner
+      .patch(`/listings/${input.listingId}`)
+      .send({ timeZone: "Pacific/Honolulu", checkInTime: "16:00" })
+      .expect(200);
+
+    const created = bookingSchema.parse(
+      (await guest.post("/bookings").send(input).expect(201)).body,
+    );
+
+    expect(created).toMatchObject({
+      timeZone: "Pacific/Honolulu",
+      checkInTime: "16:00",
+    });
+
+    await owner
+      .patch(`/listings/${input.listingId}`)
+      .send({ timeZone: "Europe/Berlin", checkInTime: "12:00" })
+      .expect(200);
+
+    expect(
+      bookingSchema.parse(
+        (await guest.get(`/bookings/${created.id}`).expect(200)).body,
+      ),
+    ).toMatchObject({ timeZone: "Pacific/Honolulu", checkInTime: "16:00" });
+  });
+
+  // The listing's today, read under the lock: whatever UTC says, a night already over where
+  // the listing is goes unsold and tonight there is for sale. Each zone's day is read off
+  // the clock the run happens at, so the spec holds at any hour.
+  it("refuses a check-in day already gone where the listing is, and takes tonight there", async () => {
+    const dayIn = (timeZone: string, days: number) =>
+      format(
+        addDays(parseISO(stayDay({ timeZone }, new Date()), IN_UTC), days),
+        "yyyy-MM-dd",
+      );
+
+    await owner
+      .patch(`/listings/${input.listingId}`)
+      .send({ timeZone: "Pacific/Kiritimati" })
+      .expect(200);
+
+    const gone = await guest
+      .post("/bookings")
+      .send({
+        ...input,
+        from: dayIn("Pacific/Kiritimati", -1),
+        to: dayIn("Pacific/Kiritimati", 1),
+      })
+      .expect(400);
+
+    // The schema's words or the lock's, by the hour the run lands on: the day before
+    // Kiritimati's is gone everywhere before noon UTC.
+    const refusal = apiErrorSchema.parse(gone.body);
+
+    expect([
+      refusal.message,
+      ...(refusal.errors ?? []).map((issue) => issue.message),
+    ]).toContain(CHECK_IN_DAY_PAST);
+
+    await owner
+      .patch(`/listings/${input.listingId}`)
+      .send({ timeZone: "Pacific/Honolulu" })
+      .expect(200);
+
+    await guest
+      .post("/bookings")
+      .send({
+        ...input,
+        from: dayIn("Pacific/Honolulu", 0),
+        to: dayIn("Pacific/Honolulu", 1),
+      })
+      .expect(201);
+  });
+
+  // A form read before the host moved the listing east is stale before its day is past:
+  // it is told to read the listing again, which redraws the calendar on the new today.
+  // The day before every zone's today passes the schema and is gone in Kiritimati at any
+  // hour, which is fourteen hours ahead of UTC and twenty-six of `earliestToday`'s zone.
+  it("answers a form read before the listing moved east with 412 rather than with its day gone", async () => {
+    const shown = listingSchema.parse(
+      (await guest.get(`/listings/${input.listingId}`).expect(200)).body,
+    ).updatedAt;
+    const moved = listingSchema.parse(
+      (
+        await owner
+          .patch(`/listings/${input.listingId}`)
+          .send({ timeZone: "Pacific/Kiritimati" })
+          .expect(200)
+      ).body,
+    ).updatedAt;
+    const from = earliestToday();
+    const stay = {
+      ...input,
+      from,
+      to: format(addDays(parseISO(from, IN_UTC), 2), "yyyy-MM-dd"),
+    };
+
+    await guest
+      .post("/bookings")
+      .send({ ...stay, listingUpdatedAt: shown })
+      .expect(412);
+
+    const gone = await guest
+      .post("/bookings")
+      .send({ ...stay, listingUpdatedAt: moved })
+      .expect(400);
+
+    expect(apiErrorSchema.parse(gone.body).message).toBe(CHECK_IN_DAY_PAST);
   });
 
   // The overlap is a pair of strict inequalities, and this is what says so now that the

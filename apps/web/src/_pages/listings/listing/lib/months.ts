@@ -40,7 +40,7 @@ export type CalendarMonth = {
  * special case for it.
  *
  * The days are `YYYY-MM-DD` strings throughout and compare lexicographically, so nothing
- * here parses one into a local `Date` — see `shared/lib/dates.ts` for why that matters.
+ * here parses one into a local `Date` — see `shared/lib/dates/dates.ts` for why that matters.
  */
 export function buildMonths(
   anchor: string,

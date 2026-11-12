@@ -22,6 +22,12 @@ export const PrismaErrorCode = {
  */
 const EXCLUSION_VIOLATION_SQLSTATE = "23P01";
 
+/**
+ * The SQLSTATE of a `CHECK` constraint violation — `P2039` again on Prisma's side, so the
+ * class code is read the way the exclusion's is.
+ */
+const CHECK_VIOLATION_SQLSTATE = "23514";
+
 export type PrismaErrorCode =
   (typeof PrismaErrorCode)[keyof typeof PrismaErrorCode];
 
@@ -93,6 +99,57 @@ export function isExclusionViolation(error: unknown): boolean {
       .code === EXCLUSION_VIOLATION_SQLSTATE
   );
 }
+
+/**
+ * True for a write that broke the named `CHECK` constraint. Most of them are unreachable
+ * over HTTP — the contract refuses the value first — and need no translation; this is for
+ * one that holds a pair of columns a `PATCH` can reach one half of. The adapter reports no
+ * constraint field for a `CHECK`, unlike a unique or a foreign key, so the name is read out
+ * of the message Postgres words it in (`violates check constraint "<name>"`). Only the name
+ * is relied on, never the words or the quotes around it: the server words the message in
+ * its `lc_messages`, and a translation quotes an identifier its own way (`»<name>«`).
+ */
+export function isCheckViolation(error: unknown, constraint: string): boolean {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+
+  const cause = checkViolationPathSchema.safeParse(error.meta).data
+    ?.driverAdapterError.cause;
+
+  return (
+    cause?.code === CHECK_VIOLATION_SQLSTATE &&
+    namesIdentifier(cause.message, constraint)
+  );
+}
+
+/**
+ * Whether `identifier` stands in `message` as a whole name rather than as a part of a
+ * longer one — the constraints of one table share a prefix (`listings_…`).
+ */
+function namesIdentifier(message: string, identifier: string): boolean {
+  for (
+    let at = message.indexOf(identifier);
+    at !== -1;
+    at = message.indexOf(identifier, at + 1)
+  ) {
+    const before = message.charAt(at - 1);
+    const after = message.charAt(at + identifier.length);
+
+    if (!IDENTIFIER_CHAR.test(before) && !IDENTIFIER_CHAR.test(after)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/** A character an unquoted Postgres identifier may continue with. */
+const IDENTIFIER_CHAR = /^[\p{L}\p{N}_$]$/u;
+
+const checkViolationPathSchema = z.object({
+  driverAdapterError: z.object({
+    cause: z.object({ code: z.string(), message: z.string() }),
+  }),
+});
 
 const sqlStatePathSchema = z.object({
   driverAdapterError: z.object({

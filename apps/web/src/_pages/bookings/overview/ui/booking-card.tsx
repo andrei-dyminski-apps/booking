@@ -23,9 +23,10 @@ import {
   awaitsPaymentFrom,
   BookingStatusBadge,
   CANCELLER_NAMES,
+  HoldDeadline,
 } from "#entities/booking";
 import { ROUTES } from "#shared/config";
-import { formatMoment, formatMoney } from "#shared/lib";
+import { formatMoney } from "#shared/lib";
 import { ButtonLink, DateRange, NightCount } from "#shared/ui";
 import { listingStaysHref } from "../lib/bookings-search";
 import { CancelBookingButton } from "./cancel-booking-button";
@@ -46,6 +47,7 @@ export const BookingCard = ({
   side,
   today,
   now,
+  readerTimeZone,
 }: {
   booking: Booking;
   viewer: User;
@@ -58,6 +60,8 @@ export const BookingCard = ({
   today: string;
   /** The server's clock at the render: the offer to cancel, its refund, a hold's deadline. */
   now: string;
+  /** The reader's zone, which a hold's deadline is stated in (`readerTimeZone`). */
+  readerTimeZone: string;
 }) => {
   const review = reviewHalf(booking, viewer, side, today);
   // A host and an admin see other people's stays; on the guest's side the list is one
@@ -110,6 +114,13 @@ export const BookingCard = ({
               by {CANCELLER_NAMES[booking.cancelledBy]}
             </span>
           )}
+          {/*
+            The dates and nights above are the stay as it stands, the amount what was bought:
+            this is what says why the two disagree. The stay's page has the rest.
+          */}
+          {booking.endedEarlyAt !== null && (
+            <Badge variant="outline">Ended early</Badge>
+          )}
           {review === "written" && <Badge variant="outline">Reviewed</Badge>}
         </CardAction>
       </CardHeader>
@@ -118,8 +129,13 @@ export const BookingCard = ({
         booking.expiresAt !== null && (
           <CardContent>
             <p className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-              The hold lasts until {formatMoment(booking.expiresAt)} UTC. Unpaid
-              by then, it lapses and the nights go back on offer.
+              The hold lasts until{" "}
+              <HoldDeadline
+                expiresAt={booking.expiresAt}
+                now={now}
+                readerTimeZone={readerTimeZone}
+              />
+              . Unpaid by then, it lapses and the nights go back on offer.
             </p>
           </CardContent>
         )}

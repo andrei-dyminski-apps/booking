@@ -7,10 +7,16 @@ import {
   type Booking,
   type BookingQuery,
   type CreateBookingInput,
+  type PricedNight,
 } from "@repo/contracts";
 import type { Page } from "../../../common/paging";
 import type { PublicOf } from "../../../common/testing/public-of.fakes";
-import { CURRENCY, type Cents } from "../../../payment/domain/money";
+import {
+  cents,
+  CURRENCY,
+  NO_CENTS,
+  type Cents,
+} from "../../../payment/domain/money";
 import { holdExpiry } from "../../domain/booking-status";
 import {
   DatesUnavailableError,
@@ -56,6 +62,11 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
 
   /** The listing's policy, which `create` copies onto the stay as the transaction does. */
   listingPolicy: CancellationPolicy = "FLEXIBLE";
+
+  /** The listing's time zone and check-in time, which `create` copies as it copies the policy. */
+  listingTimeZone = "UTC";
+
+  listingCheckInTime = "00:00";
 
   /** Set to have `create` lose the race the pre-flight check cannot close. */
   vanishingListing = false;
@@ -108,7 +119,14 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
     return Promise.resolve(this.table.rows.get(id) ?? null);
   }
 
-  /** Every night at the listing's default price — `AMOUNT` for the stay of `input`. */
+  /**
+   * The stay's nights, priced so they add up to what it was charged — `amount_cents = Σ
+   * nights` at the standard rate, the invariant the real insert keeps and the early end's
+   * refund is measured by. The fake charges every stay `AMOUNT` whatever its length, so its
+   * nights share that evenly, the odd cents on the last one, rather than each costing the
+   * listing's price: the four of `input` come to 12000 apiece, the three of `payForStay` to
+   * 16000.
+   */
   findDetailWithListingOwner(
     id: string,
   ): Promise<BookingDetailWithListingOwner | null> {
@@ -119,14 +137,8 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
         ? null
         : {
             ...found,
-            nights: pricedNights(
-              {
-                pricePerNightCents: listing.pricePerNightCents,
-                pricing: { weekdays: {}, dates: [] },
-              },
-              found.booking.from,
-              found.booking.to,
-            ),
+            nights: nightsAddingUpTo(found.booking),
+            discountCents: NO_CENTS,
           },
     );
   }
@@ -197,6 +209,8 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
       amountCents: AMOUNT,
       currency: CURRENCY,
       cancellationPolicy: this.listingPolicy,
+      timeZone: this.listingTimeZone,
+      checkInTime: this.listingCheckInTime,
       refundedAmountCents: null,
       refundOwedCents: null,
       paid: false,
@@ -208,6 +222,7 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
       cancelledBy: null,
       cancelledAt: null,
       cancellationReason: null,
+      endedEarlyAt: null,
       reviewed: { byGuest: false, byOwner: false },
     };
 
@@ -358,3 +373,24 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
     return [...this.table.rows.values()].map((found) => found.booking);
   }
 }
+
+/** Every night of the stay, its `amountCents` shared out evenly, the odd cents last. */
+function nightsAddingUpTo(
+  booking: Pick<Booking, "from" | "to" | "amountCents">,
+): PricedNight[] {
+  // Only the dates are read off this: the prices are the amount's, shared out below.
+  const dates = pricedNights(
+    { pricePerNightCents: listing.pricePerNightCents, pricing: NO_EXCEPTIONS },
+    booking.from,
+    booking.to,
+  );
+  const each = Math.floor(booking.amountCents / dates.length);
+  const odd = booking.amountCents - each * dates.length;
+
+  return dates.map(({ date }, index) => ({
+    date,
+    priceCents: cents(index === dates.length - 1 ? each + odd : each),
+  }));
+}
+
+const NO_EXCEPTIONS = { weekdays: {}, dates: [] };

@@ -37,9 +37,12 @@ export const CatalogueToolbar = ({
    */
   filters: ActiveFilter[];
   /**
-   * Today in UTC, computed on the server. The date boxes refuse a stay in the past the
-   * way `createBookingSchema` does, and reading the clock in the markup instead would
-   * make the server and the browser disagree at midnight.
+   * The earliest today of any zone (`earliestToday`), computed on the server — the bound
+   * `createBookingSchema` refuses a check-in before. Not UTC's today: a listing west of
+   * Greenwich still sells tonight after midnight UTC, so a search for it has to be
+   * possible. A listing further east, where that night is over, may still be answered; its
+   * own page draws the night as past and the form refuses it in words. Reading the clock
+   * in the markup instead would make the server and the browser disagree at midnight.
    */
   earliest: string;
 }) => {

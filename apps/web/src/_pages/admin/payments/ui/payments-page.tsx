@@ -16,7 +16,7 @@ import {
   type SetAsideFilterKey,
   type SetAsideList,
 } from "#shared/config";
-import { lookupOptionText } from "#shared/lib";
+import { lookupOptionText, readerTimeZone } from "#shared/lib";
 import {
   ButtonLink,
   NoMatchesNotice,
@@ -48,7 +48,7 @@ const DESCRIPTIONS: Record<SetAsideView["list"], string> = {
   bounced:
     "Refunds the guest's bank sent back. The same card refuses them again, so the money goes back another way — record how.",
   "stuck-refunds":
-    "Refunds owed for cancelled stays that stopped retrying. Retrying sends what the stay still owes.",
+    "Refunds owed to guests — for a cancelled stay, or for the unused nights of one ended early — that stopped retrying. Retrying sends what the stay still owes.",
   "stuck-payouts":
     "Host payouts that stopped retrying. Retrying sends the host's share again.",
 };
@@ -75,11 +75,12 @@ export const PaymentsPage = async ({
 
   // A question the contract refuses is not put to the API at all. The names of the rows the
   // id filters name are read beside the list — the chips read them, and so do the boxes.
-  const [result, listing, guest, host] = await Promise.all([
+  const [result, listing, guest, host, zone] = await Promise.all([
     view === null ? null : readSetAsidePage(view),
     lookupsApi.optionOf(LookupKind.listings, values.listingId),
     lookupsApi.optionOf(LookupKind.guests, values.guestId),
     lookupsApi.optionOf(LookupKind.hosts, values.hostId),
+    readerTimeZone(),
   ]);
   const filters = activeFilters(list, values, {
     listing: listing && lookupOptionText(listing),
@@ -116,7 +117,12 @@ export const PaymentsPage = async ({
         <StalePageNotice firstPageHref={firstPageHref(search)} />
       ) : (
         <>
-          <SetAsideItems result={result} view={view} filters={filters} />
+          <SetAsideItems
+            result={result}
+            view={view}
+            filters={filters}
+            zone={zone}
+          />
           <Pager
             nextHref={
               result.page.nextCursor !== null
@@ -137,10 +143,13 @@ const SetAsideItems = ({
   result,
   view,
   filters,
+  zone,
 }: {
   result: SetAsidePage;
   view: SetAsideView;
   filters: ActiveFilter[];
+  /** The reader's zone, which the cards state their moments in (`readerTimeZone`). */
+  zone: string;
 }) => {
   if (result.page.items.length === 0) {
     if (filters.length === 0) {
@@ -172,7 +181,7 @@ const SetAsideItems = ({
         <ul role="list" className="flex flex-col gap-4">
           {result.page.items.map((event) => (
             <li key={event.id}>
-              <FailedEventCard event={event} />
+              <FailedEventCard event={event} readerTimeZone={zone} />
             </li>
           ))}
         </ul>
@@ -182,7 +191,7 @@ const SetAsideItems = ({
         <ul role="list" className="flex flex-col gap-4">
           {result.page.items.map((failure) => (
             <li key={failure.refundId}>
-              <RefundFailureCard failure={failure} />
+              <RefundFailureCard failure={failure} readerTimeZone={zone} />
             </li>
           ))}
         </ul>
@@ -193,7 +202,7 @@ const SetAsideItems = ({
         <ul role="list" className="flex flex-col gap-4">
           {result.page.items.map((stuck) => (
             <li key={stuck.booking.id}>
-              <StuckStayCard stuck={stuck} />
+              <StuckStayCard stuck={stuck} readerTimeZone={zone} />
             </li>
           ))}
         </ul>

@@ -23,10 +23,13 @@ import { HostFeesCard } from "./host-fees-card";
 export const HostFees = async ({
   read,
   audience,
+  readerTimeZone,
   action,
 }: {
   read: () => Promise<HostFeeOverview>;
   audience: "host" | "admin";
+  /** The reader's zone, which the moments are stated in (`readerTimeZone`). */
+  readerTimeZone: string;
   action?: (fee: HostFee) => ReactNode;
 }) => {
   const overview = await readOrUnavailable(read);
@@ -46,7 +49,12 @@ export const HostFees = async ({
   }
 
   return (
-    <HostFeesCard overview={overview} audience={audience} action={action} />
+    <HostFeesCard
+      overview={overview}
+      audience={audience}
+      readerTimeZone={readerTimeZone}
+      action={action}
+    />
   );
 };
 

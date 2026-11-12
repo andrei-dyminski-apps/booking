@@ -8,6 +8,8 @@ const confirmed = {
   paid: true,
   dispute: null,
   from,
+  timeZone: "UTC",
+  checkInTime: "00:00",
   amountCents: cents(36_105),
   refundedAmountCents: null,
 };

@@ -214,8 +214,9 @@ export class PayoutRepository {
         },
       ],
       payoutFailedAt: null,
-      // `from` is a `@db.Date`, compared as a day.
-      from: { lte: subHours(now, PAYOUT_DELAY_HOURS) },
+      // `payoutDueAt` on the column: only a stay already due is read, so the stays checking
+      // in later on the clock cannot fill a batch ahead of the ones waiting on a retry.
+      checkInAt: { lte: subHours(now, PAYOUT_DELAY_HOURS) },
       ...(hostId === undefined ? {} : { listing: { ownerId: hostId } }),
     };
 
@@ -223,7 +224,7 @@ export class PayoutRepository {
       where,
       select: { id: true },
       // The fewest failures first, so stays that keep failing cannot fill every batch.
-      orderBy: [{ payoutAttempts: "asc" }, { from: "asc" }],
+      orderBy: [{ payoutAttempts: "asc" }, { checkInAt: "asc" }],
       take: limit,
     });
 

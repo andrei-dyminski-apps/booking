@@ -1,7 +1,10 @@
 import { z } from "zod";
 import {
+  BASIS_POINTS,
   CancellationPolicy,
   createListingSchema,
+  DEFAULT_TIME_ZONE,
+  NEW_LISTING_CHECK_IN_TIME,
   type CancellationPolicy as PolicyName,
   type CreateListingInput,
   type ListingDetail,
@@ -25,6 +28,17 @@ export type ListingFormValues = {
   /** `setValueAs: toNumber` has already made it a number, or `undefined` for an empty box. */
   capacity: number | undefined;
   cancellationPolicy: PolicyName;
+  /** Whether the listing offers a non-refundable rate at all — the switch. */
+  offersNonRefundable: boolean;
+  /**
+   * The rate's discount as a percentage typed into the box — `15` — under the contract's
+   * name for the reason the prices keep theirs. Read only while the switch is on.
+   */
+  nonRefundableDiscountBps: string;
+  /** An IANA zone, typed or picked out of the browser's suggestions. */
+  timeZone: string;
+  /** `HH:mm`, as a time box hands it over. */
+  checkInTime: string;
   pricing: {
     weekdays: Partial<Record<Weekday, string>>;
     dates: { date: string; priceCents: string }[];
@@ -50,6 +64,10 @@ export const listingFormSchema = z
     pricePerNightCents: priceBox,
     capacity: z.custom<number | undefined>(),
     cancellationPolicy: z.custom<PolicyName>(),
+    offersNonRefundable: z.boolean(),
+    nonRefundableDiscountBps: z.string().catch(""),
+    timeZone: z.custom<string>(),
+    checkInTime: z.custom<string>(),
     pricing: z.object({
       weekdays: z.partialRecord(weekdaySchema, priceBox),
       dates: z.array(
@@ -57,9 +75,17 @@ export const listingFormSchema = z
       ),
     }),
   })
-  .transform((values): unknown => ({
+  .transform(({ offersNonRefundable, ...values }): unknown => ({
     ...values,
     pricePerNightCents: centsFromInput(values.pricePerNightCents),
+    // Off is `null`, which withdraws the rate on an edit, and so is the `NON_REFUNDABLE`
+    // policy, beside which the switch is drawn off whatever it holds. On, an empty box is
+    // `NaN` and is refused in the contract's words, as a number out of bounds is.
+    nonRefundableDiscountBps:
+      offersNonRefundable &&
+      values.cancellationPolicy !== CancellationPolicy.NON_REFUNDABLE
+        ? bpsOfPercent(values.nonRefundableDiscountBps)
+        : null,
     pricing: {
       weekdays: Object.fromEntries(
         Object.entries(values.pricing.weekdays).map(([weekday, price]) => [
@@ -88,6 +114,8 @@ export function listingFormValues(
   listing: ListingDetail | undefined,
   earliest: string,
 ): ListingFormValues {
+  const discount = listing?.nonRefundableDiscountBps ?? null;
+
   return {
     title: listing?.title ?? "",
     description: listing?.description ?? "",
@@ -97,6 +125,12 @@ export function listingFormValues(
     // A new listing starts on the database's own default.
     cancellationPolicy:
       listing?.cancellationPolicy ?? CancellationPolicy.FLEXIBLE,
+    offersNonRefundable: discount !== null,
+    nonRefundableDiscountBps: discount === null ? "" : percentOfBps(discount),
+    // A new listing starts at the database's defaults; `CheckInFields` moves the zone to
+    // the browser's own once it is known.
+    timeZone: listing?.timeZone ?? DEFAULT_TIME_ZONE,
+    checkInTime: listing?.checkInTime ?? NEW_LISTING_CHECK_IN_TIME,
     pricing: {
       weekdays: Object.fromEntries(
         Object.entries(listing?.pricing.weekdays ?? {}).map(
@@ -114,4 +148,23 @@ export function listingFormValues(
         })),
     },
   };
+}
+
+/** One percent, in the basis points the contract counts a discount in. */
+const PERCENT_BPS = BASIS_POINTS / 100;
+
+/** Basis points as the percentage the box shows — `1250` is `12.5`. */
+export function percentOfBps(bps: number): string {
+  return String(bps / PERCENT_BPS);
+}
+
+/**
+ * A percentage as typed onto the contract's basis points. Rounded to the basis point, so a
+ * `12.5` is `1250` rather than whatever binary noise `12.5 * 100` might carry; an empty box
+ * is `NaN`, which the contract refuses.
+ */
+function bpsOfPercent(text: string): number {
+  return text.trim() === ""
+    ? Number.NaN
+    : Math.round(Number(text) * PERCENT_BPS);
 }

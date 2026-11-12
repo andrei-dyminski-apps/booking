@@ -5,6 +5,7 @@ import {
   payoutDueAt,
   type StayNotice,
 } from "@repo/contracts";
+import type { ConfirmedStayEvent } from "../../booking/application/stay-events";
 import { awaitsItsPayment } from "../../booking/domain/booking-status";
 import { PaymentNotConfirmedYetError } from "../../booking/domain/booking.errors";
 import { errorText, type SetAside } from "../../common/job-failure";
@@ -51,10 +52,10 @@ export class PayoutService {
     private readonly hostAccountService: HostAccountService,
   ) {}
 
-  async schedule(stay: Pick<StayNotice, "bookingId" | "from">): Promise<void> {
+  async schedule(stay: ConfirmedStayEvent): Promise<void> {
     await this.payoutJobs.schedulePayout(
       stay.bookingId,
-      payoutDueAt(stay.from),
+      payoutDueAt(stay.checkIn),
     );
   }
 
@@ -221,7 +222,7 @@ export class PayoutService {
       return false;
     }
 
-    if (payoutDueAt(stay.hold.stay.from) > now) return false;
+    if (payoutDueAt(stay.hold.checkIn) > now) return false;
 
     // A stay confirmed without a payment — the seed's — has nothing to fund a transfer.
     if (stay.chargeId === null) {

@@ -1,6 +1,8 @@
 import { Test } from "@nestjs/testing";
-import type { StayNotice } from "@repo/contracts";
-import { StayEvents } from "../../booking/application/stay-events";
+import {
+  StayEvents,
+  type ConfirmedStayEvent,
+} from "../../booking/application/stay-events";
 import { PaymentEventDispatcher } from "../../payment/application/payment-event-dispatcher";
 import { PaymentEventBusyError } from "../../payment/application/payment-event-handler";
 import type { PaymentEvent } from "../../payment/application/ports/payment-gateway";
@@ -66,12 +68,9 @@ class FakeHostAccountService implements Pick<
   }
 }
 
-const stay: StayNotice = {
+const stay: ConfirmedStayEvent = {
   bookingId: "2f3a4b5c-6d7e-4f80-9a1b-2c3d4e5f6a7b",
-  listingId: "3a4b5c6d-7e8f-4091-8a2b-3c4d5e6f7a8b",
-  listingTitle: "Loft above the harbour",
-  from: "2099-01-10",
-  to: "2099-01-13",
+  checkIn: { from: "2099-01-10", timeZone: "UTC", checkInTime: "00:00" },
 };
 
 describe("PayoutEventHandler", () => {

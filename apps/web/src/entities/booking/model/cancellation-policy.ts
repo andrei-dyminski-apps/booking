@@ -8,7 +8,7 @@ import {
   type CancellationPolicy as PolicyName,
   type RefundWindow,
 } from "@repo/contracts";
-import { formatMoment } from "#shared/lib";
+import { formatMomentIn } from "#shared/lib";
 
 /**
  * The policies, named for a person. Keyed by the contract's enum, so a sixth policy stops
@@ -31,9 +31,23 @@ export function sharePercent(shareBps: number): string {
   return `${String(shareBps / 100)}%`;
 }
 
-/** The moment a refund window closes, as every line and sentence about one states it. */
-export function windowEnd(moment: Date): string {
-  return `${formatMoment(moment.toISOString())} UTC`;
+/**
+ * The moment a refund window closes, as every line and sentence about one states it: on the
+ * listing's own clock, the zone named, since the window is measured from check-in there.
+ */
+export function windowEnd(moment: Date, timeZone: string): string {
+  return formatMomentIn(moment.toISOString(), timeZone);
+}
+
+/**
+ * When a stay may be arrived at, which every window is measured from: "15:00, Europe/Lisbon
+ * time".
+ */
+export function checkInWords(checkIn: {
+  timeZone: string;
+  checkInTime: string;
+}): string {
+  return `${checkIn.checkInTime}, ${checkIn.timeZone} time`;
 }
 
 /** Whether a share gives back the whole payment — the one threshold every wording reads. */
@@ -83,8 +97,8 @@ export function policySummary(policy: PolicyName): string {
 
 /**
  * Every rule of a policy as a sentence, the grace period included — what the listing page
- * and the stay's page list under the policy's name. The windows are measured to midnight
- * UTC of the check-in day, and the sentences say so.
+ * and the stay's page list under the policy's name. The windows are measured to the moment
+ * of check-in on the listing's own clock, which `CancellationTerms` states beside them.
  */
 export function policyTerms(policy: PolicyName): string[] {
   const { tiers, grace } = CANCELLATION_TERMS[policy];
@@ -96,7 +110,7 @@ export function policyTerms(policy: PolicyName): string[] {
   return [
     ...tiers.map(
       (tier) =>
-        `${refundShareLabel(tier.shareBps)} for a cancellation more than ${lead(tier.hoursBefore)} before check-in (midnight UTC).`,
+        `${refundShareLabel(tier.shareBps)} for a cancellation more than ${lead(tier.hoursBefore)} before check-in.`,
     ),
     "No refund after that.",
     ...(grace
@@ -113,11 +127,12 @@ export function policyTerms(policy: PolicyName): string[] {
  */
 export function scheduleLines(
   windows: RefundWindow[],
+  timeZone: string,
 ): { key: string; when: string; refund: string }[] {
   return [
     ...windows.map((window) => ({
       key: window.until.toISOString(),
-      when: `Before ${windowEnd(window.until)}`,
+      when: `Before ${windowEnd(window.until, timeZone)}`,
       refund: refundShareLabel(window.shareBps),
     })),
     {

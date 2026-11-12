@@ -24,7 +24,7 @@ export const ListingsFiltersDialog = ({
 }: {
   values: FilterValues;
   errors: FieldErrors;
-  /** Today in UTC, from the server — see `shared/lib/dates.ts`. */
+  /** The earliest today of any zone, from the server — see `CatalogueToolbar`. */
   earliest: string;
   /** How many filters are on, for the badge on the button that opens this. */
   count: number;

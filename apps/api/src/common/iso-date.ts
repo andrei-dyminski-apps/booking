@@ -12,8 +12,3 @@ import { format } from "date-fns";
 export function toIsoDate(date: Date): string {
   return format(date, "yyyy-MM-dd", { in: tz("UTC") });
 }
-
-/** Midnight UTC of the current day — the clock `createBookingSchema` compares a check-in to. */
-export function startOfToday(now: Date): Date {
-  return new Date(toIsoDate(now));
-}

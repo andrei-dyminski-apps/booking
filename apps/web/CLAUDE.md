@@ -70,6 +70,7 @@ apps/web/
       layout/header.tsx       # the bar: the menu button, the theme, the two CTAs
       layout/site-footer.tsx  # the quiet end, and the third thing given the session
       layout/session-recovery.tsx  # the one rotation a server-rendered header cannot run
+      layout/time-zone-cookie.tsx  # the browser's zone written into the cookie an account's moments are stated by
       layout/theme-toggle.tsx
       layout/notification-bell.tsx  # the unread count off the event stream, the latest in a popup
       layout/notification-toasts.tsx  # a toast per notice off the stream, beside the bell
@@ -115,9 +116,10 @@ apps/web/
         listing/ui/listing-page.tsx       # one listing: the calendar and the form
         listing/ui/availability-calendar.tsx # the nights already taken, drawn
         listing/ui/booking-form.tsx       # the only thing here that creates a booking — or joins the waitlist for taken nights
-        listing/ui/booking-submit.tsx     # …its button, worded by which of the two the dates call for
-        listing/ui/stay-quote.tsx         # …what its dates cost, night by night, redrawn on its own
-        listing/ui/cancellation-quote.tsx # …what cancelling them would refund, dated for the check-in
+        listing/ui/booking-submit.tsx     # …its button, worded by which of the two the dates call for; withheld while one payment could not carry the hold (stayCharge)
+        listing/ui/stay-quote.tsx         # …what its dates cost, night by night, less the discount at the non-refundable rate, redrawn on its own; a total one payment cannot carry followed by why (stayCharge) and by the other rate when that one fits
+        listing/ui/rate-choice.tsx        # …the standard and the non-refundable rate with their totals, for a listing that offers the second; none for dates the waitlist takes; a rate whose total one payment cannot carry is disabled and says why under its terms unless it is the one chosen (a disabled checked radio would take the group out of the tab order), whose reason StayQuote alone states
+        listing/ui/cancellation-quote.tsx # …what cancelling them would refund at the rate chosen, dated for the check-in on the listing's clock
         listing/ui/listing-reviews.tsx    # the guests' reviews: the summary and the newest page
         listing/ui/listing-skeleton.tsx
         listing/ui/ask-host.tsx           # a guest's question, or the way back to their thread; streamed, degrades
@@ -128,14 +130,16 @@ apps/web/
         listing/api/read-listing-reviews.ts # the cached page, or null — the screen draws without it
         listing/api/start-conversation-action.ts # opens the thread, redirects into it
         listing/lib/months.ts             # the booked ranges laid out as month grids; whether a stay calls for the waitlist
+        listing/lib/stay-rates.ts         # both rates by quoteStay as the dates are typed; offeredRate — the chosen one while the listing still offers it and the dates call for a hold, which the quotes and the request all read; stayCharge — the quote at that rate, why one payment cannot carry it and the other rate when only it fits, read by the quote and the submit; RATE_TITLES — what the form calls each rate; stayRates remembers its last call, since the quote, the rates and the submit each ask for the same one
         listing/lib/months.spec.ts
+        listing/lib/stay-rates.spec.ts
         listing/index.ts
       bookings/                         # a group, not a slice: the /bookings routes
         overview/ui/bookings-page.tsx       # one page: a user's Trips and Hosting, an admin's everything
         overview/ui/side-tabs.tsx           # …the two halves of a user's stays, as links over `?side=HOST`
         overview/ui/bookings-toolbar.tsx    # one row: the filters, the ordering, the chips
         overview/ui/bookings-filters-dialog.tsx  # every filter, in a modal
-        overview/ui/booking-card.tsx
+        overview/ui/booking-card.tsx        # one stay: its dates as they stand, the amount bought, "Ended early" beside the status when it was
         overview/ui/cancel-booking-button.tsx  # the shared dialog over this list's action
         overview/ui/review-booking-button.tsx  # one half of a finished stay, in a dialog
         overview/ui/rating-field.tsx        # …its rating, picked as stars: a radio per star
@@ -148,18 +152,22 @@ apps/web/
         overview/index.ts
         booking/ui/booking-page.tsx       # one stay; the publishable key handed to its guest's hold
         booking/ui/booking-live.tsx       # the stay drawn off what its hook returns, and an admin's refunds under it
-        booking/ui/payment-form.tsx       # opens the payment from the browser, Stripe Elements; success starts the poll and declares nothing; a Stripe.js that never loaded says so
+        booking/ui/payment-form.tsx       # opens the payment from the browser once per hold, a `409` read again and retried after a pause; Stripe Elements; success starts the poll and declares nothing; a Stripe.js that never loaded says so
         booking/ui/cancel-stay-button.tsx # the shared dialog over this page's action; a success reads the stay again
+        booking/ui/end-stay-early-button.tsx # the guest's or an admin's early end, in a confirmation stating the new check-out and the refund, taken when it opens and held while it is open and sent as they are — a refusal reads the stay again and follows the terms of now; kept on the page while open, so a stay no longer endable leaves the API's reason with nothing to press; the form inside the popup, so every opening starts clean; a success reads the stay again
         booking/ui/refund-stay-button.tsx # an admin's partial refund: amount and reason, one request id per opening, so a second press is the same refund; an unknown answer holds the boxes until the dialog closes
-        booking/ui/booking-adjustments.tsx # the refunds admins sent, under the stay — an admin's alone; an unconfirmed press, and a refund the bank sent back with the way to its bounced row; a line when the read failed
+        booking/ui/booking-adjustments.tsx # the refunds admins sent, under the stay, dated on its listing's clock — an admin's alone; an unconfirmed press, and a refund the bank sent back with the way to its bounced row; a line when the read failed
         booking/ui/finish-refund-button.tsx # an unconfirmed press pressed again under its own request id: records the refund or sends it, never a second; then waits for its webhook like the dialog
         booking/ui/booking-skeleton.tsx
         booking/api/booking-query.ts      # the query keys and the browser's read, shared by the poll and the cancel
         booking/api/cancel-stay-action.ts # cancels, then frees the nights in the Data Cache
         booking/api/read-booking-adjustments.ts # the admin's list of them, `no-store`, or null — the stay draws without it
+        booking/api/end-stay-early-action.ts # ends the stay early, then frees the nights after the new check-out in the Data Cache
         booking/api/refund-stay-action.ts # the admin's partial refund, from the dialog or the list; refresh() lists it under the stay — an unknown answer too, as unconfirmed, and a `409` that may have let a claim go; `uncertain` past a 4xx
         booking/model/refund-form.ts      # the amount typed in the currency onto adminRefundSchema
-        booking/model/use-booking-live.ts # the booking in the query cache, polled until the webhook moves it — an admin's refund too, until the refund total moves or a minute passes; the hold's deadline, the refund note's clock
+        booking/model/early-end-note.ts   # what ending the stay now does: the terms the dialog sends (the check-out and the refund in cents) beside the note — the check-out, the nights freed, unusedNightsRefund worded — less what earlier refunds gave back of those nights; and the line a stay ended early carries, against the check-out it was booked to
+        booking/model/early-end-note.spec.ts
+        booking/model/use-booking-live.ts # the booking in the query cache, polled until the webhook moves it — an admin's refund too, until the refund total moves or a minute passes; the hold's deadline, the refund note's clock, moved on at check-in and at every midnight of the stay on the listing's clock
         booking/index.ts
       waitlist/ui/waitlist-page.tsx       # one page: a user's own ranges and the ones on their listings, an admin's everything
       waitlist/ui/side-tabs.tsx           # …the two halves of a user's waitlist, as links over `?side=HOST`
@@ -267,7 +275,9 @@ apps/web/
     features/                 # a user action a second page also runs
       save-listing/ui/listing-form.tsx    # the one form the new and the edit screen run
       save-listing/ui/pricing-fields.tsx  # …its weekday and date prices, saved with the row
+      save-listing/ui/check-in-fields.tsx # …its time zone, typed with the browser's zones suggested after hydration (a new listing starts in the browser's own), and its check-in time
       save-listing/ui/policy-field.tsx    # …its cancellation policy, a select under a controller
+      save-listing/ui/non-refundable-field.tsx  # …its non-refundable rate: a switch under a controller, and the discount in percent while it is on; off and disabled under the non-refundable policy
       save-listing/ui/listing-form-skeleton.tsx  # its wait, box for box; each screen frames it
       save-listing/ui/listing-form-card.tsx  # …the card both are drawn in; the title and line are the screen's
       save-listing/lib/to-number.ts       # a number box's text onto the contract's number
@@ -298,9 +308,10 @@ apps/web/
       booking/model/status-labels.ts  # the four statuses and who cancelled, named once: the filter, the card and the stay's page
       booking/model/hold.ts   # whether a hold still keeps its nights, and whether it waits on the viewer's payment
       booking/ui/booking-status-badge.tsx
-      booking/model/cancellation-policy.ts  # the policies named, their terms and a stay's schedule as sentences
+      booking/model/cancellation-policy.ts  # the policies named, their terms, the check-in and a stay's schedule as sentences, dated on the listing's clock
       booking/ui/cancellation-terms.tsx     # a policy, or one stay's dated windows: the listing page and the stay's page
       booking/ui/refund-schedule-list.tsx   # …those windows as lines, also the listing page's quote for the dates being chosen
+      booking/ui/hold-deadline.tsx  # a hold's deadline on the reader's clock and the minutes left: the stay's page and the list
       booking/index.ts
       host-fee/ui/host-fees.tsx       # the section both screens stream: the read they hand it, a line when the API cannot answer
       host-fee/ui/host-fees-card.tsx  # …and what a host owes for cancelling paid stays, drawn: their payouts screen and the admin's page of the account
@@ -346,12 +357,14 @@ apps/web/
       config/cache-tags.ts    # the names the cached public reads are stored under
       config/cache-lifetimes.ts  # the one lifetime the API's own clock decides
       config/stripe.ts        # stripePublishableKey() — read on the server, handed to the form; the tokens Stripe's iframes are drawn in
+      config/time-zone.ts     # the cookie the browser writes its zone into, and how long it lives
       config/index.ts
       lib/form-errors.ts      # zod issues, API errors and field state onto one shape
       lib/use-action-form.ts  # the contract, react-hook-form and a Server Action, tied
       lib/next-path.ts        # a `?next=` that cannot leave this site
       lib/search-params.ts    # searchParams onto a URL and back: the domain-free half
-      lib/dates.ts            # a calendar day is a YYYY-MM-DD string, read as UTC
+      lib/dates/dates.ts      # a calendar day is a YYYY-MM-DD string, read as UTC; formatMomentIn — a moment on a given clock, its zone named; readerTimeZone — the reader's, off the cookie
+      lib/dates/dates.spec.ts
       lib/money.ts            # cents onto the screen and typed text back into cents, in one place
       lib/not-found.ts        # a 404 from the API, and an id a URL cannot carry
       lib/plural.ts           # a count and the noun it counts, made to agree
@@ -630,13 +643,59 @@ is the wrong shape for a list that keeps growing.
   all — is a drift from the contract and has to propagate.
 - Response types and request schemas come from `@repo/contracts`. Do not describe the shape
   of a response by hand — that is the main source of drift from the backend.
-- **A calendar day is a `YYYY-MM-DD` string, and `shared/lib/dates.ts` is the only place
-  that turns one into an instant.** Midnight UTC is what each of them names, which is the
-  clock `createBookingSchema` compares a check-in against. Parsing one into the runtime's
-  own zone moves a stay by a day for anybody west of Greenwich and makes the server and
-  the browser disagree about the same string — which React reports as a hydration error
-  rather than as the bug it is. For the same reason "today" is computed on the server and
-  handed to a client component as a prop instead of being read on both sides.
+- **A calendar day is a `YYYY-MM-DD` string, and `shared/lib/dates/dates.ts` is the only place
+  that turns one into an instant.** Midnight UTC is what each of them names, the instant a
+  review compares by. A date price is bounded by the earliest today of any zone
+  (`earliestToday`) instead, which the listing form is handed as `earliest`: tonight west
+  of Greenwich is still sold after midnight UTC, and its price has to survive a save. The
+  catalogue's date boxes start at the same day, so that night can be searched for. Which
+  check-in day is already gone is the listing's to say rather than UTC's
+  (`isCheckInDayPast`): the listing page reads its today (`stayDay`) and hands it to the
+  calendar and the form, whose schema checks the same day (`createBookingSchemaIn`).
+  Parsing one into the runtime's own zone moves a stay by a day for anybody west of
+  Greenwich and makes the server and the browser disagree about the same string — which
+  React reports as a hydration error rather than as the bug it is. For the same reason
+  "today" is computed on the server and handed to a client component as a prop instead of
+  being read on both sides.
+- **Which clock a moment is stated on depends on what it is about, and there are three
+  answers.** Each is written out by `Intl` with the zone named rather than read in the
+  runtime's own, so the server and the browser render it alike.
+  - **A stay's moments are on its listing's clock.** Every date of a cancellation or a
+    refund — the windows of a schedule, the sentence over "Cancel", when a stay was
+    cancelled or ended early, an admin's partial refunds under it — is measured from the
+    moment of check-in (`checkInInstant`, the stay's `timeZone` and `checkInTime`), so it is
+    stated in that zone with its name after it (`formatMomentIn`, `windowEnd`). A guest
+    reading "Cancel before 18:00" beside a 15:00 check-in in their own zone would not know
+    where the 18:00 came from. `CancellationTerms` states the check-in beside the windows.
+    Whether "Cancel" and "End stay early" are offered is decided at that moment too, from
+    the server's `now`. The zone is the API's to check: a response carries it as stored
+    (`storedTimeZoneSchema`), under IANA's name of today, which a browser with older zone
+    data may not know. Every conversion therefore reads it through `runtimeTimeZone` from
+    the contract — the rules do inside it, and so does `formatMomentIn` — which falls back
+    to the older name IANA keeps as a link (`Europe/Kiev` for `Europe/Kyiv`), while the
+    text still names the stored zone. Nothing here passes a stored zone to `tz()` or
+    `Intl` directly. A zone newer than the browser's data altogether is the one case left:
+    `formatMomentIn` states such a moment in UTC, named as such, but the rules refuse the
+    zone (`RangeError`), so a page computing a schedule in it fails.
+  - **An account's moments are on the reader's clock**: the notices, the messages,
+    "Blocked since", a host's fees, the admin's lists, and a hold's deadline, which is about
+    the guest paying in the next fifteen minutes rather than about the place. Nothing gives
+    them a place of their own, so the reader's zone is the right one, and a server render
+    does not know it by itself: the browser writes it into a cookie (`TimeZoneCookie` in
+    the shell, whenever it is missing or differs, refreshing a signed-in render once), and
+    a page reads it through `readerTimeZone()` — checked by `canonicalTimeZone`, plus the
+    fixed offsets a reader's clock may be on and a listing's may not (`Etc/GMT-3`, named
+    `UTC+3`), UTC before the first write — and hands it down as a prop to whatever states
+    such a moment (`formatMomentIn`), or the day of one ("Joined", `formatDate`), so both
+    sides render the same text. **Only a page that is personal already reads it**:
+    `cookies()` makes a render dynamic, and the public cached reads — the catalogue, a
+    listing, its reviews — must not depend on it; a review's date is UTC's for that
+    reason. A list drawn only in a browser — the bell's popup, read when it opens — uses
+    `browserTimeZone()` instead. A hold's deadline also counts down beside the time
+    (`HoldDeadline`), from the server's `now` and then the browser's clock.
+  - **A calendar day has no zone at all** — a check-in, a check-out, "today" in a date box,
+    `isReviewable` — and is never converted into one (see the rule above): 1 December in
+    Honolulu is not 2 December anywhere.
 - **A count and the noun beside it agree in one place** (`shared/lib/plural.ts`).
   `countOf(nights, "night")` is what a screen writes; the comparison itself is spelled
   once. Four labels across three screens said it inline, and each of them was a place for
@@ -1053,10 +1112,11 @@ characters` reaches the box either way. The number is read off the schema
   read. A form does not restate any of it, and the API answers with the same words.
 - **A rule about a pair of fields waits until it has the pair.** `createBookingSchema`
   guards both of its refinements on the dates parsing at all, as `listingQuerySchema` does:
-  without that, an empty check-in box is refused for being in the past — `"" >= today()` is
-  false — and the visitor is told something untrue about a box they have not filled in,
-  beside the refusal that is actually about it. Turning off `criteriaMode` would only hide
-  it, since the API returns both issues and `toFieldErrors` collects them either way.
+  without that, an empty check-in box is refused for being in the past —
+  `"" >= earliestToday()` is false — and the visitor is told something untrue about a box
+  they have not filled in, beside the refusal that is actually about it. Turning off
+  `criteriaMode` would only hide it, since the API returns both issues and
+  `toFieldErrors` collects them either way.
 - **`noValidate` stays on every form**, for the reason the filter dialog gives: the
   browser's own validation would preempt the contract with messages of its own, in its own
   words and its own place.
@@ -1088,7 +1148,7 @@ filters plus `ownerId` — the one the catalogue's contract takes and only an ad
 use for, shown as a chip named by the owner's name and address. In `shared/lib`
 and `shared/api`, the domain-free mechanics the two slices' search modules would otherwise
 each spell: `filtersHref` and `singleParam` and `searchParamsHref` (`search-params.ts`),
-`dayLabelOrAny` (`dates.ts`), `messagesExcept` (`form-errors.ts`), `pageOrNullOnStaleCursor`
+`dayLabelOrAny` (`dates/dates.ts`), `messagesExcept` (`form-errors.ts`), `pageOrNullOnStaleCursor`
 (`api/keyset-page.ts`).
 
 What is _not_ shared is anything that knows what is being filtered — the field set, the
@@ -1754,9 +1814,10 @@ component:
   (the trailing slash, the missing-env failure, the module-level cache) and
   `_pages/listings/listing/lib/months.ts` (the half-open range the calendar shades, the month
   rollover, the Monday-first offset — a stay's check-out day drawn as taken would be a
-  free night the screen refuses to sell). What a night of a stay costs is not here: the
-  booking form quotes by `nightlyPrice` from `@repo/contracts`, and its spec lives there,
-  because the payment has to charge by the same rule.
+  free night the screen refuses to sell). What a stay costs is not here: the booking form
+  quotes both rates by `quoteStay` from `@repo/contracts` (`nightlyPrice` per night, the
+  non-refundable discount off the total), and its spec lives there, because the payment
+  has to charge by the same rule.
 
 A component is not tested: one that would break is one `check-types` and Steiger already
 refuse. Nor is a Server Action's own body once it is only forwarding to `authApi` and

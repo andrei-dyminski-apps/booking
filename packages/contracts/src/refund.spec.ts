@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { checkInInstant } from "./check-in.js";
 import {
   cancellerOf,
-  checkInInstant,
   isCancellableOn,
   notRefunded,
   refundQuote,
@@ -12,12 +12,16 @@ import { cents } from "./money.js";
 
 const from = "2030-10-14";
 
+/** What every stay from before the time zones carries: midnight UTC of `from`. */
+const UTC_MIDNIGHT = { timeZone: "UTC", checkInTime: "00:00" };
+
 /** Booked long ago, so the grace period is over unless a test says otherwise. */
 const stayUnder = (
   cancellationPolicy: CancellationPolicy,
   overrides: Partial<{ createdAt: string; amountCents: number }> = {},
 ) => ({
   from,
+  ...UTC_MIDNIGHT,
   createdAt: overrides.createdAt ?? "2030-01-01T00:00:00.000Z",
   cancellationPolicy,
   amountCents: cents(overrides.amountCents ?? 36_105),
@@ -31,10 +35,103 @@ const shareAt = (stay: ReturnType<typeof stayUnder>, iso: string): number =>
   refundQuote(stay, at(iso), "GUEST").shareBps;
 
 describe("checkInInstant", () => {
-  it("is midnight UTC of the check-in day", () => {
-    expect(checkInInstant({ from }).toISOString()).toBe(
+  it("is midnight UTC of the check-in day for a stay from before the time zones", () => {
+    expect(checkInInstant({ from, ...UTC_MIDNIGHT }).toISOString()).toBe(
       "2030-10-14T00:00:00.000Z",
     );
+  });
+
+  it("is the check-in time on the listing's own clock", () => {
+    // Berlin is UTC+2 in summer time and UTC+1 after it.
+    expect(
+      checkInInstant({
+        from: "2030-07-01",
+        timeZone: "Europe/Berlin",
+        checkInTime: "15:00",
+      }).toISOString(),
+    ).toBe("2030-07-01T13:00:00.000Z");
+    expect(
+      checkInInstant({
+        from: "2030-12-01",
+        timeZone: "Europe/Berlin",
+        checkInTime: "15:00",
+      }).toISOString(),
+    ).toBe("2030-12-01T14:00:00.000Z");
+  });
+
+  it("follows the clock across a change to summer time", () => {
+    // Berlin moves from UTC+1 to UTC+2 at 02:00 on 31 March 2030; the day before and the
+    // day of the change put the same 15:00 an hour apart in UTC.
+    const berlin = { timeZone: "Europe/Berlin", checkInTime: "15:00" };
+
+    expect(
+      checkInInstant({ from: "2030-03-30", ...berlin }).toISOString(),
+    ).toBe("2030-03-30T14:00:00.000Z");
+    expect(
+      checkInInstant({ from: "2030-03-31", ...berlin }).toISOString(),
+    ).toBe("2030-03-31T13:00:00.000Z");
+  });
+
+  it("is the moment after the gap for a time the clock skips", () => {
+    expect(
+      checkInInstant({
+        from: "2030-03-31",
+        timeZone: "Europe/Berlin",
+        checkInTime: "02:30",
+      }).toISOString(),
+    ).toBe("2030-03-31T01:30:00.000Z");
+  });
+
+  it("is a day apart in UTC at the two far ends of the clock", () => {
+    // Kiritimati is UTC+14, Honolulu UTC−10: the same 15:00 of one date, 24 hours apart.
+    expect(
+      checkInInstant({
+        from: "2030-10-14",
+        timeZone: "Pacific/Kiritimati",
+        checkInTime: "15:00",
+      }).toISOString(),
+    ).toBe("2030-10-14T01:00:00.000Z");
+    expect(
+      checkInInstant({
+        from: "2030-10-14",
+        timeZone: "Pacific/Honolulu",
+        checkInTime: "15:00",
+      }).toISOString(),
+    ).toBe("2030-10-15T01:00:00.000Z");
+  });
+});
+
+describe("refundSchedule in the listing's time zone", () => {
+  it("closes a window hours before the check-in time there, not before midnight UTC", () => {
+    // FLEXIBLE refunds in full until 48 hours before check-in: 15:00 in Honolulu on the
+    // 14th is 01:00 UTC on the 15th, so the window closes at 01:00 UTC on the 13th.
+    const stay = {
+      ...stayUnder("FLEXIBLE"),
+      timeZone: "Pacific/Honolulu",
+      checkInTime: "15:00",
+    };
+
+    expect(refundSchedule(stay)).toEqual([
+      { until: new Date("2030-10-13T01:00:00.000Z"), shareBps: 10_000 },
+    ]);
+    expect(
+      refundQuote(stay, at("2030-10-13T00:59:59.999Z"), "GUEST").shareBps,
+    ).toBe(10_000);
+    expect(
+      refundQuote(stay, at("2030-10-13T01:00:00.000Z"), "GUEST").shareBps,
+    ).toBe(0);
+  });
+
+  it("closes it a day earlier in UTC at the far east of the clock", () => {
+    const stay = {
+      ...stayUnder("FLEXIBLE"),
+      timeZone: "Pacific/Kiritimati",
+      checkInTime: "15:00",
+    };
+
+    expect(refundSchedule(stay)).toEqual([
+      { until: new Date("2030-10-12T01:00:00.000Z"), shareBps: 10_000 },
+    ]);
   });
 });
 
@@ -166,6 +263,7 @@ describe("refundSchedule", () => {
     expect(
       refundSchedule({
         from,
+        ...UTC_MIDNIGHT,
         createdAt: "2030-09-01T00:00:00.000Z",
         cancellationPolicy: "FIRM",
       }),
@@ -181,6 +279,7 @@ describe("refundSchedule", () => {
     expect(
       refundSchedule({
         from,
+        ...UTC_MIDNIGHT,
         createdAt: "2030-10-11T00:00:00.000Z",
         cancellationPolicy: "MODERATE",
       }),
@@ -191,6 +290,7 @@ describe("refundSchedule", () => {
     expect(
       refundSchedule({
         from,
+        ...UTC_MIDNIGHT,
         createdAt: "2030-10-09T00:00:00.000Z",
         cancellationPolicy: "LIMITED",
       }),
@@ -202,6 +302,7 @@ describe("refundSchedule", () => {
     expect(
       refundSchedule({
         from,
+        ...UTC_MIDNIGHT,
         createdAt: "2030-10-04T12:00:00.000Z",
         cancellationPolicy: "LIMITED",
       }),
@@ -215,6 +316,7 @@ describe("refundSchedule", () => {
     expect(
       refundSchedule({
         from,
+        ...UTC_MIDNIGHT,
         createdAt: "2030-09-01T00:00:00.000Z",
         cancellationPolicy: "NON_REFUNDABLE",
       }),
@@ -266,27 +368,69 @@ describe("refundQuote amounts", () => {
 });
 
 describe("isCancellableOn", () => {
+  const stay = { from, ...UTC_MIDNIGHT, endedEarlyAt: null };
+
   it("lets a hold go at any time", () => {
     expect(
-      isCancellableOn({ status: "PENDING_PAYMENT", from }, "2030-10-20"),
+      isCancellableOn(
+        { ...stay, status: "PENDING_PAYMENT" },
+        at("2030-10-20T12:00:00.000Z"),
+      ),
     ).toBe(true);
   });
 
-  it("lets a confirmed stay go only before its check-in day", () => {
-    const confirmed = { status: "CONFIRMED" as const, from };
+  it("lets a confirmed stay go only before the moment of check-in", () => {
+    const confirmed = { ...stay, status: "CONFIRMED" as const };
 
-    expect(isCancellableOn(confirmed, "2030-10-13")).toBe(true);
-    expect(isCancellableOn(confirmed, "2030-10-14")).toBe(false);
-    expect(isCancellableOn(confirmed, "2030-10-20")).toBe(false);
+    expect(isCancellableOn(confirmed, at("2030-10-13T23:59:59.999Z"))).toBe(
+      true,
+    );
+    expect(isCancellableOn(confirmed, at("2030-10-14T00:00:00.000Z"))).toBe(
+      false,
+    );
+    expect(isCancellableOn(confirmed, at("2030-10-20T12:00:00.000Z"))).toBe(
+      false,
+    );
+  });
+
+  it("measures the moment on the listing's clock, not the UTC day", () => {
+    // 15:00 in Honolulu on the 14th is 01:00 UTC on the 15th: the whole UTC 14th is
+    // still before check-in.
+    const honolulu = {
+      ...stay,
+      status: "CONFIRMED" as const,
+      timeZone: "Pacific/Honolulu",
+      checkInTime: "15:00",
+    };
+
+    expect(isCancellableOn(honolulu, at("2030-10-15T00:59:59.999Z"))).toBe(
+      true,
+    );
+    expect(isCancellableOn(honolulu, at("2030-10-15T01:00:00.000Z"))).toBe(
+      false,
+    );
   });
 
   it("never lets a stay that already let go of its nights go again", () => {
-    expect(isCancellableOn({ status: "CANCELLED", from }, "2030-10-01")).toBe(
+    const early = at("2030-10-01T00:00:00.000Z");
+
+    expect(isCancellableOn({ ...stay, status: "CANCELLED" }, early)).toBe(
       false,
     );
-    expect(isCancellableOn({ status: "EXPIRED", from }, "2030-10-01")).toBe(
-      false,
-    );
+    expect(isCancellableOn({ ...stay, status: "EXPIRED" }, early)).toBe(false);
+  });
+
+  it("never lets a stay ended early go, whatever its dates say", () => {
+    expect(
+      isCancellableOn(
+        {
+          ...stay,
+          status: "CONFIRMED",
+          endedEarlyAt: "2030-10-01T00:00:00.000Z",
+        },
+        at("2030-10-01T00:00:00.000Z"),
+      ),
+    ).toBe(false);
   });
 });
 

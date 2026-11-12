@@ -20,17 +20,26 @@ import { ButtonLink } from "#shared/ui";
 export const UserCard = ({
   user,
   viewer,
+  readerTimeZone,
 }: {
   user: ManagedUser;
   viewer: User;
+  /** The reader's zone, which the moments are stated in (`readerTimeZone`). */
+  readerTimeZone: string;
 }) => (
   <Card>
     <CardHeader>
       <CardTitle className="break-words">{user.name}</CardTitle>
       <CardDescription className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <span className="break-all">{user.email}</span>
-        <UserJoined createdAt={user.createdAt} />
-        <UserBlockedSince blockedAt={user.blockedAt} />
+        <UserJoined
+          createdAt={user.createdAt}
+          readerTimeZone={readerTimeZone}
+        />
+        <UserBlockedSince
+          blockedAt={user.blockedAt}
+          readerTimeZone={readerTimeZone}
+        />
       </CardDescription>
       <CardAction className="flex items-center gap-2">
         {user.id === viewer.id && <Badge variant="secondary">You</Badge>}

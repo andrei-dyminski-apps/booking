@@ -19,6 +19,8 @@ import {
   listingFormSchema,
   listingFormValues,
 } from "../model/listing-form-schema";
+import { CheckInFields } from "./check-in-fields";
+import { NonRefundableField } from "./non-refundable-field";
 import { PolicyField } from "./policy-field";
 import { PricingFields } from "./pricing-fields";
 
@@ -44,9 +46,10 @@ export const ListingForm = ({
 }: {
   listing?: ListingDetail;
   /**
-   * Today in UTC, from the server. A date price before it cannot be saved, and the cached
-   * row this form is filled from can still hold one that has passed since it was read —
-   * those are left off rather than handed back to be refused.
+   * The earliest today of any zone (`earliestToday`), from the server — not UTC's, since a
+   * listing west of Greenwich still sells tonight after midnight UTC. A date price before it
+   * cannot be saved, and the cached row this form is filled from can still hold one that has
+   * passed since it was read — those are left off rather than handed back to be refused.
    */
   earliest: string;
   /** Where "Cancel" leads: the section of whoever is editing — an owner's or the admin's. */
@@ -139,7 +142,15 @@ export const ListingForm = ({
             )}
           </FormField>
 
+          <CheckInFields
+            form={form}
+            pending={pending}
+            creating={listing === undefined}
+          />
+
           <PolicyField form={form} pending={pending} />
+
+          <NonRefundableField form={form} pending={pending} />
 
           <FieldSeparator />
 

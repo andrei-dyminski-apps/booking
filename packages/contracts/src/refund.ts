@@ -2,6 +2,7 @@ import { tz } from "@date-fns/tz";
 import { addHours, isAfter, isBefore, min, parseISO, subHours } from "date-fns";
 import { Role } from "./auth.js";
 import { BookingStatus, Canceller, type Booking } from "./booking.js";
+import { checkInInstant } from "./check-in.js";
 import {
   CANCELLATION_TERMS,
   GRACE_MIN_LEAD_HOURS,
@@ -24,22 +25,15 @@ import {
 const IN_UTC = { in: tz("UTC") };
 
 /**
- * The moment every window of a cancellation is measured from: midnight UTC of the check-in
- * day for now, so every runtime agrees on the instant. The one place that knows it — a
- * check-in in the listing's own time zone changes this function and nothing else.
- */
-export function checkInInstant(booking: Pick<Booking, "from">): Date {
-  // A plain `Date`: a `TZDate` spells even its ISO string its own way.
-  return new Date(parseISO(booking.from, IN_UTC).getTime());
-}
-
-/**
  * One window of a stay's schedule: a guest who cancels before `until` — and after the
  * window before it closed — is given back `shareBps` of what they paid.
  */
 export type RefundWindow = { until: Date; shareBps: number };
 
-type ScheduledStay = Pick<Booking, "from" | "createdAt" | "cancellationPolicy">;
+type ScheduledStay = Pick<
+  Booking,
+  "from" | "timeZone" | "checkInTime" | "createdAt" | "cancellationPolicy"
+>;
 
 /**
  * Every window of a guest's cancellation of this stay, earliest first, the policy's tiers
@@ -195,16 +189,23 @@ export function cancellerOf(
 }
 
 /**
- * One rule for the guest, the host and an admin: from check-in on the nights are being
- * spent, and a cancellation would refund nights already used.
+ * One rule for the guest, the host and an admin: from the moment of check-in on
+ * (`checkInInstant`) the nights are being spent, and a cancellation would refund nights
+ * already used. A stay that was ended early can never be cancelled — the two share one
+ * refund key — and it has begun by then anyway.
  */
 export function isCancellableOn(
-  booking: Pick<Booking, "status" | "from">,
-  today: string,
+  booking: Pick<
+    Booking,
+    "status" | "from" | "timeZone" | "checkInTime" | "endedEarlyAt"
+  >,
+  now: Date,
 ): boolean {
   return (
     booking.status === BookingStatus.PENDING_PAYMENT ||
-    (booking.status === BookingStatus.CONFIRMED && today < booking.from)
+    (booking.status === BookingStatus.CONFIRMED &&
+      booking.endedEarlyAt === null &&
+      isBefore(now, checkInInstant(booking)))
   );
 }
 

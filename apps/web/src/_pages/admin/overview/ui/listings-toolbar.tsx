@@ -25,7 +25,7 @@ export const ListingsToolbar = ({
   values: FilterValues;
   errors: FieldErrors;
   filters: ActiveFilter[];
-  /** Today in UTC, computed on the server — see `CatalogueToolbar`. */
+  /** The earliest today of any zone, computed on the server — see `CatalogueToolbar`. */
   earliest: string;
   /** The owner being filtered by, for the box that names them — see the dialog. */
   owner: LookupOption | undefined;

@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { weekdaySchema, type Weekday } from "@repo/contracts";
+import { earliestToday, weekdaySchema, type Weekday } from "@repo/contracts";
 import { cents } from "../payment/domain/money";
 import type {
   CreateListingInput,
@@ -19,9 +19,13 @@ import {
   type Listing as ListingRow,
 } from "../generated/prisma/client";
 import { afterCreatedAt, CREATED_AT_ORDER, type Page } from "../common/paging";
-import { startOfToday } from "../common/iso-date";
-import { isPrismaError, PrismaErrorCode } from "../prisma/prisma.errors";
+import {
+  isCheckViolation,
+  isPrismaError,
+  PrismaErrorCode,
+} from "../prisma/prisma.errors";
 import { PrismaService } from "../prisma/prisma.service";
+import { RateUnderNonRefundablePolicyError } from "./listing.errors";
 import { toPricing } from "./listing-pricing";
 import type { CatalogueCursor } from "./catalogue-cursor";
 
@@ -104,9 +108,11 @@ export class ListingRepository {
 
   /**
    * The row with the exceptions to its price — what the listing's own page reads. Only the
-   * date prices from today (UTC) on: a past night is never booked again, and the contract
-   * caps how many dates a listing may price, so the ones that have passed should not count
-   * against a list the owner sees and edits.
+   * date prices from the earliest today of any zone on (`earliestToday`): a night over
+   * everywhere is never booked again, and the contract caps how many dates a listing may
+   * price, so the ones that have passed should not count against a list the owner sees and
+   * edits. Not UTC's today: tonight west of Greenwich is still sold after midnight UTC, and
+   * the page has to quote it at the price `create` charges.
    */
   async findDetailById(id: string): Promise<ListingDetail | null> {
     const row = await this.prismaService.listing.findFirst({
@@ -114,7 +120,7 @@ export class ListingRepository {
       include: {
         weekdayPrices: true,
         datePrices: {
-          where: { date: { gte: startOfToday(new Date()) } },
+          where: { date: { gte: new Date(earliestToday()) } },
           orderBy: { date: "asc" },
         },
       },
@@ -157,6 +163,10 @@ export class ListingRepository {
    * hang on that stamp: given nested writes alone, Prisma issues no `UPDATE` of the row at
    * all — `@updatedAt` is left as it was and nothing is locked. Without prices there is
    * nothing to lock for, and `@updatedAt` stamps the row on its own.
+   *
+   * A policy or a discount saved alone meets the other half on the row, so whether the two
+   * may stand together is the `CHECK`'s to say, in the statement that writes them — two
+   * saves at once, one of each, cannot both pass a read made before either.
    */
   async update(id: string, input: UpdateListingInput): Promise<Listing | null> {
     const { pricing, ...fields } = input;
@@ -175,6 +185,10 @@ export class ListingRepository {
       return toListing(row);
     } catch (error) {
       if (isPrismaError(error, PrismaErrorCode.RecordNotFound)) return null;
+
+      if (isCheckViolation(error, "listings_rate_beside_refundable_policy")) {
+        throw new RateUnderNonRefundablePolicyError(id);
+      }
 
       throw error;
     }
@@ -324,6 +338,9 @@ function toListing(row: ListingRow): Listing {
     pricePerNightCents: cents(row.pricePerNightCents),
     capacity: row.capacity,
     cancellationPolicy: row.cancellationPolicy,
+    nonRefundableDiscountBps: row.nonRefundableDiscountBps,
+    timeZone: row.timeZone,
+    checkInTime: row.checkInTime,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

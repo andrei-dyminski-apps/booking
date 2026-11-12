@@ -11,7 +11,7 @@ import {
   CardTitle,
 } from "@repo/ui/components/card";
 import { ROUTES } from "#shared/config";
-import { formatMoment, formatMoney } from "#shared/lib";
+import { formatMomentIn, formatMoney } from "#shared/lib";
 import { ButtonLink, DateRange } from "#shared/ui";
 import { ResolveRefundButton } from "./resolve-refund-button";
 
@@ -21,14 +21,23 @@ import { ResolveRefundButton } from "./resolve-refund-button";
  * the payment any more, they are all that does. A resolved one carries the note of how the
  * money went back instead of the button.
  */
-export const RefundFailureCard = ({ failure }: { failure: RefundFailure }) => (
+export const RefundFailureCard = ({
+  failure,
+  readerTimeZone,
+}: {
+  failure: RefundFailure;
+  /** The reader's zone, which the moments are stated in (`readerTimeZone`). */
+  readerTimeZone: string;
+}) => (
   <Card>
     <CardHeader>
       <CardTitle>
         {formatMoney(failure.amountCents, failure.currency)}
       </CardTitle>
       <CardDescription className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        <span>Came back {formatMoment(failure.failedAt)} UTC</span>
+        <span>
+          Came back {formatMomentIn(failure.failedAt, readerTimeZone)}
+        </span>
         <span>
           Refund <span className="font-mono break-all">{failure.refundId}</span>
         </span>
@@ -72,7 +81,7 @@ export const RefundFailureCard = ({ failure }: { failure: RefundFailure }) => (
       {failure.resolvedAt !== null && (
         <div className="flex flex-col gap-1 rounded-md bg-muted px-3 py-2">
           <span className="text-xs text-muted-foreground">
-            Resolved {formatMoment(failure.resolvedAt)} UTC
+            Resolved {formatMomentIn(failure.resolvedAt, readerTimeZone)}
           </span>
           <p className="break-words whitespace-pre-wrap">
             {failure.resolution}

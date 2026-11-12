@@ -29,6 +29,11 @@ export function holdOf({
 }: BookingWithListingOwner): ReleasedHold {
   return {
     stay: stayNoticeOf(booking),
+    checkIn: {
+      from: booking.from,
+      timeZone: booking.timeZone,
+      checkInTime: booking.checkInTime,
+    },
     guestId: booking.guestId,
     listingOwnerId,
     paymentId,

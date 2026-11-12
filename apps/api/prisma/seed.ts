@@ -2,9 +2,16 @@ import { tz, TZDate } from "@date-fns/tz";
 import { PrismaPg } from "@prisma/adapter-pg";
 import * as argon2 from "argon2";
 import { addDays, format } from "date-fns";
-import { cents, type PricedListing } from "@repo/contracts";
-import { quoteStay } from "../src/booking/domain/stay-price";
-import { stayMoneyData } from "../src/booking/infrastructure/stay-rows";
+import {
+  cents,
+  checkInDayEnd,
+  quoteStay,
+  type PricedListing,
+} from "@repo/contracts";
+import {
+  checkInData,
+  stayMoneyData,
+} from "../src/booking/infrastructure/stay-rows";
 import {
   BookingStatus,
   CancellationPolicy,
@@ -69,7 +76,8 @@ type UserKey = keyof typeof users;
  * a stay whose nights do not all cost the same to quote. The dates are days from the run,
  * for the reason `inDays` below gives. The cancellation policies are spread across the
  * listings, so the listing page and the stays show every schedule but `NON_REFUNDABLE`,
- * which belongs with the discount that pays for it.
+ * which comes with the discount that pays for it: two listings offer the rate beside their
+ * own policy, and the stay booked at it is the one that shows the schedule.
  */
 const listings: Array<{
   owner: UserKey;
@@ -78,6 +86,10 @@ const listings: Array<{
   pricePerNightCents: number;
   capacity: number;
   cancellationPolicy: CancellationPolicy;
+  nonRefundableDiscountBps?: number;
+  /** Spread over the clock, so the stays show their windows in zones far from UTC. */
+  timeZone: string;
+  checkInTime: string;
   weekdayPrices?: Partial<Record<Weekday, number>>;
   datePrices?: Array<{ inDays: number; priceCents: number }>;
 }> = [
@@ -89,6 +101,9 @@ const listings: Array<{
     pricePerNightCents: 12_000,
     capacity: 4,
     cancellationPolicy: CancellationPolicy.FLEXIBLE,
+    timeZone: "Europe/Lisbon",
+    checkInTime: "15:00",
+    nonRefundableDiscountBps: 1_000,
     weekdayPrices: { fri: 15_000, sat: 15_000 },
     datePrices: [
       { inDays: 30, priceCents: 19_900 },
@@ -103,6 +118,8 @@ const listings: Array<{
     pricePerNightCents: 8_500,
     capacity: 6,
     cancellationPolicy: CancellationPolicy.MODERATE,
+    timeZone: "Europe/Oslo",
+    checkInTime: "16:00",
     weekdayPrices: { mon: 7_000, tue: 7_000, wed: 7_000, thu: 7_000 },
   },
   {
@@ -113,6 +130,8 @@ const listings: Array<{
     pricePerNightCents: 5_400,
     capacity: 2,
     cancellationPolicy: CancellationPolicy.FLEXIBLE,
+    timeZone: "Europe/Prague",
+    checkInTime: "14:00",
   },
   {
     owner: "owner",
@@ -122,6 +141,9 @@ const listings: Array<{
     pricePerNightCents: 21_000,
     capacity: 12,
     cancellationPolicy: CancellationPolicy.FIRM,
+    timeZone: "America/New_York",
+    checkInTime: "15:00",
+    nonRefundableDiscountBps: 1_500,
   },
   {
     owner: "owner",
@@ -131,6 +153,8 @@ const listings: Array<{
     pricePerNightCents: 3_900,
     capacity: 1,
     cancellationPolicy: CancellationPolicy.LIMITED,
+    timeZone: "Europe/Amsterdam",
+    checkInTime: "15:00",
   },
   {
     owner: "owner",
@@ -140,6 +164,8 @@ const listings: Array<{
     pricePerNightCents: 16_500,
     capacity: 8,
     cancellationPolicy: CancellationPolicy.FIRM,
+    timeZone: "Pacific/Honolulu",
+    checkInTime: "16:00",
     weekdayPrices: { sat: 19_500, sun: 19_500 },
     datePrices: [{ inDays: 45, priceCents: 25_000 }],
   },
@@ -151,6 +177,8 @@ const listings: Array<{
     pricePerNightCents: 9_800,
     capacity: 3,
     cancellationPolicy: CancellationPolicy.MODERATE,
+    timeZone: "Australia/Adelaide",
+    checkInTime: "14:00",
   },
   {
     owner: "host",
@@ -160,6 +188,8 @@ const listings: Array<{
     pricePerNightCents: 7_200,
     capacity: 4,
     cancellationPolicy: CancellationPolicy.LIMITED,
+    timeZone: "America/Vancouver",
+    checkInTime: "15:00",
   },
 ];
 
@@ -182,7 +212,7 @@ function inDays(days: number): Date {
  * `create` writes them, so a stay one payment could not carry is refused here too rather
  * than seeded as a booking the API would never take.
  */
-function moneyOf(index: number, from: Date, to: Date) {
+function moneyOf(index: number, from: Date, to: Date, nonRefundable = false) {
   const listing = listings[index];
 
   if (listing === undefined) {
@@ -206,23 +236,64 @@ function moneyOf(index: number, from: Date, to: Date) {
     },
   };
 
-  return stayMoneyData(quoteStay(priced, day(from), day(to)));
+  const discountBps = nonRefundable
+    ? (listing.nonRefundableDiscountBps ?? null)
+    : null;
+
+  if (nonRefundable && discountBps === null) {
+    throw new Error(`Demo listing ${index} offers no non-refundable rate`);
+  }
+
+  return stayMoneyData(quoteStay(priced, day(from), day(to), discountBps));
+}
+
+/** The policy a demo stay is frozen under: the rate's, or the listing's own. */
+function policyOf(
+  listing: { cancellationPolicy: CancellationPolicy },
+  nonRefundable = false,
+): CancellationPolicy {
+  return nonRefundable
+    ? CancellationPolicy.NON_REFUNDABLE
+    : listing.cancellationPolicy;
+}
+
+/**
+ * A demo stay's copy of its listing's check-in, written through `checkInData` as `create`
+ * writes it.
+ */
+function checkInOf(
+  listing: { timeZone: string; checkInTime: string },
+  from: Date,
+) {
+  return checkInData({
+    from: format(from, "yyyy-MM-dd", { in: tz("UTC") }),
+    timeZone: listing.timeZone,
+    checkInTime: listing.checkInTime,
+  });
 }
 
 /**
  * Indexes into `listings`; the ids only exist once the rows are written. Several listings
  * are left with no stay at all on purpose: the catalogue's date filter has to have
  * something to keep as well as something to drop. The stays of one listing never overlap
- * — `bookings_no_overlap` would refuse the seed.
+ * — `bookings_no_overlap` would refuse the seed. One is booked at the non-refundable rate,
+ * so a stay with a discount and nothing to refund is in the demo too.
  */
 const bookings: Array<{
   guest: UserKey;
   listing: number;
   from: Date;
   to: Date;
+  nonRefundable?: boolean;
 }> = [
   { guest: "guest", listing: 0, from: inDays(10), to: inDays(14) },
-  { guest: "guest", listing: 0, from: inDays(19), to: inDays(21) },
+  {
+    guest: "guest",
+    listing: 0,
+    from: inDays(19),
+    to: inDays(21),
+    nonRefundable: true,
+  },
   { guest: "guest", listing: 1, from: inDays(12), to: inDays(16) },
   { guest: "guest", listing: 2, from: inDays(40), to: inDays(53) },
   { guest: "guest", listing: 3, from: inDays(5), to: inDays(9) },
@@ -411,8 +482,14 @@ async function main(): Promise<void> {
         guestId: idOf(booking.guest),
         from: booking.from,
         to: booking.to,
-        ...moneyOf(booking.listing, booking.from, booking.to),
-        cancellationPolicy: listing.cancellationPolicy,
+        ...moneyOf(
+          booking.listing,
+          booking.from,
+          booking.to,
+          booking.nonRefundable,
+        ),
+        cancellationPolicy: policyOf(listing, booking.nonRefundable),
+        ...checkInOf(listing, booking.from),
         // Confirmed, not holds: a PENDING_PAYMENT booking would lapse 15 minutes after
         // the seed runs and disappear from the demo.
         status: BookingStatus.CONFIRMED,
@@ -433,6 +510,10 @@ async function main(): Promise<void> {
         userId: idOf(entry.user),
         from: entry.from,
         to: entry.to,
+        checkInDayEndsAt: checkInDayEnd(
+          listing,
+          format(entry.from, "yyyy-MM-dd", { in: tz("UTC") }),
+        ),
       };
     }),
   });
@@ -452,6 +533,7 @@ async function main(): Promise<void> {
         to: past.to,
         ...moneyOf(past.listing, past.from, past.to),
         cancellationPolicy: listing.cancellationPolicy,
+        ...checkInOf(listing, past.from),
         status: BookingStatus.CONFIRMED,
       },
     });

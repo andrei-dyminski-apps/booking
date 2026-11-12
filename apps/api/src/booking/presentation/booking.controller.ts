@@ -38,6 +38,7 @@ import { Roles } from "../../auth/decorators/roles.decorator";
 import { ApiErrorDto } from "../../common/dto/api-error.dto";
 import { BookingAdjustmentService } from "../application/booking-adjustment.service";
 import { BookingCancellationService } from "../application/booking-cancellation.service";
+import { BookingEarlyEndService } from "../application/booking-early-end.service";
 import { BookingRefundService } from "../application/booking-refund.service";
 import { BookingService } from "../application/booking.service";
 import {
@@ -51,6 +52,7 @@ import {
   BookingQueryDto,
   CancelBookingDto,
   CreateBookingDto,
+  EndStayEarlyDto,
   StuckStayPageDto,
   StuckStayQueryDto,
 } from "./dto/booking.dto";
@@ -64,6 +66,7 @@ export class BookingController {
   constructor(
     private readonly bookingService: BookingService,
     private readonly bookingCancellationService: BookingCancellationService,
+    private readonly bookingEarlyEndService: BookingEarlyEndService,
     private readonly bookingRefundService: BookingRefundService,
     private readonly bookingAdjustmentService: BookingAdjustmentService,
   ) {}
@@ -191,6 +194,45 @@ export class BookingController {
     @Param("id", ParseUUIDPipe) id: string,
   ): Promise<BookingAdjustment[]> {
     return this.bookingAdjustmentService.listOf(id);
+  }
+
+  /**
+   * The guest leaves before the check-out they paid for: the stay checks out tomorrow, the
+   * nights after it go back on offer, and the stay's policy decides what the unused nights
+   * give back (`unusedNightsRefund`). Ended when it answers; the refund is sent after it by
+   * the cancellation's job, and the booking says so in `refundOwedCents` until it has gone
+   * out. The guest and an admin may end it, not the host. The body names the check-out and
+   * the refund the caller was shown, so a confirmation that crossed the listing's midnight,
+   * or one a refund recorded meanwhile made worth less, is refused rather than carried out
+   * on terms other than the ones it said.
+   */
+  @Post(":id/end-early")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiNoContentResponse()
+  @ApiNotFoundResponse({
+    description: "The booking does not exist, or the caller may not read it",
+    type: ApiErrorDto,
+  })
+  @ApiForbiddenResponse({
+    description: "The caller is the host of the listing",
+    type: ApiErrorDto,
+  })
+  @ApiConflictResponse({
+    description:
+      "The stay is not confirmed, has not begun, was ended early already, has no night left after tonight or no nights recorded, the day has turned since the check-out named, the refund is now less than the one named, its payment is disputed, a cancellation refund was sent for it, it changed meanwhile, or another request holds it",
+    type: ApiErrorDto,
+  })
+  @ApiBadGatewayResponse({
+    description:
+      "The payment provider could not be reached to read the refunds; the stay was not ended",
+    type: ApiErrorDto,
+  })
+  endEarly(
+    @Param("id", ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: EndStayEarlyDto,
+  ): Promise<void> {
+    return this.bookingEarlyEndService.endEarly(id, user, dto);
   }
 
   /**

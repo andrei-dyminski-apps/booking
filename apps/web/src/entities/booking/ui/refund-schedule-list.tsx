@@ -8,14 +8,17 @@ import { scheduleLines } from "../model/cancellation-policy";
  */
 export const RefundScheduleList = ({
   schedule,
+  timeZone,
 }: {
   schedule: RefundWindow[];
+  /** The listing's, which every moment of the schedule is stated in. */
+  timeZone: string;
 }) => (
   <ul
     role="list"
     className="flex list-disc flex-col gap-1 pl-5 text-sm text-muted-foreground"
   >
-    {scheduleLines(schedule).map((line) => (
+    {scheduleLines(schedule, timeZone).map((line) => (
       <li key={line.key}>
         {line.when}: <span className="text-foreground">{line.refund}</span>
       </li>

@@ -85,6 +85,24 @@ export function describeNotification(
           : listingStays(data.listingId),
       };
     }
+    case NotificationType.STAY_ENDED_EARLY: {
+      const { data } = notification;
+      const asGuest = data.recipient === StayParty.GUEST;
+
+      return {
+        title: endedEarlyTitle(asGuest, data.endedBy),
+        detail: [
+          data.listingTitle,
+          `now ${stayDates({ from: data.from, to: data.checkOut })}`,
+          ...(data.refundCents === null
+            ? []
+            : [cancellationRefund(data.refundCents, data.currency, asGuest)]),
+        ].join(" · "),
+        href: asGuest
+          ? ROUTES.booking(data.bookingId)
+          : listingStays(data.listingId),
+      };
+    }
     case NotificationType.PAYMENT_REFUNDED: {
       const { data } = notification;
 
@@ -155,7 +173,7 @@ export function describeNotification(
       const { data } = notification;
 
       return {
-        title: "A cancellation's refund is stuck",
+        title: "A refund owed to a guest is stuck",
         detail: data.error,
         href: setAsideHref("stuck-refunds", { bookingId: data.bookingId }),
       };
@@ -247,6 +265,17 @@ function cancellationRefund(
   return asGuest
     ? `${amount} coming back to you`
     : `${amount} going back to the guest`;
+}
+
+/** Who ended the stay early, as the side told about it reads it — the guest or an admin. */
+function endedEarlyTitle(asGuest: boolean, endedBy: Canceller): string {
+  if (endedBy === Canceller.ADMIN) {
+    return asGuest
+      ? "Your stay was ended early by the site"
+      : "A stay was ended early by the site";
+  }
+
+  return asGuest ? "Your stay was ended early" : "Your guest is leaving early";
 }
 
 /** Who took the stay away, as the side told about it reads it. */

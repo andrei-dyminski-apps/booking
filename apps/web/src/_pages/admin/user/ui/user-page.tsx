@@ -19,7 +19,7 @@ import {
 import { HostFees } from "#entities/host-fee";
 import { hostFeesApi, requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { countOf, filtersHref, requireId } from "#shared/lib";
+import { countOf, filtersHref, readerTimeZone, requireId } from "#shared/lib";
 import { BackLink, ButtonLink } from "#shared/ui";
 import { BlockButton } from "./block-button";
 import { WaiveFeeButton } from "./waive-fee-button";
@@ -34,7 +34,7 @@ import { WaiveFeeButton } from "./waive-fee-button";
 export const UserPage = async ({ params }: PageProps<"/admin/users/[id]">) => {
   const id = requireId((await params).id);
   const viewer = await requireRole(Role.ADMIN, ROUTES.adminUser(id));
-  const user = await anyUser(id);
+  const [user, zone] = await Promise.all([anyUser(id), readerTimeZone()]);
   const self = user.id === viewer.id;
 
   return (
@@ -59,8 +59,11 @@ export const UserPage = async ({ params }: PageProps<"/admin/users/[id]">) => {
             <Badge variant="outline">{ROLE_LABELS[user.role]}</Badge>
           </div>
           <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
-            <UserJoined createdAt={user.createdAt} />
-            <UserBlockedSince blockedAt={user.blockedAt} />
+            <UserJoined createdAt={user.createdAt} readerTimeZone={zone} />
+            <UserBlockedSince
+              blockedAt={user.blockedAt}
+              readerTimeZone={zone}
+            />
           </p>
         </div>
       </div>
@@ -76,6 +79,7 @@ export const UserPage = async ({ params }: PageProps<"/admin/users/[id]">) => {
         <HostFees
           read={() => hostFeesApi.ofHost(id)}
           audience="admin"
+          readerTimeZone={zone}
           action={(fee) => <WaiveFeeButton feeId={fee.id} />}
         />
       </Suspense>

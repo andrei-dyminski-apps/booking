@@ -68,6 +68,34 @@ export class FakeBookingCancellationRepository implements PublicOf<BookingCancel
     };
   }
 
+  /** Matches the stay as it was read, as the `where` of `endEarly` does. */
+  async endEarly(
+    id: string,
+    to: string,
+    checkOut: string,
+    refundOwedCents: Cents | null,
+  ): Promise<boolean> {
+    await this.table.racing?.(id);
+
+    const found = this.table.rows.get(id);
+
+    if (
+      found === undefined ||
+      found.booking.status !== BookingStatus.CONFIRMED ||
+      found.booking.to !== to ||
+      found.booking.endedEarlyAt !== null ||
+      found.booking.refundOwedCents !== null
+    ) {
+      return false;
+    }
+
+    found.booking.to = checkOut;
+    found.booking.endedEarlyAt = new Date().toISOString();
+    found.booking.refundOwedCents = refundOwedCents;
+
+    return true;
+  }
+
   /** Every fee of the host not waived counts: the fake keeps no clock. */
   hostCancellations(
     hostId: string,

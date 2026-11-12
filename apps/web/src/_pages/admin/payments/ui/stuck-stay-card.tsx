@@ -11,7 +11,7 @@ import {
 } from "@repo/ui/components/card";
 import { BookingStatusBadge } from "#entities/booking";
 import { ROUTES } from "#shared/config";
-import { countOf, formatMoment, formatMoney } from "#shared/lib";
+import { countOf, formatMomentIn, formatMoney } from "#shared/lib";
 import { ButtonLink, DateRange } from "#shared/ui";
 import { retryStuckAction } from "../api/set-aside-actions";
 import { LastError } from "./last-error";
@@ -19,10 +19,17 @@ import { RetryButton } from "./retry-button";
 
 /**
  * A stay whose owed refund or host payout stopped retrying. The money is still on the row —
- * the debt a cancellation left, or the share the host is owed — so the way out is the job
- * again rather than a note: retried, it sends what the row says.
+ * the debt a cancellation or an early end left, or the share the host is owed — so the way
+ * out is the job again rather than a note: retried, it sends what the row says.
  */
-export const StuckStayCard = ({ stuck }: { stuck: StuckStay }) => {
+export const StuckStayCard = ({
+  stuck,
+  readerTimeZone,
+}: {
+  stuck: StuckStay;
+  /** The reader's zone, which the moments are stated in (`readerTimeZone`). */
+  readerTimeZone: string;
+}) => {
   const { booking } = stuck;
 
   return (
@@ -37,7 +44,7 @@ export const StuckStayCard = ({ stuck }: { stuck: StuckStay }) => {
           <DateRange from={booking.from} to={booking.to} />
           <span>{owed(stuck)}</span>
           <span>
-            Set aside {formatMoment(stuck.failedAt)} UTC after{" "}
+            Set aside {formatMomentIn(stuck.failedAt, readerTimeZone)} after{" "}
             {countOf(stuck.attempts, "attempt")}
           </span>
         </CardDescription>

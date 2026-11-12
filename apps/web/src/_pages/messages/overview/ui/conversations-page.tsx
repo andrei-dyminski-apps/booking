@@ -19,7 +19,7 @@ import {
   requireUser,
 } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { filtersHref, singleParam } from "#shared/lib";
+import { filtersHref, readerTimeZone, singleParam } from "#shared/lib";
 import {
   ButtonLink,
   LiveRefresh,
@@ -49,10 +49,13 @@ export const ConversationsPage = async ({
   const query: ConversationQuery = conversationQuerySchema.parse({
     cursor: singleParam((await searchParams).cursor),
   });
-  const page = await pageOrNullOnStaleCursor(
-    () => conversationsApi.page(query, { cache: "no-store" }),
-    query.cursor,
-  );
+  const [page, zone] = await Promise.all([
+    pageOrNullOnStaleCursor(
+      () => conversationsApi.page(query, { cache: "no-store" }),
+      query.cursor,
+    ),
+    readerTimeZone(),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -89,7 +92,10 @@ export const ConversationsPage = async ({
           <ul role="list" className="flex flex-col gap-3">
             {page.items.map((conversation) => (
               <li key={conversation.id}>
-                <ConversationCard conversation={conversation} />
+                <ConversationCard
+                  conversation={conversation}
+                  readerTimeZone={zone}
+                />
               </li>
             ))}
           </ul>

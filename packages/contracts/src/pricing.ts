@@ -8,7 +8,16 @@ import {
 } from "date-fns";
 import { z } from "zod";
 import { weekdaySchema, type ListingDetail, type Weekday } from "./listing.js";
-import { addCents, centsSchema, NO_CENTS, type Cents } from "./money.js";
+import {
+  addCents,
+  centsSchema,
+  MAX_CHARGE,
+  MIN_CHARGE,
+  NO_CENTS,
+  shareOf,
+  subtractCents,
+  type Cents,
+} from "./money.js";
 
 /**
  * What a night costs, in the order `listingPricingSchema` gives its fields. It is a rule
@@ -86,6 +95,85 @@ export function stayTotal(nights: readonly PricedNight[]): Cents {
     (total, night) => addCents(total, night.priceCents),
     NO_CENTS,
   );
+}
+
+/**
+ * The rates a stay can be booked at, mirrored by nothing in the database: a rate is a choice
+ * made once, when the hold is taken, and what it decides is stored in its own terms — the
+ * discount in `discount_cents` and the policy in `cancellation_policy`. `NON_REFUNDABLE` is
+ * offered only by a listing with a `nonRefundableDiscountBps`.
+ */
+export const bookingRateSchema = z.enum(["STANDARD", "NON_REFUNDABLE"]);
+
+export const BookingRate = bookingRateSchema.enum;
+
+export type BookingRate = z.infer<typeof bookingRateSchema>;
+
+/**
+ * Why a hold at the non-refundable rate is refused on a listing that offers none — one
+ * that never did, or withdrew it since the page was read without naming its version.
+ */
+export const RATE_NOT_OFFERED = "This listing offers no non-refundable rate";
+
+/**
+ * A stay as a hold stores it: every night at its own price, the discount its rate takes off,
+ * and what is left to charge.
+ */
+export type StayQuote = {
+  nights: PricedNight[];
+  discountCents: Cents;
+  amountCents: Cents;
+};
+
+/**
+ * What a stay costs at a rate: the nights priced one by one, then the discount taken off
+ * their total once, with one rounding — half up, in the guest's favour — rather than off
+ * each night, where the roundings would add up to a total nobody can work back to. The
+ * nights keep their undiscounted prices, so `amountCents` is their sum less `discountCents`.
+ * `discountBps` is the listing's `nonRefundableDiscountBps` for that rate and `null` for
+ * the standard one; whether a listing offers the rate is the caller's to check.
+ *
+ * Here rather than in the API so the booking form quotes both rates by the very rule the
+ * hold is charged by.
+ */
+export function quoteStay(
+  listing: PricedListing,
+  from: string,
+  to: string,
+  discountBps: number | null = null,
+): StayQuote {
+  const nights = pricedNights(listing, from, to);
+  const total = stayTotal(nights);
+  const discountCents =
+    discountBps === null ? NO_CENTS : shareOf(total, discountBps);
+
+  return {
+    nights,
+    discountCents,
+    amountCents: subtractCents(total, discountCents),
+  };
+}
+
+/** Why a stay is refused when what it charges is more than one payment can carry. */
+export const STAY_TOO_EXPENSIVE =
+  "This stay costs more than one payment can carry — book fewer nights";
+
+/** …and when it is less than one payment can carry. */
+export const STAY_TOO_CHEAP =
+  "This stay costs less than one payment can carry — book more nights";
+
+/**
+ * Why one payment cannot carry `amount` — between `MIN_CHARGE` and `MAX_CHARGE`, both
+ * included — in the words the API refuses the hold with, or `null` when it can. Read off a
+ * quote's `amountCents`, after its discount: the booking form disables a rate whose total
+ * it refuses and says so under the quote, and the API answers the same words with a `422`.
+ */
+export function chargeRefusal(amount: Cents): string | null {
+  if (amount > MAX_CHARGE) return STAY_TOO_EXPENSIVE;
+
+  if (amount < MIN_CHARGE) return STAY_TOO_CHEAP;
+
+  return null;
 }
 
 /**

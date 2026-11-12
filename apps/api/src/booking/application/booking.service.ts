@@ -1,5 +1,6 @@
 import {
   BadGatewayException,
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -11,7 +12,9 @@ import {
 } from "@nestjs/common";
 import {
   BookingStatus,
+  CHECK_IN_DAY_PAST,
   NotificationType,
+  RATE_NOT_OFFERED,
   Role,
   StayParty,
   type Booking,
@@ -27,13 +30,14 @@ import { NotificationService } from "../../notification/notification.service";
 import { WaitlistService } from "../../waitlist/waitlist.service";
 import { BookingRepository } from "../infrastructure/booking.repository";
 import {
+  CheckInDayPastError,
   DatesUnavailableError,
   GuestNotFoundError,
   ListingChangedError,
   ListingNotFoundError,
   OwnListingError,
-  StayTooCheapError,
-  StayTooExpensiveError,
+  RateNotOfferedError,
+  UnchargeableStayError,
 } from "../domain/booking.errors";
 import type {
   BookingCursor,
@@ -144,18 +148,18 @@ export class BookingService {
 
   /** The stay with the nights it was quoted by — read only once the caller may read it. */
   async findOne(id: string, user: AuthenticatedUser): Promise<BookingDetail> {
-    const { booking, nights } = readerOf(
+    const { booking, nights, discountCents } = readerOf(
       user,
       id,
       await this.bookingRepository.findDetailWithListingOwner(id),
     ).found;
 
-    return { ...booking, nights };
+    return { ...booking, nights, discountCents };
   }
 
   /**
    * The atomicity lives one layer down: `BookingRepository.create` locks the listing row
-   * and settles overlaps inside a transaction, and this method only translates the four
+   * and settles overlaps inside a transaction, and this method only translates the
    * failures it can raise. On success it schedules the hold's expiry, and that call cannot
    * fail this request: the booking is committed by then, so a Redis that is down would
    * otherwise answer an existing booking with a 500 and never hand the caller its id. The
@@ -205,17 +209,20 @@ export class BookingService {
         );
       }
 
-      // Valid dates on a valid listing that add up to more than a payment can carry.
-      if (error instanceof StayTooExpensiveError) {
-        throw new UnprocessableEntityException(
-          "This stay costs more than one payment can carry — book fewer nights",
-        );
+      // In the schema's words: the same rule, the half of it that needs the listing's zone.
+      if (error instanceof CheckInDayPastError) {
+        throw new BadRequestException(CHECK_IN_DAY_PAST);
       }
 
-      if (error instanceof StayTooCheapError) {
-        throw new UnprocessableEntityException(
-          "This stay costs less than one payment can carry — book more nights",
-        );
+      // A rate the listing does not offer is the request's mistake rather than a change of
+      // terms: a client that read the listing before it withdrew the rate gets the `412` above.
+      if (error instanceof RateNotOfferedError) {
+        throw new BadRequestException(RATE_NOT_OFFERED);
+      }
+
+      // Valid dates on a valid listing that add up to more, or less, than a payment can carry.
+      if (error instanceof UnchargeableStayError) {
+        throw new UnprocessableEntityException(error.refusal);
       }
 
       throw error;

@@ -1,8 +1,7 @@
-import { Role } from "@repo/contracts";
+import { earliestToday, Role } from "@repo/contracts";
 import { ListingForm } from "#features/save-listing";
 import { requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { today } from "#shared/lib";
 import { NewListingCard } from "./new-listing-card";
 
 export const NewListingPage = async () => {
@@ -10,7 +9,7 @@ export const NewListingPage = async () => {
 
   return (
     <NewListingCard>
-      <ListingForm earliest={today()} />
+      <ListingForm earliest={earliestToday()} />
     </NewListingCard>
   );
 };

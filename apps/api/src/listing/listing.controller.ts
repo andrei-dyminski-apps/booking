@@ -142,6 +142,11 @@ export class ListingController {
   @Patch(":id")
   @Roles(Role.USER, Role.ADMIN)
   @ApiOkResponse({ type: ListingDto })
+  @ApiBadRequestResponse({
+    description:
+      "The body breaks the contract, or names a policy or a non-refundable discount that cannot stand beside the other half already on the listing: a listing under the `NON_REFUNDABLE` policy offers no non-refundable rate",
+    type: ApiErrorDto,
+  })
   @ApiNotFoundResponse({
     description: "The listing does not exist",
     type: ApiErrorDto,

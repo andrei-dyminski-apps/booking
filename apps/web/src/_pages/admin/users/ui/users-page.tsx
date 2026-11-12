@@ -10,6 +10,7 @@ import {
 } from "@repo/ui/components/empty";
 import { requireRole } from "#shared/api";
 import { ROUTES } from "#shared/config";
+import { readerTimeZone } from "#shared/lib";
 import {
   NoMatchesNotice,
   PageHeading,
@@ -39,7 +40,10 @@ export const UsersPage = async ({
   // One search, one address — see `canonical` in `bookings-search.ts`.
   if (canonical !== null) redirect(canonical);
 
-  const page = query === null ? null : await readUsersPage(query);
+  const [page, zone] = await Promise.all([
+    query === null ? null : readUsersPage(query),
+    readerTimeZone(),
+  ]);
   const staleCursor = query !== null && page === null;
   const filters = activeFilters(values);
 
@@ -75,7 +79,7 @@ export const UsersPage = async ({
           <ul role="list" className="flex flex-col gap-4">
             {page.items.map((user) => (
               <li key={user.id}>
-                <UserCard user={user} viewer={viewer} />
+                <UserCard user={user} viewer={viewer} readerTimeZone={zone} />
               </li>
             ))}
           </ul>

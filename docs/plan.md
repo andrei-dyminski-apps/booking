@@ -499,57 +499,116 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
 - [x] Specs: e2e — more than is left is refused, a repeated `requestId` refunds once, a
       refund after the payout reverses the host's share.
 
-### 7.4 — Ending a stay early, refunding the unused nights
+### 7.4 — Ending a stay early, refunding the unused nights ✅
 
-- [ ] `@repo/contracts`: `mayEndEarly(booking, today)` — confirmed, begun, at least one night
+- [x] `@repo/contracts`: `mayEndEarly(booking, today)` — confirmed, begun, at least one night
       left — and `unusedNightsRefund(booking, nights, today)`: the `booking_nights` from
-      tomorrow's on, times the policy's `unusedNightsBps`. Tonight is used.
-- [ ] The stay stays `CONFIRMED`; `to` moves to the new check-out and `ended_early_at` is
+      tomorrow's on, times the policy's `unusedNightsBps`. Tonight is used. An earlier partial
+      refund names no nights, so it counts as spread over all of them by price: the unused
+      nights keep `notRefunded / Σ nights` of their worth — which also prices them at the
+      discount of a non-refundable rate (7.5).
+- [x] The stay stays `CONFIRMED`; `to` moves to the new check-out and `ended_early_at` is
       stamped, so the `EXCLUDE` constraint and the waitlist see the nights free and the
       review opens at once. `booking_nights` keep what was bought. A stay with no nights
       recorded (before `store_money_in_cents`) cannot end early.
-- [ ] `POST /bookings/:id/end-early` (the guest, an admin) under `whileCancelling`: the debt
+- [x] `POST /bookings/:id/end-early` (the guest, an admin) under `whileCancelling`: the debt
       goes into `refund_owed_cents` and out through the same job. The key
       `booking-<id>-cancellation` is shared safely — a cancellation happens only before
       check-in and an early end only after. Then `announceFreed`.
-- [ ] The host's side needs nothing: `owedToHost` already counts a refund owed, and `settle`
+- [x] The host's side needs nothing: `owedToHost` already counts a refund owed, and `settle`
       reverses what was paid out beyond it.
-- [ ] Web: "End stay early" on the stay's page during the stay, with what it refunds.
-- [ ] Specs: the night arithmetic (tonight, the last night); e2e — the nights are free, the
+- [x] Web: "End stay early" on the stay's page during the stay, with what it refunds.
+- [x] Specs: the night arithmetic (tonight, the last night); e2e — the nights are free, the
       refund is right, a payout already sent is reversed.
 
-### 7.5 — A non-refundable rate for a discount
+### 7.5 — A non-refundable rate for a discount ✅
 
-- [ ] `@repo/contracts`: `listing.nonRefundableDiscountBps` (nullable, at most
-      `MAX_NON_REFUNDABLE_DISCOUNT_BPS`), `createBookingSchema.rate`
-      (`STANDARD | NON_REFUNDABLE`). `quoteStay` takes the discount off the total once, with
-      one rounding; the nights keep their undiscounted prices and `discount_cents` holds the
-      difference, so `amount = Σ nights − discount`, checked against `MIN_CHARGE` /
-      `MAX_CHARGE` after it.
-- [ ] Prisma: `listings.non_refundable_discount_bps`, `bookings.discount_cents` (a `CHECK`
-      within the amount). `create` refuses the rate on a listing that does not offer it
-      (`400`) and freezes `NON_REFUNDABLE` as the booking's policy.
-- [ ] A guest's cancellation refunds nothing, and the grace period does not apply; a host's or
-      an admin's still refunds in full.
-- [ ] Web: the switch and the percentage on the listing form; both rates with their totals on
-      the booking form (`stay-quote.tsx`). The catalogue still shows and filters by the base
-      price.
-- [ ] Specs: `pricing.spec.ts` (the discount, its rounding, the floor); e2e — the guest's
-      cancellation refunds 0, the host's and the admin's 100%.
+- [x] `@repo/contracts`: `listing.nonRefundableDiscountBps` (nullable, 1% to
+      `MAX_NON_REFUNDABLE_DISCOUNT_BPS` = 50%), `createBookingSchema.rate`
+      (`STANDARD | NON_REFUNDABLE`, optional, `STANDARD` when left out). `quoteStay` moved
+      into the contract so the booking form quotes both rates by the rule the hold is
+      charged by: it takes the discount off the total once, with one rounding (half up, in
+      the guest's favour); the nights keep their undiscounted prices and `discountCents`
+      holds the difference, so `amount = Σ nights − discount`, checked against
+      `MIN_CHARGE` / `MAX_CHARGE` after it. `bookingDetailSchema.discountCents`.
+- [x] Prisma: `listings.non_refundable_discount_bps`
+      (`listings_discount_within_contract`), `bookings.discount_cents`
+      (`bookings_discount_within_amount`). `create` reads the discount under the same
+      `FOR UPDATE` as the policy, refuses the rate on a listing that does not offer it
+      (`400`) and freezes `NON_REFUNDABLE` as the booking's policy. A listing under the
+      `NON_REFUNDABLE` policy offers no such rate (`listings_rate_beside_refundable_policy`,
+      the contract's refinement for a body naming both, a `400` for a `PATCH` naming one).
+- [x] A guest's cancellation refunds nothing, and the grace period does not apply; a host's or
+      an admin's still refunds in full — `CANCELLATION_TERMS.NON_REFUNDABLE` already says
+      so, nothing new in `refundQuote`.
+- [x] Web: the switch and the percentage on the listing form; both rates with their totals on
+      the booking form (`RateChoice`, `stay-quote.tsx`), the cancellation quote under the
+      chosen rate; the discount on the stay's page. A rate whose total one payment cannot
+      carry is disabled unless chosen, its terms still shown, and the quote says why — naming the other
+      rate when that one fits (`stayCharge`) — while the submit is withheld; `MIN_CHARGE` /
+      `MAX_CHARGE` moved into the contract beside `chargeRefusal`, which the API applies
+      itself and answers in a `422`. The catalogue still
+      shows and filters by the base price. `switch` and `radio-group` added to `@repo/ui`.
+- [x] The seed: two listings offer the rate, one stay is booked at it.
+- [x] Specs: `pricing.spec.ts` (the discount, its rounding, the odd cent at the deepest
+      discount); e2e — the guest's cancellation refunds 0, the host's and the admin's 100%, a
+      listing without the rate refuses it, the floor applies after the discount, a 50%
+      discount of an odd total is stored, the discount round-trips through
+      `POST`/`PATCH`/`GET /listings`, the rate is refused beside the non-refundable policy
+      whichever half a save names, the three `CHECK`s hold against raw writes.
 
-### 7.6 — Check-in in the listing's own time zone
+### 7.6 — Check-in in the listing's own time zone ✅
 
-- [ ] `listingSchema` gains `timeZone` (IANA, checked through `Intl`) and `checkInTime`
-      (`HH:mm`), frozen onto the booking; `checkInInstant` becomes
-      `TZDate(from + checkInTime, timeZone)`. Every refund window, the fee's tiers,
-      `isCancellableOn` (the instant, not the UTC day) and `payoutDueAt` follow from it.
-- [ ] Backfilled `UTC` / `00:00`, so nothing already booked moves.
-- [ ] Left as they are, on UTC days: `createBookingSchema`'s "check-in not in the past" and
-      `isReviewable` — they are about calendar days, not about the moment of arrival.
-- [ ] Web: the two fields on the listing form; every date of a cancellation or a refund shown
-      in the listing's time with the zone named.
-- [ ] Specs: a DST change and the far zones (UTC−10, UTC+14); e2e — a payout due by the new
-      `payoutDueAt`.
+- [x] `listingSchema` gains `timeZone` (an IANA name or `UTC`, never an offset, checked
+      through `Intl` — `timeZoneSchema`) and `checkInTime` (`HH:mm`), both optional on a save
+      (`UTC` / `15:00` for a new listing) and frozen onto the booking under the policy's lock;
+      `checkInInstant` (`check-in.ts`) is `from` at `checkInTime` in `timeZone`. Every refund
+      window, the fee's tiers, `isCancellableOn` (the instant, not the UTC day — and never a
+      stay ended early) and `payoutDueAt` follow from it; the payout sweep cuts by the
+      moment itself, stored as `bookings.check_in_at` when the hold is taken. A zone is
+      stored as `Intl` resolves it, a renamed one under IANA's name of today, and an offset
+      is refused however it is spelled — `+05:00`, `Etc/GMT±N`, or `EST`, which `Intl` turns
+      into `America/Panama`. A response carries the zone unchecked, since the reader's
+      `Intl` is not the API's.
+- [x] `mayEndEarly` and `earlyCheckOut` follow it too: an early end is offered from the
+      instant a cancellation stops, never before it, and "tonight" is the listing's night
+      (`stayDay`), not the UTC one. `BookingCancellationService` refuses a stay with
+      `ended_early_at` as the backstop, and `isCancellableOn` refuses it too, so neither the
+      API nor the stay's page (`mayCancel`) offers "Cancel" for one.
+- [x] Backfilled `UTC` / `00:00`, so nothing already booked moves.
+- [x] Which check-in day is gone is the listing's too: a day before its today
+      (`isCheckInDayPast`, `stayDay`) is refused under the lock that takes the hold —
+      a night already over in Adelaide is not sold, tonight in Honolulu is, whatever day
+      UTC has reached. `createBookingSchema`, which knows no listing, refuses only a day
+      gone everywhere (`earliestToday`, UTC−12); the booking form checks the listing's day
+      too (`createBookingSchemaIn`), and the listing page draws the calendar and starts the
+      form at it. The waitlist refuses the same day, and writes when it ends there on the
+      entry (`waitlist_entries.check_in_day_ends_at`, `checkInDayEnd`): every read of the
+      list, and the search for waiters when nights come free, drops an entry from that
+      moment, since a query cannot convert a day into the listing's zone. A date price
+      is bounded by `earliestToday` too — written and read from it, not from UTC's today
+      — or tonight in Honolulu after midnight UTC would be quoted at the default price,
+      charged at its date's, and lose that price at the host's next save. The catalogue's
+      date boxes start at `earliestToday` as well, so tonight in Honolulu can be searched
+      for; a listing further east where that night is over may still be answered, and its
+      page draws the night as past and the form refuses it — a filter by each listing's
+      own today would be raw SQL on Postgres's zone data, which is not the `Intl` every
+      other rule converts with. Left on UTC days: `isReviewable`, which is about no place.
+- [x] Web: the two fields on the listing form (`CheckInFields`); the check-in beside every
+      policy, and every date of a cancellation or a refund on the stay's page and the
+      listing's — the windows, the cancellation, the early end, an admin's partial refunds —
+      shown in the listing's time with the zone named (`formatMomentIn`). A zone is stored
+      under IANA's name of today and read through `runtimeTimeZone`, which falls back to
+      the older name IANA keeps as a link where a browser's zone data predates the rename
+      (`Europe/Kiev` for `Europe/Kyiv`). A host's fees keep UTC: the ledger spans every
+      listing of theirs and carries no zone, and it is an account's moment, the step in
+      phase 8.
+- [x] The seed spreads the listings over zones from UTC−10 to UTC+10:30.
+- [x] Specs: `checkInInstant` across a change to summer time, a time the clock skips and the
+      far zones (UTC−10, UTC+14), the windows, `isCancellableOn`, `mayEndEarly` and
+      `payoutDueAt` measured on the listing's clock; e2e — a payout due by the new
+      `payoutDueAt` found by the sweep to the millisecond, the fields round-trip and are
+      copied onto a stay, the `CHECK`s on the format.
 
 ## Phase 8 — Production polish
 
@@ -598,13 +657,19 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
     the sweep takes the row again. Retried rather than resolved by hand: the debt and the
     transfer are still on the row, and the sweep is what sends them.
   - The frontend renders the four admin notices with a link to the screen.
-- [ ] **The payment form opens the payment once.** `POST /bookings/:id/payment` is safe to
+- [x] **The payment form opens the payment once.** `POST /bookings/:id/payment` is safe to
       repeat one after another, but not at the same moment: Stripe refuses a second request
       under the same idempotency key while the first is in flight, and the API answers it
       `409` ("being opened by another request — try again"). The form has to call it once per
       mount — single-flight, the way the transport refreshes a session — survive React's
       Strict Mode running the effect twice and a double click, and read that `409` as a
       retry after a short pause rather than as a hold that stopped waiting for payment.
+      Done in the form alone: the query cache already reuses a request in flight, so the
+      Strict Mode mount and a remount land on the one `POST`, and "Try again" puts the
+      query back to pending, which takes the button away; what changed is the `409`. Each one has the page read the booking again and is asked
+      again a second later, up to four times, the skeleton still drawn — a hold that moved
+      on takes the form off the page, which stops the retries, and one still waiting gets
+      the secret from the request that won (`CONFLICT_RETRIES` in `payment-form.tsx`).
 - [ ] **Authorize the hold, capture the stay.** The guest is charged at once today, so a
       payment that lands on a lapsed or cancelled hold is a full charge and a full refund,
       and Stripe keeps its processing fee on both. Opening the intent with
@@ -674,6 +739,35 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
       exist, and `availability` on the offer — that would be a promise about dates the
       calendar answers per window and a document cannot state for a stay as a whole.
 
+- [x] **An account's moments on the reader's clock.** The notices, the messages, "Blocked
+      since", a host's fees, the admin's lists of what was set aside and a hold's deadline
+      were said in UTC (`formatMoment` + ` UTC`): they have no place of their own, so
+      the reader's zone is the right one, and a server render does not know it — formatting
+      in the browser's zone on one side only is a hydration error. A stay's moments stay on
+      the listing's clock (7.6) and a calendar day on none; this is the third kind only.
+  - The browser writes its zone into a cookie (`Intl.DateTimeFormat().resolvedOptions()`,
+    checked by `canonicalTimeZone`), and a server render reads it through `cookies()` and
+    formats in it with the zone named, so both sides render the same text and nothing
+    flickers. No cookie yet — a first visit — is UTC, as now.
+  - Only on pages that are personal already: `cookies()` makes a render dynamic, and the
+    public cached reads (the catalogue, a listing, its reviews) must not depend on it.
+    None of them states such a moment; the rule goes into `apps/web/CLAUDE.md` with it.
+  - A hold's deadline also counts down ("12 minutes left") beside the time, since what it
+    asks of the guest is to pay now.
+  - Not a profile setting: that is a column, a contract field and a screen for what the
+    browser already knows.
+  - Done: `TimeZoneCookie` in the shell writes the cookie (`time_zone`) whenever it is
+    missing or differs and refreshes a signed-in render once; `readerTimeZone()` reads it
+    on each personal page, which hands it down as a prop to whatever states such a moment
+    (`formatMomentIn`), and the bell's popup, drawn only in a browser, uses
+    `browserTimeZone()`. The cookie is checked by `canonicalTimeZone` and, past it, takes
+    the fixed offsets a reader's clock may be on and a listing's may not (`Etc/GMT-3`,
+    stated as `UTC+3`). "Joined" and "Member since" are read on the reader's clock too
+    (`formatDate`); a review's date stays UTC's, since the listing's reviews are a public
+    cached read. The hold's deadline is `HoldDeadline` (`entities/booking`): the time and
+    the minutes left, counted from the server's `now` and then the browser's clock, at
+    once when that already says otherwise.
+
 - [ ] Optional: reviews with ratings, email notifications through BullMQ.
 
 ## Phase 9 — Deployment and presentation
@@ -737,10 +831,11 @@ of its pieces were written in advance, each with a note saying so.
       catalogue replace its body and nothing else; `formatMoney` names `en-GB` explicitly
       so the server and the browser agree on the separators, and localizing it means
       choosing the locale rather than dropping the argument — a `undefined` locale is the
-      runtime's, and the server's runtime is not the visitor's. `shared/lib/dates.ts` is
+      runtime's, and the server's runtime is not the visitor's. `shared/lib/dates/dates.ts` is
       the one that stays: a calendar day is a `YYYY-MM-DD` string read as midnight UTC,
-      because that is the clock the contract compares a check-in against. Only its display
-      is localized; parsing one in the visitor's zone moves a stay by a day.
+      and which check-in day is gone is the listing's to say (`isCheckInDayPast`), never
+      the visitor's. Only its display is localized; parsing one in the visitor's zone
+      moves a stay by a day.
 - [ ] **The SEO of two languages**, and it is the other half of the JSON-LD item in phase 8.
       `<html lang>` comes from the resolved locale instead of the literal `en` it carries
       now, `generateMetadata` emits `alternates.languages` so each page names its

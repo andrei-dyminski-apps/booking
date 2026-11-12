@@ -1,5 +1,7 @@
+import { tz } from "@date-fns/tz";
 import { INestApplication } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
+import { addDays, format, parseISO } from "date-fns";
 import { App } from "supertest/types";
 import {
   NotificationType,
@@ -11,6 +13,7 @@ import {
   waitlistSchema,
   type CreateBookingInput,
   type Notification,
+  stayDay,
 } from "@repo/contracts";
 import { AppModule } from "./../src/app.module";
 import { BookingService } from "./../src/booking/application/booking.service";
@@ -19,6 +22,8 @@ import { resetDatabase } from "./database";
 import { inDays } from "./dates";
 import { resetQueue } from "./queue";
 import { hostCredentials, signIn, signInAs, type Agent } from "./session";
+
+const IN_UTC = { in: tz("UTC") };
 
 describe("WaitlistController (e2e)", () => {
   let app: INestApplication<App>;
@@ -167,6 +172,36 @@ describe("WaitlistController (e2e)", () => {
     await holder.post("/waitlist").send(stay).expect(403);
   });
 
+  // The listing's tonight, whatever day UTC has reached: an entry for it is taken, listed
+  // and told about until midnight there — read by `check_in_day_ends_at`, not by the UTC
+  // day, which in Honolulu turns ten hours early.
+  it("waits for tonight where the listing is, and tells the waiter when it comes free", async () => {
+    await owner
+      .patch(`/listings/${stay.listingId}`)
+      .send({ timeZone: "Pacific/Honolulu" })
+      .expect(200);
+
+    const tonight = stayDay({ timeZone: "Pacific/Honolulu" }, new Date());
+    stay = {
+      ...stay,
+      from: tonight,
+      to: format(addDays(parseISO(tonight, IN_UTC), 2), "yyyy-MM-dd"),
+    };
+
+    const bookingId = await hold();
+    const entry = waitlistEntrySchema.parse(
+      (await waiter.post("/waitlist").send(stay).expect(201)).body,
+    );
+
+    await expect(waitingFor(waiter)).resolves.toEqual([entry]);
+
+    await holder.delete(`/bookings/${bookingId}`).expect(204);
+
+    const [notice] = await noticesOf(waiter);
+
+    expect(notice?.type).toBe(NotificationType.WAITLIST_AVAILABLE);
+  });
+
   it("tells nobody whose check-in has already passed", async () => {
     const bookingId = await hold();
     const { id: userId } = (await waiter.get("/auth/me").expect(200)).body as {
@@ -181,6 +216,7 @@ describe("WaitlistController (e2e)", () => {
         userId,
         from: new Date(inDays(-1)),
         to: new Date(inDays(12)),
+        checkInDayEndsAt: new Date(inDays(0)),
       },
     });
     await holder.delete(`/bookings/${bookingId}`).expect(204);
