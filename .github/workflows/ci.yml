@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A newer push to a pull request makes the run in progress worthless. On main every
+# commit keeps its run, so each merge ends up with a status of its own.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Turbo's anonymous telemetry has nothing to learn from a CI runner.
+  TURBO_TELEMETRY_DISABLED: 1
+
+jobs:
+  checks:
+    name: lint, types, unit tests, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # The restored cache is saved back with this run's entries added, so without eviction
+      # it keeps every past commit's outputs and grows with each run. Turbo evicts at the
+      # start of every `turbo run`: entries older than a week first, then the oldest ones
+      # until the rest fits.
+      TURBO_CACHE_MAX_AGE: 7d
+      TURBO_CACHE_MAX_SIZE: 1GB
+    steps:
+      - uses: actions/checkout@v7
+
+      # The version comes from `packageManager` in the root package.json.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The local setup is the one the scripts expect: the root .env, read through
+      # `node --env-file-if-exists=.env`. Nothing in it is a secret.
+      - run: cp .env.example .env
+
+      # Turbo's local cache, carried between runs: a package whose inputs did not change
+      # replays its logs and outputs instead of running again.
+      - uses: actions/cache@v6
+        with:
+          path: .turbo/cache
+          key: turbo-checks-${{ runner.os }}-${{ github.sha }}
+          restore-keys: turbo-checks-${{ runner.os }}-
+
+      - run: pnpm lint
+      - run: pnpm check-types
+      - run: pnpm test
+      - run: pnpm build
+
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The same images and credentials as docker-compose.yml, so the root .env built from
+    # .env.example reaches them unchanged.
+    services:
+      db:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: booking
+          POSTGRES_PASSWORD: booking
+          POSTGRES_DB: booking
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U booking -d booking"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      # Every spec that boots the whole AppModule needs these two, because the payment
+      # config refuses to start without them. No spec depends on Stripe accepting them: the
+      # payment spec replaces that config and the gateways with offline ones of its own. A
+      # background job can still reach Stripe — the payout sweep picks up the payable stay
+      # payout.repository.e2e-spec.ts writes — and Stripe refuses the placeholder key; the
+      # job logs the error and nothing waits on it. A variable set here wins over the empty
+      # one in .env.
+      STRIPE_SECRET_KEY: sk_test_ci
+      STRIPE_PAYMENT_WEBHOOK_SECRET: whsec_ci
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: cp .env.example .env
+
+      # No turbo cache here: test:e2e is never cached, and the only thing it would replay
+      # is the build of @repo/contracts, which takes seconds.
+
+      # The committed migrations, as a deployment applies them — never `migrate dev`.
+      - run: pnpm --filter @repo/api db:deploy
+
+      - run: pnpm test:e2e

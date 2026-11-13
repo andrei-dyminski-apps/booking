@@ -553,8 +553,8 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
 
 ## Phase 8 — Production polish
 
-- [ ] Tests: unit tests for the services, e2e over the whole booking and payment cycle (Stripe mocked), the concurrency test from phase 4.
-- [ ] CI: GitHub Actions — `lint`, `check-types`, `test`, `build` with the turbo cache; a badge in the README.
+- [x] Tests: unit tests for the services, e2e over the whole booking and payment cycle (Stripe mocked), the concurrency test from phase 4.
+- [x] CI: GitHub Actions — `lint`, `check-types`, `test`, `build` with the turbo cache; a badge in the README. The e2e specs run too, as a second job against Postgres and Redis service containers ("Continuous integration" in `README.md`).
 - [x] Rate limiting (`@nestjs/throttler`) on the auth endpoints — pulled forward into phase 2: argon2 turns an unlimited `/auth/login` into a memory amplifier, so it could not wait.
 - [ ] Helmet.
 - [ ] Bring Swagger up to a complete description with examples and auth.
