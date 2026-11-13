@@ -58,6 +58,8 @@ All three tasks declare `dependsOn: ["^build"]`: the specs import `@repo/contrac
 
 Before considering a task done: `pnpm lint` and `pnpm check-types` have to pass.
 
+CI (`.github/workflows/ci.yml`) runs the same commands — lint, check-types, test, build, and the e2e specs against Postgres and Redis service containers — on every pull request and push to `main`. A new variable the e2e specs need without a usable value in `.env.example` goes onto the `e2e` job's `env` there too.
+
 Every package, `apps/api` included, inherits the shared presets from `packages/typescript-config` and `packages/eslint-config`; Prettier is configured by a single `.prettierrc` in the root and wired into ESLint through `eslint-plugin-prettier` — a mismatch with it fails `pnpm lint`. Details are in `rules/monorepo.md`.
 
 ## API contract

@@ -1,5 +1,7 @@
 # booking
 
+[![CI](https://github.com/andrei-dyminski-apps/booking/actions/workflows/ci.yml/badge.svg)](https://github.com/andrei-dyminski-apps/booking/actions/workflows/ci.yml)
+
 A booking service monorepo: a Next.js frontend and a NestJS backend in one repository, managed by Turborepo and pnpm workspaces.
 
 > Status: the API is a working vertical slice — any account publishes listings and books other people's and the dates are checked for overlaps. Storage is PostgreSQL via Prisma 7, and the API is behind hand-written authentication: argon2, a JWT pair in httpOnly cookies, refresh-token rotation, and role-based authorization on top. The frontend has the session half of it — sign up, sign in, a guarded profile page rendered on the server as the visitor, and a session that survives an expired access token — plus the dashboard, where a listing is published, edited and taken down, and the catalogue: a filtered, cursor-paged list of stays whose filters live in the URL, a listing page with an availability calendar and the form that takes a hold, and a bookings screen with a "Trips" and a "Hosting" side for every user and everything for an admin, filtered and paged out of the URL like the catalogue. A hold is paid for on the stay's own page through Stripe Elements, and becomes a confirmed stay when Stripe's webhook says the money arrived; cancelling a paid stay refunds it by a rule both sides read from the contract. The rest are in [docs/plan.md](docs/plan.md).
@@ -641,6 +643,15 @@ The e2e tests wipe the tables before every test — do not run them against a da
 Linting is strict: `--max-warnings 0` combined with `eslint-plugin-only-warn` means any remark fails the check. Formatting falls under the same umbrella through `eslint-plugin-prettier` — a file that drifted from `.prettierrc` fails `pnpm lint`. One command fixes it: `pnpm lint:fix`. Both `pnpm lint` and `pnpm check-types` must pass before a push.
 
 In `apps/web` the same script runs [Steiger](https://github.com/feature-sliced/steiger) after ESLint: the frontend is organized by Feature-Sliced Design, and Steiger owns that half of the checks entirely — layer boundaries, cross-imports between slices, sidesteps of a public API and the shape of the tree. ESLint keeps only the ordinary rules; it resolves nothing, and duplicating architecture rules there would just give them a second place to drift. The layout is described in [apps/web/README.md](apps/web/README.md).
+
+## Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs on every pull request and on every push to `main`, as two jobs:
+
+- **checks** — `pnpm lint`, `pnpm check-types`, `pnpm test`, `pnpm build`, the same commands as locally, over a root `.env` copied from `.env.example`. The build needs no running API: every page of `apps/web` that reads it is dynamic.
+- **e2e** — Postgres 17 and Redis 7 as service containers with the credentials `docker-compose.yml` uses, the committed migrations applied by `db:deploy`, then `pnpm test:e2e`. `STRIPE_SECRET_KEY` and `STRIPE_PAYMENT_WEBHOOK_SECRET` are placeholders set on the job: every spec that boots the whole application needs them to start, and no spec depends on Stripe accepting them — the payment spec swaps the gateways for offline ones. A background job may still reach Stripe (the payout sweep finds the payable stay `payout.repository.e2e-spec.ts` writes); Stripe refuses the placeholder key, and the job only logs it.
+
+The **checks** job carries Turbo's local cache (`.turbo/cache`) between runs with `actions/cache`, so a package whose inputs did not change replays its result instead of running again. `TURBO_CACHE_MAX_AGE` and `TURBO_CACHE_MAX_SIZE` on the job keep it from growing with every run: Turbo evicts entries older than a week, then the oldest ones until the cache fits in 1 GB. The e2e job has no cache to carry, since `test:e2e` is never cached. A newer push to a pull request cancels its run in progress — on `main` every commit's run finishes, so each merge keeps a status of its own — and a job that runs past 20 minutes is stopped.
 
 ## Installing dependencies
 
