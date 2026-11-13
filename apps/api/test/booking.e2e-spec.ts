@@ -188,9 +188,11 @@ describe("BookingController (e2e)", () => {
   });
 
   it("rejects a check-in in the past — the rule lives in the schema", async () => {
+    // Two days back, not one: the schema refuses only a day gone everywhere, and until noon
+    // UTC yesterday is still today twelve hours west — the listing's zone refuses it instead.
     const response = await guest
       .post("/bookings")
-      .send({ ...input, from: inDays(-1), to: inDays(3) })
+      .send({ ...input, from: inDays(-2), to: inDays(3) })
       .expect(400);
 
     expect(apiErrorSchema.parse(response.body).errors).toEqual([
