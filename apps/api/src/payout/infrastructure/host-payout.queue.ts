@@ -28,9 +28,7 @@ export type PayHostJobData = { hostId: string };
 export type SweepPayoutsJobData = Record<string, never>;
 
 export type HostPayoutJobData =
-  | PayOutJobData
-  | PayHostJobData
-  | SweepPayoutsJobData;
+  PayOutJobData | PayHostJobData | SweepPayoutsJobData;
 
 /** What the worker is handed: the name decides the data, as in `PaymentEventJob`. */
 export type HostPayoutJob =

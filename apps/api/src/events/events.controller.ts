@@ -96,9 +96,10 @@ export class EventsController {
    */
   private syncOf(userId: string): Observable<ServerEvent> {
     return defer(() => this.unreadService.count(userId)).pipe(
-      map(
-        (counts): ServerEvent => ({ type: "sync", ...unreadFieldsOf(counts) }),
-      ),
+      map((counts): ServerEvent => ({
+        type: "sync",
+        ...unreadFieldsOf(counts),
+      })),
       catchError((error: unknown) => {
         this.logger.warn(
           `Could not count what ${userId} has unread: ${String(error)}`,

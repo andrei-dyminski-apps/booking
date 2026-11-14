@@ -31,6 +31,9 @@ export default defineConfig([
     files: ["./src/_app/**"],
     rules: {
       "fsd/no-segmentless-slices": "off",
+      // `providers` is one of the app layer's own concerns in the FSD reference; the rule
+      // treats it as a by-essence name meant for the sliced layers.
+      "fsd/segments-by-purpose": "off",
     },
   },
   {
