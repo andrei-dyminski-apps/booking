@@ -60,7 +60,7 @@
     "@repo/typescript-config": "workspace:*",
     "@types/express": "^5.0.0",
     "@types/jest": "^30.0.0",
-    "@types/node": "^24.19.2",
+    "@types/node": "^26.6.6",
     "@types/passport-jwt": "^4.0.1",
     "@types/supertest": "^7.0.0",
     "eslint": "^9.39.5",

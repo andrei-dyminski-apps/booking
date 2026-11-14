@@ -8,7 +8,7 @@ A booking service monorepo: a Next.js frontend and a NestJS backend in one repos
 
 ## Requirements
 
-- Node.js `^24.11 || >=26` (CI and Railway run 24)
+- Node.js `^24.11 || >=26` (CI and Railway run 26)
 - pnpm 9 (`corepack enable` picks the version up from the `packageManager` field)
 - Docker (for the local PostgreSQL)
 
@@ -676,7 +676,7 @@ That removes three deployment problems rather than one. There is no `SameSite=No
 - `buildCommand` filters turbo down to `@repo/api`, which builds `@repo/contracts` on the way;
 - `watchPatterns` keeps a frontend-only push from redeploying the backend;
 - `preDeploy` runs `db:deploy` before the new instance starts — committed migrations only, never `migrate dev`;
-- the Node major is pinned by `devEngines.runtime` in the root `package.json` (`24`, the one CI runs). Railpack reads it before `engines.node`, whose range it would otherwise resolve to its lowest major; pnpm 9 ignores the field;
+- the Node major is pinned by `devEngines.runtime` in the root `package.json` (`26`, the one CI runs). Railpack reads it before `engines.node`, whose range it would otherwise resolve to its lowest major; pnpm 9 ignores the field;
 - `start` is a plain `node apps/api/dist/main`: the port comes from Railway's `PORT` and the host from `API_HOST`, both of which `src/main.ts` already reads. Not `pnpm start` — that keeps pnpm and the Nest CLI resident beside the API, about 180 MB of memory doing nothing.
 
 The file exports the partial `api`, so it owns only the resources it declares: Postgres and Redis live in the same project but stay managed in the dashboard, and an apply never deletes them. A change to the file reaches Railway through the CLI rather than a push — `railway config plan`, then `railway config apply` once the plan shows only the intended changes.
