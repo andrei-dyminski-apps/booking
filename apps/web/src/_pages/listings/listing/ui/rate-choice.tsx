@@ -55,7 +55,9 @@ export const RateChoice = ({
 }) => {
   // Derived rather than written down, so nothing else on the page can share them.
   const id = useId();
-  const { field } = useController({ control, name: "rate" });
+  const {
+    field: { ref, value, onChange },
+  } = useController({ control, name: "rate" });
   const [from, to] = useWatch({ control, name: ["from", "to"] });
 
   if (isDay(from) && isDay(to) && callsForWaitlist(from, to, booked, refused)) {
@@ -63,7 +65,7 @@ export const RateChoice = ({
   }
 
   const rates = stayRates(prices, discountBps, from, to);
-  const chosen = field.value ?? BookingRate.STANDARD;
+  const chosen = value ?? BookingRate.STANDARD;
 
   return (
     <div className="flex flex-col gap-2">
@@ -73,10 +75,10 @@ export const RateChoice = ({
       <RadioGroup
         aria-labelledby={`${id}-label`}
         value={chosen}
-        onValueChange={(value) => {
-          const rate = bookingRateSchema.safeParse(value);
+        onValueChange={(picked) => {
+          const rate = bookingRateSchema.safeParse(picked);
 
-          if (rate.success) field.onChange(rate.data);
+          if (rate.success) onChange(rate.data);
         }}
         className="sm:grid-cols-2"
       >
@@ -87,7 +89,7 @@ export const RateChoice = ({
           note="Refunded under the listing's cancellation policy below."
           quote={rates?.standard ?? null}
           chosen={chosen === BookingRate.STANDARD}
-          focusRef={chosen === BookingRate.STANDARD ? field.ref : undefined}
+          focusRef={chosen === BookingRate.STANDARD ? ref : undefined}
         />
         <RateOption
           id={`${id}-${BookingRate.NON_REFUNDABLE}`}
@@ -96,9 +98,7 @@ export const RateChoice = ({
           note="Cancelling refunds nothing. If the host cancels, you are refunded in full."
           quote={rates?.nonRefundable ?? null}
           chosen={chosen === BookingRate.NON_REFUNDABLE}
-          focusRef={
-            chosen === BookingRate.NON_REFUNDABLE ? field.ref : undefined
-          }
+          focusRef={chosen === BookingRate.NON_REFUNDABLE ? ref : undefined}
         />
       </RadioGroup>
     </div>

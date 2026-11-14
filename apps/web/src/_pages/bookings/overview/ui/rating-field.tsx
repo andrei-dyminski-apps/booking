@@ -34,14 +34,17 @@ export const RatingField = ({
   control: Control<CreateReviewInput>;
   disabled: boolean;
 }) => {
-  const { field, fieldState } = useController({ control, name: "rating" });
+  const {
+    field: { ref, name, value, onChange, onBlur },
+    fieldState,
+  } = useController({ control, name: "rating" });
   // The stars a pointer over the row would give, drawn ahead of the click — while the
   // stars can be picked at all, so a submit that starts under the pointer shows the value.
   const [hovered, setHovered] = useState<number | null>(null);
 
   const messages = messagesOf(fieldState.error);
   const errorId = messages === undefined ? undefined : "field-rating-error";
-  const shown = disabled ? field.value : (hovered ?? field.value);
+  const shown = disabled ? value : (hovered ?? value);
 
   return (
     <Field data-invalid={fieldState.invalid}>
@@ -72,15 +75,15 @@ export const RatingField = ({
             >
               <input
                 // The first star takes the ref, so a refused submit focuses the group.
-                ref={stars === MIN_RATING ? field.ref : undefined}
+                ref={stars === MIN_RATING ? ref : undefined}
                 type="radio"
-                name={field.name}
+                name={name}
                 value={stars}
-                checked={field.value === stars}
+                checked={value === stars}
                 onChange={() => {
-                  field.onChange(stars);
+                  onChange(stars);
                 }}
-                onBlur={field.onBlur}
+                onBlur={onBlur}
                 disabled={disabled}
                 aria-invalid={fieldState.invalid}
                 aria-describedby={errorId}
