@@ -9,7 +9,7 @@ export const STRIPE_CLIENT = Symbol("STRIPE_CLIENT");
  * compiler accepts only the version the SDK is typed against, and the webhook endpoints
  * have to deliver in it too — `readEvent` warns about an event in another.
  */
-export const STRIPE_API_VERSION = "2026-09-30.endive";
+export const STRIPE_API_VERSION = "2026-10-28.endive";
 
 /**
  * Four seconds a call and no SDK retry: the SDK's 80-second default outlives the
