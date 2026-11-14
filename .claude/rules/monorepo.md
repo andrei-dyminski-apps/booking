@@ -12,6 +12,8 @@ pnpm add -D <pkg> --filter @repo/api
 pnpm add <pkg> -w              # only for repository-wide tooling
 ```
 
+A dependency whose install script has to run (a native binding, a generated client) goes into `allowBuilds` in `pnpm-workspace.yaml` as `true`; one whose script the project does not need goes in as `false`. pnpm 12 fails the install on any script left undeclared.
+
 Internal packages are wired in as `"@repo/ui": "workspace:*"` — not through a relative path and not through a version from npm.
 
 ## Package boundaries

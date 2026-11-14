@@ -1,3 +1,18 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+# Dependencies whose install scripts may run; any other one with a script fails the install.
+allowBuilds:
+  # Native binding, the password hashes of apps/api.
+  argon2: true
+  # The schema engine `prisma migrate deploy` runs on Railway, and the client generation.
+  prisma: true
+  "@prisma/engines": true
+  # The binary check behind tsup in packages/contracts.
+  esbuild: true
+  # Native accelerators of bullmq's msgpackr and of jest's file watcher.
+  msgpackr-extract: true
+  "@parcel/watcher": true
+  # Install-time telemetry of swagger-ui-dist, nothing the app needs.
+  "@scarf/scarf": false
