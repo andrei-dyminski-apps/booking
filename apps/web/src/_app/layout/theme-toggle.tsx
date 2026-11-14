@@ -1,19 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { MoonIcon, SunIcon } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@repo/ui/components/button";
 
 export const ThemeToggle = () => {
   const { resolvedTheme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-
   // The server renders without knowing the stored theme, so the icon appears only
-  // after hydration — otherwise the first paint would not match the markup.
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  // after hydration — otherwise the first paint would not match the markup. Hydration
+  // renders with the server snapshot and React re-renders with the client one right
+  // after; a mount without hydration starts on the client one.
+  const mounted = useSyncExternalStore(subscribeToNothing, isClient, isServer);
 
   return (
     <Button
@@ -31,3 +29,7 @@ export const ThemeToggle = () => {
     </Button>
   );
 };
+
+const subscribeToNothing = () => () => {};
+const isClient = () => true;
+const isServer = () => false;

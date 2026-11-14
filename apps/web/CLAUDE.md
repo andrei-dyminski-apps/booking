@@ -1350,7 +1350,11 @@ belongs in the same step.
 The lint is two tools in one script, and both have to pass:
 
 - **ESLint** carries the ordinary rules of the repository — TypeScript, React hooks, the
-  Next.js plugin, Prettier. It holds **no** FSD rules.
+  Next.js plugin, Prettier. It holds **no** FSD rules. The React hooks preset includes the
+  React Compiler rules: no ref read during render, no state set synchronously in an effect.
+  The `field` of `useController` carries a `ref`: once `field.ref` reaches a `ref` prop, the
+  rule reports every `field.*` read during render. Every field destructures it
+  (`field: { ref, value, onChange, onBlur }`), including the ones the rule does not flag.
 - **Steiger** (`steiger.config.js`) owns the architecture entirely: the layer boundaries
   above, cross-imports between sibling slices, sidesteps of a public API, and the shape of
   the tree that no per-file linter can see (a slice without a public API, a segment in the

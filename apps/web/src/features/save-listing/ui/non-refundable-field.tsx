@@ -38,7 +38,9 @@ export const NonRefundableField = ({
   form: UseFormReturn<ListingFormValues, unknown, CreateListingInput>;
   pending: boolean;
 }) => {
-  const { field } = useController({
+  const {
+    field: { ref, value, onChange, onBlur },
+  } = useController({
     control: form.control,
     name: "offersNonRefundable",
   });
@@ -47,17 +49,17 @@ export const NonRefundableField = ({
     name: "cancellationPolicy",
   });
   const unavailable = policy === CancellationPolicy.NON_REFUNDABLE;
-  const offered = field.value && !unavailable;
+  const offered = value && !unavailable;
 
   return (
     <div className="flex flex-col gap-4">
       <Field orientation="horizontal">
         <Switch
           id={SWITCH_ID}
-          ref={field.ref}
+          ref={ref}
           checked={offered}
-          onCheckedChange={field.onChange}
-          onBlur={field.onBlur}
+          onCheckedChange={onChange}
+          onBlur={onBlur}
           disabled={pending || unavailable}
         />
         <FieldLabel htmlFor={SWITCH_ID} className="flex-wrap">

@@ -35,7 +35,10 @@ export const PolicyField = ({
   form: UseFormReturn<ListingFormValues, unknown, CreateListingInput>;
   pending: boolean;
 }) => {
-  const { field, fieldState } = useController({
+  const {
+    field: { ref, value, onChange, onBlur },
+    fieldState,
+  } = useController({
     control: form.control,
     name: "cancellationPolicy",
   });
@@ -50,17 +53,17 @@ export const PolicyField = ({
     <Field data-invalid={fieldState.invalid}>
       <HintLabel htmlFor={ID} label="Cancellation policy" hint={hint} />
       <Select
-        value={field.value}
-        onValueChange={(value) => {
-          if (value !== null) field.onChange(value);
+        value={value}
+        onValueChange={(picked) => {
+          if (picked !== null) onChange(picked);
         }}
         items={CANCELLATION_POLICY_LABELS}
         disabled={pending}
       >
         <SelectTrigger
           id={ID}
-          ref={field.ref}
-          onBlur={field.onBlur}
+          ref={ref}
+          onBlur={onBlur}
           aria-invalid={fieldState.invalid}
           aria-describedby={
             [hint?.id, errorId].filter(Boolean).join(" ") || undefined

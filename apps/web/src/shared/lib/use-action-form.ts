@@ -4,6 +4,7 @@ import {
   useActionState,
   useEffect,
   useRef,
+  useState,
   type BaseSyntheticEvent,
 } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -145,7 +146,7 @@ export function useActionForm<
   // keeps the effect below reacting to an answer from the server and to nothing else —
   // re-running it per render would put a refusal back under a field the visitor has
   // since corrected.
-  const fields = useRef(defaultValues).current;
+  const [fields] = useState(defaultValues);
 
   useEffect(() => {
     // The server keys its messages by field name, and a name is a string until something
