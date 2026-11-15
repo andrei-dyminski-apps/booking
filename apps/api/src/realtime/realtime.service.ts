@@ -118,6 +118,15 @@ export class RealtimeService implements OnModuleDestroy {
   }
 
   /**
+   * Throws when Redis does not answer, for `/health`. Sent on the publisher, whose
+   * settings are the ones a probe wants: no offline queue, so a dropped connection fails at
+   * once, and `PUBLISH_TIMEOUT_MS`, so a silent one fails within a second.
+   */
+  async ping(): Promise<void> {
+    await this.publisher.ping();
+  }
+
+  /**
    * The events of one account, for as long as somebody is subscribed, opened by `opening`
    * once the channel is subscribed. That order is the point of the parameter: whatever
    * `opening` reads — the counts of the `sync` — is read after the channel listens, so a

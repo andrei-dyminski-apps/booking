@@ -628,7 +628,34 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
       `ParseUUIDPipe` checks drawn as a uuid; an example on every request body, typed as
       the contract's input, parsed by a spec and required by another. See "main.ts" in
       `apps/api/CLAUDE.md`.
-- [ ] Observability: structured logs (pino), a request-logging interceptor, `/health` (`@nestjs/terminus`).
+- [x] Observability: structured logs (pino), request logging, `/health` (`@nestjs/terminus`).
+      `nestjs-pino` behind every Nest `Logger` from its first line, a failed boot included —
+      JSON in production, `pino-pretty` in development, the level named and the time ISO,
+      without the route-by-route listing of every boot in production — and a line per
+      request from pino-http. One departure: the request log is middleware rather than the
+      planned interceptor, since an interceptor runs after the guards and would miss the
+      `401`s and `429`s they answer; mounted first in `main.ts`, ahead of the body parsers,
+      so their `400`s and `413`s are logged too. The request is logged by an allowlist, not
+      by redacting a full dump of headers, and by its path without the query string; a
+      client that left before its answer is a `499`; an `X-Request-Id` is adopted or minted
+      and sent back. `GET /health` is readiness — Postgres and Redis, both through
+      indicators of its own — and is what the Railway deploy now waits on (`healthcheck` in
+      `.railway/railway.ts`). See "main.ts" in `apps/api/CLAUDE.md`.
+- [ ] **Every line on stdout is JSON.** While Redis cannot be reached, the connections of
+      the BullMQ queues and workers write `Error: connect ECONNREFUSED …` with its stack
+      straight to stderr, a dozen multi-line blocks within seconds, outside pino and
+      without a level a log viewer reads (`RealtimeService` already listens for its own
+      connections' errors and logs them as a `warn`). Route those errors through a
+      `Logger` too, once per outage rather than once per retry, so that the README's
+      "JSON lines" holds without exceptions.
+- [ ] **One request id from the browser to the database.** The API adopts an
+      `X-Request-Id` or mints one, but in production nothing ever sends it one: the browser
+      reaches it only through the BFF, which forwards neither its own id nor anyone
+      else's, so the lines of the frontend and of the API cannot be joined. The BFF should
+      mint the id per proxied request (or keep a valid one the browser sent), forward it
+      upstream — `x-request-id` joins `FORWARDED_HEADERS` in
+      `apps/web/src/_app/bff/api-proxy.ts` — and log it with its own line, so that the id
+      a user quotes from the answer's header finds both halves.
 - [x] **The admin's side of what the money paths set aside.** The API half is done (see
       "Payments" in `apps/api/CLAUDE.md`), with two departures from the routes below: the
       failed events are `GET /payment-events/failed`, a path rather than a one-value

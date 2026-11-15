@@ -25,7 +25,7 @@ pnpm dev
 ```
 
 - the application — http://localhost:3000 (`/login`, `/register`, `/profile`)
-- API — http://localhost:3001
+- API — http://localhost:3001 (`/health` says whether it reaches Postgres and Redis)
 - OpenAPI — http://localhost:3001/docs (not published when `NODE_ENV=production`)
 
 The seed also creates three demo logins: `guest@example.com` (books stays), `owner@example.com` (hosts most of the catalogue) — both plain users, since hosting is owning a listing rather than a role — and `admin@example.com` — password `password123`. A few more accounts (`ines@example.com`, a second host who also books one of the owner's stays; `alex.morgan@example.com`, `amorgan@example.com`, `sam@example.com`, guests) share that password and exist so the filter boxes have names to suggest.
@@ -135,11 +135,12 @@ The three catalogue routes are the first cached reads in the application: `GET /
 
 ## Endpoints
 
-Every route below except `/`, the four public `/auth/*` ones, the three reading routes
+Every route below except `/`, `/health`, the four public `/auth/*` ones, the three reading routes
 of the catalogue and a listing's reviews is behind the global `JwtAuthGuard` and answers `401` without a session.
 
 | Method   | Path                               | What it does                                                                                                   |
 | -------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `GET`    | `/health`                          | readiness: `200` while Postgres and Redis answer, `503` naming which did not; public, logged only when failing |
 | `POST`   | `/auth/register`                   | register and open a session; `400` — failed the schema, `409` — email is taken                                 |
 | `POST`   | `/auth/login`                      | log in; `401` — wrong email or password, `403` — the account is blocked                                        |
 | `POST`   | `/auth/refresh`                    | rotate the token pair; `401` — missing, spent or forged token, cookies cleared                                 |
@@ -548,7 +549,7 @@ All settings live in a single `.env` in the repository root — there are no per
 
 | Variable                        | What it sets                                                                 | Default                                                 |
 | ------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `NODE_ENV`                      | `production` hides Swagger and marks the auth cookies `Secure`               | unset, set by the runtime                               |
+| `NODE_ENV`                      | `production`: no Swagger, `Secure` cookies, JSON logs (not `pino-pretty`)    | unset, set by the runtime                               |
 | `WEB_PORT`                      | Next port (`apps/web`)                                                       | `3000`                                                  |
 | `API_PORT`                      | Nest port (`apps/api`)                                                       | `3001`                                                  |
 | `API_HOST`                      | the interface Nest listens on                                                | `0.0.0.0`                                               |
@@ -677,6 +678,12 @@ That removes three deployment problems rather than one. There is no `SameSite=No
 - `watchPatterns` keeps a frontend-only push from redeploying the backend;
 - `preDeploy` runs `db:deploy` before the new instance starts — committed migrations only, never `migrate dev`;
 - the Node major is pinned by `devEngines.runtime` in the root `package.json` (`26`, the one CI runs). Railpack reads it before `engines.node`, whose range it would otherwise resolve to its lowest major; pnpm leaves it alone, since it sets no `onFail`, so a local Node 24 still installs;
+- `healthcheck` is `/health`, which answers `200` only once the new instance reaches Postgres and Redis, so Railway keeps the old one serving until it does;
+- the API writes its logs to stdout as JSON lines (pino):
+  - only because `NODE_ENV` is `production` — anything else pretty-prints them through `pino-pretty`, a dev dependency, and fails at boot where dev dependencies were not installed;
+  - every line names its level (`"level":"error"`, which Railway colours and `@level:error` finds) and states its time in ISO 8601, a boot that fails included; the route-by-route listing Nest prints at every boot is left out;
+  - one line per request with its id, method, path, status and time. `userId` and `responseTime` are top-level fields Railway's log view filters by (`@userId:…`); the request's own sit nested under `req` and `res`, which Railway does not document filtering into;
+  - an `X-Request-Id` the caller sends is kept and every answer names its own, so a failed request can be found by the id in its headers;
 - `start` is a plain `node` on `apps/api/dist/main`: the port comes from Railway's `PORT` and the host from `API_HOST`, both of which `src/main.ts` already reads. Not `pnpm start` — that keeps pnpm and the Nest CLI resident beside the API, about 180 MB of memory doing nothing. `--max-semi-space-size=2` caps V8's young generation at 2 MB: since Node 24 it is sized from the memory the container can see and is not given back after a burst, which held the API about 80 MB above its working set; measured on Node 26 the cap brings it from ~270 MB to ~190 MB with no change in request throughput.
 
 The file exports the partial `api`, so it owns only the resources it declares: Postgres and Redis live in the same project but stay managed in the dashboard, and an apply never deletes them. A change to the file reaches Railway through the CLI rather than a push — `railway config plan`, then `railway config apply` once the plan shows only the intended changes.

@@ -68,7 +68,7 @@ const TAGS: [name: string, description: string][] = [
   ["Lookups", "Admin: the people and listings a filter can be narrowed to"],
   ["Refund failures", "Admin: refunds a guest's bank sent back"],
   ["Payment events", "Admin: provider events the inbox set aside"],
-  ["Status", "Whether the API answers at all"],
+  ["Status", "Whether the API answers, and reaches what it needs"],
 ];
 
 const ERROR_CONTENT = {
