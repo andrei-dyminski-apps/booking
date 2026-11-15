@@ -10,27 +10,26 @@ import pino, {
   type LoggerOptions,
 } from "pino";
 import { pinoHttp, type Options } from "pino-http";
+import {
+  CLIENT_CLOSED_REQUEST,
+  REQUEST_ID_HEADER,
+  REQUEST_ID_PATTERN,
+} from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { HEALTH_PATH } from "../health/health-path";
 
-export const REQUEST_ID_HEADER = "x-request-id";
-
-/**
- * What an incoming id may look like to be adopted rather than replaced: a UUID, a
- * platform's trace id. It ends up in every line of the request and in the answer's header,
- * so anything longer or stranger is a value a client writes into the logs, and gets a fresh
- * UUID instead.
- */
-const ADOPTABLE_REQUEST_ID = /^[\w.:-]{1,128}$/;
-
 /**
  * The id every line of one request carries. An id the caller already sent is kept, so a
- * proxy in front that names its requests can be followed into this log; either way the
- * answer names it back, which is what a user reporting an error can quote.
+ * proxy in front that names its requests can be followed into this log — the frontend's
+ * BFF does, for every request a browser makes — and either way the answer names it back,
+ * which is what a user reporting an error can quote. An id is adopted only in the shape of
+ * `REQUEST_ID_PATTERN`: it ends up in every line of the request and in the answer's
+ * header, so anything else gets a fresh UUID instead.
  *
  * A kept id is a correlation hint, not a fact: anyone reaching the API directly can send
  * one, another request's included, so two requests may share it and nothing may be
- * decided by it. The browser cannot — the BFF does not forward the header.
+ * decided by it. The browser cannot — the BFF mints its own id and drops whatever a
+ * browser sent.
  */
 export function requestIdOf(
   request: IncomingMessage,
@@ -38,7 +37,7 @@ export function requestIdOf(
 ): string {
   const incoming = request.headers[REQUEST_ID_HEADER];
   const id =
-    typeof incoming === "string" && ADOPTABLE_REQUEST_ID.test(incoming)
+    typeof incoming === "string" && REQUEST_ID_PATTERN.test(incoming)
       ? incoming
       : randomUUID();
 
@@ -48,15 +47,11 @@ export function requestIdOf(
 }
 
 /**
- * What a request that ended before its answer did is logged as: `499`, nginx's "client
- * closed request", the convention log readers know. pino-http writes the line on `close`
- * as well as on `finish`, and the status there is whatever the handler had set — a `200`
- * nobody received. The event stream ends this way every time a tab closes, which is right:
- * nobody was left to answer.
+ * The status the client got, or `499` (`CLIENT_CLOSED_REQUEST`) when it left before the
+ * answer was finished. pino-http writes the line on `close` as well as on `finish`, and the
+ * status there is whatever the handler had set — a `200` nobody received. The event stream
+ * ends this way every time a tab closes, which is right: nobody was left to answer.
  */
-export const CLIENT_CLOSED_REQUEST = 499;
-
-/** The status the client got, or `499` when it left before the answer was finished. */
 export function loggedStatusOf(response: ServerResponse): number {
   return response.writableFinished
     ? response.statusCode

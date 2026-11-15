@@ -359,3 +359,9 @@ export {
   type StuckStayPage,
   type StuckStayQuery,
 } from "./set-aside.js";
+
+export {
+  CLIENT_CLOSED_REQUEST,
+  REQUEST_ID_HEADER,
+  REQUEST_ID_PATTERN,
+} from "./request-id.js";

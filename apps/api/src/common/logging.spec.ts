@@ -9,10 +9,10 @@ import { PinoLogger } from "nestjs-pino";
 import pino, { type Logger } from "pino";
 import { pinoHttp } from "pino-http";
 import request from "supertest";
+import { REQUEST_ID_HEADER } from "@repo/contracts";
 import { useBodyParsers } from "./body-parsers";
 import {
   LOG_FORMAT,
-  REQUEST_ID_HEADER,
   nestLogger,
   requestLogOptions,
   theLogger,

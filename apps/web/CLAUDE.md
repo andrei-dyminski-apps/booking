@@ -389,6 +389,24 @@ other browsers are following. Behind the proxy the question does not arise.
   client. The API reads the header from the right, so an invented value always sits
   further left than the entries it trusts, and the only way to make it forgeable is to set
   `TRUST_PROXY` higher than the number of proxies that really append.
+- **Every request is named here, and the name travels both ways.** The handler mints an
+  id for every request (`REQUEST_ID_HEADER` of `@repo/contracts`), sends it upstream,
+  where the API adopts it, sets it on the answer — the `502` and `500` the handler writes
+  itself included — and logs a line of its own with it (`_app/bff/request-log.ts`): JSON
+  in production in the shape of the API's pino-http line, a short line otherwise, written
+  in a `finally` so a throw is logged too. What made the proxy fail — a throw, an unset
+  `API_ORIGIN` behind its `500` — goes into that line as `err`, pino's shape, never into a
+  second line beside it nor into the answer. An `x-request-id` the browser sent is dropped,
+  however well-formed: this is the edge, the browser reads the id off the answer and has
+  no use for naming its requests, and a kept one would let anybody file a request under
+  somebody else's id in both logs. Vercel's `x-vercel-id` goes into the line as
+  `vercelId`, to find the request in the platform's logs — beside the id, never as it,
+  since nothing documents that Vercel replaces one a client sent, and for the same reason
+  only in the shape the API asks of an id it adopts (`REQUEST_ID_PATTERN` of
+  `@repo/contracts`, as is the `CLIENT_CLOSED_REQUEST` both log). The path is logged
+  without its query, a browser that left as `499` with `aborted: true` as the API marks
+  it, an event stream once its headers arrive. A server render, which goes direct, is not
+  named here; the API mints its id.
 - **The API's answer headers are passed on, all but the hop's own and two more**: its
   `Set-Cookie`, re-issued above, and its `Strict-Transport-Security`. The API sends Helmet's
   headers; the rest of them are harmless on a JSON answer, but HSTS with `includeSubDomains`
@@ -1422,7 +1440,9 @@ component:
   links carry, since one that lost a filter or kept a cursor would answer a different
   question than the one on the screen).
 - A security gate — `_app/proxy/proxy.ts`, which decides whether a request reaches a page
-  or is bounced to `/login?next=…`.
+  or is bounced to `/login?next=…`, and the request id of `_app/bff/api-proxy.ts`: minted
+  for every request, never taken from the browser, and the same on the API's request, the
+  answer and the BFF's own line — the `502`, the `500` and a browser that left included.
 - A concurrency or protocol invariant — the single-flight session refresh and the
   retry-one-401-once rule in `shared/api/http-client.ts`, and the event stream's protocol in
   `shared/api/server-events.ts` (one stream per browser and its handover between tabs, the
