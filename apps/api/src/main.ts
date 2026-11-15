@@ -6,6 +6,7 @@ import { AppModule } from "./app.module";
 import { ACCESS_TOKEN_COOKIE } from "./auth/cookies";
 import { useBodyParsers } from "./common/body-parsers";
 import { assertConnectionUrlsMatchCompose } from "./common/env-consistency";
+import { useSecurityHeaders } from "./common/security-headers";
 
 async function bootstrap() {
   // Before Nest, and deliberately: creating the module connects Prisma, so a URL that
@@ -20,6 +21,7 @@ async function bootstrap() {
   });
 
   useBodyParsers(app);
+  useSecurityHeaders(app);
 
   // Behind a proxy every request arrives from the proxy's address, and the rate limiter
   // would then put all clients in one bucket — one attacker locking everyone else out.

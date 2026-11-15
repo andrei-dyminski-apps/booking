@@ -247,6 +247,11 @@ function downstreamHeaders(upstream: Response): Headers {
     // the API's host and would be refused by the browser anyway.
     if (name === "set-cookie") continue;
 
+    // The API's transport policy is for the API's host. Passed on, its `includeSubDomains`
+    // would decide HTTPS for every subdomain of wherever this application is deployed —
+    // that is this origin's hosting to say, not an answer of somebody else's.
+    if (name === "strict-transport-security") continue;
+
     headers.set(name, value);
   }
 

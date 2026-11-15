@@ -389,6 +389,13 @@ other browsers are following. Behind the proxy the question does not arise.
   client. The API reads the header from the right, so an invented value always sits
   further left than the entries it trusts, and the only way to make it forgeable is to set
   `TRUST_PROXY` higher than the number of proxies that really append.
+- **The API's answer headers are passed on, all but the hop's own and two more**: its
+  `Set-Cookie`, re-issued above, and its `Strict-Transport-Security`. The API sends Helmet's
+  headers; the rest of them are harmless on a JSON answer, but HSTS with `includeSubDomains`
+  would decide HTTPS for every subdomain of wherever this application is deployed, and that
+  is this origin's hosting to say. Vercel says it already: `includeSubDomains; preload` on
+  `*.vercel.app`, a plain two-year `max-age` on a custom domain, which is why no HSTS of
+  this application's own is set either.
 - Three things follow for free, and each of them removed a deployment concern: there is no
   CORS left to configure, `AUTH_COOKIE_DOMAIN` stops being a problem of the frontend, and
   the address of the API stops being a build-time constant in the bundle.
