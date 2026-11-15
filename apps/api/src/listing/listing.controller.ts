@@ -18,6 +18,8 @@ import {
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
+  ApiTags,
 } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
 import {
@@ -66,6 +68,7 @@ const NOT_YOUR_LISTING =
  * `@Roles(Role.USER, Role.ADMIN)` routes carry a second check inside the service: the role
  * says the caller may edit listings, only the row says which ones.
  */
+@ApiTags("Listings")
 @Controller("listings")
 export class ListingController {
   constructor(private readonly listingService: ListingService) {}
@@ -76,6 +79,7 @@ export class ListingController {
    * `searchParams` for the same reason.
    */
   @Get()
+  @ApiOperation({ summary: "Search the catalogue" })
   @Public()
   @Throttle(CATALOGUE_READS)
   @ApiOkResponse({ type: ListingPageDto })
@@ -90,6 +94,7 @@ export class ListingController {
 
   /** Declared before `:id`: Nest matches routes in declaration order. */
   @Get("mine")
+  @ApiOperation({ summary: "The caller's own listings" })
   @Roles(Role.USER)
   @ApiOkResponse({ type: ListingDto, isArray: true })
   findMine(@CurrentUser() user: AuthenticatedUser): Promise<Listing[]> {
@@ -97,6 +102,7 @@ export class ListingController {
   }
 
   @Get(":id")
+  @ApiOperation({ summary: "One listing with its nightly pricing" })
   @Public()
   @Throttle(CATALOGUE_READS)
   @ApiOkResponse({ type: ListingDetailDto })
@@ -115,6 +121,7 @@ export class ListingController {
    * that locks the row.
    */
   @Get(":id/availability")
+  @ApiOperation({ summary: "The dates a listing is booked within a window" })
   @Public()
   @Throttle(CATALOGUE_READS)
   @ApiOkResponse({ type: ListingAvailabilityDto })
@@ -130,6 +137,7 @@ export class ListingController {
   }
 
   @Post()
+  @ApiOperation({ summary: "Create a listing" })
   @Roles(Role.USER)
   @ApiCreatedResponse({ type: ListingDto })
   create(
@@ -140,6 +148,7 @@ export class ListingController {
   }
 
   @Patch(":id")
+  @ApiOperation({ summary: "Change a listing" })
   @Roles(Role.USER, Role.ADMIN)
   @ApiOkResponse({ type: ListingDto })
   @ApiBadRequestResponse({
@@ -164,6 +173,7 @@ export class ListingController {
   }
 
   @Delete(":id")
+  @ApiOperation({ summary: "Delete a listing" })
   @Roles(Role.USER, Role.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse({

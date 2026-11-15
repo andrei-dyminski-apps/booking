@@ -18,6 +18,8 @@ import {
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
+  ApiTags,
   ApiUnauthorizedResponse,
 } from "@nestjs/swagger";
 import {
@@ -44,12 +46,14 @@ import { WaitlistService } from "./waitlist.service";
  * one route an admin reaches is the other side of the list, the ranges waited for on
  * listings, which names both roles itself.
  */
+@ApiTags("Waitlist")
 @Controller("waitlist")
 @Roles(Role.USER)
 export class WaitlistController {
   constructor(private readonly waitlistService: WaitlistService) {}
 
   @Get()
+  @ApiOperation({ summary: "The caller's waitlist entries" })
   @ApiOkResponse({ type: WaitlistDto })
   findMine(@CurrentUser() user: AuthenticatedUser): Promise<WaitlistEntry[]> {
     return this.waitlistService.findMine(user.id);
@@ -61,6 +65,10 @@ export class WaitlistController {
    * host's listings.
    */
   @Get("demand")
+  @ApiOperation({
+    summary:
+      "The dates guests wait for on the caller's listings, or any for an admin",
+  })
   @Roles(Role.USER, Role.ADMIN)
   @ApiOkResponse({ type: WaitlistDemandPageDto })
   @ApiBadRequestResponse({
@@ -80,6 +88,7 @@ export class WaitlistController {
    * for — joining twice is waiting once.
    */
   @Post()
+  @ApiOperation({ summary: "Wait for booked dates to come free" })
   @ApiCreatedResponse({ type: WaitlistEntryDto })
   @ApiNotFoundResponse({
     description: "The listing does not exist",
@@ -108,6 +117,7 @@ export class WaitlistController {
   }
 
   @Delete(":id")
+  @ApiOperation({ summary: "Leave the waitlist for those dates" })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse()
   @ApiNotFoundResponse({

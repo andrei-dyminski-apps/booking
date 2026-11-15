@@ -1,17 +1,32 @@
 import { INestApplication } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
-import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { App } from "supertest/types";
 import { AppModule } from "./../src/app.module";
-import { ACCESS_TOKEN_COOKIE } from "./../src/auth/cookies";
+import {
+  ACCESS_TOKEN_COOKIE,
+  REFRESH_TOKEN_COOKIE,
+} from "./../src/auth/cookies";
+import { createOpenApiDocument } from "./../src/common/openapi";
 
 type ResponseObject = {
   content?: Record<string, unknown>;
   description?: string;
 };
 
+type Parameter = {
+  name: string;
+  in: string;
+  schema?: { format?: string };
+};
+
 type Operation = {
-  security?: unknown[];
+  summary?: string;
+  tags?: string[];
+  parameters?: Parameter[];
+  requestBody?: {
+    content?: Record<string, { schema?: { $ref?: string } }>;
+  };
+  security?: Record<string, unknown>[];
   responses?: Record<string, ResponseObject>;
 };
 
@@ -22,7 +37,9 @@ type Operation = {
  */
 type SecurityView = {
   security?: unknown[];
+  tags?: { name: string }[];
   paths: Record<string, Record<string, Operation>>;
+  components?: { schemas?: Record<string, { example?: unknown }> };
 };
 
 /**
@@ -78,20 +95,8 @@ describe("OpenAPI document (e2e)", () => {
     app = moduleFixture.createNestApplication();
     await app.init();
 
-    // The same builder as main.ts — the point is what the decorators produce through it.
-    const config = new DocumentBuilder()
-      .addCookieAuth(
-        ACCESS_TOKEN_COOKIE,
-        { type: "apiKey", in: "cookie", name: ACCESS_TOKEN_COOKIE },
-        ACCESS_TOKEN_COOKIE,
-      )
-      .addSecurityRequirements(ACCESS_TOKEN_COOKIE)
-      .build();
-
-    document = SwaggerModule.createDocument(
-      app,
-      config,
-    ) as unknown as SecurityView;
+    // The function main.ts serves — the point is what the decorators produce through it.
+    document = createOpenApiDocument(app) as unknown as SecurityView;
   });
 
   afterAll(async () => {
@@ -215,8 +220,6 @@ describe("OpenAPI document (e2e)", () => {
       ["/", "get"],
       ["/auth/register", "post"],
       ["/auth/login", "post"],
-      ["/auth/refresh", "post"],
-      ["/auth/logout", "post"],
       // The catalogue and everything a browsing visitor reads of it.
       ["/listings", "get"],
       ["/listings/{id}", "get"],
@@ -225,6 +228,131 @@ describe("OpenAPI document (e2e)", () => {
       // An empty requirement object is how OpenAPI 3 spells "no credential needed", and an
       // operation-level `security` replaces the root one rather than adding to it.
       expect(operation(path, method).security).toEqual([{}]);
+    }
+  });
+
+  it("names the refresh cookie on the two routes that read it, still open to the guard", () => {
+    for (const path of ["/auth/refresh", "/auth/logout"]) {
+      const { security } = operation(path, "post");
+
+      expect(security).toContainEqual({});
+      expect(security).toContainEqual({ [REFRESH_TOKEN_COOKIE]: [] });
+    }
+  });
+
+  it("gives every route a summary and a tag the document lists", () => {
+    const listed = new Set(document.tags?.map((tag) => tag.name));
+
+    for (const [path, method, found] of routes()) {
+      const route = { route: `${method} ${path}` };
+
+      expect({
+        ...route,
+        summary: Boolean(found.summary),
+        // One tag, and one /docs lists: a tag named only by a controller is put after the
+        // listed ones and reads as a misspelling of one.
+        tagged:
+          found.tags?.length === 1 &&
+          found.tags.every((tag) => listed.has(tag)),
+      }).toEqual({ ...route, summary: true, tagged: true });
+    }
+  });
+
+  it("answers the guard's 401 exactly where the document asks for the session", () => {
+    const NO_SESSION = "access cookie is missing";
+
+    for (const [path, method, found] of routes()) {
+      const route = { route: `${method} ${path}` };
+      const open = found.security?.some(
+        (requirement) => Object.keys(requirement).length === 0,
+      );
+
+      expect({
+        ...route,
+        guard401:
+          found.responses?.["401"]?.description?.includes(NO_SESSION) === true,
+      }).toEqual({ ...route, guard401: open !== true });
+    }
+
+    // A 401 of the route's own keeps its reason first and gains the guard's after it.
+    const { description } =
+      operation("/bookings", "post").responses?.["401"] ?? {};
+
+    expect(description).toMatch(
+      new RegExp(
+        `^The account behind the token no longer exists\n\n.*${NO_SESSION}`,
+      ),
+    );
+  });
+
+  it("draws a path id as a uuid where ParseUUIDPipe checks it, and only there", () => {
+    const ids = routes().flatMap(([path, method, found]) =>
+      (found.parameters ?? [])
+        .filter((parameter) => parameter.in === "path")
+        .map((parameter) => ({
+          route: `${method} ${path}`,
+          uuid: parameter.schema?.format === "uuid",
+        })),
+    );
+
+    // A provider's id — Stripe's `evt_…` and `re_…` — is no uuid, and no pipe refuses it.
+    const providerIds = new Set([
+      "post /payment-events/{id}/retry",
+      "post /refund-failures/{id}/resolve",
+    ]);
+
+    expect(ids).toEqual(
+      ids.map(({ route }) => ({ route, uuid: !providerIds.has(route) })),
+    );
+  });
+
+  it("answers the pipe's 400 on every route that takes checked input, and the limiter's 429 on all", () => {
+    for (const [path, method, found] of routes()) {
+      const route = { route: `${method} ${path}` };
+      const parameters = found.parameters ?? [];
+      const parsed =
+        found.requestBody !== undefined ||
+        parameters.some((parameter) => parameter.in === "query");
+      const checkedId = parameters.some(
+        (parameter) =>
+          parameter.in === "path" && parameter.schema?.format === "uuid",
+      );
+      const description = found.responses?.["400"]?.description ?? "";
+
+      // The pipe's `errors` only where a schema parses; `ParseUUIDPipe` answers a message.
+      expect({
+        ...route,
+        validation: description.includes("failed validation"),
+        notUuid: description.includes("not a UUID"),
+        limited: found.responses?.["429"] !== undefined,
+      }).toEqual({
+        ...route,
+        validation: parsed,
+        notUuid: checkedId,
+        limited: true,
+      });
+    }
+
+    // A path id no pipe checks cannot fail validation, and the route has nothing else to.
+    expect(
+      operation("/payment-events/{id}/retry", "post").responses?.["400"],
+    ).toBeUndefined();
+  });
+
+  it("offers an example on every request body", () => {
+    // `api-example.spec.ts` parses the examples there are; this is what notices a body
+    // that has none.
+    for (const [path, method, found] of routes()) {
+      if (found.requestBody === undefined) continue;
+
+      const ref = found.requestBody.content?.["application/json"]?.schema?.$ref;
+      const name = ref?.split("/").at(-1) ?? "";
+      const route = { route: `${method} ${path}` };
+
+      expect({
+        ...route,
+        example: document.components?.schemas?.[name]?.example !== undefined,
+      }).toEqual({ ...route, example: true });
     }
   });
 });

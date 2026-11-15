@@ -17,6 +17,11 @@ import {
   stuckStayPageSchema,
   stuckStayQuerySchema,
 } from "@repo/contracts";
+import {
+  EXAMPLE_ID,
+  exampleDay,
+  withExample,
+} from "../../../common/api-example";
 
 /**
  * Nest needs a class as the runtime metatype of the parameter — the schemas themselves
@@ -25,17 +30,32 @@ import {
  * `BookingDto` below exists only to be handed to `@ApiOkResponse`/`@ApiCreatedResponse`,
  * the controller itself keeps returning the contract type `Booking`.
  */
-export class CreateBookingDto extends createZodDto(createBookingSchema) {}
+export class CreateBookingDto extends createZodDto(
+  withExample(createBookingSchema, {
+    listingId: EXAMPLE_ID.listing,
+    from: exampleDay(30),
+    to: exampleDay(33),
+    rate: "STANDARD",
+  }),
+) {}
 
 /**
  * Optional as a whole: `DELETE` usually travels without a body, and a missing one is the
  * same as an empty one.
  */
 export class CancelBookingDto extends createZodDto(
-  cancelBookingSchema.default({}),
+  withExample(cancelBookingSchema.default({}), {
+    reason: "Our flight was cancelled.",
+  }),
 ) {}
 
-export class EndStayEarlyDto extends createZodDto(endStayEarlySchema) {}
+export class EndStayEarlyDto extends createZodDto(
+  // `refundCents` has to be the one the stay quotes for that check-out, or it is refused.
+  withExample(endStayEarlySchema, {
+    checkOut: exampleDay(1),
+    refundCents: 24_000,
+  }),
+) {}
 
 export class BookingDto extends createZodDto(bookingSchema) {}
 
@@ -52,7 +72,13 @@ export class BookingPageDto extends createZodDto(bookingPageSchema) {}
 
 export class BookingPaymentDto extends createZodDto(bookingPaymentSchema) {}
 
-export class AdminRefundDto extends createZodDto(adminRefundSchema) {}
+export class AdminRefundDto extends createZodDto(
+  withExample(adminRefundSchema, {
+    amountCents: 5_000,
+    reason: "The hot water was out for a night.",
+    requestId: EXAMPLE_ID.request,
+  }),
+) {}
 
 export class BookingAdjustmentDto extends createZodDto(
   bookingAdjustmentSchema,
@@ -75,5 +101,7 @@ export class RefundFailurePageDto extends createZodDto(
 ) {}
 
 export class ResolveRefundFailureDto extends createZodDto(
-  resolveRefundFailureSchema,
+  withExample(resolveRefundFailureSchema, {
+    resolution: "Sent back by bank transfer to the guest's new account.",
+  }),
 ) {}

@@ -1,5 +1,5 @@
 import { Controller, Logger, Sse, type MessageEvent } from "@nestjs/common";
-import { ApiOkResponse } from "@nestjs/swagger";
+import { ApiOkResponse, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { ServerEvent } from "@repo/contracts";
 import {
   catchError,
@@ -53,6 +53,7 @@ const STREAM_LIFETIME_MS = 5 * 60 * 1000;
  *
  * Behind the global guard like everything else: the stream is the caller's own account.
  */
+@ApiTags("Events")
 @Controller("events")
 export class EventsController {
   private readonly logger = new Logger(EventsController.name);
@@ -63,6 +64,7 @@ export class EventsController {
   ) {}
 
   @Sse()
+  @ApiOperation({ summary: "Subscribe to the caller's live events" })
   // The body is a stream of frames rather than one JSON document, so there is no DTO to
   // hand over: what is described is the media type, and the shape of each `data` line is
   // named in words.

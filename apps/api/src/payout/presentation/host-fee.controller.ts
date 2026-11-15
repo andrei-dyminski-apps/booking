@@ -15,6 +15,8 @@ import {
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
+  ApiTags,
   ApiUnauthorizedResponse,
 } from "@nestjs/swagger";
 import { Role, type HostFeeOverview } from "@repo/contracts";
@@ -33,11 +35,13 @@ import {
  * The fees hosts owe for cancelling paid stays. A host reads their own — no id in the
  * route, the session names them — and an admin reads any host's and waives a fee.
  */
+@ApiTags("Host fees")
 @Controller("host-fees")
 export class HostFeeController {
   constructor(private readonly hostFeeService: HostFeeService) {}
 
   @Get("mine")
+  @ApiOperation({ summary: "The fees the caller owes as a host" })
   @Roles(Role.USER)
   @ApiOkResponse({ type: HostFeeOverviewDto })
   mine(@CurrentUser() user: AuthenticatedUser): Promise<HostFeeOverview> {
@@ -45,6 +49,7 @@ export class HostFeeController {
   }
 
   @Get()
+  @ApiOperation({ summary: "Admin: the fees one host owes" })
   @Roles(Role.ADMIN)
   @ApiOkResponse({ type: HostFeeOverviewDto })
   ofHost(@Query() query: HostFeeQueryDto): Promise<HostFeeOverview> {
@@ -52,6 +57,7 @@ export class HostFeeController {
   }
 
   @Post(":id/waive")
+  @ApiOperation({ summary: "Admin: waive a host fee" })
   @HttpCode(HttpStatus.NO_CONTENT)
   @Roles(Role.ADMIN)
   @ApiNoContentResponse()

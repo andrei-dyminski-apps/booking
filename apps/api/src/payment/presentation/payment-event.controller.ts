@@ -13,6 +13,8 @@ import {
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
+  ApiTags,
 } from "@nestjs/swagger";
 import { Role, type FailedPaymentEventPage } from "@repo/contracts";
 import { Roles } from "../../auth/decorators/roles.decorator";
@@ -27,6 +29,7 @@ import {
  * The inbox as an admin sees it: the events its worker gave up on, and the way to hand one
  * back. The admin's alone, stated once on the class for the reason `UserController` gives.
  */
+@ApiTags("Payment events")
 @Controller("payment-events")
 @Roles(Role.ADMIN)
 export class PaymentEventController {
@@ -35,6 +38,7 @@ export class PaymentEventController {
   ) {}
 
   @Get("failed")
+  @ApiOperation({ summary: "Admin: provider events the inbox set aside" })
   @ApiOkResponse({ type: FailedPaymentEventPageDto })
   @ApiBadRequestResponse({
     description: "The cursor was not issued by this list",
@@ -48,6 +52,7 @@ export class PaymentEventController {
 
   /** Queued at once; the worker runs it with a whole count of attempts again. */
   @Post(":id/retry")
+  @ApiOperation({ summary: "Admin: hand a set-aside event back to the inbox" })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse()
   @ApiNotFoundResponse({

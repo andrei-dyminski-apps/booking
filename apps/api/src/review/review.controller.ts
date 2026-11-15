@@ -17,6 +17,8 @@ import {
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
+  ApiTags,
 } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
 import { Role, type Review, type ReviewPage } from "@repo/contracts";
@@ -42,6 +44,7 @@ const STALE_CURSOR =
  * controller has no prefix of its own and each route names its parent. The one route of
  * its own is the admin's removal, which needs nothing but the review.
  */
+@ApiTags("Reviews")
 @Controller()
 export class ReviewController {
   constructor(private readonly reviewService: ReviewService) {}
@@ -52,6 +55,7 @@ export class ReviewController {
    * rather than from a visitor's — see `CATALOGUE_READS`.
    */
   @Get("listings/:id/reviews")
+  @ApiOperation({ summary: "A listing's reviews" })
   @Public()
   @Throttle(CATALOGUE_READS)
   @ApiOkResponse({ type: ReviewPageDto })
@@ -68,6 +72,7 @@ export class ReviewController {
   }
 
   @Get("guests/:id/reviews")
+  @ApiOperation({ summary: "The reviews hosts left about a guest" })
   @ApiOkResponse({ type: ReviewPageDto })
   @ApiBadRequestResponse({ description: STALE_CURSOR, type: ApiErrorDto })
   @ApiNotFoundResponse({
@@ -85,6 +90,7 @@ export class ReviewController {
 
   /** The guest reviews the listing, its owner reviews the guest — an admin writes neither. */
   @Post("bookings/:id/reviews")
+  @ApiOperation({ summary: "Review a stay" })
   @Roles(Role.USER)
   @ApiCreatedResponse({ type: ReviewDto })
   @ApiNotFoundResponse({
@@ -106,6 +112,7 @@ export class ReviewController {
   }
 
   @Delete("reviews/:id")
+  @ApiOperation({ summary: "Admin: delete a review" })
   @Roles(Role.ADMIN)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse()

@@ -37,8 +37,10 @@ const DEFAULT_LIMIT = 20;
  * next one of the same list.
  */
 export const PAGING = {
-  cursor: blank(z.string().min(1).optional()),
+  cursor: blank(z.string().min(1).optional()).describe(
+    "The previous page's `nextCursor`; left out for the first page",
+  ),
   limit: blank(
     z.coerce.number().int().min(1).max(MAX_LIMIT).default(DEFAULT_LIMIT),
-  ),
+  ).describe(`Rows per page, at most ${String(MAX_LIMIT)}`),
 };

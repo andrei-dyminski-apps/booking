@@ -6,9 +6,12 @@ import {
   userPageSchema,
   userQuerySchema,
 } from "@repo/contracts";
+import { withExample } from "../../common/api-example";
 
 /** The request halves, which the global pipe validates — see `booking.dto.ts` for why a class. */
-export class UpdateUserDto extends createZodDto(updateUserSchema) {}
+export class UpdateUserDto extends createZodDto(
+  withExample(updateUserSchema, { blocked: true }),
+) {}
 
 export class UserQueryDto extends createZodDto(userQuerySchema) {}
 
