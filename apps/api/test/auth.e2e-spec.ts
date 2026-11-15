@@ -283,6 +283,9 @@ describe("AuthController (e2e)", () => {
       await attempt().expect(401);
     }
 
-    await attempt().expect(429);
+    const limited = await attempt().expect(429);
+
+    // What /docs promises a client about the wait (`addSharedResponses`).
+    expect(limited.headers["retry-after"]).toMatch(/^\d+$/);
   });
 });

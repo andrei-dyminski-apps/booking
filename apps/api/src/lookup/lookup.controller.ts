@@ -1,5 +1,10 @@
 import { Controller, Get, Query } from "@nestjs/common";
-import { ApiBadRequestResponse, ApiOkResponse } from "@nestjs/swagger";
+import {
+  ApiBadRequestResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiTags,
+} from "@nestjs/swagger";
 import { Role, type LookupPage } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
@@ -18,12 +23,16 @@ import { LookupService } from "./lookup.service";
  * the lookups over stays read accounts and listings both, which `BookingModule` could only
  * reach by importing `ListingModule` — the module that already imports it.
  */
+@ApiTags("Lookups")
 @Controller("lookups")
 export class LookupController {
   constructor(private readonly lookupService: LookupService) {}
 
   /** The accounts with a listing on offer: the admin's `?ownerId=` on `/admin`. */
   @Get("owners")
+  @ApiOperation({
+    summary: "Admin: accounts with a listing, matched by a search",
+  })
   @Roles(Role.ADMIN)
   @ApiOkResponse({ type: LookupPageDto })
   @ApiBadRequestResponse({
@@ -40,6 +49,7 @@ export class LookupController {
    * `?hostId=` on `/admin/payments`, where a stay outlives the listing it names.
    */
   @Get("hosts")
+  @ApiOperation({ summary: "Admin: hosts of stays, matched by a search" })
   @Roles(Role.ADMIN)
   @ApiOkResponse({ type: LookupPageDto })
   @ApiBadRequestResponse({
@@ -56,6 +66,9 @@ export class LookupController {
    * role, because any account may host — one with no listings is answered an empty page.
    */
   @Get("guests")
+  @ApiOperation({
+    summary: "Guests of the stays the caller may read, matched by a search",
+  })
   @ApiOkResponse({ type: LookupPageDto })
   @ApiBadRequestResponse({
     description:
@@ -75,6 +88,9 @@ export class LookupController {
    * own are the scope.
    */
   @Get("listings")
+  @ApiOperation({
+    summary: "Listings of the stays the caller may read, matched by a search",
+  })
   @ApiOkResponse({ type: LookupPageDto })
   @ApiBadRequestResponse({
     description:

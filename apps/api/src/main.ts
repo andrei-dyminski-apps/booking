@@ -1,11 +1,10 @@
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
-import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
-import { cleanupOpenApiDoc } from "nestjs-zod";
+import { SwaggerModule } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
-import { ACCESS_TOKEN_COOKIE } from "./auth/cookies";
 import { useBodyParsers } from "./common/body-parsers";
 import { assertConnectionUrlsMatchCompose } from "./common/env-consistency";
+import { createOpenApiDocument } from "./common/openapi";
 import { useSecurityHeaders } from "./common/security-headers";
 
 async function bootstrap() {
@@ -42,24 +41,7 @@ async function bootstrap() {
 
   // /docs describes the whole API surface, so it stays out of production.
   if (process.env.NODE_ENV !== "production") {
-    // OpenAPI schemas are derived from the @repo/contracts zod schemas;
-    // cleanupOpenApiDoc converts them into the shape @nestjs/swagger understands.
-    const config = new DocumentBuilder()
-      .setTitle("Booking API")
-      .setVersion("0.0.1")
-      // The session is a cookie, not a bearer header, so "Try it out" works only from a
-      // browser that already logged in through /auth/login. The requirement is document-
-      // wide because the guard is: every route is protected until @Public() opens it, and
-      // that decorator is what drops the requirement again on the operations it marks.
-      .addCookieAuth(
-        ACCESS_TOKEN_COOKIE,
-        { type: "apiKey", in: "cookie", name: ACCESS_TOKEN_COOKIE },
-        ACCESS_TOKEN_COOKIE,
-      )
-      .addSecurityRequirements(ACCESS_TOKEN_COOKIE)
-      .build();
-    const document = SwaggerModule.createDocument(app, config);
-    SwaggerModule.setup("docs", app, cleanupOpenApiDoc(document));
+    SwaggerModule.setup("docs", app, createOpenApiDocument(app));
   }
 
   const origins = (

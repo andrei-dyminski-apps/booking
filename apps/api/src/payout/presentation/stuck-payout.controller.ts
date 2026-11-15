@@ -10,6 +10,8 @@ import {
   ApiConflictResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
+  ApiOperation,
+  ApiTags,
 } from "@nestjs/swagger";
 import { Role } from "@repo/contracts";
 import { Roles } from "../../auth/decorators/roles.decorator";
@@ -21,12 +23,14 @@ import { PayoutService } from "../application/payout.service";
  * `BookingController`: the path is the stay's, the transfer is this module's, and `booking`
  * may not import it. The list of what is stuck is `GET /bookings/stuck`, for both kinds.
  */
+@ApiTags("Bookings")
 @Controller("bookings")
 @Roles(Role.ADMIN)
 export class StuckPayoutController {
   constructor(private readonly payoutService: PayoutService) {}
 
   @Post(":id/stuck/payout/retry")
+  @ApiOperation({ summary: "Admin: retry a host payout that was set aside" })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse()
   @ApiNotFoundResponse({

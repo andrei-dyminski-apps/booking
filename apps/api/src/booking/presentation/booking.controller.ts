@@ -12,15 +12,17 @@ import {
 } from "@nestjs/common";
 import {
   ApiBadGatewayResponse,
-  ApiBody,
   ApiBadRequestResponse,
+  ApiBody,
   ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
   ApiPreconditionFailedResponse,
+  ApiTags,
   ApiUnauthorizedResponse,
 } from "@nestjs/swagger";
 import {
@@ -61,6 +63,7 @@ import {
  * Only the reading routes are open to every role, and what they return is narrowed by that
  * role inside the service rather than here — a scope is not something a guard can express.
  */
+@ApiTags("Bookings")
 @Controller("bookings")
 export class BookingController {
   constructor(
@@ -82,6 +85,7 @@ export class BookingController {
    * frontend had to parse and draw in one go.
    */
   @Get()
+  @ApiOperation({ summary: "The stays the caller may see" })
   @ApiOkResponse({ type: BookingPageDto })
   @ApiBadRequestResponse({
     description:
@@ -100,6 +104,9 @@ export class BookingController {
    * which would otherwise take `stuck` for an id and refuse it as no uuid.
    */
   @Get("stuck")
+  @ApiOperation({
+    summary: "Admin: stays whose refund or payout stopped retrying",
+  })
   @Roles(Role.ADMIN)
   @ApiOkResponse({ type: StuckStayPageDto })
   @ApiBadRequestResponse({
@@ -116,6 +123,7 @@ export class BookingController {
    * `StuckPayoutController`'s, since only the payout module may send a transfer.
    */
   @Post(":id/stuck/refund/retry")
+  @ApiOperation({ summary: "Admin: retry a refund that was set aside" })
   @HttpCode(HttpStatus.NO_CONTENT)
   @Roles(Role.ADMIN)
   @ApiNoContentResponse()
@@ -132,6 +140,7 @@ export class BookingController {
   }
 
   @Get(":id")
+  @ApiOperation({ summary: "One stay with its priced nights" })
   @ApiOkResponse({ type: BookingDetailDto })
   @ApiNotFoundResponse({
     description: "The booking does not exist, or the caller may not read it",
@@ -151,6 +160,9 @@ export class BookingController {
    * provider's webhook, and so does the guest's notice.
    */
   @Post(":id/refunds")
+  @ApiOperation({
+    summary: "Admin: refund part of a payment, the stay left as it is",
+  })
   @HttpCode(HttpStatus.OK)
   @Roles(Role.ADMIN)
   @ApiOkResponse({ type: BookingAdjustmentDto })
@@ -184,6 +196,7 @@ export class BookingController {
   }
 
   @Get(":id/refunds")
+  @ApiOperation({ summary: "Admin: the refunds an admin gave on a stay" })
   @Roles(Role.ADMIN)
   @ApiOkResponse({ type: BookingAdjustmentListDto })
   @ApiNotFoundResponse({
@@ -207,6 +220,7 @@ export class BookingController {
    * on terms other than the ones it said.
    */
   @Post(":id/end-early")
+  @ApiOperation({ summary: "End a stay early and refund the unused nights" })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse()
   @ApiNotFoundResponse({
@@ -243,6 +257,7 @@ export class BookingController {
    * confirms it, and the page polls `GET /bookings/:id`.
    */
   @Post(":id/payment")
+  @ApiOperation({ summary: "Open the payment for a hold" })
   @HttpCode(HttpStatus.OK)
   @Roles(Role.USER)
   @ApiOkResponse({ type: BookingPaymentDto })
@@ -275,6 +290,7 @@ export class BookingController {
    * and does not book.
    */
   @Post()
+  @ApiOperation({ summary: "Hold dates on a listing" })
   @Roles(Role.USER)
   @ApiCreatedResponse({ type: BookingDto })
   @ApiNotFoundResponse({
@@ -294,8 +310,8 @@ export class BookingController {
       "The listing has been saved since the version the request names (`listingUpdatedAt`)",
     type: ApiErrorDto,
   })
-  // Not the 401 of the global guard, which every route answers: this one comes from the
-  // service, for a token whose account was deleted while the token was still valid.
+  // Not the 401 of the global guard, which `addSharedResponses` adds after it: this one
+  // comes from the service, for a token whose account was deleted while still valid.
   @ApiUnauthorizedResponse({
     description: "The account behind the token no longer exists",
     type: ApiErrorDto,
@@ -315,6 +331,7 @@ export class BookingController {
    * say sends none.
    */
   @Delete(":id")
+  @ApiOperation({ summary: "Cancel a stay" })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBody({ type: CancelBookingDto, required: false })
   @ApiNoContentResponse()

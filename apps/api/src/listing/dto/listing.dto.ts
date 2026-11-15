@@ -9,6 +9,7 @@ import {
   listingSchema,
   updateListingSchema,
 } from "@repo/contracts";
+import { withExample } from "../../common/api-example";
 
 /**
  * Nest needs a class as the runtime metatype of the parameter — the schemas themselves
@@ -17,9 +18,24 @@ import {
  * `ListingDto` below exists only to be handed to `@ApiOkResponse`/`@ApiCreatedResponse`,
  * the controller itself keeps returning the contract type `Listing`.
  */
-export class CreateListingDto extends createZodDto(createListingSchema) {}
+export class CreateListingDto extends createZodDto(
+  withExample(createListingSchema, {
+    title: "Sunny loft by the canal",
+    description:
+      "A top-floor loft with a balcony over the water, a full kitchen and a desk by the window.",
+    pricePerNightCents: 12_000,
+    capacity: 3,
+    cancellationPolicy: "MODERATE",
+    nonRefundableDiscountBps: 1_000,
+    timeZone: "Europe/Amsterdam",
+    checkInTime: "15:00",
+    pricing: { weekdays: { fri: 14_000, sat: 14_000 }, dates: [] },
+  }),
+) {}
 
-export class UpdateListingDto extends createZodDto(updateListingSchema) {}
+export class UpdateListingDto extends createZodDto(
+  withExample(updateListingSchema, { pricePerNightCents: 13_500, capacity: 4 }),
+) {}
 
 export class ListingDto extends createZodDto(listingSchema) {}
 

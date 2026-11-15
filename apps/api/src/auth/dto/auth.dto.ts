@@ -1,5 +1,6 @@
 import { createZodDto } from "nestjs-zod";
 import { loginSchema, registerSchema, userSchema } from "@repo/contracts";
+import { withExample } from "../../common/api-example";
 
 /**
  * Nest needs a class as the runtime metatype of the parameter — the schemas themselves
@@ -8,8 +9,20 @@ import { loginSchema, registerSchema, userSchema } from "@repo/contracts";
  * `UserDto` below exists only to be handed to `@ApiOkResponse`/`@ApiCreatedResponse`, the
  * controller itself keeps returning the contract type `User`.
  */
-export class RegisterDto extends createZodDto(registerSchema) {}
+export class RegisterDto extends createZodDto(
+  withExample(registerSchema, {
+    name: "Ada Lovelace",
+    email: "ada@example.com",
+    password: "correct-horse-battery",
+  }),
+) {}
 
-export class LoginDto extends createZodDto(loginSchema) {}
+export class LoginDto extends createZodDto(
+  // A demo login the seed writes, so "Try it out" signs in on a seeded database.
+  withExample(loginSchema, {
+    email: "guest@example.com",
+    password: "password123",
+  }),
+) {}
 
 export class UserDto extends createZodDto(userSchema) {}

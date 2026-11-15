@@ -11,10 +11,13 @@ import {
 import { Throttle, minutes } from "@nestjs/throttler";
 import {
   ApiConflictResponse,
+  ApiCookieAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiOkResponse,
+  ApiOperation,
+  ApiTags,
   ApiUnauthorizedResponse,
 } from "@nestjs/swagger";
 import type { Response } from "express";
@@ -23,7 +26,11 @@ import { ApiErrorDto } from "../common/dto/api-error.dto";
 import { AUTH_CONFIG, type AuthConfig } from "./auth.config";
 import { AuthService, type AuthResult } from "./auth.service";
 import type { AuthenticatedUser } from "./auth.types";
-import { clearAuthCookies, setAuthCookies } from "./cookies";
+import {
+  REFRESH_TOKEN_COOKIE,
+  clearAuthCookies,
+  setAuthCookies,
+} from "./cookies";
 import { CurrentUser } from "./decorators/current-user.decorator";
 import { Public } from "./decorators/public.decorator";
 import { RefreshToken } from "./decorators/refresh-token.decorator";
@@ -40,6 +47,7 @@ import { LoginDto, RegisterDto, UserDto } from "./dto/auth.dto";
  * deployment: too low and everything behind the proxy shares one bucket, too high and the
  * caller picks its own with a header.
  */
+@ApiTags("Auth")
 @Controller("auth")
 export class AuthController {
   constructor(
@@ -50,6 +58,7 @@ export class AuthController {
   @Public()
   @Throttle({ default: { ttl: minutes(1), limit: 10 } })
   @Post("register")
+  @ApiOperation({ summary: "Create an account and start its session" })
   @ApiCreatedResponse({ type: UserDto })
   @ApiConflictResponse({
     description: "Email is already registered",
@@ -65,6 +74,7 @@ export class AuthController {
   @Public()
   @Throttle({ default: { ttl: minutes(1), limit: 10 } })
   @Post("login")
+  @ApiOperation({ summary: "Log in and start a session" })
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ type: UserDto })
   @ApiUnauthorizedResponse({
@@ -88,6 +98,11 @@ export class AuthController {
    */
   @Public()
   @Post("refresh")
+  @ApiOperation({
+    summary: "Rotate the refresh token and issue a new access token",
+  })
+  // Public to the guard and read by the service: the refresh cookie is the credential.
+  @ApiCookieAuth(REFRESH_TOKEN_COOKIE)
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ type: UserDto })
   @ApiUnauthorizedResponse({
@@ -116,6 +131,8 @@ export class AuthController {
   /** Public for the same reason, and idempotent: the cookies are cleared either way. */
   @Public()
   @Post("logout")
+  @ApiOperation({ summary: "End the session and clear its cookies" })
+  @ApiCookieAuth(REFRESH_TOKEN_COOKIE)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse()
   async logout(
@@ -127,6 +144,7 @@ export class AuthController {
   }
 
   @Get("me")
+  @ApiOperation({ summary: "The signed-in account" })
   @ApiOkResponse({ type: UserDto })
   @ApiUnauthorizedResponse({
     description: "Session no longer exists, or its account has been blocked",

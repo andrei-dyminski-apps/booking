@@ -12,6 +12,8 @@ import {
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
+  ApiTags,
 } from "@nestjs/swagger";
 import {
   Role,
@@ -43,12 +45,14 @@ import { UserService } from "./user.service";
  * listed anything — blocking is the reversible answer to "this account must stop", and the
  * rows it leaves behind are the record of what the account did.
  */
+@ApiTags("Users")
 @Controller("users")
 @Roles(Role.ADMIN)
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
   @Get()
+  @ApiOperation({ summary: "Admin: search the accounts" })
   @ApiOkResponse({ type: UserPageDto })
   @ApiBadRequestResponse({
     description:
@@ -60,6 +64,9 @@ export class UserController {
   }
 
   @Get(":id")
+  @ApiOperation({
+    summary: "Admin: one account with its booking and listing counts",
+  })
   @ApiOkResponse({ type: ManagedUserDetailDto })
   @ApiNotFoundResponse({
     description: "The user does not exist",
@@ -75,6 +82,7 @@ export class UserController {
    * `JWT_ACCESS_TTL`.
    */
   @Patch(":id")
+  @ApiOperation({ summary: "Admin: block or unblock an account" })
   @ApiOkResponse({ type: ManagedUserDto })
   @ApiNotFoundResponse({
     description: "The user does not exist",

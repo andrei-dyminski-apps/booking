@@ -14,6 +14,8 @@ import {
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
+  ApiTags,
 } from "@nestjs/swagger";
 import { Role, type RefundFailurePage } from "@repo/contracts";
 import { Roles } from "../../auth/decorators/roles.decorator";
@@ -26,12 +28,14 @@ import {
 } from "./dto/booking.dto";
 
 /** The refunds a guest's bank sent back. The admin's alone, stated once on the class. */
+@ApiTags("Refund failures")
 @Controller("refund-failures")
 @Roles(Role.ADMIN)
 export class RefundFailureController {
   constructor(private readonly refundFailureService: RefundFailureService) {}
 
   @Get()
+  @ApiOperation({ summary: "Admin: refunds a guest's bank sent back" })
   @ApiOkResponse({ type: RefundFailurePageDto })
   @ApiBadRequestResponse({
     description:
@@ -44,6 +48,9 @@ export class RefundFailureController {
 
   /** Records how the money went back; it sends nothing. */
   @Post(":id/resolve")
+  @ApiOperation({
+    summary: "Admin: record how a returned refund was paid back",
+  })
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse()
   @ApiNotFoundResponse({

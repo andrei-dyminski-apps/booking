@@ -6,9 +6,16 @@ import {
   waitlistEntrySchema,
   waitlistSchema,
 } from "@repo/contracts";
+import { EXAMPLE_ID, exampleDay, withExample } from "../../common/api-example";
 
 /** The request metatype Nest needs, and the response shapes `/docs` is handed — see `booking.dto.ts`. */
-export class JoinWaitlistDto extends createZodDto(joinWaitlistSchema) {}
+export class JoinWaitlistDto extends createZodDto(
+  withExample(joinWaitlistSchema, {
+    listingId: EXAMPLE_ID.listing,
+    from: exampleDay(30),
+    to: exampleDay(33),
+  }),
+) {}
 
 export class WaitlistEntryDto extends createZodDto(waitlistEntrySchema) {}
 

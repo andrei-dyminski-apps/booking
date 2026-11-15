@@ -16,6 +16,8 @@ import {
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
+  ApiTags,
   ApiUnauthorizedResponse,
 } from "@nestjs/swagger";
 import {
@@ -59,11 +61,13 @@ const MALFORMED_CURSOR = {
  * reaches is decided by the rows rather than here: the scope of the list, and the `404`
  * for anybody who is not one of a thread's two people.
  */
+@ApiTags("Conversations")
 @Controller("conversations")
 export class ConversationController {
   constructor(private readonly conversationService: ConversationService) {}
 
   @Get()
+  @ApiOperation({ summary: "The caller's conversations" })
   @Roles(Role.USER)
   @ApiOkResponse({ type: ConversationPageDto })
   @ApiBadRequestResponse(MALFORMED_CURSOR)
@@ -76,6 +80,7 @@ export class ConversationController {
 
   /** Guests write first; a host answers in the thread a guest opened. */
   @Post()
+  @ApiOperation({ summary: "Write to a listing's host" })
   @Roles(Role.USER)
   @ApiCreatedResponse({ type: ConversationDto })
   @ApiNotFoundResponse({
@@ -98,6 +103,7 @@ export class ConversationController {
   }
 
   @Get(":id")
+  @ApiOperation({ summary: "One conversation" })
   @Roles(Role.USER)
   @ApiOkResponse({ type: ConversationDto })
   @ApiNotFoundResponse(NOT_A_SIDE)
@@ -110,6 +116,7 @@ export class ConversationController {
 
   /** The thread, the newest message first — it is read from its end. */
   @Get(":id/messages")
+  @ApiOperation({ summary: "A conversation's messages, newest first" })
   @Roles(Role.USER)
   @ApiOkResponse({ type: MessagePageDto })
   @ApiBadRequestResponse(MALFORMED_CURSOR)
@@ -123,6 +130,7 @@ export class ConversationController {
   }
 
   @Post(":id/messages")
+  @ApiOperation({ summary: "Send a message" })
   @Roles(Role.USER)
   @ApiCreatedResponse({ type: MessageDto })
   @ApiNotFoundResponse(NOT_A_SIDE)
@@ -140,6 +148,7 @@ export class ConversationController {
    * what the other list says would be marked read by a prefetch nobody looked at.
    */
   @Post(":id/read")
+  @ApiOperation({ summary: "Mark a conversation read up to a moment" })
   @Roles(Role.USER)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiNoContentResponse()

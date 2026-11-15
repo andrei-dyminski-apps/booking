@@ -12,6 +12,8 @@ import {
   ApiBadRequestResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
+  ApiOperation,
+  ApiTags,
 } from "@nestjs/swagger";
 import type { NotificationPage, UnreadCount } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
@@ -29,11 +31,13 @@ import { NotificationService } from "./notification.service";
  * any of these routes, so there is no scope to get wrong and every role reads the same
  * way. The writes answer with the count that is left, which is what the bell shows next.
  */
+@ApiTags("Notifications")
 @Controller("notifications")
 export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
 
   @Get()
+  @ApiOperation({ summary: "The caller's notifications" })
   @ApiOkResponse({ type: NotificationPageDto })
   @ApiBadRequestResponse({
     description: "The cursor was not issued by this list",
@@ -47,12 +51,14 @@ export class NotificationController {
   }
 
   @Get("unread-count")
+  @ApiOperation({ summary: "How many notifications are unread" })
   @ApiOkResponse({ type: UnreadCountDto })
   unreadCount(@CurrentUser() user: AuthenticatedUser): Promise<UnreadCount> {
     return this.notificationService.unreadCount(user.id);
   }
 
   @Post("read")
+  @ApiOperation({ summary: "Mark every notification read" })
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ type: UnreadCountDto })
   markAllRead(@CurrentUser() user: AuthenticatedUser): Promise<UnreadCount> {
@@ -60,6 +66,7 @@ export class NotificationController {
   }
 
   @Post(":id/read")
+  @ApiOperation({ summary: "Mark one notification read" })
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ type: UnreadCountDto })
   @ApiNotFoundResponse({

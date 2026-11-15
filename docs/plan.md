@@ -619,7 +619,15 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
       its defaults but `upgrade-insecure-requests`, registered before `/docs` so the one HTML
       page gets them too; the frontend's BFF passes them on but HSTS, which is the frontend
       host's own to set. `app.useSecurityHeaders()` is Nest 12's, so the package it is.
-- [ ] Bring Swagger up to a complete description with examples and auth.
+- [x] Bring Swagger up to a complete description with examples and auth. One builder,
+      `createOpenApiDocument` (`src/common/openapi.ts`), serves `/docs` and is what the spec
+      checks: a description of the session, errors, paging, money and limits; a summary and
+      a listed tag on every route; the refresh cookie as a second scheme on the two routes
+      that read it; the pipes' `400`s, the guard's `401` and the limiter's `429` added to
+      the finished document where they apply rather than decorated by hand, a path id
+      `ParseUUIDPipe` checks drawn as a uuid; an example on every request body, typed as
+      the contract's input, parsed by a spec and required by another. See "main.ts" in
+      `apps/api/CLAUDE.md`.
 - [ ] Observability: structured logs (pino), a request-logging interceptor, `/health` (`@nestjs/terminus`).
 - [x] **The admin's side of what the money paths set aside.** The API half is done (see
       "Payments" in `apps/api/CLAUDE.md`), with two departures from the routes below: the
