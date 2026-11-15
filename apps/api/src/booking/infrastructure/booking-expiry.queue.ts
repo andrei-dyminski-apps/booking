@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import { type Job, Queue } from "bullmq";
 import { DISPOSABLE, registerSweep } from "../../common/job-options";
+import { RedisOutage } from "../../common/redis-outage";
 import { BookingJobs } from "../application/ports/booking-jobs";
 
 export const BOOKING_EXPIRY_QUEUE = "booking-expiry";
@@ -66,11 +67,19 @@ export class BookingExpiryQueue
 {
   private readonly logger = new Logger(BookingExpiryQueue.name);
 
+  private readonly redisOutage = new RedisOutage(
+    this.logger,
+    `The ${BOOKING_EXPIRY_QUEUE} queue`,
+  );
+
   constructor(
     @InjectQueue(BOOKING_EXPIRY_QUEUE)
     private readonly queue: Queue<BookingExpiryJobData>,
   ) {
     super();
+    queue.on("error", (error) => {
+      this.redisOutage.report(error, queue.getBackend());
+    });
   }
 
   /** Not awaited: a slow Redis must not hold the API's boot open. */

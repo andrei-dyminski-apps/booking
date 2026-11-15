@@ -641,13 +641,16 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
       and sent back. `GET /health` is readiness — Postgres and Redis, both through
       indicators of its own — and is what the Railway deploy now waits on (`healthcheck` in
       `.railway/railway.ts`). See "main.ts" in `apps/api/CLAUDE.md`.
-- [ ] **Every line on stdout is JSON.** While Redis cannot be reached, the connections of
-      the BullMQ queues and workers write `Error: connect ECONNREFUSED …` with its stack
-      straight to stderr, a dozen multi-line blocks within seconds, outside pino and
-      without a level a log viewer reads (`RealtimeService` already listens for its own
-      connections' errors and logs them as a `warn`). Route those errors through a
-      `Logger` too, once per outage rather than once per retry, so that the README's
-      "JSON lines" holds without exceptions.
+- [x] **Every line on stdout is JSON.** While Redis cannot be reached, the connections of
+      the BullMQ queues and workers wrote `Error: connect ECONNREFUSED …` with its stack
+      straight to stderr — BullMQ's `emit` falls back to `console.error` when an `error`
+      event has no listener — over a thousand lines in ten seconds. Every queue and worker
+      now listens (the queue adapters in their constructors, the processors through
+      `@OnWorkerEvent("error")`, registered as the worker is created) and reports through
+      `RedisOutage` (`src/common/redis-outage.ts`): a warning when a client loses Redis, a
+      line when its backend is `ready` again, nothing between. `RealtimeService`, which
+      warned on every retry, goes through it too. An error that is not about the
+      connection, while it is up, is logged as an error each time.
 - [ ] **One request id from the browser to the database.** The API adopts an
       `X-Request-Id` or mints one, but in production nothing ever sends it one: the browser
       reaches it only through the BFF, which forwards neither its own id nor anyone
