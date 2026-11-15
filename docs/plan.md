@@ -615,7 +615,10 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
 - [x] Tests: unit tests for the services, e2e over the whole booking and payment cycle (Stripe mocked), the concurrency test from phase 4.
 - [x] CI: GitHub Actions — `lint`, `check-types`, `test`, `build` with the turbo cache; a badge in the README. The e2e specs run too, as a second job against Postgres and Redis service containers ("Continuous integration" in `README.md`).
 - [x] Rate limiting (`@nestjs/throttler`) on the auth endpoints — pulled forward into phase 2: argon2 turns an unlimited `/auth/login` into a memory amplifier, so it could not wait.
-- [ ] Helmet.
+- [x] Helmet. `helmet` on every answer of the API (`src/common/security-headers.ts`),
+      its defaults but `upgrade-insecure-requests`, registered before `/docs` so the one HTML
+      page gets them too; the frontend's BFF passes them on but HSTS, which is the frontend
+      host's own to set. `app.useSecurityHeaders()` is Nest 12's, so the package it is.
 - [ ] Bring Swagger up to a complete description with examples and auth.
 - [ ] Observability: structured logs (pino), a request-logging interceptor, `/health` (`@nestjs/terminus`).
 - [x] **The admin's side of what the money paths set aside.** The API half is done (see
