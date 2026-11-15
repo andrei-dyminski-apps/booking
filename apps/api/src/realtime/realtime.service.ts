@@ -2,6 +2,7 @@ import { Injectable, Logger, type OnModuleDestroy } from "@nestjs/common";
 import { serverEventSchema, type ServerEvent } from "@repo/contracts";
 import { Redis } from "ioredis";
 import { from, Observable, ReplaySubject, switchMap } from "rxjs";
+import { RedisOutage } from "../common/redis-outage";
 import { requireRedisUrl } from "../common/redis-url";
 
 /** One channel per account: whatever is published there reaches every tab it has open. */
@@ -94,10 +95,15 @@ export class RealtimeService implements OnModuleDestroy {
     });
 
     // Without a listener an `error` event is an uncaught exception; with one, ioredis
-    // keeps reconnecting and this only says so.
-    for (const connection of [this.publisher, this.subscriber]) {
+    // keeps reconnecting and this only says so, once per outage.
+    for (const [connection, client] of [
+      [this.publisher, "The event publisher"],
+      [this.subscriber, "The event subscriber"],
+    ] as const) {
+      const redisOutage = new RedisOutage(this.logger, client);
+
       connection.on("error", (error: unknown) => {
-        this.logger.warn(`Redis connection error: ${String(error)}`);
+        redisOutage.report(error, connection);
       });
     }
   }

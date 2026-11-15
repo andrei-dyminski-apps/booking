@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import { type Job, Queue } from "bullmq";
 import { DISPOSABLE, registerSweep } from "../../common/job-options";
+import { RedisOutage } from "../../common/redis-outage";
 import { PaymentEventJobs } from "../application/ports/payment-event-jobs";
 
 export const PAYMENT_EVENT_QUEUE = "payment-event";
@@ -51,11 +52,19 @@ export class PaymentEventQueue
 {
   private readonly logger = new Logger(PaymentEventQueue.name);
 
+  private readonly redisOutage = new RedisOutage(
+    this.logger,
+    `The ${PAYMENT_EVENT_QUEUE} queue`,
+  );
+
   constructor(
     @InjectQueue(PAYMENT_EVENT_QUEUE)
     private readonly queue: Queue<PaymentEventJobData>,
   ) {
     super();
+    queue.on("error", (error) => {
+      this.redisOutage.report(error, queue.getBackend());
+    });
   }
 
   /** Not awaited: a Redis that is slow must not hold the API's boot open. */

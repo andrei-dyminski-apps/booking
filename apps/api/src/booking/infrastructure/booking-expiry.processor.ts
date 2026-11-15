@@ -1,6 +1,7 @@
 import { OnWorkerEvent, Processor, WorkerHost } from "@nestjs/bullmq";
 import { Logger } from "@nestjs/common";
 import { logJobFailure, unknownJob } from "../../common/job-failure";
+import { RedisOutage } from "../../common/redis-outage";
 import { BookingRefundService } from "../application/booking-refund.service";
 import { BookingService } from "../application/booking.service";
 import {
@@ -24,6 +25,11 @@ const WORKER_CONCURRENCY = 4;
 @Processor(BOOKING_EXPIRY_QUEUE, { concurrency: WORKER_CONCURRENCY })
 export class BookingExpiryProcessor extends WorkerHost {
   private readonly logger = new Logger(BookingExpiryProcessor.name);
+
+  private readonly redisOutage = new RedisOutage(
+    this.logger,
+    `The ${BOOKING_EXPIRY_QUEUE} worker`,
+  );
 
   constructor(
     private readonly bookingService: BookingService,
@@ -79,5 +85,11 @@ export class BookingExpiryProcessor extends WorkerHost {
   @OnWorkerEvent("failed")
   onFailed(job: BookingExpiryJob | undefined, error: Error): void {
     logJobFailure(this.logger, job, error);
+  }
+
+  /** Registered with the worker as it is created, so not one error reaches stderr. */
+  @OnWorkerEvent("error")
+  onError(error: Error): void {
+    this.redisOutage.report(error, this.worker.getBackend());
   }
 }
