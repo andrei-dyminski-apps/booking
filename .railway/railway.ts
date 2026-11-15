@@ -23,7 +23,7 @@ export default defineRailway(() => {
         "turbo.json",
       ],
     },
-    start: "node apps/api/dist/main",
+    start: "node --max-semi-space-size=2 apps/api/dist/main",
     healthcheck: "/",
     preDeploy: "pnpm --filter @repo/api db:deploy",
     replicas: { "us-east4-eqdc4a": 1 },
