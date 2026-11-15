@@ -24,7 +24,7 @@ export default defineRailway(() => {
       ],
     },
     start: "node --max-semi-space-size=2 apps/api/dist/main",
-    healthcheck: "/",
+    healthcheck: "/health",
     preDeploy: "pnpm --filter @repo/api db:deploy",
     replicas: { "us-east4-eqdc4a": 1 },
     networking: { privateNetworkEndpoint: "repoapi" },

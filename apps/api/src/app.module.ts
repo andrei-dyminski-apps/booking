@@ -2,6 +2,7 @@ import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
 import { APP_GUARD, APP_PIPE } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule, minutes } from "@nestjs/throttler";
+import { LoggerModule } from "nestjs-pino";
 import { ZodValidationPipe } from "nestjs-zod";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
@@ -9,9 +10,11 @@ import { AuthModule } from "./auth/auth.module";
 import { JwtAuthGuard } from "./auth/guards/jwt-auth.guard";
 import { RolesGuard } from "./auth/guards/roles.guard";
 import { BookingModule } from "./booking/booking.module";
+import { loggerParams } from "./common/logging";
 import { requireRedisUrl } from "./common/redis-url";
 import { ConversationModule } from "./conversation/conversation.module";
 import { EventsModule } from "./events/events.module";
+import { HealthModule } from "./health/health.module";
 import { ListingModule } from "./listing/listing.module";
 import { LookupModule } from "./lookup/lookup.module";
 import { NotificationModule } from "./notification/notification.module";
@@ -23,6 +26,8 @@ import { WaitlistModule } from "./waitlist/waitlist.module";
 
 @Module({
   imports: [
+    // The structured logger and the request log — see `loggerParams`.
+    LoggerModule.forRoot(loggerParams()),
     // A ceiling per address for the whole API: this one only keeps a single client from
     // monopolising the service. What a route actually needs lives next to it, in both
     // directions — @Throttle in AuthController tightens it to 10 where an attempt costs
@@ -43,6 +48,7 @@ import { WaitlistModule } from "./waitlist/waitlist.module";
     BookingModule,
     ConversationModule,
     EventsModule,
+    HealthModule,
     ListingModule,
     LookupModule,
     NotificationModule,

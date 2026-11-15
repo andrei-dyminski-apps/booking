@@ -4,6 +4,7 @@ import { SwaggerModule } from "@nestjs/swagger";
 import { AppModule } from "./app.module";
 import { useBodyParsers } from "./common/body-parsers";
 import { assertConnectionUrlsMatchCompose } from "./common/env-consistency";
+import { nestLogger, theLogger, useRequestLog } from "./common/logging";
 import { createOpenApiDocument } from "./common/openapi";
 import { useSecurityHeaders } from "./common/security-headers";
 
@@ -14,11 +15,16 @@ async function bootstrap() {
   assertConnectionUrlsMatchCompose();
 
   // The parsers are registered by hand so that only the signed webhooks keep their raw
-  // bytes — see `useBodyParsers`.
+  // bytes — see `useBodyParsers`. The logger is handed over here rather than taken from
+  // the module once it exists, so a module that fails to start is reported in the same
+  // JSON as everything after it — see `nestLogger`.
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bodyParser: false,
+    logger: nestLogger(),
   });
 
+  // First, so that a request every later middleware refuses is logged and named too.
+  useRequestLog(app);
   useBodyParsers(app);
   useSecurityHeaders(app);
 
@@ -63,4 +69,11 @@ async function bootstrap() {
     process.env.API_HOST ?? "0.0.0.0",
   );
 }
-void bootstrap();
+
+// What fails outside Nest's own guard — the check of .env above, a port already taken —
+// is logged as the rest is, and ends the process: a half-started API keeps its database
+// and Redis connections open and would otherwise hang instead of exiting.
+bootstrap().catch((error: unknown) => {
+  theLogger().fatal({ err: error }, "The API did not start");
+  process.exit(1);
+});
