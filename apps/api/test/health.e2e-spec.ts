@@ -2,7 +2,8 @@ import type { NestExpressApplication } from "@nestjs/platform-express";
 import { Test, TestingModule } from "@nestjs/testing";
 import request from "supertest";
 import { AppModule } from "./../src/app.module";
-import { REQUEST_ID_HEADER, useRequestLog } from "./../src/common/logging";
+import { REQUEST_ID_HEADER } from "@repo/contracts";
+import { useRequestLog } from "./../src/common/logging";
 import { waitUntil } from "./wait-until";
 
 /** Against the docker-compose Postgres and Redis, the two the probe has to reach. */

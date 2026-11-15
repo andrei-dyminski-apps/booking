@@ -651,14 +651,17 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
       line when its backend is `ready` again, nothing between. `RealtimeService`, which
       warned on every retry, goes through it too. An error that is not about the
       connection, while it is up, is logged as an error each time.
-- [ ] **One request id from the browser to the database.** The API adopts an
+- [x] **One request id from the browser to the database.** The API adopts an
       `X-Request-Id` or mints one, but in production nothing ever sends it one: the browser
       reaches it only through the BFF, which forwards neither its own id nor anyone
-      else's, so the lines of the frontend and of the API cannot be joined. The BFF should
-      mint the id per proxied request (or keep a valid one the browser sent), forward it
-      upstream — `x-request-id` joins `FORWARDED_HEADERS` in
-      `apps/web/src/_app/bff/api-proxy.ts` — and log it with its own line, so that the id
-      a user quotes from the answer's header finds both halves.
+      else's, so the lines of the frontend and of the API cannot be joined.
+      Done: the BFF mints an id for every proxied request, sends it upstream as
+      `x-request-id` (`REQUEST_ID_HEADER` of `@repo/contracts`), answers with it — the
+      `502` and `500` it writes itself included — and logs it with a line of its own,
+      `_app/bff/request-log.ts`, in the shape of the API's, beside Vercel's `x-vercel-id`.
+      An id the browser sent is dropped rather than kept: the BFF is the edge, the browser
+      reads the id off the answer, and a kept one could be anybody's. A server render still
+      reaches the API without one and is named there.
 - [x] **The admin's side of what the money paths set aside.** The API half is done (see
       "Payments" in `apps/api/CLAUDE.md`), with two departures from the routes below: the
       failed events are `GET /payment-events/failed`, a path rather than a one-value

@@ -1,11 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
   ACCESS_TOKEN_COOKIE,
+  CLIENT_CLOSED_REQUEST,
   REFRESH_TOKEN_COOKIE,
+  REQUEST_ID_HEADER,
+  REQUEST_ID_PATTERN,
   type ApiError,
 } from "@repo/contracts";
 import { mirrorSessionCookies } from "#shared/api";
 import { apiOrigin, BFF_BASE_PATH, HTTP_STATUS } from "#shared/config";
+import { logRequest } from "./request-log";
 
 /**
  * The backend for frontend: everything the browser sends to the API goes through this
@@ -64,8 +68,20 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
-/** Nothing else of the incoming request is repeated upstream — see `upstreamHeaders`. */
+/**
+ * Nothing else of the incoming request is repeated upstream — see `upstreamHeaders`. The
+ * request id is not on the list: `handle` mints it rather than copying the browser's.
+ */
 const FORWARDED_HEADERS = ["accept", "content-type", "x-forwarded-for"];
+
+/**
+ * Vercel's own name for the request, which finds it in the platform's logs. Logged beside
+ * the id rather than used as it: its format is not documented, nothing says Vercel
+ * replaces one a client sent, and outside Vercel it is not there at all. For the same
+ * reason it is logged only in the shape of `REQUEST_ID_PATTERN`, the one the API asks of
+ * an id it adopts, rather than at whatever length it arrived.
+ */
+const VERCEL_ID_HEADER = "x-vercel-id";
 
 /**
  * Statuses defined to carry no body at all. `Response` refuses one that does, and an
@@ -78,17 +94,71 @@ const NULL_BODY_STATUSES = new Set<number>([
   HTTP_STATUS.NOT_MODIFIED,
 ]);
 
+/**
+ * Every request is named here before it is forwarded, always with a fresh id: the API
+ * adopts it, logs it on every line of the request, and the answer carries it — the 502 and
+ * 500 this handler writes itself included, when no line of the API's exists. An
+ * `x-request-id` the browser sent is dropped rather than kept. The browser has no use for
+ * naming its own requests — it reads the id off the answer — and a kept one would let
+ * anybody file their request under somebody else's id in both logs.
+ *
+ * The line is written whatever happens, a throw included: Next then answers its own 500,
+ * which carries no id, and this line — with the error as its `err` — is the only record of
+ * which request it was. The `500` of an unset `API_ORIGIN` carries its reason the same
+ * way, so a failure of the proxy is one line found by its id, not a second one beside it.
+ */
 async function handle(request: NextRequest): Promise<Response> {
-  const { pathname, search } = request.nextUrl;
-
-  let target: string;
+  const startedAt = performance.now();
+  const id = crypto.randomUUID();
+  let status: number = HTTP_STATUS.INTERNAL_SERVER_ERROR;
+  let error: unknown;
 
   try {
-    target = `${apiOrigin()}${pathname.slice(BFF_BASE_PATH.length)}${search}`;
-  } catch (cause) {
-    return misconfigured(cause);
-  }
+    let target: string | null = null;
 
+    try {
+      target = upstreamUrl(request);
+    } catch (cause) {
+      error = cause;
+    }
+
+    const response =
+      target === null ? misconfigured() : await forward(request, target, id);
+
+    response.headers.set(REQUEST_ID_HEADER, id);
+    status = response.status;
+
+    return response;
+  } catch (thrown) {
+    error = thrown;
+
+    throw thrown;
+  } finally {
+    logRequest({
+      id,
+      method: request.method,
+      path: request.nextUrl.pathname,
+      // The event stream is logged once its headers arrive, not when the tab closes it.
+      status: request.signal.aborted ? CLIENT_CLOSED_REQUEST : status,
+      durationMs: performance.now() - startedAt,
+      vercelId: vercelIdOf(request),
+      error,
+    });
+  }
+}
+
+/** Throws when `API_ORIGIN` is unset — see `misconfigured`. */
+function upstreamUrl(request: NextRequest): string {
+  const { pathname, search } = request.nextUrl;
+
+  return `${apiOrigin()}${pathname.slice(BFF_BASE_PATH.length)}${search}`;
+}
+
+async function forward(
+  request: NextRequest,
+  target: string,
+  id: string,
+): Promise<NextResponse> {
   const upstreamSignal = new AbortController();
   const deadline = setTimeout(() => {
     upstreamSignal.abort(
@@ -97,12 +167,17 @@ async function handle(request: NextRequest): Promise<Response> {
   }, UPSTREAM_TIMEOUT_MS);
 
   // A browser that goes away takes its upstream request with it — for an ordinary request
-  // that saves a little, for the event stream it is the only thing that ever closes it.
-  request.signal.addEventListener(
-    "abort",
-    () => upstreamSignal.abort(request.signal.reason),
-    { once: true },
-  );
+  // that saves a little, for the event stream it is the only thing that ever closes it. A
+  // signal already aborted fires no event, so that case is checked rather than listened for.
+  if (request.signal.aborted) {
+    upstreamSignal.abort(request.signal.reason);
+  } else {
+    request.signal.addEventListener(
+      "abort",
+      () => upstreamSignal.abort(request.signal.reason),
+      { once: true },
+    );
+  }
 
   try {
     let upstream: Response;
@@ -110,7 +185,7 @@ async function handle(request: NextRequest): Promise<Response> {
     try {
       upstream = await fetch(target, {
         method: request.method,
-        headers: upstreamHeaders(request),
+        headers: upstreamHeaders(request, id),
         body: await upstreamBody(request),
         // This proxy answers for a person, never for the next person to ask the same thing.
         cache: "no-store",
@@ -160,6 +235,12 @@ async function handle(request: NextRequest): Promise<Response> {
   }
 }
 
+function vercelIdOf(request: NextRequest): string | null {
+  const value = request.headers.get(VERCEL_ID_HEADER);
+
+  return value !== null && REQUEST_ID_PATTERN.test(value) ? value : null;
+}
+
 /**
  * `GET /events` — Server-Sent Events, which is why this proxy streams at all. Every other
  * answer is a small JSON body read whole; this one stays open for minutes and is useful
@@ -198,9 +279,12 @@ function isEventStream(upstream: Response): boolean {
  * value a client invented can only ever sit further left than the entries it trusts —
  * provided that number is not larger than the proxies that really append. It is that
  * number, not this line, that decides whether the header is forgeable.
+ *
+ * `x-request-id` is the id `handle` minted, so the API's lines carry the one this handler
+ * logs and the browser is answered with.
  */
-function upstreamHeaders(request: NextRequest): Headers {
-  const headers = new Headers();
+function upstreamHeaders(request: NextRequest, id: string): Headers {
+  const headers = new Headers({ [REQUEST_ID_HEADER]: id });
 
   for (const name of FORWARDED_HEADERS) {
     const value = request.headers.get(name);
@@ -278,13 +362,12 @@ function unreachable(): NextResponse {
  * `apiOrigin()` throws when `API_ORIGIN` is unset, and the API was then never asked at all.
  * Calling that a 502 would send whoever reads it looking at the wrong service.
  *
- * The reason is logged rather than returned. `apiOrigin()` names the variable it is
- * missing, which is exactly what an operator needs and exactly what a browser has no
- * business being told about this server's environment.
+ * The reason is logged rather than returned — `handle` puts it into the request's line as
+ * its `err`. `apiOrigin()` names the variable it is missing, which is exactly what an
+ * operator needs and exactly what a browser has no business being told about this
+ * server's environment.
  */
-function misconfigured(cause: unknown): NextResponse {
-  console.error("The BFF cannot address the API:", cause);
-
+function misconfigured(): NextResponse {
   const body: ApiError = {
     statusCode: HTTP_STATUS.INTERNAL_SERVER_ERROR,
     message: "The proxy is not configured",
