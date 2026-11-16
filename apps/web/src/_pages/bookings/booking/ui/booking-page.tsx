@@ -12,6 +12,7 @@ import {
 import { BackLink, PageHeading } from "#shared/ui";
 import { readBookingAdjustments } from "../api/read-booking-adjustments";
 import { BookingLive, type BankAnswer } from "./booking-live";
+import { BookingQueryProvider } from "./booking-query-provider";
 
 /**
  * One stay: what it costs, where it stands, and — for the guest of a hold — the form that
@@ -58,21 +59,23 @@ export const BookingPage = async ({
         />
       </div>
 
-      <BookingLive
-        initial={booking}
-        viewer={viewer}
-        now={now}
-        readerTimeZone={zone}
-        // Whether to offer the form at all: the API decides it again when the form asks for
-        // the payment, so this only spares a form that is bound to be refused.
-        publishableKey={
-          awaitsPaymentFrom(booking, viewer, now)
-            ? stripePublishableKey()
-            : null
-        }
-        bankAnswer={bankAnswerOf(redirectStatus)}
-        adjustments={adjustments}
-      />
+      <BookingQueryProvider>
+        <BookingLive
+          initial={booking}
+          viewer={viewer}
+          now={now}
+          readerTimeZone={zone}
+          // Whether to offer the form at all: the API decides it again when the form asks for
+          // the payment, so this only spares a form that is bound to be refused.
+          publishableKey={
+            awaitsPaymentFrom(booking, viewer, now)
+              ? stripePublishableKey()
+              : null
+          }
+          bankAnswer={bankAnswerOf(redirectStatus)}
+          adjustments={adjustments}
+        />
+      </BookingQueryProvider>
     </div>
   );
 };
