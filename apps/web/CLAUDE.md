@@ -1049,7 +1049,9 @@ screen is still an action, and what it answers is followed by an invalidation of
 query, so the cache hears of it.
 
 **The stay's own page (`_pages/bookings/booking`) is that client path, and the only one.**
-It is what brought TanStack Query in (`_app/providers`), and the reasons are two:
+It is what brought TanStack Query in, and the query cache is the page's own
+(`ui/booking-query-provider.tsx`) rather than the app's, so no other screen loads the
+library. The reasons are two:
 
 - **A payment is confirmed by Stripe's webhook, not by the browser that paid.**
   `confirmPayment` succeeding in the browser — or the bank sending the visitor back with
