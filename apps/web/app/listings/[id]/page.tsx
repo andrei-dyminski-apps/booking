@@ -1,1 +1,4 @@
-export { ListingPage as default } from "#_pages/listings/listing";
+export {
+  ListingPage as default,
+  generateListingMetadata as generateMetadata,
+} from "#_pages/listings/listing";

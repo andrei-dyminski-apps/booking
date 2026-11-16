@@ -332,7 +332,7 @@ is the wrong shape for a list that keeps growing.
   a singular to be missed — the same argument as the formatter below. The irregular form
   is an argument rather than a guess, and the function is where `Intl.PluralRules` goes
   when i18n arrives.
-- **Money travels in cents and is shown in the currency, and `shared/lib/money.ts` is the
+- **Money travels in cents and is shown in the currency, and `shared/lib/money/money.ts` is the
   only edge between the two.** Every amount the contract carries is a branded `Cents`
   whose field says so (`amountCents`, `pricePerNightCents`); `formatMoney(cents, currency)`
   is the way out — the decimals come from `Intl` for the currency rather than an assumed
@@ -518,11 +518,11 @@ their refresh token, and only the browser can turn an expired session into a liv
   other forms have no such problem: `react-hook-form` owns their values, and an action that
   comes back with a refusal changes nothing about them.
 - **The forms show what comes back under the same field names** —
-  `shared/lib/form-errors.ts` maps a zod issue and an `apiErrorSchema` issue onto one
+  `shared/lib/form-errors/form-errors.ts` maps a zod issue and an `apiErrorSchema` issue onto one
   shape, because they are the same thing on two sides of the wire. `fieldMessages` is the
   last step of it: every box of every form ends in the same line, and writing the map out
   at each of them is one more place to hand a field its neighbour's messages.
-- **A `?next=` is a path of this site or it is nothing** (`shared/lib/next-path.ts`):
+- **A `?next=` is a path of this site or it is nothing** (`shared/lib/next-path/next-path.ts`):
   `//evil.com` and `/\evil.com` are absolute URLs to a browser, and following one would
   make the login page an open redirect. The action checks it again after the page has:
   an action is an endpoint of its own, and this one ends in a redirect.
@@ -982,6 +982,86 @@ know the box changed.
   as chips while the empty state asks whether it is empty, and two calls would be two
   chances to answer the same question differently.
 
+## Metadata and structured data
+
+What a crawler reads a page by is two things, and both are built from what the page
+already renders — a document that disagrees with the page it sits on is what a crawler
+penalises, and that drift is what a shared schema exists to prevent.
+
+- **Every absolute URL is built on `siteOrigin()`** (`shared/config/site.ts`): the root
+  layout's `metadataBase`, so a page writes its canonical and `og:url` as paths, and every
+  `url` and `@id` of the JSON-LD (`siteUrl(path)`). It is the address people are sent to,
+  not the host that answered, so a preview names its pages by production's: `SITE_ORIGIN`,
+  else `VERCEL_PROJECT_PRODUCTION_URL`, which Vercel sets on every deployment, else this
+  machine's port. A fallback rather than a failure, unlike `API_ORIGIN`: a bare host is
+  read as `https`, and a value that is not an address is passed over like an empty one —
+  the root layout's `metadataBase` is built on it on every request, and a `new URL` that
+  threw there would take every page down.
+- **The title is the page's, set into the layout's template** (`%s · Booking`). A page's
+  `openGraph` replaces the layout's whole rather than merging into it, so a page that sets
+  one names `siteName` and `type` again; a page that sets none is shared under the site's
+  own title and description.
+- **What to index is decided by the page that knows its address.** The catalogue's
+  `generateMetadata` (`lib/catalogue-metadata.ts`) indexes the bare `/listings` and
+  nothing else: an ordering is the same rows reordered, a price or a guest count is
+  unbounded and each value near-identical to its neighbour, and a pair of dates stops
+  being a search the contract takes the day it passes — indexed, each would be a
+  duplicate under one title competing with the catalogue. Every search, cursor page and
+  refused search is `noindex, follow` with no canonical: `noindex` beside a canonical
+  pointing elsewhere are two answers to one question, which Google advises against. An
+  address the page redirects away from is never rendered and needs no rule. The listing's
+  (`api/listing-metadata.ts`) states the title, the description cut to a result's length
+  (`lib/description-summary.ts`, counted in the characters a reader sees and cut at the
+  last word that fits whole) and the shared link off the row — through `readListing`,
+  the read the page makes, so the second ask is the Data Cache's answer and a missing
+  listing is the route's 404 here too. The sign-in and sign-up forms are `noindex, follow` in
+  a static `metadata`: a form is not content, and every `?next=` is another address of it.
+  None of these is a `Disallow` in `robots.txt`, which would stop a crawler from reading
+  the `noindex` at all.
+- **A crawler finds the listings through the sitemap** (`_app/seo`, wired by
+  `app/sitemap.ts` and `app/robots.ts`), because the catalogue's pages past the first are
+  `noindex` and a search engine stops following the links of a page left out for long.
+  `sitemap.xml` names the home page, the catalogue and every listing with its
+  `updatedAt`, read page by page through the unfiltered catalogue at `MAX_PAGE_LIMIT`
+  under `CATALOGUE_TAG` with no lifetime — a hold changes what is free, never which
+  listings exist — and fails with the API rather than answering an empty list.
+  `robots.txt` keeps a crawler out of the BFF and of the proxy's `PROTECTED` sections,
+  each a redirect to the login page for a stranger, and names the sitemap. Both render
+  per request through `await connection()`: the API is not there while the site builds,
+  and the origin is read at runtime. Not `dynamic = "force-dynamic"` — it turns every
+  `fetch` that sets no `cache` into a `no-store`, `revalidate: false` included (the check
+  reads it as falsy), so the sitemap's reads would skip the Data Cache every time.
+- **JSON-LD goes on the page whose data it describes**, never into a graph assembled in
+  one place for screens it cannot see: `Organization` and `WebSite` in the shell, the
+  `ItemList` of the rows the catalogue drew under its search's address, the cursor left
+  off as the shared link leaves it (none on an empty page), the listing's
+  `VacationRental` — the `Accommodation` it lets with its `occupancy`, an `Offer` at the
+  default nightly price as a `UnitPriceSpecification`, an `AggregateRating` off the review
+  summary once somebody has rated it, rounded through the summary's own `toFixed(1)` — and a `BreadcrumbList` on both. `availability` is
+  left out: the calendar answers it per night, and a document cannot promise dates for a
+  listing as a whole. Each builder takes the parsed contract type the page renders, never
+  fields assembled by hand or a read of its own.
+- **What it earns is a crawler's reading, not a rich result.** Google's vacation-rental
+  result is a partner programme, and outside it the listing's markup is incomplete by
+  Google's rules — it wants photos, an address and coordinates, which the contract does
+  not hold — so Search Console reports it as such and an `Offer` nested in it draws no
+  price in the results. The `AggregateRating` sits on a `LocalBusiness` subtype rated on
+  its own site, which Google treats as self-serving and draws no stars for. Both are
+  still valid schema.org that states the page's facts; when the contract gains photos and
+  a location, they are the fields to add.
+- **It is untrusted text inside a `<script>`.** An owner writes the title and the
+  description, and an HTML parser closes a script at the first `</script` whatever its
+  type, so `JsonLd` (`shared/ui/json-ld.tsx`) writes through `serializeJsonLd`
+  (`shared/lib/json-ld/`), which turns every `<` into `\u003c` — the whole defence, with a
+  spec beside it. A data block is never executed, so the CSP's nonce has nothing to say
+  about it. `breadcrumbJsonLd` and the `JsonLdNode` type the builders return sit beside the
+  serializer, so `shared/ui` exports the component and nothing else.
+- **`shared/lib` stays under Steiger's grouping threshold** (`shared-lib-grouping`: more
+  than fifteen entries, a number the rule hardcodes and no option raises). It counts
+  files, a spec included, so a module with a spec lives in a folder of its own beside it
+  (`money/`, `next-path/`, `form-errors/`, `json-ld/`, like `dates/`) and is one entry
+  rather than two; the segment's `index.ts` names the file inside.
+
 ## Live updates
 
 The API pushes over one stream per browser — `GET /events`, Server-Sent Events, read
@@ -1318,7 +1398,7 @@ rather than in `src/shared`.
 component that knows this application's `FieldErrors`, or one whose whole job is to
 navigate with `useRouter`. The test is the dependency, not the size — anything that would
 have to import from `#shared/*` or from `next/*` is not a primitive and does not go into
-the package. Twenty are exported from there: `PageHeading` — the title and the line
+the package. Twenty-one are exported from there: `PageHeading` — the title and the line
 under it at the top of a list screen —, `BackLink` — the ghost arrow link above a detail
 screen's heading, back to the list it was opened from —, `ButtonLink` — a `<Link>`
 wearing the button classes, the one spelling of "a link that looks like a button" (see
@@ -1332,8 +1412,9 @@ personal list when the event stream says it changed, and `FilterField`, `FilterS
 screen — the catalogue, the stays and the admin's listings and users — searches and pages
 with. `DateRange` and `NightCount` draw a range of days and the nights it spans — on the
 stay's page and card, the waitlist's card and the admin's stuck stays and bounced refunds.
-One more is internal to the boxes and not exported: `CharacterCount`, the room left in a
-bounded `FormField`. A component only one screen uses stays in that screen's slice, exactly as
+`JsonLd` writes a page's structured data (see "Metadata and structured data"). One more
+is internal to the boxes and not exported: `CharacterCount`, the room left in a bounded
+`FormField`. A component only one screen uses stays in that screen's slice, exactly as
 "pages first" says.
 
 - The design tokens live in `packages/ui/src/styles/globals.css`;
@@ -1387,8 +1468,8 @@ belongs in the same step.
   count and an edge — a screen reader announces how many rows there are and where one
   ends, which a run of `div`s cannot say, and these rows are alike by design. What it does
   not buy is search ranking: nothing reads list markup for that, and what would read a
-  catalogue is structured data this site does not emit yet. `role="list"` is not
-  redundant — Tailwind's preflight drops the marker from every `ul` and Safari drops the
+  catalogue is the JSON-LD beside it (see "Metadata and structured data"). `role="list"`
+  is not redundant — Tailwind's preflight drops the marker from every `ul` and Safari drops the
   list semantics along with it, so the attribute is what puts them back.
 - **What is not a collection is not marked as one.** A set written down in the code is a
   composition rather than a list: the toolbar's controls, the home page's three
@@ -1459,8 +1540,9 @@ because that was where this logic lived until the catalogue arrived — the spec
 `_pages/` are the same four kinds, on a layer rather than in a layer. None of them is a
 component:
 
-- A parser of untrusted input — `shared/lib/next-path.ts` (where a visitor is sent after
-  signing in), the `Set-Cookie` reader inside `shared/api/session-cookies.ts` (what
+- A parser of untrusted input — `shared/lib/next-path/next-path.ts` (where a visitor is sent after
+  signing in), `shared/lib/json-ld/structured-data.ts` (an owner's text inside a script
+  block), the `Set-Cookie` reader inside `shared/api/session-cookies.ts` (what
   becomes a cookie of this origin) and the two searches — `_pages/listings/overview/lib/catalogue-search.ts`
   and `_pages/bookings/overview/lib/bookings-search.ts`
   (`searchParams` onto the contract's query: what a blank box means, what a repeated
@@ -1485,11 +1567,20 @@ component:
   same term it would repeat or skip rows): each has a real way to be wrong (a second rotation spent on an already-refreshed
   session, a retry loop) that only shows up under a race or a specific server answer, not
   by reading the function.
-- A mapping with more than one rule to keep straight — `shared/lib/form-errors.ts` (a zod
+- A mapping with more than one rule to keep straight — `shared/lib/form-errors/form-errors.ts` (a zod
   issue, an `apiErrorSchema` issue and `react-hook-form`'s own field state reduced to one
   shape: which of `types` and `message` a box's messages come out of, and that a rule
   recorded as a bare `true` is not one of them), `shared/config/api-url.ts`
-  (the trailing slash, the missing-env failure, the module-level cache) and
+  (the trailing slash, the missing-env failure, the module-level cache), `shared/config/site.ts`
+  (which of three sources names the site, the scheme Vercel's leaves off, a value that is
+  not an address), the catalogue's indexing rule in
+  `_pages/listings/overview/lib/catalogue-metadata.ts` (which addresses are indexed, which
+  name a canonical — a wrong answer is a duplicate or a missing page in a search engine,
+  seen weeks later), `_pages/listings/listing/lib/description-summary.ts` (an owner's
+  text cut to a snippet: at a word, within the length, never through half a character),
+  the JSON-LD builders `catalogue-json-ld.ts` and
+  `_pages/listings/listing/lib/listing-json-ld.ts` (cents to the currency's units, the
+  rating left out while there is none, the list left out on an empty page) and
   `_pages/listings/listing/lib/months.ts` (the half-open range the calendar shades, the month
   rollover, the Monday-first offset — a stay's check-out day drawn as taken would be a
   free night the screen refuses to sell). What a stay costs is not here: the booking form

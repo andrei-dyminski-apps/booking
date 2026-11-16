@@ -9,6 +9,7 @@ import {
   EmptyTitle,
 } from "@repo/ui/components/empty";
 import {
+  JsonLd,
   NoMatchesNotice,
   PageHeading,
   Pager,
@@ -16,6 +17,7 @@ import {
   StalePageNotice,
 } from "#shared/ui";
 import { readCataloguePage } from "../api/read-catalogue-page";
+import { catalogueJsonLd } from "../lib/catalogue-json-ld";
 import {
   activeFilters,
   catalogueHref,
@@ -56,6 +58,10 @@ export const CataloguePage = async ({
 
   return (
     <div className="flex flex-col gap-6">
+      {page !== null && (
+        <JsonLd data={catalogueJsonLd(page.items, catalogueHref(values))} />
+      )}
+
       <PageHeading
         title="Stays"
         description="Every listing on offer. The filters live in the address bar, so a search is a link you can send."

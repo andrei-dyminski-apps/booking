@@ -142,6 +142,8 @@ export {
   type Currency,
 } from "./money.js";
 
+export { MAX_PAGE_LIMIT } from "./query.js";
+
 export {
   apiErrorSchema,
   apiErrorIssueSchema,

@@ -21,7 +21,13 @@ export {
   toFormErrors,
   type FieldErrors,
   type FormErrors,
-} from "./form-errors";
+} from "./form-errors/form-errors";
+export {
+  breadcrumbJsonLd,
+  serializeJsonLd,
+  type Crumb,
+  type JsonLdNode,
+} from "./json-ld/structured-data";
 export { lookupOptionText } from "./filter-labels/lookup-option";
 export { shortId } from "./filter-labels/short-id";
 export {
@@ -29,8 +35,8 @@ export {
   formatMoney,
   inputOfCents,
   nightsBreakdown,
-} from "./money";
-export { toLocalPath } from "./next-path";
+} from "./money/money";
+export { toLocalPath } from "./next-path/next-path";
 export { orNotFound, requireId } from "./not-found";
 export { countOf } from "./plural";
 export { filtersHref, searchParamsHref, singleParam } from "./search-params";

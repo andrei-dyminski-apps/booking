@@ -22,7 +22,7 @@ export const blank = <Schema extends z.ZodType>(schema: Schema) =>
   z.preprocess((value) => (value === "" ? undefined : value), schema);
 
 /** How many rows one page may carry, and the one parameter a client could ask the whole table with. */
-const MAX_LIMIT = 50;
+export const MAX_PAGE_LIMIT = 50;
 
 const DEFAULT_LIMIT = 20;
 
@@ -41,6 +41,6 @@ export const PAGING = {
     "The previous page's `nextCursor`; left out for the first page",
   ),
   limit: blank(
-    z.coerce.number().int().min(1).max(MAX_LIMIT).default(DEFAULT_LIMIT),
-  ).describe(`Rows per page, at most ${String(MAX_LIMIT)}`),
+    z.coerce.number().int().min(1).max(MAX_PAGE_LIMIT).default(DEFAULT_LIMIT),
+  ).describe(`Rows per page, at most ${String(MAX_PAGE_LIMIT)}`),
 };

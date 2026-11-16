@@ -16,7 +16,7 @@ import {
   type UseFormReturn,
 } from "react-hook-form";
 import type { ZodType } from "zod";
-import { NO_FORM_ERRORS, type FormErrors } from "./form-errors";
+import { NO_FORM_ERRORS, type FormErrors } from "./form-errors/form-errors";
 
 /**
  * A form that validates in the browser against the contract and submits to a Server

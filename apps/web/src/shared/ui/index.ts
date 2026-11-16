@@ -8,6 +8,7 @@ export { FilterSelect } from "./filter-select";
 export { FiltersDialog } from "./filters-dialog";
 export { FormField, type FormControl } from "./form-field";
 export { HintFieldSet, HintLabel, hintOf } from "./hint-label";
+export { JsonLd } from "./json-ld";
 export { LiveRefresh } from "./live-refresh";
 export { LookupField } from "./lookup-field/lookup-field";
 export { NightCount } from "./night-count";

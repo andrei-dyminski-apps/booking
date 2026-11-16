@@ -5,9 +5,10 @@ import { contentSecurityPolicy } from "./content-security-policy";
 
 /**
  * The sections a stranger has nothing to see in. A new protected route is a line here;
- * each prefix guards the route itself and everything under it.
+ * each prefix guards the route itself and everything under it. `robots.txt` keeps a
+ * crawler out of the same list (`_app/seo`).
  */
-const PROTECTED: readonly string[] = [
+export const PROTECTED: readonly string[] = [
   ROUTES.profile,
   ROUTES.bookings,
   ROUTES.waitlist,

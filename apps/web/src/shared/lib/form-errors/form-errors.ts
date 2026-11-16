@@ -1,7 +1,7 @@
 // The type is erased at compile time, so nothing about this import reaches the bundle of
 // either side: a Server Action reads `toFieldErrors` out of this same module.
 import type { FieldError } from "react-hook-form";
-import { ApiResponseError, ApiUnreachableError } from "../api";
+import { ApiResponseError, ApiUnreachableError } from "../../api";
 
 /** The messages to show under each field, keyed by the name of the field. */
 export type FieldErrors = Record<string, string[]>;
