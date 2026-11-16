@@ -10,6 +10,7 @@
     "PORT",
     "WEB_ORIGIN",
     "API_ORIGIN",
+    "SITE_ORIGIN",
     "DATABASE_URL",
     "POSTGRES_USER",
     "POSTGRES_PASSWORD",
@@ -28,7 +29,8 @@
     "STRIPE_PAYOUT_WEBHOOK_SECRET",
     "STRIPE_SITE",
     "STRIPE_PUBLISHABLE_KEY",
-    "VERCEL_ENV"
+    "VERCEL_ENV",
+    "VERCEL_PROJECT_PRODUCTION_URL"
   ],
   "tasks": {
     "build": {

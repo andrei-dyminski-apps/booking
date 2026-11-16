@@ -1,1 +1,1 @@
-export { proxy } from "./proxy";
+export { PROTECTED, proxy } from "./proxy";

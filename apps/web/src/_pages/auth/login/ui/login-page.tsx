@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import {
   Card,
@@ -9,6 +10,16 @@ import {
 import { ROUTES } from "#shared/config";
 import { toLocalPath } from "#shared/lib";
 import { LoginForm } from "./login-form";
+
+/**
+ * A form rather than content, and every `?next=` is another address of it: kept out of
+ * the index with its links still followed. Not a `Disallow` in `robots.txt`, which would
+ * stop a crawler from reading the `noindex` at all.
+ */
+export const metadata: Metadata = {
+  title: "Sign in",
+  robots: { index: false, follow: true },
+};
 
 export const LoginPage = async ({ searchParams }: PageProps<"/login">) => {
   // Where the proxy wanted to send this visitor before it found no session.

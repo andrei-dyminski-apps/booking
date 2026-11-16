@@ -1,1 +1,4 @@
-export { CataloguePage as default } from "#_pages/listings/overview";
+export {
+  CataloguePage as default,
+  generateCatalogueMetadata as generateMetadata,
+} from "#_pages/listings/overview";

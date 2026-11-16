@@ -4,7 +4,7 @@ import {
   type Currency,
   type PricedNight,
 } from "@repo/contracts";
-import { countOf } from "./plural";
+import { countOf } from "../plural";
 
 /**
  * The edge where money changes units, in one place. Everything that travels — the contract,

@@ -745,7 +745,7 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
       up from (`booking_nights`, answered by `GET /bookings/:id`). Turning cents into the
       currency itself is `apps/web`'s job alone, at one edge — `formatMoney` out,
       `centsFromInput` in. Details are "Payments" in `apps/api/CLAUDE.md`.
-- [ ] **JSON-LD across the whole site** — the structured data a catalogue is actually read
+- [x] **JSON-LD across the whole site** — the structured data a catalogue is actually read
       by, and the one SEO question this project has so far answered with nothing. Semantic
       markup is not that answer: wrapping the rows in a `<ul role="list">` bought a screen
       reader a count and an edge (`apps/web/CLAUDE.md`) and buys a crawler nothing,
@@ -764,8 +764,10 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
       - `Accommodation` (`VacationRental`) with an `Offer` on `/listings/:id` — the title,
         the description, `occupancy` off the capacity, and the nightly price as a
         `UnitPriceSpecification` in the currency the contract stores. Google's
-        vacation-rental result is a partner programme; the `Offer` and its price is the
-        half that earns a rich result without one.
+        vacation-rental result is a partner programme, so this is structured data a
+        crawler reads the page by rather than a rich result: outside the programme Google
+        asks for photos, an address and coordinates the contract does not hold, and a
+        nested `Offer` draws no price on its own.
       - `BreadcrumbList` on both, since the trail is `/` → `/listings` → the row and each
         page already knows its own.
 
@@ -792,6 +794,44 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
       What stays out: `AggregateRating` and `Review` until the optional reviews below
       exist, and `availability` on the offer — that would be a promise about dates the
       calendar answers per window and a document cannot state for a stay as a whole.
+
+      Done: `JsonLd` over `serializeJsonLd` (`shared/lib/json-ld/`, a spec on the
+      `\u003c`; the modules with a spec in `shared/lib` moved into folders of their own to
+      make room under Steiger's grouping threshold), the shell's `Organization` and `WebSite` as one `@graph`, the catalogue's
+      `ItemList` of the rows it drew, and the listing's `VacationRental` holding an
+      `Accommodation` (`occupancy`) and making an `Offer` at the default nightly price,
+      each page with its `BreadcrumbList`. Every absolute URL is built on `siteOrigin()`
+      (`SITE_ORIGIN`, else Vercel's `VERCEL_PROJECT_PRODUCTION_URL`, else this machine's
+      port), which is the root layout's `metadataBase` too; it reads a bare host as
+      `https` and passes over a value that is not an address rather than letting
+      `metadataBase` throw on every page. The listing's `generateMetadata` states its
+      title, a description cut to a result's length (`descriptionSummary`) and
+      `openGraph` off the same cached read the page renders (`readListing`). Specs cover
+      `siteOrigin()`, the indexing rule, the summary and both JSON-LD builders.
+
+      Four departures from the above:
+
+      - **Only the bare `/listings` is indexed.** A filtered search does not canonicalise
+        to itself: an ordering is the first page reordered, a price or a guest count is
+        unbounded and near-identical to its neighbours, and a pair of dates stops being a
+        search the contract takes the day it passes — each one a duplicate under one
+        title. Every search, cursor page and refused search is `noindex, follow`.
+      - **None of those names a canonical**, the cursor page included: `noindex` beside a
+        canonical pointing elsewhere is the mixed signal Google advises against.
+      - **`sitemap.xml` and `robots.txt` came with it** (`_app/seo`), since a catalogue
+        whose later pages are `noindex` leaves a crawler no other road to most listings —
+        Google stops following the links of a page left out for long. The sitemap names
+        the home page, the catalogue and every listing with its `updatedAt`, read through
+        the unfiltered catalogue at `MAX_PAGE_LIMIT` (now exported by
+        `@repo/contracts`) under `CATALOGUE_TAG`; `robots.txt` keeps a crawler out of the
+        BFF and of the proxy's `PROTECTED` sections. Both are rendered per request.
+      - **An `AggregateRating` is in**, because the shared reviews arrived first: off the
+        listing's review summary, once somebody has rated it; `Review` items are not.
+        Google draws no stars for it — a `LocalBusiness` subtype rated on its own site is
+        self-serving by its rules — but it is the page's fact, stated. The `ItemList` is
+        left out on an empty page, where it would state nothing.
+      - **The sign-in and sign-up forms are `noindex, follow`** — a form is not content,
+        and every `?next=` is another address of it.
 
 - [x] **An account's moments on the reader's clock.** The notices, the messages, "Blocked
       since", a host's fees, the admin's lists of what was set aside and a hold's deadline

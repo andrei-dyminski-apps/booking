@@ -559,6 +559,7 @@ All settings live in a single `.env` in the repository root — there are no per
 | `API_HOST`                      | the interface Nest listens on                                                | `0.0.0.0`                                               |
 | `API_ORIGIN`                    | API address the Next.js server forwards to (server-side only)                | required, no fallback                                   |
 | `WEB_ORIGIN`                    | origin(s) for CORS in Nest, several — comma-separated                        | `http://localhost:3000`                                 |
+| `SITE_ORIGIN`                   | the frontend's public address: canonical links, `og:url`, JSON-LD            | `VERCEL_PROJECT_PRODUCTION_URL`, else `localhost`       |
 | `POSTGRES_USER`                 | user inside the Postgres container                                           | `booking`                                               |
 | `POSTGRES_PASSWORD`             | password inside the Postgres container                                       | `booking`                                               |
 | `POSTGRES_DB`                   | database name inside the Postgres container                                  | `booking`                                               |
@@ -578,6 +579,7 @@ All settings live in a single `.env` in the repository root — there are no per
 | `STRIPE_SITE`                   | this deployment's name on its payments; another site's are left alone        | `local`; required in production                         |
 | `STRIPE_PUBLISHABLE_KEY`        | Stripe.js key, read by the frontend server and handed to the form            | required, no fallback                                   |
 | `VERCEL_ENV`                    | set by Vercel; `preview` lets its toolbar through the frontend's CSP         | empty, set by the platform                              |
+| `VERCEL_PROJECT_PRODUCTION_URL` | set by Vercel; the production domain `SITE_ORIGIN` falls back to             | empty, set by the platform                              |
 
 The root scripts start turbo through `node --env-file-if-exists=.env`, so the variables reach the environment of both tasks. The same `.env` is read by `docker compose` — it sits next to `docker-compose.yml`, so `POSTGRES_*` and `REDIS_PORT` are substituted into the services without extra flags; compose declares defaults for them, so the database comes up even without a `.env`.
 
@@ -639,7 +641,7 @@ pnpm test           # unit, *.spec.ts next to the code; no database needed
 pnpm test:e2e       # e2e, apps/api/test/*.e2e-spec.ts; needs the database from docker-compose running
 ```
 
-`pnpm test` covers both applications, with a runner each: **Jest** in `apps/api`, where the specs run a service against fakes of its repositories through Nest's testing module, and **Vitest** in `apps/web` and in `packages/contracts` — the latter for `nightlyPrice` and `refundQuote`, the rules a night of a stay is priced by and a cancellation refunds by on both sides of the wire. What has a spec on the frontend is deliberately narrow — a parser whose input somebody else writes, which today means `?next=` after signing in ([`next-path.ts`](apps/web/src/shared/lib/next-path.ts)) and the `Set-Cookie` the proxy re-issues ([`session-cookies.ts`](apps/web/src/shared/api/session-cookies.ts)). Both are security decisions that a diff does not show, and neither is a component: a component that would break is one `check-types` and Steiger already refuse.
+`pnpm test` covers both applications, with a runner each: **Jest** in `apps/api`, where the specs run a service against fakes of its repositories through Nest's testing module, and **Vitest** in `apps/web` and in `packages/contracts` — the latter for `nightlyPrice` and `refundQuote`, the rules a night of a stay is priced by and a cancellation refunds by on both sides of the wire. What has a spec on the frontend is deliberately narrow — a parser whose input somebody else writes, which today means `?next=` after signing in ([`next-path.ts`](apps/web/src/shared/lib/next-path/next-path.ts)) and the `Set-Cookie` the proxy re-issues ([`session-cookies.ts`](apps/web/src/shared/api/session-cookies.ts)). Both are security decisions that a diff does not show, and neither is a component: a component that would break is one `check-types` and Steiger already refuse.
 
 All of them run through turbo, which builds `@repo/contracts` first — the specs import its schemas as values, and unlike `lint` and `check-types` they need the compiled `dist/`, not the sources.
 

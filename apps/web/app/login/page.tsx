@@ -1,1 +1,1 @@
-export { LoginPage as default } from "#_pages/auth/login";
+export { LoginPage as default, metadata } from "#_pages/auth/login";

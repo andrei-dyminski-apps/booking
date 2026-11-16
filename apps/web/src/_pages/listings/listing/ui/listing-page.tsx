@@ -17,12 +17,7 @@ import {
   sharePercent,
 } from "#entities/booking";
 import { currentUser, listingsApi } from "#shared/api";
-import {
-  availabilityTag,
-  HOLD_SWEEP_REVALIDATE,
-  listingTag,
-  ROUTES,
-} from "#shared/config";
+import { availabilityTag, HOLD_SWEEP_REVALIDATE, ROUTES } from "#shared/config";
 import {
   addDays,
   formatMoney,
@@ -31,8 +26,10 @@ import {
   requireId,
   WEEKDAY_NAMES,
 } from "#shared/lib";
-import { BackLink, ButtonLink } from "#shared/ui";
+import { BackLink, ButtonLink, JsonLd } from "#shared/ui";
+import { readListing } from "../api/read-listing";
 import { readListingReviews } from "../api/read-listing-reviews";
+import { listingJsonLd } from "../lib/listing-json-ld";
 import { buildMonths } from "../lib/months";
 import { AskHost, AskHostCard, AskHostSkeleton } from "./ask-host";
 import { AvailabilityCalendar } from "./availability-calendar";
@@ -84,13 +81,7 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
   const [[listing, availability], reviews, viewer] = await Promise.all([
     orNotFound(
       Promise.all([
-        // No lifetime beside the tag, unlike the availability: nothing about the row
-        // changes on a timer, so the writes that name this tag are the whole of its
-        // invalidation. `false` is how that is spelled — an absent `revalidate` would
-        // leave the read uncached and the tag pointing at nothing.
-        listingsApi.get(id, {
-          next: { revalidate: false, tags: [listingTag(id)] },
-        }),
+        readListing(id),
         listingsApi.availability(
           id,
           { from, to: addDays(from, WINDOW_DAYS) },
@@ -126,6 +117,8 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
 
   return (
     <div className="flex flex-col gap-8">
+      <JsonLd data={listingJsonLd(listing, reviews?.summary ?? null)} />
+
       <div className="flex flex-col gap-4">
         <BackLink href={ROUTES.catalogue}>All stays</BackLink>
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ApiResponseError, ApiUnreachableError } from "../api/http-client";
+import { ApiResponseError, ApiUnreachableError } from "../../api/http-client";
 import { messagesOf, toFieldErrors, toFormErrors } from "./form-errors";
 
 describe("toFieldErrors", () => {

@@ -1,2 +1,2 @@
 export { GlobalError } from "./global-error";
-export { metadata, RootLayout } from "./root-layout";
+export { generateMetadata, RootLayout } from "./root-layout";
