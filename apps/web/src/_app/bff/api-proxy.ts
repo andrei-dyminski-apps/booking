@@ -30,7 +30,9 @@ import { logRequest } from "./request-log";
  * is only ever read here, on the server.
  *
  * What it deliberately does not do is decide anything. Authentication, authorization and
- * validation stay with Nest — this forwards a request and re-scopes two cookies.
+ * validation stay with Nest — this forwards a request and re-scopes two cookies. The one
+ * answer it gives on its own is a refresh with no session cookie at all, which the API
+ * could only refuse (`isRefreshWithoutSession`).
  */
 
 /**
@@ -123,7 +125,11 @@ async function handle(request: NextRequest): Promise<Response> {
     }
 
     const response =
-      target === null ? misconfigured() : await forward(request, target, id);
+      target === null
+        ? misconfigured()
+        : isRefreshWithoutSession(request)
+          ? noSession()
+          : await forward(request, target, id);
 
     response.headers.set(REQUEST_ID_HEADER, id);
     status = response.status;
@@ -145,6 +151,31 @@ async function handle(request: NextRequest): Promise<Response> {
       error,
     });
   }
+}
+
+/**
+ * A refresh from a browser with no session cookie at all can only be refused, and the
+ * shell asks it of every stranger once per visit. Answered here with a 2xx, because a 401
+ * is what the browser writes to its console as an error — and what Lighthouse then
+ * reports against every public page. The answer is not JSON, which is the signal
+ * `refreshSession` reads as "no session was restored".
+ *
+ * Only with neither cookie. The API's refused refresh also clears the session cookies,
+ * and an access cookie left behind without its refresh cookie would keep `proxy.ts`
+ * letting the browser into protected pages until it expired — so that request still goes
+ * to the API, which clears it.
+ */
+function isRefreshWithoutSession(request: NextRequest): boolean {
+  return (
+    request.method === "POST" &&
+    request.nextUrl.pathname === `${BFF_BASE_PATH}/auth/refresh` &&
+    !request.cookies.has(REFRESH_TOKEN_COOKIE) &&
+    !request.cookies.has(ACCESS_TOKEN_COOKIE)
+  );
+}
+
+function noSession(): NextResponse {
+  return new NextResponse(null, { status: HTTP_STATUS.NO_CONTENT });
 }
 
 /** Throws when `API_ORIGIN` is unset — see `misconfigured`. */

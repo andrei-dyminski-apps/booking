@@ -383,7 +383,8 @@ other browsers are following. Behind the proxy the question does not arise.
 
 - **It decides nothing.** Authentication, authorization and validation stay in Nest. What
   the handler does is forward a request and re-scope two cookies; a rule that appears in
-  it is a rule in the wrong place.
+  it is a rule in the wrong place. The one answer it gives on its own — a refresh with no
+  session cookie at all, below — is not a rule: the API could only refuse it.
 - **The session is taken over, not passed through** (`shared/api/session-cookies.ts`). The
   API still answers with `Set-Cookie` for its own host; the proxy drops those headers and
   writes the same two tokens again for this origin. `Max-Age` is copied rather than
@@ -425,6 +426,13 @@ other browsers are following. Behind the proxy the question does not arise.
   without its query, a browser that left as `499` with `aborted: true` as the API marks
   it, an event stream once its headers arrive. A server render, which goes direct, is not
   named here; the API mints its id.
+- **A refresh with no session cookie at all is answered here, with a 204**
+  (`isRefreshWithoutSession` in `api-proxy.ts`). The shell asks once per visit on behalf of
+  every stranger, and the API's 401 is what the browser logs as a console error and
+  Lighthouse reports on every public page. A 204 is not JSON, which `refreshSession`
+  already reads as "nothing restored". An access cookie without its refresh cookie still
+  goes to the API: its refused refresh clears the leftover, which `proxy.ts` would
+  otherwise keep reading as a session.
 - **The API's answer headers are passed on, all but the hop's own and two more**: its
   `Set-Cookie`, re-issued above, and its `Strict-Transport-Security`. The API sends Helmet's
   headers; the rest of them are harmless on a JSON answer, but HSTS with `includeSubDomains`
