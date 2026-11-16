@@ -998,7 +998,9 @@ stream.
   seconds; a `text/event-stream` is handed on as it arrives, the deadline covers its
   headers only, and the browser leaving is what aborts the upstream request.
 - **The bell is the shell's** (`_app/layout/notification-bell.tsx`) and renders for a
-  session only. Its count comes from the stream rather than the server render — one number
+  session only. So it is loaded only for one: the header reaches it and its toasts through
+  `account-notifications.tsx`, a Client Component calling `next/dynamic` — called from the
+  server header itself, `dynamic()` kept their chunks in every visitor's first load. Its count comes from the stream rather than the server render — one number
   should have one source — and its list is read when the popup opens
   (`use-latest-notifications.ts`, which owns the popup's `open` for that reason); a re-read
   that fails while it is open keeps the rows already shown, and the next opening asks
