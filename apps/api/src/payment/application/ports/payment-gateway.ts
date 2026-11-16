@@ -16,10 +16,18 @@ export abstract class PaymentGateway {
   ): Promise<OpenedPayment>;
 
   /**
-   * Withdraws a payment whose hold lapsed or was cancelled. One already withdrawn or
-   * completed is no failure: a completed one reaches the webhook, which refunds it.
+   * Withdraws a payment whose hold lapsed or was cancelled — an authorization among them,
+   * released without a charge (Afterpay gives back the first instalment it took). One
+   * already withdrawn or completed is no failure: a completed one reaches the webhook,
+   * which refunds it.
    */
   abstract cancel(paymentId: string): Promise<void>;
+
+  /**
+   * Takes the money an authorization set aside, once per payment — for a payment captured
+   * already too, so a run that died after the capture finds what it took again.
+   */
+  abstract capture(paymentId: string): Promise<CaptureOutcome>;
 
   /**
    * Gives `amount` back once per `key` — for good, not only for the provider's 24 hours of
@@ -74,6 +82,17 @@ export type PaymentRefunds = {
   sent: SentRefund | null;
 };
 
+/**
+ * What a capture came to. `captured`: the money taken, with the charge the host's transfer
+ * is funded from. `processing`: taken, and still settling — Stripe moves some methods there
+ * on capture, and their `succeeded` brings the news. `withdrawn`: no longer there to take,
+ * let go by a release or lapsed.
+ */
+export type CaptureOutcome =
+  | { kind: "captured"; chargeId: string | null; amount: Cents }
+  | { kind: "processing" }
+  | { kind: "withdrawn" };
+
 export type OpenedPayment = {
   id: string;
   /** What the browser confirms the payment with; see `bookingPaymentSchema`. */
@@ -86,6 +105,21 @@ export type OpenedPayment = {
  * comes from the payout webhook and shares the inbox, so both webhooks answer at once.
  */
 export type PaymentEvent =
+  | {
+      /**
+       * The guest's part is done and the money is set aside, not taken: a method captured by
+       * hand (`MANUAL_CAPTURE_METHODS`). The stay takes it while the hold still holds its
+       * nights and lets it go otherwise.
+       */
+      kind: "authorized";
+      eventId: string;
+      type: string;
+      paymentId: string;
+      /** Read off the payment's metadata; `null` for a payment this site did not open. */
+      bookingId: string | null;
+      /** What a capture would take. */
+      amount: Cents;
+    }
   | {
       kind: "succeeded";
       eventId: string;

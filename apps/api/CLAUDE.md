@@ -346,14 +346,46 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
 - **Only payment methods that confirm at once are offered, and the code says which.** A
   method that stays `processing` for days outlives its fifteen-minute hold and is refunded
   in full when it lands, so the intent is opened with `allowed_payment_method_types` set to
-  `INSTANT_PAYMENT_METHODS` (`stripe-payment.gateway.ts`) — not `payment_method_types`, which
-  the pinned API version refuses with a `400`. The dashboard still decides which of them are
-  switched on: Stripe drops a listed method that is not enabled instead of failing the
-  payment. A method added to the list has to be one Stripe confirms immediately. The
+  `INSTANT_PAYMENT_METHODS` (`stripe-payment.gateway.ts`, the two capture lists together) —
+  not `payment_method_types`, which the pinned API version refuses with a `400`. The
+  dashboard still decides which of them are switched on: Stripe drops a listed method that
+  is not enabled instead of failing the payment. A method added to the list has to be one Stripe confirms immediately. The
   frontend depends on that too: the stay's page reads `processing` as paid and takes the
   payment form away until the webhook (`bankAnswerOf`, `PAID` in
   `apps/web/src/_pages/bookings/booking`), so a method that settles over days — and can
   still fail after `processing` — is a change on that page first.
+- **A hold is paid by an authorization where the method allows one, and taken when it is
+  confirmed.** The intent is opened with `capture_method: "manual"` per method in
+  `payment_method_options` for `MANUAL_CAPTURE_METHODS` (cards, Link, PayPal, Klarna, Amazon
+  Pay, Revolut Pay, MobilePay, Cash App Pay, Afterpay) and with Stripe's automatic capture
+  for `IMMEDIATE_CAPTURE_METHODS` (iDEAL, Wero, Bancontact, EPS, MB WAY, Zip — the pinned
+  API offers no manual capture for them; Wero's own page lists it, but neither the API
+  reference of `STRIPE_API_VERSION` nor the SDK has options to ask for it). Both lists are
+  checked against the SDK's types — the first is an object literal of the options
+  themselves (`MANUAL_CAPTURE`), the second is held to `ManuallyCapturable`, the methods
+  whose options take `capture_method` — so a method on the wrong one stops compiling
+  rather than reaching Stripe as a `400`. The guest's confirmation then sends
+  `payment_intent.amount_capturable_updated` (`kind: "authorized"`), and
+  `BookingPaymentHandler` reads the stay under `whileCancelling`: a hold still pending —
+  whatever its deadline, as `confirmPayment` reads it — for this intent or none yet, at the
+  quoted amount, is captured (`PaymentGateway.capture`, under `payment-<pi>-capture`; a
+  capture refused for the intent's state is read back, so a run that died after it finds
+  what it took, and a redelivery after the confirmation finishes the announcement a run left
+  undone) and confirmed through the same `confirmOrRefund` a `succeeded` goes through;
+  anything else — a lapsed, released or cancelled hold, another intent, another sum — is
+  withdrawn (`cancel`), which charges nobody, rather than taken and refunded with Stripe's
+  fee kept (Afterpay takes the first instalment at authorization and gives it back then).
+  The capture's own `succeeded` comes after and finds the stay confirmed. A capture can also
+  leave the intent `processing`, which Stripe documents for some methods: the run ends
+  there, counting no failure, and that `succeeded` confirms the stay — or refunds a payment
+  a release beat, as for a method taken at once. A release by the deadline takes no lease,
+  so it can still slip between the read and the capture: then the capture is refused as
+  `canceled` (`withdrawn`, nothing taken), or the release's withdrawal finds a taken payment
+  and the stay refunds it as before — a window as long as one call to Stripe instead of the
+  whole time a payment can land late. A card authorization lapses after seven days, far
+  beyond a fifteen-minute hold. The webhook endpoint has to deliver the event (the
+  Dashboard's list in `README.md`, `--events` of the `stripe` service in
+  `docker-compose.yml`).
 - **A cancellation is final when it is answered, and its refund follows it.**
   `DELETE /bookings/:id` calls no payment provider. A hold can be cancelled at any time, a
   confirmed stay only before the moment of check-in (`checkInInstant`: `from` at the stay's

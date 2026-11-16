@@ -315,3 +315,185 @@ describe("StripePaymentGateway refunds", () => {
     );
   });
 });
+
+/** A PaymentIntent as Stripe answers one, with only the fields the adapter reads. */
+const intentObject = (status: string) => ({
+  id: PAYMENT_ID,
+  object: "payment_intent",
+  status,
+  amount_received: status === "succeeded" ? 36_105 : 0,
+  latest_charge: status === "succeeded" ? "ch_spec" : null,
+  client_secret: `${PAYMENT_ID}_secret`,
+  metadata: {},
+});
+
+describe("StripePaymentGateway authorizations", () => {
+  /** Every request, and what the next ones answer by path. */
+  let requests: {
+    method: string;
+    path: string;
+    idempotencyKey: string | null;
+    form: URLSearchParams;
+  }[];
+  let answers: Map<string, Answer[]>;
+  let gateway: StripePaymentGateway;
+
+  beforeEach(() => {
+    requests = [];
+    answers = new Map();
+
+    const fetch: typeof globalThis.fetch = (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : input);
+      const method = init?.method ?? "GET";
+
+      requests.push({
+        method,
+        path: url.pathname,
+        idempotencyKey: new Headers(init?.headers).get("Idempotency-Key"),
+        form: new URLSearchParams(
+          typeof init?.body === "string" ? init.body : "",
+        ),
+      });
+
+      const answer = answers.get(`${method} ${url.pathname}`)?.shift();
+
+      return answer === undefined
+        ? Promise.reject(new Error(`Unexpected request to ${url.pathname}`))
+        : Promise.resolve(respond(answer));
+    };
+
+    gateway = new StripePaymentGateway(
+      config,
+      new Stripe(config.secretKey, {
+        apiVersion: STRIPE_API_VERSION,
+        httpClient: Stripe.createFetchHttpClient(fetch),
+        maxNetworkRetries: 0,
+        telemetry: false,
+      }),
+    );
+  });
+
+  const answer = (route: string, ...queued: Answer[]): void => {
+    answers.set(route, queued);
+  };
+
+  it("opens a payment that authorizes by card and the like, and takes at once only what cannot wait", async () => {
+    answer("POST /v1/payment_intents", {
+      status: 200,
+      body: intentObject("requires_payment_method"),
+    });
+
+    await gateway.open("booking-1", cents(36_105), "usd");
+
+    const [{ form }] = requests as [(typeof requests)[number]];
+    expect(form.get("payment_method_options[card][capture_method]")).toBe(
+      "manual",
+    );
+    expect(form.get("payment_method_options[paypal][capture_method]")).toBe(
+      "manual",
+    );
+    // No manual capture at Stripe: offered still, and taken the moment it is confirmed.
+    expect(
+      [...form]
+        .filter(([key]) => key.startsWith("allowed_payment_method_types["))
+        .map(([, value]) => value),
+    ).toContain("ideal");
+    expect(form.has("payment_method_options[ideal][capture_method]")).toBe(
+      false,
+    );
+    expect(form.has("capture_method")).toBe(false);
+  });
+
+  it("captures once per payment, under a key, and answers what was taken", async () => {
+    answer("POST /v1/payment_intents/pi_spec/capture", {
+      status: 200,
+      body: intentObject("succeeded"),
+    });
+
+    await expect(gateway.capture(PAYMENT_ID)).resolves.toEqual({
+      kind: "captured",
+      chargeId: "ch_spec",
+      amount: 36_105,
+    });
+    expect(requests[0]?.idempotencyKey).toBe("payment-pi_spec-capture");
+  });
+
+  it("answers a capture that left the payment settling as taken, its news still to come", async () => {
+    answer("POST /v1/payment_intents/pi_spec/capture", {
+      status: 200,
+      body: intentObject("processing"),
+    });
+
+    await expect(gateway.capture(PAYMENT_ID)).resolves.toEqual({
+      kind: "processing",
+    });
+  });
+
+  it("reads back a payment Stripe will not capture: taken already, or withdrawn", async () => {
+    const unexpectedState = refusal(400, {
+      type: "invalid_request_error",
+      code: "payment_intent_unexpected_state",
+    });
+    answer(
+      "POST /v1/payment_intents/pi_spec/capture",
+      unexpectedState,
+      unexpectedState,
+    );
+    answer(
+      "GET /v1/payment_intents/pi_spec",
+      { status: 200, body: intentObject("succeeded") },
+      { status: 200, body: intentObject("canceled") },
+    );
+
+    await expect(gateway.capture(PAYMENT_ID)).resolves.toEqual({
+      kind: "captured",
+      chargeId: "ch_spec",
+      amount: 36_105,
+    });
+    await expect(gateway.capture(PAYMENT_ID)).resolves.toEqual({
+      kind: "withdrawn",
+    });
+  });
+
+  it("reads an authorization off its webhook, and one with nothing left to take as no news", () => {
+    const signer = new Stripe(config.secretKey);
+    const delivery = (status: string) => {
+      const payload = JSON.stringify({
+        id: `evt_${status}`,
+        object: "event",
+        api_version: STRIPE_API_VERSION,
+        type: "payment_intent.amount_capturable_updated",
+        data: {
+          object: {
+            id: PAYMENT_ID,
+            object: "payment_intent",
+            status,
+            amount_capturable: status === "requires_capture" ? 36_105 : 0,
+            metadata: {
+              bookingId: "4f6c1d4e-8a9b-4c2d-9e1f-0a1b2c3d4e5f",
+              site: config.site,
+            },
+          },
+        },
+      });
+
+      return gateway.readEvent(
+        Buffer.from(payload),
+        signer.webhooks.generateTestHeaderString({
+          payload,
+          secret: config.paymentWebhookSecret,
+        }),
+      );
+    };
+
+    expect(delivery("requires_capture")).toEqual({
+      kind: "authorized",
+      eventId: "evt_requires_capture",
+      type: "payment_intent.amount_capturable_updated",
+      paymentId: PAYMENT_ID,
+      bookingId: "4f6c1d4e-8a9b-4c2d-9e1f-0a1b2c3d4e5f",
+      amount: 36_105,
+    });
+    expect(delivery("canceled")).toMatchObject({ kind: "other" });
+  });
+});

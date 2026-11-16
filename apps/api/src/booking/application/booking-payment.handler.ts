@@ -74,6 +74,9 @@ export class BookingPaymentHandler
 
   private async dispatch(event: PaymentEvent): Promise<void> {
     switch (event.kind) {
+      case "authorized":
+        await this.settleAuthorization(event);
+        break;
       case "succeeded":
         await this.settlePayment(event);
         break;
@@ -91,6 +94,105 @@ export class BookingPaymentHandler
       case "account":
       case "other":
         break;
+    }
+  }
+
+  /**
+   * Takes an authorization while its hold still holds the nights, and confirms the stay with
+   * what was taken, or lets it go — at no cost, where a payment taken at once would be
+   * refunded and its fee kept. The capture's own `succeeded` comes after and finds the stay
+   * confirmed already. Under `whileCancelling`, like the payment's: a cancellation cannot
+   * release the hold between the read and the capture. A release by the deadline can, since
+   * it takes no lease — for as long as one call to Stripe — and then the release's
+   * withdrawal finds a payment taken, and the stay a payment for nights it no longer holds,
+   * refunded by `confirmOrRefund` as before.
+   */
+  private async settleAuthorization(
+    event: Extract<PaymentEvent, { kind: "authorized" }>,
+  ): Promise<void> {
+    const { bookingId, paymentId } = event;
+
+    if (bookingId === null) {
+      this.logger.warn(`Payment ${paymentId} names no booking, ignored`);
+
+      return;
+    }
+
+    await this.bookingCancellationRepository.whileCancelling(bookingId, () =>
+      this.captureOrRelease(event, bookingId),
+    );
+  }
+
+  private async captureOrRelease(
+    event: Extract<PaymentEvent, { kind: "authorized" }>,
+    bookingId: string,
+  ): Promise<void> {
+    const { eventId, type, paymentId } = event;
+    const target =
+      await this.bookingRefundRepository.findPaymentTarget(bookingId);
+
+    // Not this database's, as in `confirmOrRefund`: not this API's to take or let go.
+    if (target === null) {
+      this.logger.warn(
+        `Payment ${paymentId} names booking ${bookingId}, which this database does not hold; ignored`,
+      );
+
+      return;
+    }
+
+    // Taken and confirmed by an earlier run: a redelivery, which finishes what that run
+    // left unannounced, as `confirmOrRefund` does for the payment's own news.
+    if (target.paid && target.hold.paymentId === paymentId) {
+      if (
+        target.status === BookingStatus.CONFIRMED &&
+        !target.confirmationAnnounced
+      ) {
+        await this.announceConfirmed(target.hold);
+      }
+
+      return;
+    }
+
+    if (!holdsItsNights(target, event)) {
+      await this.paymentGateway.cancel(paymentId);
+      this.logger.log(
+        `Let payment ${paymentId} go: booking ${bookingId} no longer holds its nights`,
+      );
+
+      return;
+    }
+
+    const outcome = await this.paymentGateway.capture(paymentId);
+
+    switch (outcome.kind) {
+      // Withdrawn by a release that came first, or lapsed: nothing was taken.
+      case "withdrawn":
+        this.logger.log(
+          `Payment ${paymentId} of booking ${bookingId} was withdrawn before it could be taken`,
+        );
+
+        return;
+      // Taken and still settling: its `succeeded` confirms the stay, or refunds a payment
+      // that lands on a hold released meanwhile, as for a method taken at once.
+      case "processing":
+        this.logger.log(
+          `Payment ${paymentId} of booking ${bookingId} was taken and is still settling`,
+        );
+
+        return;
+      case "captured":
+        await this.confirmOrRefund(
+          {
+            kind: "succeeded",
+            eventId,
+            type,
+            paymentId,
+            bookingId,
+            chargeId: outcome.chargeId,
+            amount: outcome.amount,
+          },
+          bookingId,
+        );
     }
   }
 
@@ -399,6 +501,22 @@ export class BookingPaymentHandler
       confirmed.stay.bookingId,
     );
   }
+}
+
+/**
+ * Whether taking the authorization would confirm the stay: the hold is pending — whatever
+ * its deadline, as `confirmPayment` reads it — for this payment or none yet, and the amount
+ * is the one quoted. Anything else is let go rather than taken and refunded.
+ */
+function holdsItsNights(
+  target: RefundTarget,
+  { paymentId, amount }: Extract<PaymentEvent, { kind: "authorized" }>,
+): boolean {
+  return (
+    target.status === BookingStatus.PENDING_PAYMENT &&
+    (target.hold.paymentId === null || target.hold.paymentId === paymentId) &&
+    amount === target.amountCents
+  );
 }
 
 /** Before the moment of check-in — the moment `isCancellableOn` stops letting a stay go. */

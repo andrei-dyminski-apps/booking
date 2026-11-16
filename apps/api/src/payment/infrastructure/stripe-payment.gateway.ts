@@ -7,6 +7,7 @@ import {
   PaymentOpeningInProgressError,
   RefundExceedsPaymentError,
   RefundRefusedError,
+  type CaptureOutcome,
   type OpenedPayment,
   type PaymentEvent,
   type PaymentRefunds,
@@ -27,6 +28,32 @@ import {
   STRIPE_CLIENT,
   transferGroupOf,
 } from "./stripe";
+
+type PaymentMethodOptions =
+  Stripe.PaymentIntentCreateParams.PaymentMethodOptions;
+
+/**
+ * A method whose options take `capture_method` — one Stripe can authorize first and capture
+ * later. Read off the SDK's types, so the methods taken at once are checked against it
+ * rather than against a key that merely exists: one that has it belongs with the others.
+ */
+type ManuallyCapturable = {
+  [
+    M in keyof PaymentMethodOptions
+  ]-?: "capture_method" extends keyof NonNullable<
+    Exclude<PaymentMethodOptions[M], "">
+  >
+    ? M
+    : never;
+}[keyof PaymentMethodOptions];
+
+/**
+ * The methods the SDK names for `allowed_payment_method_types`, without the open-ended
+ * string it accepts beside them — which would let any name through.
+ */
+type NamedPaymentMethod<
+  T = Stripe.PaymentIntentCreateParams.AllowedPaymentMethodType,
+> = T extends unknown ? (string extends T ? never : T) : never;
 
 /**
  * The payment methods a hold may be paid with: those Stripe confirms at once, in Europe and
@@ -49,29 +76,60 @@ import {
  * are not listed. Przelewy24, Satispay and Affirm are left out because they prohibit
  * lodging merchants.
  *
+ * The list is two: the methods that can authorize first and be captured later, and those
+ * that cannot. The first are opened with `capture_method: "manual"` each, so a payment
+ * that lands on a hold no longer holding its nights is an authorization let go rather than
+ * a charge refunded in full, whose processing fee Stripe keeps — Afterpay alone takes the
+ * first instalment at authorization, and gives it back when it is let go. The second are
+ * taken at once, as every method used to be, and a late one of them is still refunded.
+ *
  * The stay's page relies on the list as well: it reads `processing` as paid and takes the
  * form away until the webhook (`bankAnswerOf` and `PAID` in `apps/web`), which is safe only
  * while `processing` is a moment before `succeeded`. A method that settles later is a change
  * there before it is a line here.
  */
-const INSTANT_PAYMENT_METHODS = [
-  "card",
-  "link",
-  "amazon_pay",
-  "paypal",
-  "klarna",
+const MANUAL_CAPTURE = {
+  card: { capture_method: "manual" },
+  link: { capture_method: "manual" },
+  amazon_pay: { capture_method: "manual" },
+  paypal: { capture_method: "manual" },
+  klarna: { capture_method: "manual" },
   // Europe
-  "revolut_pay",
+  revolut_pay: { capture_method: "manual" },
+  mobilepay: { capture_method: "manual" },
+  // The Americas
+  cashapp: { capture_method: "manual" },
+  afterpay_clearpay: { capture_method: "manual" },
+} satisfies PaymentMethodOptions;
+
+/**
+ * Read off the options rather than listed beside them. An object literal is what the SDK's
+ * types check entry by entry — a method whose options take no `capture_method` is an excess
+ * property — while options assembled from a list go through an index signature and would
+ * let one through.
+ */
+const MANUAL_CAPTURE_METHODS = Object.keys(MANUAL_CAPTURE);
+
+/**
+ * The pinned API offers no manual capture for these: taken the moment the guest confirms.
+ * Wero's own page lists manual capture, but neither the API reference of
+ * `STRIPE_API_VERSION` nor the SDK has options to ask for it. A method that gains them in
+ * the SDK stops compiling here, and moves to the list above.
+ */
+const IMMEDIATE_CAPTURE_METHODS = [
+  // Europe
   "ideal",
   "wero",
   "bancontact",
   "eps",
-  "mobilepay",
   "mb_way",
   // The Americas
-  "cashapp",
-  "afterpay_clearpay",
   "zip",
+] as const satisfies readonly Exclude<NamedPaymentMethod, ManuallyCapturable>[];
+
+const INSTANT_PAYMENT_METHODS = [
+  ...MANUAL_CAPTURE_METHODS,
+  ...IMMEDIATE_CAPTURE_METHODS,
 ] as const;
 
 /** The guest's half of the money, through PaymentIntents; the host's is `StripePayoutGateway`. */
@@ -101,6 +159,7 @@ export class StripePaymentGateway extends PaymentGateway {
           amount,
           currency,
           allowed_payment_method_types: [...INSTANT_PAYMENT_METHODS],
+          payment_method_options: MANUAL_CAPTURE,
           // What the webhook finds the booking by, and whose database holds it.
           metadata: { bookingId, site: this.paymentConfig.site },
           transfer_group: transferGroupOf(bookingId),
@@ -143,6 +202,58 @@ export class StripePaymentGateway extends PaymentGateway {
       }
 
       throw error;
+    }
+  }
+
+  /**
+   * Under a key, so a second run is the same capture. A capture Stripe refuses for the
+   * payment's state is read back instead: captured already — a run that died before its
+   * stay was confirmed, or one past the key's 24 hours — answers what it took, and one
+   * withdrawn or lapsed answers so. A capture can also leave the payment `processing`, which
+   * Stripe documents for some methods: taken, its `succeeded` still to come.
+   */
+  async capture(paymentId: string): Promise<CaptureOutcome> {
+    let intent: Stripe.PaymentIntent;
+
+    try {
+      intent = await this.stripe.paymentIntents.capture(
+        paymentId,
+        {},
+        {
+          idempotencyKey: `payment-${paymentId}-capture`,
+          ...BACKGROUND_REQUEST,
+        },
+      );
+    } catch (error) {
+      if (!(
+        error instanceof Stripe.errors.StripeInvalidRequestError &&
+        error.code === "payment_intent_unexpected_state"
+      )) {
+        throw error;
+      }
+
+      intent = await this.stripe.paymentIntents.retrieve(
+        paymentId,
+        {},
+        BACKGROUND_REQUEST,
+      );
+    }
+
+    switch (intent.status) {
+      case "succeeded":
+        return {
+          kind: "captured",
+          chargeId: idOf(intent.latest_charge),
+          amount: cents(intent.amount_received),
+        };
+      case "processing":
+        return { kind: "processing" };
+      case "canceled":
+        return { kind: "withdrawn" };
+      default:
+        throw new Error(
+          `PaymentIntent ${paymentId} could not be captured from ${intent.status}`,
+        );
     }
   }
 
@@ -320,6 +431,21 @@ export class StripePaymentGateway extends PaymentGateway {
     const { id: eventId, type } = event;
 
     switch (event.type) {
+      case "payment_intent.amount_capturable_updated": {
+        const intent = event.data.object;
+
+        // Sent again as an authorization shrinks; nothing left to take is no news.
+        return intent.status === "requires_capture"
+          ? {
+              kind: "authorized",
+              eventId,
+              type,
+              paymentId: intent.id,
+              bookingId: this.bookingIdOf(intent.metadata),
+              amount: cents(intent.amount_capturable),
+            }
+          : { kind: "other", eventId, type };
+      }
       case "payment_intent.succeeded": {
         const intent = event.data.object;
 
