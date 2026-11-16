@@ -7,7 +7,6 @@ import {
   Logger,
   NotFoundException,
   PreconditionFailedException,
-  UnauthorizedException,
   UnprocessableEntityException,
 } from "@nestjs/common";
 import {
@@ -54,6 +53,7 @@ import { BookingJobs } from "./ports/booking-jobs";
 import { notifyBothSides, stayNoticeOf } from "./stay-notices";
 import { readerOf } from "./stay-reader";
 import { decodeCursor, encodeCursor } from "./booking-cursor";
+import { sessionNotFound } from "../../common/session-errors";
 
 /**
  * The `409` of a hold refused for nights that are held or booked, as the guest reads it. It
@@ -200,7 +200,7 @@ export class BookingService {
       // and JwtStrategy reads no database. A signed token whose row is gone is an ended
       // session, so this is the 401 of `/auth/me` and not a 404 about the listing.
       if (error instanceof GuestNotFoundError) {
-        throw new UnauthorizedException("Session no longer exists");
+        throw sessionNotFound();
       }
 
       // An overlap with an active stay, caught by the in-transaction check or the

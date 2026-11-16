@@ -1,9 +1,10 @@
 import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
-import { APP_GUARD, APP_PIPE } from "@nestjs/core";
+import { APP_FILTER, APP_GUARD, APP_PIPE } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule, minutes } from "@nestjs/throttler";
 import { LoggerModule } from "nestjs-pino";
 import { ZodValidationPipe } from "nestjs-zod";
+import { ApiErrorFilter } from "./common/api-error.filter";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { AuthModule } from "./auth/auth.module";
@@ -63,6 +64,8 @@ import { WaitlistModule } from "./waitlist/waitlist.module";
     AppService,
     // Validates bodies and params against the @repo/contracts schemas on every route.
     { provide: APP_PIPE, useClass: ZodValidationPipe },
+    // Puts a `code` on every refusal an HttpException turns into — see ApiErrorFilter.
+    { provide: APP_FILTER, useClass: ApiErrorFilter },
     // Order matters: guards run in the order they are registered, and the limiter has to
     // answer 429 before JwtAuthGuard verifies anything — an unauthenticated flood of
     // /auth/login is otherwise a flood of argon2 hashes, 64 MB of memory each.

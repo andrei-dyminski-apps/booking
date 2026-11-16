@@ -70,7 +70,14 @@ describe("apiRequest", () => {
         jsonResponse(422, {
           statusCode: 422,
           message: "Validation failed",
-          errors: [{ path: ["email"], message: "Already registered" }],
+          code: "VALIDATION_FAILED",
+          errors: [
+            {
+              path: ["email"],
+              message: "Already registered",
+              code: "EMAIL_ALREADY_REGISTERED",
+            },
+          ],
         }),
       ),
     );
@@ -85,7 +92,14 @@ describe("apiRequest", () => {
     ).rejects.toMatchObject({
       status: 422,
       message: "Validation failed",
-      issues: [{ path: ["email"], message: "Already registered" }],
+      code: "VALIDATION_FAILED",
+      issues: [
+        {
+          path: ["email"],
+          message: "Already registered",
+          code: "EMAIL_ALREADY_REGISTERED",
+        },
+      ],
     });
   });
 
@@ -102,7 +116,37 @@ describe("apiRequest", () => {
         schema: z.object({}),
         retryOnUnauthorized: false,
       }),
-    ).rejects.toMatchObject({ status: 500, message: "API responded with 500" });
+    ).rejects.toMatchObject({
+      status: 500,
+      message: "API responded with 500",
+      code: "UNKNOWN_ERROR",
+    });
+  });
+
+  it("reads a code this build does not know as unknown, keeping the sentence", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse(409, {
+          statusCode: 409,
+          message: "A rule from a newer API",
+          code: "A_RULE_FROM_A_NEWER_API",
+        }),
+      ),
+    );
+
+    await expect(
+      apiRequest({
+        method: "GET",
+        path: "/things/1",
+        schema: z.object({}),
+        retryOnUnauthorized: false,
+      }),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: "A rule from a newer API",
+      code: "UNKNOWN_ERROR",
+    });
   });
 
   it("spends a 401 on one refresh and one replay of the failed request", async () => {
@@ -110,7 +154,11 @@ describe("apiRequest", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
-        jsonResponse(401, { statusCode: 401, message: "Unauthorized" }),
+        jsonResponse(401, {
+          statusCode: 401,
+          message: "Unauthorized",
+          code: "UNAUTHORIZED",
+        }),
       )
       .mockResolvedValueOnce(jsonResponse(200, { id: 1 }));
 
@@ -131,11 +179,13 @@ describe("apiRequest", () => {
   });
 
   it("does not retry a 401 from a route that opted out, such as the session's own", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        jsonResponse(401, { statusCode: 401, message: "Wrong password" }),
-      );
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(401, {
+        statusCode: 401,
+        message: "Wrong password",
+        code: "INVALID_CREDENTIALS",
+      }),
+    );
 
     vi.stubGlobal("fetch", fetchMock);
 
@@ -154,11 +204,13 @@ describe("apiRequest", () => {
 
   it("throws the original 401 when the refresh itself fails", async () => {
     const schema = z.object({ id: z.number() });
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        jsonResponse(401, { statusCode: 401, message: "Unauthorized" }),
-      );
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(401, {
+        statusCode: 401,
+        message: "Unauthorized",
+        code: "UNAUTHORIZED",
+      }),
+    );
 
     vi.stubGlobal("fetch", fetchMock);
     vi.mocked(refreshSession).mockResolvedValue(false);

@@ -353,6 +353,10 @@ is the wrong shape for a list that keeps growing.
   back under `minPrice`.
 - The error body is part of the contract too (`apiErrorSchema`): do not read
   `message`/`errors` out of an `unknown` body by hand.
+  `ApiResponseError.code` (an `ErrorCode`, `UNKNOWN_ERROR` for a code this build has no word for
+  or an answer outside the contract) and each issue's `code`/`params` carry the rule that
+  refused, for a client that words it itself; the interface still shows `message`, which is the English
+  fallback and what every screen reads today.
 - Parse the API response with a schema (`bookingListSchema.parse(...)`) instead of casting
   with `as`: a mismatch with the contract has to fail immediately and loudly.
 - Validate a submitted form with the same schema that validates the request in Nest
@@ -1248,6 +1252,12 @@ request; the root layout reads `x-nonce` and hands it to `next-themes`, the one 
 script of this site's own. Every page renders per request already — the shell reads the
 session — so the nonce costs no static page. A new third-party origin is a line in the
 policy, and a new inline script needs the nonce, or the browser refuses it.
+
+The policy has no `'unsafe-eval'`, so zod's `new Function` probe (made when the first
+object schema is built) would be refused and logged in Chrome's Issues panel — a Lighthouse
+finding even though zod swallows the error. `instrumentation-client.ts` (Next.js runs it in
+the browser before any application code) sets `config({ jitless: true })` to skip the probe.
+It has to stay ahead of every schema, so it is not a component's job.
 
 The secret Elements pays with is asked for by the form, from the browser
 (`bookingsApi.payment`, `POST /bookings/:id/payment`), never by a render: opening it is a

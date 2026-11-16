@@ -36,8 +36,10 @@ Every route needs the session unless it says otherwise.
 **Roles.** \`USER\` books and hosts, \`ADMIN\` moderates. A route closed to a role says
 so in its \`403\`.
 
-**Errors.** Every non-2xx answer is \`ApiErrorDto\`: \`statusCode\`, \`message\`, and for a
-body or a query that failed validation \`errors\`, one entry per field with its \`path\`.
+**Errors.** Every non-2xx answer is \`ApiErrorDto\`: \`statusCode\`, \`message\`, a stable
+\`code\` naming the rule that refused (the sentence may be reworded, the code is not), and for
+a body or a query that failed validation \`errors\`, one entry per field with its \`path\`,
+\`code\` and, where the rule has numbers to state, \`params\`.
 
 **Lists.** Paged by an opaque \`cursor\` taken from the previous page's \`nextCursor\`, up
 to \`limit\` rows. A cursor belongs to the list and the ordering that issued it.

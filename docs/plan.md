@@ -870,83 +870,72 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
 - [x] The README as a pitch: the top of `README.md` now reads as one — what it does, the double-booking GIF and three screenshots (`docs/images/`), a Mermaid architecture diagram, an "Interesting decisions" section (concurrency, webhooks, authorize-then-capture, money in cents, the shared contract, session rotation, leases) and the demo logins and test card. One departure: the quick start stays the six commands it takes (Stripe keys, Docker, migrate, seed) rather than three. The live demo is linked from the first lines.
 - [x] The demo scenario: two browser windows book the same slot at once — one goes to payment, the other receives a polite conflict. The API's `409` used to name the listing's uuid and the dates (`Listing … is already booked for an overlapping range`); the guest now reads a sentence that says the nights are no longer free and what to do next (`DATES_UNAVAILABLE`; the error's own message, with the ids, goes to the API's log). The GIF was recorded once with Playwright driving two signed-in browser contexts; the script is not kept in the repository, so as not to add a browser-automation dependency for one recording.
 
-## Phase 10 — Localization
+## Phase 10 — Error codes from the API
 
-The whole tree is English today, the interface included, and that is a rule rather than an
-accident (`.claude/rules/workflow.md`). This phase is the one change allowed to touch it,
-and the rule already says how: Russian comes back as a translation catalogue, never as a
-string typed into a component. It comes last because it touches every screen — doing it
-before the screens were finished would be paying for each of them twice — and because two
-of its pieces were written in advance, each with a note saying so.
+The interface is English today, and that is a rule rather than an accident
+(`.claude/rules/workflow.md`). Localizing it is not planned here; what this phase does is
+the one piece of it that is a contract change and would be paid for twice if it were left
+until the screens move: **a refusal answers with a stable code, not only a sentence.** Today
+it is English prose written in a zod schema or a Nest exception, and it reaches the screen
+as it is — `form-errors.ts` puts it under the field it names. A client that wants to word a
+refusal differently, or in another language, would have to match the text, which is a parser
+over somebody else's prose.
 
-- [ ] **`next-intl` and a `[locale]` segment.** It is the toolkit built for the App Router
-      rather than around it: `getTranslations` in a Server Component, `getLocale` instead
-      of reading the segment out of `params`, and ICU messages so a plural is a rule of the
-      catalogue rather than of the code. The locale goes in the path — `/en/listings`,
-      `/ru/listings` — and not in a cookie, and the Data Cache is what settles that: it is
-      keyed by URL and shared between visitors, so a catalogue whose language lived in a
-      cookie would serve one visitor's language to the next one out of the same entry. In
-      the path, the two languages are two keys and the sharing stays correct.
-- [ ] **`app/` grows a level and `src/` does not.** Every file under `app/` is a one-line
-      re-export, so moving the tree under `app/[locale]/` is mechanical and the slices it
-      re-exports never learn about it. `app/api/[...path]` stays outside that segment — the
-      BFF is transport, it has no language, and the middleware's matcher has to say so.
-      `ROUTES` in `shared/config` stays locale-free too: the prefix is added by the
-      navigation helpers `createNavigation` generates, which is one place rather than
-      every `href` on the site.
-- [ ] **One `proxy.ts`, two jobs.** Next.js allows a single middleware, and this one already
-      is the cookie gate in front of the protected routes; `createMiddleware` from
-      `next-intl` is a second function that wants the same slot. They compose — the locale
-      is resolved first, the gate then reads a path it can recognise — and the matcher
-      literal in `proxy.ts` has to learn the prefix, since `/profile` and `/ru/profile` are
-      the same protected route. The literal stays a literal: Next.js parses it out of that
-      file before any import is evaluated, which is why it could never be `ROUTES` and
-      cannot become a generated list now.
-- [ ] **The contract answers with a code, not a sentence — and this is the real work of the
-      phase.** Today a refusal is English prose written in a zod schema or a Nest
-      exception, and it reaches the screen as it is: `form-errors.ts` puts it under the
-      field it names. A Russian form showing an English refusal is the whole problem, and
-      translating on the frontend by matching the text would be a parser over somebody
-      else's prose. So `apiErrorSchema` grows a stable `code` per issue, the schemas in
-      `@repo/contracts` carry one on every rule, and the catalogue maps a code to a
-      message with the parameters the rule already knows (a minimum, a ceiling, a date).
-      The English prose stays as the fallback for a code no catalogue has yet, and as what
-      `/docs` and the API's own logs keep saying. It is a contract change, so it lands in
-      one place for both sides — which is the argument the shared package has been making
-      since phase 1.
-- [ ] **A Server Action has to be handed its locale.** `next/root-params` does not reach
-      one, so `getTranslations({locale, namespace})` needs the value passed in — and
-      mutations here are Server Actions by default. That makes it a rule for the whole
-      `api/` segment of every page slice rather than a detail of one form: the locale
-      travels as a hidden field of the form, beside the `sort` the catalogue's dialog
-      already carries for the same kind of reason.
-- [ ] **Two formatters were written for this and one must not be touched.** `countOf` in
-      `shared/lib/plural.ts` says in its own comment that `Intl.PluralRules` and a
-      catalogue replace its body and nothing else; `formatMoney` names `en-GB` explicitly
-      so the server and the browser agree on the separators, and localizing it means
-      choosing the locale rather than dropping the argument — a `undefined` locale is the
-      runtime's, and the server's runtime is not the visitor's. `shared/lib/dates/dates.ts` is
-      the one that stays: a calendar day is a `YYYY-MM-DD` string read as midnight UTC,
-      and which check-in day is gone is the listing's to say (`isCheckInDayPast`), never
-      the visitor's. Only its display is localized; parsing one in the visitor's zone
-      moves a stay by a day.
-- [ ] **The SEO of two languages**, and it is the other half of the JSON-LD item in phase 8.
-      `<html lang>` comes from the resolved locale instead of the literal `en` it carries
-      now, `generateMetadata` emits `alternates.languages` so each page names its
-      counterpart, and every JSON-LD document gains `inLanguage`. A locale is a path
-      segment, so a canonical is per language and the `?cursor=…` rule from phase 8 applies
-      unchanged in both.
-- [ ] **What stays English.** Everything that is not the interface: code, comments, tests
-      and their fixtures, commit messages aside, the seed's demo data, the API's logs and
-      Swagger. The catalogue files are the only place in the tree where Cyrillic lands, and
-      `.claude/rules/workflow.md` is updated in this change to say so instead of saying
-      "when i18n appears".
+The phase stops at the API's side of the wire. No catalogue, no `next-intl`, no `[locale]`
+segment: those come back as their own phase if the interface is ever translated.
 
-What stays out: translating what an owner wrote. A listing's title and description are
-their author's text in their author's language, and a `language` column with per-locale
-copy behind it is a product decision rather than an engineering one. So is currency —
-money is stored and answered in one currency, and localizing how a number is written is
-not converting what it is worth.
+- [x] **A code on every refusal.** `apiErrorSchema` grows `code`, and `apiErrorIssueSchema`
+      grows `code` and `params` (the minimum, the ceiling, the date the rule already knows).
+      The codes are one list in `@repo/contracts` (`ERROR_CODES`), so the API cannot invent
+      one the other side has never heard of. `message` stays as it is — the English
+      sentence is the fallback for a client that knows no code, and what `/docs` and the
+      logs keep saying.
+- [x] **Rules carry their code.** A zod rule is written `error: rule("PASSWORD_TOO_SHORT",
+"Password must be at least 8 characters long", params)`; the helper stamps the code onto
+      the raw issue, so it survives to the wire and to the browser's own parse of the same
+      schema. An issue no rule claimed (zod's own "expected string") gets `INVALID_INPUT`.
+- [x] **Exceptions carry theirs.** `apiException(NotFoundException, "BOOKING_NOT_FOUND",
+message, params?)` in `apps/api/src/common`; a global filter guarantees the field on
+      every answer — an exception nobody migrated yet (a Nest 404 for an unknown route, the
+      throttler's 429) gets a code per status (`NOT_FOUND`, `TOO_MANY_REQUESTS`, …), a
+      body the parser refused gets its status's, an unexpected error is a bare
+      `INTERNAL_ERROR` (logged with its stack, as Nest's own filter did), and a status with
+      no code of its own is `UNKNOWN_ERROR` rather than a guess.
+- [ ] **Migrated slice by slice**, each one a change that lands whole: auth ✅ (its schema
+      rules, `AuthService`, `RolesGuard`, and the session and admin-standing refusals every
+      service shares, `common/session-errors.ts`), then listings,
+      bookings and cancellations, payments and payouts, the rest (reviews, conversations,
+      waitlist, notifications, lookup, users). The e2e spec of a slice asserts the code
+      next to the status.
+- [ ] **The web branches on a code where a status is ambiguous.** The interface decides by
+      HTTP status today, which is right wherever a status has one reason (`404` is a missing
+      row, `401` a dead session, `400` on a read a stale cursor) and wrong where it has
+      several. Those are the places to move onto a code, each in the change that migrates the
+      slice raising it, since the code has to exist first:
+
+  - `payment-form.tsx` — a `409` is both "the hold moved on" and "another request is
+    opening this payment", and the form retries on either; with codes it retries on the
+    second only, and takes the form away on the first at once.
+  - `refund-stay-action.ts` — a `409` is a dispute, Stripe's refusal, more than is left to
+    refund, a claim another press holds, or a stay that moved on; the action refreshes
+    the list on all of them, and the dialog should say which.
+  - `create-booking-action.ts` and `join-waitlist-action.ts` — a `409` is read as "the
+    calendar is stale", true today only because nothing else in those routes answers one;
+    the check moves to `DATES_UNAVAILABLE` so a second `409` added later cannot flip the
+    form into the waitlist offer. Likewise the `412` there, to the code for a listing
+    changed since it was read.
+  - `keyset-page.ts` stays on `400`: a stale cursor is the only `400` a read answers, and
+    the filter's `VALIDATION_FAILED` already tells a refused search apart from it.
+
+  What stays on status: `not-found.ts`, `auth.ts` and the retry-on-`401` of the transport.
+
+- [x] **The web's transport reads it.** `ApiResponseError` keeps `code` and the issues'
+      `code`/`params` beside the message, and nothing else changes in the interface: it
+      still shows `message`.
+
+What stays out: everything that touches the interface — a catalogue, a locale in the path,
+`proxy.ts` composed with a locale middleware, formatters, `<html lang>`, the SEO of two
+languages. A listing's title and description stay their author's text.
 
 ## Phase 11 — Partial prerendering
 
@@ -993,7 +982,7 @@ not converting what it is worth.
   before React has hydrated, and `refresh()` / `updateTag` are reachable only from there.
   The client path stays for what a round trip cannot express — a poll for a webhook — and
   phase 6 is what brings the first of those.
-- The order of the phases follows the dependencies: database → auth → roles → concurrency → catalogue → Stripe → cancellation policies → polish → deployment. The cancellation policies follow Stripe directly because they change the rules its refund machinery runs on, and they come before localization because they add screens and sentences it would otherwise translate twice. The catalogue comes before Stripe because the dependency runs one way only: Stripe Elements needs a booking to attach to, and a booking is created from the form on the listing page, which is the catalogue's. Nothing in the catalogue needs a payment — it is server-rendered from `searchParams`, and TanStack Query arrives with the polling of the webhook.
+- The order of the phases follows the dependencies: database → auth → roles → concurrency → catalogue → Stripe → cancellation policies → polish → deployment. The cancellation policies follow Stripe directly because they change the rules its refund machinery runs on, and they come before the error codes because they add refusals the codes would otherwise be written for twice. The catalogue comes before Stripe because the dependency runs one way only: Stripe Elements needs a booking to attach to, and a booking is created from the form on the listing page, which is the catalogue's. Nothing in the catalogue needs a payment — it is server-rendered from `searchParams`, and TanStack Query arrives with the polling of the webhook.
 
 ## Decisions deliberately not taken
 

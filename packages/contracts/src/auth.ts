@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Role } from "./enums.js";
+import { rule } from "./error-code.js";
 
 /** Built from the runtime value in `enums.ts`, so `@Roles(Role.ADMIN)` and the schema share one list. */
 export const roleSchema = z.enum(Role);
@@ -14,7 +15,27 @@ export const roleSchema = z.enum(Role);
  * behind an unconstrained input schema — and with it the `format: email` of the OpenAPI
  * document, which is generated from this very schema.
  */
-const emailSchema = z.email().max(254).toLowerCase();
+const emailFormat = rule("EMAIL_INVALID", "Invalid email address");
+
+const emailSchema = z
+  .email({
+    // `error` on a schema reaches every issue it raises, a missing or non-string value
+    // included, which would answer "expected string" with the code of a malformed address.
+    // Only the format check is the rule's; anything else falls through to zod's own
+    // sentence and `INVALID_INPUT`, as it does for the name and the password.
+    error: (issue) =>
+      issue.code === "invalid_format" ? emailFormat(issue) : undefined,
+  })
+  .max(254, {
+    error: rule(
+      "EMAIL_TOO_LONG",
+      "An email address may not be longer than 254 characters",
+      {
+        maximum: 254,
+      },
+    ),
+  })
+  .toLowerCase();
 
 /**
  * The lower bound is the only rule worth enforcing — a composition rule ("one digit,
@@ -24,8 +45,20 @@ const emailSchema = z.email().max(254).toLowerCase();
  */
 const passwordSchema = z
   .string()
-  .min(8, { error: "Password must be at least 8 characters long" })
-  .max(128, { error: "Password may not be longer than 128 characters" });
+  .min(8, {
+    error: rule(
+      "PASSWORD_TOO_SHORT",
+      "Password must be at least 8 characters long",
+      { minimum: 8 },
+    ),
+  })
+  .max(128, {
+    error: rule(
+      "PASSWORD_TOO_LONG",
+      "Password may not be longer than 128 characters",
+      { maximum: 128 },
+    ),
+  });
 
 /**
  * The name a person goes by on the site — what a host reads on a stay instead of an
@@ -42,10 +75,21 @@ export const nameSchema = z
   .string()
   .trim()
   // `abort`: an empty box is one mistake, and "no letter in it" would only say it twice.
-  .min(1, { error: "Enter your name", abort: true })
-  .max(100, { error: "A name may not be longer than 100 characters" })
+  .min(1, { error: rule("NAME_REQUIRED", "Enter your name"), abort: true })
+  .max(100, {
+    error: rule(
+      "NAME_TOO_LONG",
+      "A name may not be longer than 100 characters",
+      {
+        maximum: 100,
+      },
+    ),
+  })
   .regex(/[\p{L}\p{N}]/u, {
-    error: "A name has to have at least one letter in it",
+    error: rule(
+      "NAME_NEEDS_LETTER",
+      "A name has to have at least one letter in it",
+    ),
   });
 
 /** What the API tells the client about the signed-in person — never the password hash. */
@@ -81,7 +125,7 @@ export const registerFormSchema = registerSchema
       values.confirmPassword === undefined ||
       values.confirmPassword === values.password,
     {
-      error: "Passwords do not match",
+      error: rule("PASSWORDS_DO_NOT_MATCH", "Passwords do not match"),
       path: ["confirmPassword"],
     },
   );
@@ -93,7 +137,9 @@ export const registerFormSchema = registerSchema
  */
 export const loginSchema = z.object({
   email: emailSchema,
-  password: z.string().min(1, { error: "Password is required" }),
+  password: z
+    .string()
+    .min(1, { error: rule("PASSWORD_REQUIRED", "Password is required") }),
 });
 
 export type User = z.infer<typeof userSchema>;

@@ -18,6 +18,7 @@ import {
   CallerNotAdminError,
   UserRepository,
 } from "./user.repository";
+import { notAnAdminAnymore } from "../common/session-errors";
 
 /**
  * Managing accounts is the admin's, and the controller says so with `@Roles`. What is left
@@ -90,7 +91,7 @@ export class UserService {
       }
 
       if (error instanceof CallerNotAdminError) {
-        throw new ForbiddenException("Your account is no longer an admin's");
+        throw notAnAdminAnymore();
       }
 
       throw error;

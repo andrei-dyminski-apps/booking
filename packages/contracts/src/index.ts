@@ -152,6 +152,17 @@ export {
 } from "./error.js";
 
 export {
+  ERROR_CODES,
+  errorCodeSchema,
+  errorParamsSchema,
+  rule,
+  toApiIssue,
+  toErrorCode,
+  type ErrorCode,
+  type ErrorParams,
+} from "./error-code.js";
+
+export {
   MAX_NON_REFUNDABLE_DISCOUNT_BPS,
   MIN_NON_REFUNDABLE_DISCOUNT_BPS,
   RATE_UNDER_NON_REFUNDABLE_POLICY,

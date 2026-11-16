@@ -5,6 +5,7 @@ import {
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { Role } from "@repo/contracts";
+import { refusalOfSync } from "../../common/testing/refusal";
 import type { AuthenticatedUser } from "../auth.types";
 import { Roles } from "../decorators/roles.decorator";
 import { RolesGuard } from "./roles.guard";
@@ -88,5 +89,37 @@ describe("RolesGuard", () => {
     expect(() =>
       guard.canActivate(contextFor(controller.userOnly, undefined)),
     ).toThrow(UnauthorizedException);
+  });
+
+  it("names the rule that refused, and the roles the route wanted", () => {
+    expect(
+      refusalOfSync(() =>
+        guard.canActivate(
+          contextFor(controller.userOnly, userWith(Role.ADMIN)),
+        ),
+      ),
+    ).toEqual({
+      status: 403,
+      code: "ROLE_NOT_ALLOWED",
+      params: { roles: ["USER"] },
+    });
+
+    expect(
+      refusalOfSync(() =>
+        guard.canActivate(
+          contextFor(controller.adminOnly, userWith(Role.USER)),
+        ),
+      ),
+    ).toEqual({
+      status: 403,
+      code: "ROLE_NOT_ALLOWED",
+      params: { roles: ["ADMIN"] },
+    });
+
+    expect(
+      refusalOfSync(() =>
+        guard.canActivate(contextFor(controller.userOnly, undefined)),
+      ),
+    ).toEqual({ status: 401, code: "AUTHENTICATION_REQUIRED" });
   });
 });

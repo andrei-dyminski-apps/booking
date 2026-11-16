@@ -2,7 +2,6 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
-  UnauthorizedException,
 } from "@nestjs/common";
 import {
   ConversationSide,
@@ -38,6 +37,7 @@ import {
   RECENT,
   type ConversationCursor,
 } from "./conversation-cursor";
+import { sessionNotFound } from "../common/session-errors";
 
 /**
  * The threads, and the news of them on the account's event stream: every message is
@@ -139,7 +139,7 @@ export class ConversationService {
 
       // An ended session, answered the way `BookingService.create` answers it.
       if (error instanceof GuestNotFoundError) {
-        throw new UnauthorizedException("Session no longer exists");
+        throw sessionNotFound();
       }
 
       throw error;

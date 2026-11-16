@@ -1,11 +1,9 @@
 import {
   BadGatewayException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
-  UnauthorizedException,
 } from "@nestjs/common";
 import {
   DisputeStatus,
@@ -36,6 +34,10 @@ import {
 } from "../infrastructure/booking-adjustment.repository";
 import { BookingCancellationRepository } from "../infrastructure/booking-cancellation.repository";
 import { BookingRepository } from "../infrastructure/booking.repository";
+import {
+  sessionNotFound,
+  notAnAdminAnymore,
+} from "../../common/session-errors";
 
 /**
  * How long a press waits for a stay another run holds before its `409`. Shorter than a
@@ -124,9 +126,9 @@ export class BookingAdjustmentService {
       case "ACTIVE":
         return;
       case "GONE":
-        throw new UnauthorizedException("Session no longer exists");
+        throw sessionNotFound();
       case "NOT_ADMIN":
-        throw new ForbiddenException("Your account is no longer an admin's");
+        throw notAnAdminAnymore();
     }
   }
 

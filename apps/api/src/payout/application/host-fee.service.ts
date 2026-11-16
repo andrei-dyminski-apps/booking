@@ -1,9 +1,4 @@
-import {
-  ForbiddenException,
-  Injectable,
-  Logger,
-  UnauthorizedException,
-} from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { stillOwed, type HostFeeOverview } from "@repo/contracts";
 import { writeOrRefuse } from "../../common/set-aside";
 import { addCents, NO_CENTS } from "../../payment/domain/money";
@@ -13,6 +8,10 @@ import {
 } from "../domain/payout.errors";
 import type { HostFeeReader } from "../domain/payout.types";
 import { HostFeeRepository } from "../infrastructure/host-fee.repository";
+import {
+  sessionNotFound,
+  notAnAdminAnymore,
+} from "../../common/session-errors";
 
 /**
  * What hosts owe for cancelling paid stays: the overview the host's payouts screen and the
@@ -62,11 +61,11 @@ export class HostFeeService {
       );
     } catch (error) {
       if (error instanceof WaivingAccountGoneError) {
-        throw new UnauthorizedException("Session no longer exists");
+        throw sessionNotFound();
       }
 
       if (error instanceof WaivingAccountNotAdminError) {
-        throw new ForbiddenException("Your account is no longer an admin's");
+        throw notAnAdminAnymore();
       }
 
       throw error;

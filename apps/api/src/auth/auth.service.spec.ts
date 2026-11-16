@@ -11,6 +11,7 @@ import type { ManagedUser, ManagedUserDetail, User } from "@repo/contracts";
 import type { Page } from "../common/paging";
 import * as argon2 from "argon2";
 import type { PublicOf } from "../common/testing/public-of.fakes";
+import { refusalOf } from "../common/testing/refusal";
 import { AUTH_CONFIG, type AuthConfig } from "./auth.config";
 import { AuthService } from "./auth.service";
 import type { IssuedRefreshToken } from "./auth.types";
@@ -306,6 +307,10 @@ describe("AuthService", () => {
       await expect(service.register(credentials)).rejects.toThrow(
         ConflictException,
       );
+      await expect(refusalOf(service.register(credentials))).resolves.toEqual({
+        status: 409,
+        code: "EMAIL_ALREADY_REGISTERED",
+      });
     });
 
     it("keeps a stored session when the sweep of expired rows fails", async () => {
@@ -342,6 +347,26 @@ describe("AuthService", () => {
       ).rejects.toThrow(UnauthorizedException);
 
       expect(refreshTokenRepository.rows).toHaveLength(sessions);
+
+      // One rule for both, as one sentence: the code must not tell them apart either.
+      const invalid = { status: 401, code: "INVALID_CREDENTIALS" };
+
+      await expect(
+        refusalOf(
+          service.login({
+            email: "nobody@example.com",
+            password: "password123",
+          }),
+        ),
+      ).resolves.toEqual(invalid);
+      await expect(
+        refusalOf(
+          service.login({
+            email: credentials.email,
+            password: "wrong-password",
+          }),
+        ),
+      ).resolves.toEqual(invalid);
     });
 
     it("spends an argon2 verification on an unknown email too, so the clock tells no tales", async () => {
@@ -375,6 +400,10 @@ describe("AuthService", () => {
       await expect(service.login(credentials)).rejects.toThrow(
         ForbiddenException,
       );
+      await expect(refusalOf(service.login(credentials))).resolves.toEqual({
+        status: 403,
+        code: "ACCOUNT_BLOCKED",
+      });
 
       expect(refreshTokenRepository.rows).toHaveLength(sessions);
     });
@@ -418,8 +447,8 @@ describe("AuthService", () => {
       // The same token a second time: whoever holds the copy is indistinguishable from
       // the real user, so the chain ends for both of them.
       await expect(
-        service.refresh(session.tokens.refreshToken),
-      ).rejects.toThrow(UnauthorizedException);
+        refusalOf(service.refresh(session.tokens.refreshToken)),
+      ).resolves.toEqual({ status: 401, code: "REFRESH_TOKEN_REUSED" });
 
       expect(refreshTokenRepository.family(familyId)).toHaveLength(2);
       expect(
@@ -438,8 +467,8 @@ describe("AuthService", () => {
       jest.spyOn(refreshTokenRepository, "rotate").mockResolvedValueOnce(false);
 
       await expect(
-        service.refresh(session.tokens.refreshToken),
-      ).rejects.toThrow(UnauthorizedException);
+        refusalOf(service.refresh(session.tokens.refreshToken)),
+      ).resolves.toEqual({ status: 401, code: "REFRESH_TOKEN_REUSED" });
 
       // Both halves matter: the presented token stays usable, and no successor was left
       // behind for a chain that never advanced.
@@ -454,9 +483,10 @@ describe("AuthService", () => {
     it("rejects a token signed with another key without touching the database", async () => {
       const lookup = jest.spyOn(refreshTokenRepository, "findByHash");
 
-      await expect(service.refresh("not-a-token")).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(refusalOf(service.refresh("not-a-token"))).resolves.toEqual({
+        status: 401,
+        code: "REFRESH_TOKEN_INVALID",
+      });
       expect(lookup).not.toHaveBeenCalled();
     });
 
@@ -466,9 +496,9 @@ describe("AuthService", () => {
       // whose rows are gone.
       const orphan = await tokenService.issuePair(user.user);
 
-      await expect(service.refresh(orphan.refreshToken)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(
+        refusalOf(service.refresh(orphan.refreshToken)),
+      ).resolves.toEqual({ status: 401, code: "REFRESH_TOKEN_UNKNOWN" });
     });
 
     it("ends the family of a token that outlived the block of its account", async () => {
@@ -480,8 +510,8 @@ describe("AuthService", () => {
       userRepository.block(session.user.id);
 
       await expect(
-        service.refresh(session.tokens.refreshToken),
-      ).rejects.toThrow(UnauthorizedException);
+        refusalOf(service.refresh(session.tokens.refreshToken)),
+      ).resolves.toEqual({ status: 401, code: "ACCOUNT_BLOCKED" });
 
       expect(refreshTokenRepository.family(familyId)).toHaveLength(1);
       expect(
@@ -492,9 +522,10 @@ describe("AuthService", () => {
     });
 
     it("rejects a missing cookie", async () => {
-      await expect(service.refresh(null)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(refusalOf(service.refresh(null))).resolves.toEqual({
+        status: 401,
+        code: "REFRESH_TOKEN_MISSING",
+      });
     });
 
     it("rejects a row that expired early without ending the family", async () => {
@@ -507,8 +538,8 @@ describe("AuthService", () => {
       stored.expiresAt = new Date(Date.now() - 1000);
 
       await expect(
-        service.refresh(session.tokens.refreshToken),
-      ).rejects.toThrow(UnauthorizedException);
+        refusalOf(service.refresh(session.tokens.refreshToken)),
+      ).resolves.toEqual({ status: 401, code: "REFRESH_TOKEN_INVALID" });
 
       expect(stored.revokedAt).toBeNull();
       expect(refreshTokenRepository.family(stored.familyId)).toHaveLength(1);
@@ -566,9 +597,10 @@ describe("AuthService", () => {
 
   describe("findById", () => {
     it("treats a vanished user as an ended session rather than a missing resource", async () => {
-      await expect(service.findById(randomUUID())).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(refusalOf(service.findById(randomUUID()))).resolves.toEqual({
+        status: 401,
+        code: "SESSION_NOT_FOUND",
+      });
     });
 
     it("treats a blocked account as an ended session while its access token is still signed", async () => {
@@ -576,9 +608,9 @@ describe("AuthService", () => {
 
       userRepository.block(session.user.id);
 
-      await expect(service.findById(session.user.id)).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(
+        refusalOf(service.findById(session.user.id)),
+      ).resolves.toEqual({ status: 401, code: "SESSION_NOT_FOUND" });
     });
   });
 

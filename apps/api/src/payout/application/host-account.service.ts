@@ -1,9 +1,4 @@
-import {
-  BadGatewayException,
-  Injectable,
-  Logger,
-  UnauthorizedException,
-} from "@nestjs/common";
+import { BadGatewayException, Injectable, Logger } from "@nestjs/common";
 import {
   HostAccountStatus,
   type AccountSession,
@@ -18,6 +13,7 @@ import {
   type Caller,
 } from "./ports/payout-gateway";
 import { PayoutJobs } from "./ports/payout-jobs";
+import { sessionNotFound } from "../../common/session-errors";
 
 const ACCOUNT_CHANGES = new Set([
   "v2.core.account[configuration.recipient].capability_status_updated",
@@ -86,7 +82,7 @@ export class HostAccountService {
     const holder = await this.payoutRepository.findHolder(user.id);
 
     if (holder === null) {
-      throw new UnauthorizedException("Session no longer exists");
+      throw sessionNotFound();
     }
 
     return holder;

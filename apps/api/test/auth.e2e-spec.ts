@@ -4,6 +4,7 @@ import request from "supertest";
 import { App } from "supertest/types";
 import { apiErrorSchema, userSchema } from "@repo/contracts";
 import { AppModule } from "./../src/app.module";
+import { PrismaService } from "./../src/prisma/prisma.service";
 import {
   ACCESS_TOKEN_COOKIE,
   REFRESH_TOKEN_COOKIE,
@@ -65,10 +66,14 @@ describe("AuthController (e2e)", () => {
       .send(testCredentials)
       .expect(201);
 
-    await request(server)
+    const response = await request(server)
       .post("/auth/register")
       .send(testCredentials)
       .expect(409);
+
+    expect(apiErrorSchema.parse(response.body).code).toBe(
+      "EMAIL_ALREADY_REGISTERED",
+    );
   });
 
   it("rejects a password the contract schema refuses", async () => {
@@ -79,8 +84,13 @@ describe("AuthController (e2e)", () => {
 
     const error = apiErrorSchema.parse(response.body);
 
+    expect(error.code).toBe("VALIDATION_FAILED");
     expect(error.errors).toEqual([
-      expect.objectContaining({ path: ["password"] }),
+      expect.objectContaining({
+        path: ["password"],
+        code: "PASSWORD_TOO_SHORT",
+        params: { minimum: 8 },
+      }),
     ]);
   });
 
@@ -92,7 +102,9 @@ describe("AuthController (e2e)", () => {
 
     const error = apiErrorSchema.parse(response.body);
 
-    expect(error.errors).toEqual([expect.objectContaining({ path: ["name"] })]);
+    expect(error.errors).toEqual([
+      expect.objectContaining({ path: ["name"], code: "NAME_REQUIRED" }),
+    ]);
   });
 
   it("rejects a name with no letter in it, however long", async () => {
@@ -139,10 +151,35 @@ describe("AuthController (e2e)", () => {
     expect(apiErrorSchema.parse(wrongPassword.body).message).toBe(
       apiErrorSchema.parse(unknownEmail.body).message,
     );
+    expect(apiErrorSchema.parse(wrongPassword.body).code).toBe(
+      "INVALID_CREDENTIALS",
+    );
+    expect(apiErrorSchema.parse(unknownEmail.body).code).toBe(
+      "INVALID_CREDENTIALS",
+    );
+  });
+
+  it("gives a code to the answers that are not an exception of ours", async () => {
+    // The body parser's refusal is an http-errors error, and an unknown route is Nest's
+    // own 404: neither names a code, so the filter has to.
+    const malformed = await request(server)
+      .post("/auth/login")
+      .set("Content-Type", "application/json")
+      .send("{ not json")
+      .expect(400);
+
+    expect(apiErrorSchema.parse(malformed.body).code).toBe("BAD_REQUEST");
+
+    const unknown = await request(server).get("/no-such-route").expect(404);
+
+    expect(apiErrorSchema.parse(unknown.body).code).toBe("NOT_FOUND");
   });
 
   it("closes /auth/me without a session and answers it with one", async () => {
-    await request(server).get("/auth/me").expect(401);
+    const refused = await request(server).get("/auth/me").expect(401);
+
+    // The guard is Passport's, which names no code: the filter answers with the status's.
+    expect(apiErrorSchema.parse(refused.body).code).toBe("UNAUTHORIZED");
 
     const agent = await signIn(app);
     const response = await agent.get("/auth/me").expect(200);
@@ -183,14 +220,91 @@ describe("AuthController (e2e)", () => {
     const stolenToken = readSetCookie(registered, REFRESH_TOKEN_COOKIE);
 
     await agent.post("/auth/refresh").expect(200);
-    await request(server)
+
+    const replayed = await request(server)
       .post("/auth/refresh")
       .set("Cookie", `${REFRESH_TOKEN_COOKIE}=${stolenToken ?? ""}`)
       .expect(401);
 
+    expect(apiErrorSchema.parse(replayed.body).code).toBe(
+      "REFRESH_TOKEN_REUSED",
+    );
+
     // The agent holds the current, never-used token — and it is dead as well: the replay
     // proved a copy of the chain exists, and there is no telling which side holds it.
     await agent.post("/auth/refresh").expect(401);
+  });
+
+  it("names why a refresh was refused: no cookie, a token that is no token, one nobody stored", async () => {
+    const missing = await request(server).post("/auth/refresh").expect(401);
+
+    expect(apiErrorSchema.parse(missing.body).code).toBe(
+      "REFRESH_TOKEN_MISSING",
+    );
+
+    const garbage = await request(server)
+      .post("/auth/refresh")
+      .set("Cookie", `${REFRESH_TOKEN_COOKIE}=not-a-token`)
+      .expect(401);
+
+    expect(apiErrorSchema.parse(garbage.body).code).toBe(
+      "REFRESH_TOKEN_INVALID",
+    );
+
+    // Signed with the real key, so it is the database that has never heard of it: the
+    // row is gone (a logout only revokes the family, which reads as a replay instead).
+    const agent = request.agent(server);
+    const registered = await agent
+      .post("/auth/register")
+      .send(testCredentials)
+      .expect(201);
+    const token = readSetCookie(registered, REFRESH_TOKEN_COOKIE) ?? "";
+
+    await app.get(PrismaService).refreshToken.deleteMany();
+
+    const unstored = await request(server)
+      .post("/auth/refresh")
+      .set("Cookie", `${REFRESH_TOKEN_COOKIE}=${token}`)
+      .expect(401);
+
+    expect(apiErrorSchema.parse(unstored.body).code).toBe(
+      "REFRESH_TOKEN_UNKNOWN",
+    );
+  });
+
+  it("answers an ended session with SESSION_NOT_FOUND once the row behind a signed token is gone", async () => {
+    const agent = await signIn(app);
+
+    await app
+      .get(PrismaService)
+      .user.delete({ where: { email: testCredentials.email } });
+
+    const refused = await agent.get("/auth/me").expect(401);
+
+    expect(apiErrorSchema.parse(refused.body).code).toBe("SESSION_NOT_FOUND");
+  });
+
+  it("tells a blocked account so only once the password is right", async () => {
+    await request(server)
+      .post("/auth/register")
+      .send(testCredentials)
+      .expect(201);
+    await app.get(PrismaService).user.update({
+      where: { email: testCredentials.email },
+      data: { blockedAt: new Date() },
+    });
+
+    const wrong = await request(server)
+      .post("/auth/login")
+      .send({ ...testCredentials, password: "wrong-password" })
+      .expect(401);
+    const blocked = await request(server)
+      .post("/auth/login")
+      .send(testCredentials)
+      .expect(403);
+
+    expect(apiErrorSchema.parse(wrong.body).code).toBe("INVALID_CREDENTIALS");
+    expect(apiErrorSchema.parse(blocked.body).code).toBe("ACCOUNT_BLOCKED");
   });
 
   it("never mints two sessions out of two parallel refreshes", async () => {

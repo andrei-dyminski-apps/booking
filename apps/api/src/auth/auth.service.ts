@@ -9,15 +9,28 @@ import {
 import type { LoginInput, RegisterInput, User } from "@repo/contracts";
 import * as argon2 from "argon2";
 import { isPast } from "date-fns";
+import { apiException } from "../common/api-exception";
 import { RefreshTokenRepository } from "./refresh-token.repository";
 import { TokenService, type TokenPair } from "./token.service";
 import {
   EmailAlreadyRegisteredError,
   UserRepository,
 } from "../user/user.repository";
+import { sessionNotFound } from "../common/session-errors";
 
-/** What a blocked account is told when it tries to sign in or keep a session going. */
-const ACCOUNT_BLOCKED = "This account has been blocked";
+/**
+ * What a blocked account is told when it tries to sign in or keep a session going — the
+ * status differs (a login is forbidden, a refresh is a session that ended), the rule does not.
+ */
+function accountBlocked(
+  Exception: typeof ForbiddenException | typeof UnauthorizedException,
+): Error {
+  return apiException(
+    Exception,
+    "ACCOUNT_BLOCKED",
+    "This account has been blocked",
+  );
+}
 
 /** Everything the controller needs: the body of the answer plus the tokens it turns into cookies. */
 export type AuthResult = {
@@ -64,7 +77,11 @@ export class AuthService {
       if (error instanceof EmailAlreadyRegisteredError) {
         // Deliberately not the message of the error: it names the address back, which is
         // fine in a log and is a registered-address oracle in a response body.
-        throw new ConflictException("Email is already registered");
+        throw apiException(
+          ConflictException,
+          "EMAIL_ALREADY_REGISTERED",
+          "Email is already registered",
+        );
       }
 
       throw error;
@@ -86,13 +103,17 @@ export class AuthService {
     );
 
     if (found === null || !matches) {
-      throw new UnauthorizedException("Invalid email or password");
+      throw apiException(
+        UnauthorizedException,
+        "INVALID_CREDENTIALS",
+        "Invalid email or password",
+      );
     }
 
     // Only after the password: saying an account is blocked tells whoever hears it that
     // the address is registered, and the one person that is no news to is its owner.
     if (found.blocked) {
-      throw new ForbiddenException(ACCOUNT_BLOCKED);
+      throw accountBlocked(ForbiddenException);
     }
 
     return this.startSession(found.user);
@@ -106,13 +127,21 @@ export class AuthService {
    */
   async refresh(token: string | null): Promise<AuthResult> {
     if (token === null) {
-      throw new UnauthorizedException("Refresh token is missing");
+      throw apiException(
+        UnauthorizedException,
+        "REFRESH_TOKEN_MISSING",
+        "Refresh token is missing",
+      );
     }
 
     const payload = await this.tokenService.verifyRefreshToken(token);
 
     if (payload === null) {
-      throw new UnauthorizedException("Refresh token is invalid or expired");
+      throw apiException(
+        UnauthorizedException,
+        "REFRESH_TOKEN_INVALID",
+        "Refresh token is invalid or expired",
+      );
     }
 
     const stored = await this.refreshTokenRepository.findByHash(
@@ -121,7 +150,11 @@ export class AuthService {
 
     // A valid signature with no row behind it: the session was ended, or the user is gone.
     if (stored === null) {
-      throw new UnauthorizedException("Refresh token is not recognised");
+      throw apiException(
+        UnauthorizedException,
+        "REFRESH_TOKEN_UNKNOWN",
+        "Refresh token is not recognised",
+      );
     }
 
     // Blocking deletes every refresh row of the account, so a row that is still here was
@@ -129,18 +162,26 @@ export class AuthService {
     // goes with it, and the answer is the one a dead session gets.
     if (stored.userBlocked) {
       await this.refreshTokenRepository.revokeFamily(stored.familyId);
-      throw new UnauthorizedException(ACCOUNT_BLOCKED);
+      throw accountBlocked(UnauthorizedException);
     }
 
     if (stored.revokedAt !== null) {
       await this.refreshTokenRepository.revokeFamily(stored.familyId);
-      throw new UnauthorizedException("Refresh token has already been used");
+      throw apiException(
+        UnauthorizedException,
+        "REFRESH_TOKEN_REUSED",
+        "Refresh token has already been used",
+      );
     }
 
     // The row outlives nothing: the JWT check above already rejects an expired token, and
     // this covers a row whose lifetime was cut short another way.
     if (isPast(stored.expiresAt)) {
-      throw new UnauthorizedException("Refresh token is invalid or expired");
+      throw apiException(
+        UnauthorizedException,
+        "REFRESH_TOKEN_INVALID",
+        "Refresh token is invalid or expired",
+      );
     }
 
     const issued = await this.tokenService.issuePair(
@@ -156,7 +197,11 @@ export class AuthService {
     // Lost a race with a parallel refresh of the same token — a double-clicked button
     // rather than a replay, so the family survives and only this request fails.
     if (!rotated) {
-      throw new UnauthorizedException("Refresh token has already been used");
+      throw apiException(
+        UnauthorizedException,
+        "REFRESH_TOKEN_REUSED",
+        "Refresh token has already been used",
+      );
     }
 
     // Only once the successor is safely written: the sweep of dead rows must not hold
@@ -191,7 +236,7 @@ export class AuthService {
     const user = await this.userRepository.findActiveById(id);
 
     if (user === null) {
-      throw new UnauthorizedException("Session no longer exists");
+      throw sessionNotFound();
     }
 
     return user;
