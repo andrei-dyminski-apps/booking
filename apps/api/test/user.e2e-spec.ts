@@ -4,6 +4,7 @@ import request from "supertest";
 import { App } from "supertest/types";
 import {
   Role,
+  apiErrorSchema,
   managedUserDetailSchema,
   managedUserSchema,
   userPageSchema,
@@ -63,7 +64,14 @@ describe("UserController (e2e)", () => {
   });
 
   it("is the admin's alone", async () => {
-    await guest.get("/users").expect(403);
+    const refused = await guest.get("/users").expect(403);
+
+    // The guard's refusal names the rule and the roles the route wanted.
+    expect(apiErrorSchema.parse(refused.body)).toMatchObject({
+      code: "ROLE_NOT_ALLOWED",
+      params: { roles: ["ADMIN"] },
+    });
+
     await owner.get("/users").expect(403);
     await request(app.getHttpServer()).get("/users").expect(401);
 
@@ -249,10 +257,15 @@ describe("UserController (e2e)", () => {
         data: { role: Role.ADMIN, blockedAt: null, ...data },
       });
 
-      await admin
+      const refused = await admin
         .patch(`/users/${guestId}`)
         .send({ blocked: true })
         .expect(403);
+
+      // The token's role passed the guard; it is the row that no longer says admin.
+      expect(apiErrorSchema.parse(refused.body).code).toBe(
+        "NOT_AN_ADMIN_ANYMORE",
+      );
       expect(
         await prismaService.user.findUniqueOrThrow({ where: { id: guestId } }),
       ).toMatchObject({ blockedAt: null });

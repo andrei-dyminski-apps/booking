@@ -34,7 +34,7 @@ describe("toFieldErrors", () => {
 describe("toFormErrors", () => {
   it("reads an ApiResponseError into the form message plus its field issues", () => {
     const error = new ApiResponseError(422, "Validation failed", [
-      { path: ["email"], message: "Already registered" },
+      { path: ["email"], message: "Already registered", code: "CONFLICT" },
     ]);
 
     expect(toFormErrors(error)).toEqual({

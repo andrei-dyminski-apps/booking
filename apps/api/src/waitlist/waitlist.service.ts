@@ -5,7 +5,6 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-  UnauthorizedException,
 } from "@nestjs/common";
 import {
   CHECK_IN_DAY_PAST,
@@ -36,6 +35,7 @@ import {
   WaitlistRepository,
 } from "./waitlist.repository";
 import type { FreedNights } from "./waitlist.types";
+import { sessionNotFound } from "../common/session-errors";
 
 /**
  * Who is waiting for which nights, and telling them when the nights come free.
@@ -136,7 +136,7 @@ export class WaitlistService {
       }
 
       if (error instanceof WaiterNotFoundError) {
-        throw new UnauthorizedException("Session no longer exists");
+        throw sessionNotFound();
       }
 
       if (error instanceof WaitlistCheckInPastError) {

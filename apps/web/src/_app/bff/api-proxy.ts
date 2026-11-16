@@ -383,6 +383,7 @@ function unreachable(): NextResponse {
     statusCode: HTTP_STATUS.BAD_GATEWAY,
     message: "The API did not answer",
     error: "Bad Gateway",
+    code: "BAD_GATEWAY",
   };
 
   return NextResponse.json(body, { status: HTTP_STATUS.BAD_GATEWAY });
@@ -403,6 +404,7 @@ function misconfigured(): NextResponse {
     statusCode: HTTP_STATUS.INTERNAL_SERVER_ERROR,
     message: "The proxy is not configured",
     error: "Internal Server Error",
+    code: "INTERNAL_ERROR",
   };
 
   return NextResponse.json(body, { status: HTTP_STATUS.INTERNAL_SERVER_ERROR });

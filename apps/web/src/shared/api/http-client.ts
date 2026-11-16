@@ -2,7 +2,9 @@ import { z } from "zod";
 import {
   ACCESS_TOKEN_COOKIE,
   apiErrorSchema,
+  toErrorCode,
   type ApiErrorIssue,
+  type ErrorCode,
 } from "@repo/contracts";
 import {
   apiOrigin,
@@ -26,12 +28,19 @@ export class ApiUnreachableError extends Error {
   }
 }
 
-/** The API answered with a non-2xx status. `issues` is non-empty only for a failed validation. */
+/**
+ * The API answered with a non-2xx status. `issues` is non-empty only for a failed
+ * validation. `code` names the rule that refused (see `ERROR_CODES` in `@repo/contracts`),
+ * so a branch on it is exhaustive over the list. It is `UNKNOWN_ERROR` for a code this build
+ * has no word for (an API newer than the site) and for an answer outside the error
+ * contract, which has none — either way the status and `message` are what is left to read.
+ */
 export class ApiResponseError extends Error {
   constructor(
     readonly status: number,
     message: string,
     readonly issues: readonly ApiErrorIssue[] = [],
+    readonly code: ErrorCode = "UNKNOWN_ERROR",
   ) {
     super(message);
     this.name = "ApiResponseError";
@@ -298,6 +307,7 @@ async function toResponseError(response: Response): Promise<ApiResponseError> {
     response.status,
     parsed.data.message,
     parsed.data.errors ?? [],
+    toErrorCode(parsed.data.code),
   );
 }
 

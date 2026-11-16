@@ -8,6 +8,7 @@ import {
 import { Reflector } from "@nestjs/core";
 import type { Role } from "@repo/contracts";
 import type { Request } from "express";
+import { apiException } from "../../common/api-exception";
 import type { AuthenticatedUser } from "../auth.types";
 import { ROLES_KEY } from "../decorators/roles.decorator";
 
@@ -49,12 +50,19 @@ export class RolesGuard implements CanActivate {
     // letting it through would be the exact opposite of what the decorator asks for. A
     // misconfiguration rather than a client mistake, so it fails loudly on the first call.
     if (user === undefined) {
-      throw new UnauthorizedException("Authentication is required");
+      throw apiException(
+        UnauthorizedException,
+        "AUTHENTICATION_REQUIRED",
+        "Authentication is required",
+      );
     }
 
     if (!required.includes(user.role)) {
-      throw new ForbiddenException(
+      throw apiException(
+        ForbiddenException,
+        "ROLE_NOT_ALLOWED",
         `This endpoint requires the role ${required.join(" or ")}`,
+        { roles: [...required] },
       );
     }
 

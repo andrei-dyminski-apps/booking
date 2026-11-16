@@ -353,6 +353,10 @@ is the wrong shape for a list that keeps growing.
   back under `minPrice`.
 - The error body is part of the contract too (`apiErrorSchema`): do not read
   `message`/`errors` out of an `unknown` body by hand.
+  `ApiResponseError.code` (an `ErrorCode`, `UNKNOWN_ERROR` for a code this build has no word for
+  or an answer outside the contract) and each issue's `code`/`params` carry the rule that
+  refused, for a client that words it itself; the interface still shows `message`, which is the English
+  fallback and what every screen reads today.
 - Parse the API response with a schema (`bookingListSchema.parse(...)`) instead of casting
   with `as`: a mismatch with the contract has to fail immediately and loudly.
 - Validate a submitted form with the same schema that validates the request in Nest
