@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
-import { ACCESS_TOKEN_COOKIE, REQUEST_ID_HEADER } from "@repo/contracts";
-import { GET } from "./api-proxy";
+import {
+  ACCESS_TOKEN_COOKIE,
+  REFRESH_TOKEN_COOKIE,
+  REQUEST_ID_HEADER,
+} from "@repo/contracts";
+import { GET, POST } from "./api-proxy";
 
 /**
  * The request id is the one thing this handler adds to a request rather than copies. What
@@ -268,5 +272,75 @@ describe("the BFF's request id", () => {
       level: "info",
       res: { statusCode: 499, aborted: true },
     });
+  });
+});
+
+describe("a refresh without a session cookie", () => {
+  const refresh = (headers: Record<string, string> = {}): NextRequest =>
+    new NextRequest(new URL("/api/auth/refresh", "http://localhost:3000"), {
+      method: "POST",
+      headers,
+    });
+
+  it("is answered with a 204 here when there is neither cookie, without asking the API", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(refresh());
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("content-type")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("still carries the request id and is logged with its own status", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+
+    const response = await POST(refresh());
+    const id = response.headers.get(REQUEST_ID_HEADER);
+
+    expect(id).toMatch(UUID);
+    expect(loggedLine()).toMatchObject({
+      msg: "POST /api/auth/refresh 204",
+      req: { id, method: "POST", url: "/api/auth/refresh" },
+      res: { statusCode: 204 },
+    });
+  });
+
+  it("is forwarded with the refresh cookie when it is there", async () => {
+    const sent = stubApi();
+
+    const response = await POST(
+      refresh({ cookie: `${REFRESH_TOKEN_COOKIE}=token` }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
+      "http://api.test/auth/refresh",
+    );
+    expect(sent().get("cookie")).toBe(`${REFRESH_TOKEN_COOKIE}=token`);
+  });
+
+  it("is forwarded when only an access cookie is left, so the API clears it", async () => {
+    const sent = stubApi();
+
+    const response = await POST(
+      refresh({ cookie: `${ACCESS_TOKEN_COOKIE}=stale` }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    expect(sent().get("cookie")).toBe(`${ACCESS_TOKEN_COOKIE}=stale`);
+  });
+
+  it("is not answered here for another method on the same path", async () => {
+    stubApi();
+
+    const response = await GET(
+      new NextRequest(new URL("/api/auth/refresh", "http://localhost:3000")),
+    );
+
+    expect(response.status).toBe(200);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
   });
 });

@@ -37,7 +37,7 @@ export const SessionRecovery = ({ signedIn }: { signedIn: boolean }) => {
       // "recovered" is what closes the loop: `router.refresh()` renders the header again,
       // and a render that still reports nobody must not spend a second rotation asking the
       // same question. "exhausted" is the ordinary case of a visitor who is simply not
-      // signed in — one refused request per page load, not one per navigation.
+      // signed in — one fruitless request per page load, not one per navigation.
       attempt = restored ? "recovered" : "exhausted";
 
       if (restored) router.refresh();
