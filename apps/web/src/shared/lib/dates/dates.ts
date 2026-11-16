@@ -13,7 +13,6 @@
 
 import { tz } from "@date-fns/tz";
 import {
-  canonicalTimeZone,
   DEFAULT_TIME_ZONE,
   runtimeTimeZone,
   type Weekday,
@@ -26,6 +25,7 @@ import {
   parseISO,
 } from "date-fns";
 import { TIME_ZONE_COOKIE } from "../../config";
+import { OFFSET_ZONE, readerTimeZoneOf } from "./time-zone";
 
 const IN_UTC = { in: tz("UTC") };
 
@@ -132,13 +132,6 @@ export function formatMomentIn(moment: string, timeZone: string): string {
     : `${zonedFormat(zonedMomentFormats, MOMENT_PARTS, spelling).format(new Date(moment))} ${zoneLabel(timeZone)}`;
 }
 
-/**
- * A fixed offset IANA spells as a region, with POSIX's sign — `Etc/GMT-3` is three hours
- * ahead of UTC. A listing is never stored in one (`canonicalTimeZone` refuses it: an offset
- * does not follow summer time), but a reader's clock may be on one, and then it is right.
- */
-const OFFSET_ZONE = /^Etc\/GMT([+-])(\d{1,2})$/;
-
 /** A zone as the text names it: an offset zone as the `UTC+3` a person reads, not `Etc/GMT-3`. */
 function zoneLabel(timeZone: string): string {
   const [, sign, hours] = OFFSET_ZONE.exec(timeZone) ?? [];
@@ -166,35 +159,6 @@ export async function readerTimeZone(): Promise<string> {
   const { cookies } = await import("next/headers");
 
   return readerTimeZoneOf((await cookies()).get(TIME_ZONE_COOKIE)?.value);
-}
-
-/**
- * The cookie's value as a zone, or UTC — a first visit, before the browser has written it,
- * and anything it should not hold. The browser writes it, so it is checked like a typed
- * one: a region's name this runtime knows (`canonicalTimeZone`), or one of the fixed
- * offsets a reader's clock may be on and a listing's may not (`Etc/GMT-3`). Never a raw
- * `+05:00`, and nothing else reaches `runtimeTimeZone`, whose memo a cookie must not grow:
- * the offsets are a pattern of a couple of hundred values at most.
- */
-export function readerTimeZoneOf(value: string | undefined): string {
-  if (value === undefined) return DEFAULT_TIME_ZONE;
-
-  const zone = value.trim();
-
-  return (
-    canonicalTimeZone(zone) ??
-    (OFFSET_ZONE.test(zone) && runtimeTimeZone(zone) !== null
-      ? zone
-      : DEFAULT_TIME_ZONE)
-  );
-}
-
-/**
- * The browser's own zone, spelled as the cookie stores it. For a client render nothing on
- * the server drew first — the bell's popup, read when it opens — and for the cookie itself.
- */
-export function browserTimeZone(): string {
-  return readerTimeZoneOf(Intl.DateTimeFormat().resolvedOptions().timeZone);
 }
 
 const MOMENT_PARTS = {

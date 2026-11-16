@@ -1,6 +1,6 @@
 import { tz } from "@date-fns/tz";
 import { addHours, isAfter, isBefore, min, parseISO, subHours } from "date-fns";
-import { Role } from "./auth.js";
+import { Role } from "./enums.js";
 import { BookingStatus, Canceller, type Booking } from "./booking.js";
 import { checkInInstant } from "./check-in.js";
 import {

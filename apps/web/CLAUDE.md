@@ -178,12 +178,30 @@ is the wrong shape for a list that keeps growing.
   than a piece of the profile page: the account panel at the foot of the navigation runs
   it, and so does `/profile`. Why it is a browser call and not a Server Action is in "The
   session" below, and has not changed.
+- **Nothing a stranger's first load reaches evaluates a zod schema.** The shell is on
+  every page, so whatever its client components import is downloaded by every visitor —
+  and zod with date-fns was 140 KB of it while a stranger's shell parses nothing. The
+  roads it took were all one import deep: `ROUTES` naming `Role`, which used to be
+  `roleSchema.enum`; `TimeZoneCookie` reaching the time zone rules beside the check-in
+  schemas; `refreshSession` living in the transport that imports the contract; the
+  account panel's `LogoutButton`, inside the sheet, a Client Component; the badges'
+  `useServerEvents` importing the stream that parses events. So the enums the browser
+  needs as values are plain objects in `@repo/contracts` (`enums.ts`) the schemas are
+  built from, the zone rules are a module of their own on both sides (`time-zone.ts`),
+  the refresh is a bare `fetch` (`session-refresh.ts`), the logout button is loaded with
+  `next/dynamic` (`account-logout.tsx`), and the stream is imported when its first
+  listener mounts. A new import into the shell is checked the same way: `next build`,
+  then the chunks of the home page's entries in `page_client-reference-manifest.js`.
 
 ## Data and API
 
 - **Every call to the API goes through `src/shared/api`.** No `fetch` to the backend from a
   component or a page: the transport — the base URL, the two errors, the parse of the
-  answer — is written down once in `http-client.ts`.
+  answer — is written down once in `http-client.ts`. The one `fetch` beside it is the
+  session refresh (`session-refresh.ts`), which the shell runs on every page and which
+  must not import the schemas the transport does: it calls `BFF_BASE_PATH` itself, since
+  it only ever runs in the browser, shares the timeout through `shared/config`
+  (`REQUEST_TIMEOUT_MS`), and reads the answer's status and type rather than its body.
 - **The routes live next to it, one file per resource**: `shared/api/bookings.ts` writes
   down method, path and the schema of the answer for each of them. A new endpoint means a
   new method there, a new resource means a sibling file — never a `fetch` at the call site.
@@ -444,9 +462,11 @@ their refresh token, and only the browser can turn an expired session into a liv
   so several tabs waking up together would queue up spending each other's successors. A
   module-level promise collapses that within a tab and `navigator.locks` — the only mutex
   a browser has that spans its tabs — collapses it across them; a mark in `localStorage`
-  lets the tab that waited skip a rotation the winner has just performed. It lives in
-  `http-client.ts` rather than with the other session routes because the transport is what
-  has to spend it in the middle of somebody else's request.
+  lets the tab that waited skip a rotation the winner has just performed. It lives beside
+  the transport (`shared/api/session-refresh.ts`) rather than with the other session routes
+  because the transport is what has to spend it in the middle of somebody else's request —
+  and in a module of its own, a bare `fetch` with no schema, because the shell runs it on
+  every page (see "The shell" on keeping zod out of a stranger's first load).
 - **That mark is read before the wait and compared after it**, never trusted on its own.
   It is not evidence that a rotation happened recently — it is evidence that one happened
   _while this call was queued_, and only the second reading survives a logout: cookies are
@@ -1447,9 +1467,10 @@ component:
   or is bounced to `/login?next=…`, and the request id of `_app/bff/api-proxy.ts`: minted
   for every request, never taken from the browser, and the same on the API's request, the
   answer and the BFF's own line — the `502`, the `500` and a browser that left included.
-- A concurrency or protocol invariant — the single-flight session refresh and the
-  retry-one-401-once rule in `shared/api/http-client.ts`, and the event stream's protocol in
-  `shared/api/server-events.ts` (one stream per browser and its handover between tabs, the
+- A concurrency or protocol invariant — the single-flight session refresh in
+  `shared/api/session-refresh.ts` and the retry-one-401-once rule in
+  `shared/api/http-client.ts` (whose spec mocks the refresh, so each spec covers its own
+  module), and the event stream's protocol in `shared/api/server-events.ts` (one stream per browser and its handover between tabs, the
   growing delay before a refused stream is tried again, the `sync` every listener starts
   with), and `shared/ui/lookup-field/lookup-search.ts` (a next page of suggestions lands
   only on the search that still ends at its cursor — appended to a fresh first page of the
@@ -1484,7 +1505,7 @@ the parser for the test. What has to hold is not "the header splits into parts" 
 API's answer becomes these cookies and nothing else does", and the fixtures are therefore
 the headers Express actually writes in `apps/api/src/auth/cookies.ts` — `Expires` next to
 `Max-Age`, both spellings of forgetting a cookie, the `Domain` that must not be carried
-over. The `http-client.ts` case needs no `jsdom` either: `window`, `navigator.locks` and
+over. The session refresh needs no `jsdom` either: `window`, `navigator.locks` and
 `localStorage` are stubbed by hand (`vi.stubGlobal`) rather than rendered, because what is
 under test is the retry and locking logic, not a browser.
 

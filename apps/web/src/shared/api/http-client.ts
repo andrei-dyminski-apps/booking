@@ -2,10 +2,15 @@ import { z } from "zod";
 import {
   ACCESS_TOKEN_COOKIE,
   apiErrorSchema,
-  userSchema,
   type ApiErrorIssue,
 } from "@repo/contracts";
-import { apiOrigin, BFF_BASE_PATH, HTTP_STATUS } from "../config";
+import {
+  apiOrigin,
+  BFF_BASE_PATH,
+  HTTP_STATUS,
+  REQUEST_TIMEOUT_MS,
+} from "../config";
+import { refreshSession } from "./session-refresh";
 
 /**
  * The transport every call to the API goes through: the base URL, the two errors, the
@@ -76,19 +81,6 @@ type RequestOptions<T> = {
   signal?: AbortSignal;
 };
 
-/**
- * An API that accepts the connection and then says nothing would hold a server render
- * open for the five minutes undici allows it, so the transport gives up first. The abort
- * reaches the caller as a `TimeoutError` out of `fetch`, which is exactly the case
- * `ApiUnreachableError` describes.
- *
- * The price is Next's per-render memoization: a `signal` in the init opts the request out
- * of it, so two components asking for the same booking in one pass make two requests. The
- * Data Cache — the decision `read` carries from the call site — is not affected, and a
- * render that never finishes costs more than a duplicated call.
- */
-const REQUEST_TIMEOUT_MS = 10_000;
-
 export async function apiRequest<T>(options: RequestOptions<T>): Promise<T> {
   const response = await send(options);
 
@@ -108,104 +100,6 @@ export async function apiRequest<T>(options: RequestOptions<T>): Promise<T> {
   if (!retried.ok) throw await toResponseError(retried);
 
   return await settle(retried, options);
-}
-
-/**
- * One refresh at a time, and one for the whole browser rather than one per tab.
- *
- * Rotation burns the token it is given, so several tabs waking up together used to be a
- * queue of requests each spending the successor of the last. The promise below collapses
- * that within a tab; `navigator.locks` — the only mutex a browser has that spans its tabs
- * — collapses it across them.
- *
- * It lives with the transport rather than with the other session routes because the
- * transport is what has to perform it in the middle of somebody else's request; a
- * `shared/api/auth.ts` that owned it would be imported by the module it imports.
- */
-export function refreshSession(): Promise<boolean> {
-  refreshInFlight ??= runRefresh().finally(() => {
-    refreshInFlight = null;
-  });
-
-  return refreshInFlight;
-}
-
-const SESSION_REFRESH_LOCK = "booking:session-refresh";
-const REFRESH_MARK_KEY = "booking:session-refreshed-at";
-
-let refreshInFlight: Promise<boolean> | null = null;
-
-async function runRefresh(): Promise<boolean> {
-  const locks = globalThis.navigator?.locks;
-  // Read before the wait and compared after it. The mark is not evidence that a rotation
-  // happened recently — it is evidence that one happened *while this call was queued*,
-  // which is the only reading that survives a logout: cookies can be thrown away without
-  // the mark going with them, and a mark trusted on its own would then report a session
-  // that no longer exists. Sampling it here is what dates it to this attempt.
-  const before = readRefreshMark();
-
-  // An insecure context or an old browser has no Web Locks. The promise above still keeps
-  // this tab honest, and what a second tab then costs is an extra rotation rather than a
-  // broken session: the API burns the token it is handed and the next tab spends its
-  // successor.
-  if (locks === undefined) return await attemptRefresh(before);
-
-  // The lib types the callback's result as the value of the lock, so the promise it
-  // hands back is one layer deeper than it looks.
-  return await locks.request(
-    SESSION_REFRESH_LOCK,
-    async () => await attemptRefresh(before),
-  );
-}
-
-async function attemptRefresh(before: string | null): Promise<boolean> {
-  // Whoever held the lock while this call waited for it has already replaced the cookies,
-  // and the request behind it only needs to be retried. The cookie itself cannot be
-  // consulted — it is httpOnly — so the winner leaves a mark where the others can see it.
-  // An unchanged mark means nobody did, however recent it looks.
-  if (readRefreshMark() !== before) return true;
-
-  try {
-    await apiRequest({
-      method: "POST",
-      path: "/auth/refresh",
-      schema: userSchema,
-      retryOnUnauthorized: false,
-    });
-  } catch {
-    // Every way this fails means the same thing to the caller: there is no session to
-    // repair, and the 401 it was about to receive stands.
-    return false;
-  }
-
-  markRefreshed();
-
-  return true;
-}
-
-function readRefreshMark(): string | null {
-  try {
-    return window.localStorage.getItem(REFRESH_MARK_KEY);
-  } catch {
-    // A browser that refuses storage costs one redundant rotation, not a session: the two
-    // reads then agree on `null` and this call rotates for itself.
-    return null;
-  }
-}
-
-function markRefreshed(): void {
-  try {
-    // Only ever compared for equality, so what it has to be is different from the last
-    // one rather than a time. Two rotations in the same millisecond would otherwise read
-    // as none, and the cost of that is one more rotation — the case the mark exists to
-    // spare, spent on the case it cannot see.
-    window.localStorage.setItem(
-      REFRESH_MARK_KEY,
-      `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    );
-  } catch {
-    // Same trade as above.
-  }
 }
 
 async function send<T>({
@@ -324,7 +218,7 @@ function canRetry<T>(
  * access cookie is copied out by hand. Only that one is there to copy — the refresh
  * cookie is scoped to the `/auth` path of the proxy and never travels with a request for
  * a page, which is why a session that has outlived its access token can only be revived
- * from the browser (see `refreshSession` above and the login page).
+ * from the browser (see `session-refresh.ts` and the login page).
  *
  * The client address is the second, and it matters because this is the one path that does
  * not go through the BFF: a Server Action and a server render reach Nest directly, so the

@@ -26,3 +26,4 @@ There is no `dev` script in this package on purpose. The root `pnpm dev` runs `t
 - A schema describes what actually travels over the network. Internal models of `apps/api` stay in `apps/api`.
 - Change a schema — check both sides: `pnpm check-types` from the root reports the mismatch right away.
 - Error messages in schemas are written in English: they are returned by the API and read by developers.
+- An enum the browser needs as a value — `Role`, `RefundFailureStatus` — is a plain object in `src/enums.ts` that its schema is built from (`z.enum(Role)`), not `roleSchema.enum`: a constant derived from a schema makes every importer download zod, and `ROUTES` in `apps/web` is imported by the shell of every page. The time zone rules are apart from `check-in.ts` (`src/time-zone.ts`) for the same reason. Both files import nothing.

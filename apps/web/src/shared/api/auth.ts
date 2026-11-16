@@ -30,7 +30,7 @@ import { mirrorSessionCookies } from "./session-cookies";
  *   It is called from the browser and reaches the API through the BFF, which mirrors the
  *   cleared cookies the same way it mirrors the issued ones.
  * - `refresh` is the same case and is not here at all: the transport has to spend it in
- *   the middle of somebody else's request (`refreshSession` in `http-client.ts`).
+ *   the middle of somebody else's request (`refreshSession` in `session-refresh.ts`).
  * - `me` needs only the access cookie, which both sides have.
  */
 export const authApi = {
