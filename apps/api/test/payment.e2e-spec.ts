@@ -26,6 +26,7 @@ import {
 import { AppModule } from "./../src/app.module";
 import { useBodyParsers } from "./../src/common/body-parsers";
 import type {
+  CaptureOutcome,
   OpenedPayment,
   PaymentRefunds,
   SentRefund,
@@ -80,6 +81,26 @@ class OfflineStripeGateway extends StripePaymentGateway {
     this.withdrawn.push(paymentId);
 
     return Promise.resolve();
+  }
+
+  /** The authorizations taken, one entry per call; and what each one set aside, as its delivery stated it. */
+  readonly captured: string[] = [];
+  readonly authorized = new Map<string, Cents>();
+
+  /** An authorization withdrawn first is no longer there to take, as at Stripe. */
+  override capture(paymentId: string): Promise<CaptureOutcome> {
+    if (this.withdrawn.includes(paymentId)) {
+      return Promise.resolve({ kind: "withdrawn" });
+    }
+
+    this.captured.push(paymentId);
+    const bookingPaymentId = paymentId.replace("pi_", "");
+
+    return Promise.resolve({
+      kind: "captured",
+      chargeId: `ch_${bookingPaymentId}`,
+      amount: this.authorized.get(paymentId) ?? NO_CENTS,
+    });
   }
 
   override refund(
@@ -327,6 +348,29 @@ describe("Payments (e2e)", () => {
       signature,
     );
 
+  /** A delivery of `payment_intent.amount_capturable_updated`: the money set aside, not taken. */
+  const deliverAuthorization = (
+    booking: Booking,
+    eventId = `evt_authorized_${booking.id}`,
+  ) => {
+    gateway.authorized.set(paymentIdOf(booking.id), booking.amountCents);
+
+    return post("/payments/webhook", {
+      id: eventId,
+      object: "event",
+      type: "payment_intent.amount_capturable_updated",
+      data: {
+        object: {
+          id: paymentIdOf(booking.id),
+          object: "payment_intent",
+          status: "requires_capture",
+          amount_capturable: booking.amountCents,
+          metadata: { bookingId: booking.id, site: "e2e" },
+        },
+      },
+    });
+  };
+
   /** A delivery about the charge of a stay: a refund or a dispute. */
   const deliverChargeEvent = (
     booking: Booking,
@@ -484,6 +528,49 @@ describe("Payments (e2e)", () => {
         amount: 36_105,
       }),
     ]);
+  });
+
+  it("takes an authorization once and confirms the stay with it, the payment's own news after it changing nothing", async () => {
+    const booking = await hold();
+    await guest.post(`/bookings/${booking.id}/payment`).expect(200);
+
+    await settled(deliverAuthorization(booking).expect(200));
+    await settled(
+      deliverAuthorization(booking, `evt_again_${booking.id}`).expect(200),
+    );
+    // What the capture itself makes Stripe send.
+    await settled(deliver(booking).expect(200));
+
+    const after = await read(booking.id);
+    expect(after.status).toBe("CONFIRMED");
+    expect(after.refundedAmountCents).toBeNull();
+    expect(gateway.captured).toEqual([paymentIdOf(booking.id)]);
+    expect(gateway.refunds).toEqual([]);
+    expect(
+      await app.get(PrismaService).booking.findUniqueOrThrow({
+        where: { id: booking.id },
+        select: { chargeId: true },
+      }),
+    ).toEqual({ chargeId: chargeIdOf(booking.id) });
+  });
+
+  it("lets go an authorization that lands on a cancelled hold, and refunds nothing", async () => {
+    const booking = await hold();
+    await guest.post(`/bookings/${booking.id}/payment`).expect(200);
+    await guest.delete(`/bookings/${booking.id}`).expect(204);
+    await waitUntil(() => Promise.resolve(gateway.withdrawn.length > 0));
+
+    await settled(deliverAuthorization(booking).expect(200));
+
+    const after = await read(booking.id);
+    expect(after.status).toBe("CANCELLED");
+    expect(after.refundedAmountCents).toBeNull();
+    expect(gateway.captured).toEqual([]);
+    expect(gateway.refunds).toEqual([]);
+    // Withdrawn by the cancellation's job, and let go again by the event: both are no-ops at Stripe.
+    expect(new Set(gateway.withdrawn)).toEqual(
+      new Set([paymentIdOf(booking.id)]),
+    );
   });
 
   it("answers a delivery before its work, and finishes the work once Stripe answers", async () => {

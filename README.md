@@ -403,10 +403,14 @@ than a redirect to Checkout. The cycle:
    from the browser, which opens the hold's PaymentIntent under an idempotency key named
    after the booking — a reload is handed the same one — and Stripe Elements confirms it in
    the browser. Card details go to Stripe and never through this site.
-3. **The webhook confirms the stay.** `payment_intent.succeeded` reaches
+3. **The webhook confirms the stay.** `payment_intent.amount_capturable_updated` — or
+   `payment_intent.succeeded` for a method taken at once — reaches
    `POST /payments/webhook`, whose signature is checked over the raw body, and only then
-   does the hold become `CONFIRMED`. The browser's own "success" only starts a poll
-   (TanStack Query, `refetchInterval`) that waits for the status to move.
+   does the hold become `CONFIRMED`. A card only authorizes the payment: the API takes the
+   money when it confirms the hold, and lets the authorization go at no cost when the hold
+   has lapsed or been cancelled in between, instead of charging and refunding it. The
+   browser's own "success" only starts a poll (TanStack Query, `refetchInterval`) that
+   waits for the status to move.
 4. **Through an inbox.** The webhook records the event in `payment_events` and answers
    `200` at once; a BullMQ worker handles it afterwards and retries it on a failure, and a
    sweep re-queues what a lost job left. Stripe delivers at least once, so an event already
@@ -457,12 +461,12 @@ line — and goes into `STRIPE_PAYMENT_WEBHOOK_SECRET`.
 
 Test cards, with any future expiry date, any CVC and any postcode:
 
-| Card number           | What it does                       |
-| --------------------- | ---------------------------------- |
-| `4242 4242 4242 4242` | succeeds straight away             |
-| `4000 0025 0000 3155` | asks for 3-D Secure, then succeeds |
-| `4000 0000 0000 9995` | is declined (insufficient funds)   |
-| `4000 0000 0000 0002` | is declined (generic decline)      |
+| Card number           | What it does                                  |
+| --------------------- | --------------------------------------------- |
+| `4242 4242 4242 4242` | is authorized straight away, the API takes it |
+| `4000 0025 0000 3155` | asks for 3-D Secure, then is authorized       |
+| `4000 0000 0000 9995` | is declined (insufficient funds)              |
+| `4000 0000 0000 0002` | is declined (generic decline)                 |
 
 ## Authentication
 
@@ -693,7 +697,7 @@ The API replica runs in `us-east4-eqdc4a` (Virginia), next to Vercel's default f
 
 Postgres is a service in the same Railway project, and `DATABASE_URL` is set as a reference to it (`${{Postgres.DATABASE_URL}}`) rather than copied — the credentials then survive a rotation. The rest of the variables from the table above are set by hand; the JWT secrets are generated (`openssl rand -hex 32`), not taken from `.env.example`.
 
-Stripe needs one more step on each side. The webhook endpoint is registered in the Dashboard at `https://<api>/payments/webhook` for `payment_intent.succeeded`, `charge.refunded`, `refund.failed`, `charge.dispute.created` and `charge.dispute.closed`, and its signing secret becomes `STRIPE_PAYMENT_WEBHOOK_SECRET` on Railway beside `STRIPE_SECRET_KEY` and a `STRIPE_SITE` of the deployment's own (`production`); a second destination, "Your account" with the thin events `v2.core.account[configuration.recipient].capability_status_updated` and `v2.core.account[requirements].updated`, goes to `https://<api>/payouts/webhook` and its secret to `STRIPE_PAYOUT_WEBHOOK_SECRET`; `STRIPE_PUBLISHABLE_KEY` goes to Vercel, as a runtime variable like `API_ORIGIN`. Both destinations deliver in the API version the API pins (`STRIPE_API_VERSION` in `apps/api/src/payment/infrastructure/stripe.ts`); the API logs a warning when an event arrives in another.
+Stripe needs one more step on each side. The webhook endpoint is registered in the Dashboard at `https://<api>/payments/webhook` for `payment_intent.amount_capturable_updated`, `payment_intent.succeeded`, `charge.refunded`, `refund.failed`, `charge.dispute.created` and `charge.dispute.closed`, and its signing secret becomes `STRIPE_PAYMENT_WEBHOOK_SECRET` on Railway beside `STRIPE_SECRET_KEY` and a `STRIPE_SITE` of the deployment's own (`production`); a second destination, "Your account" with the thin events `v2.core.account[configuration.recipient].capability_status_updated` and `v2.core.account[requirements].updated`, goes to `https://<api>/payouts/webhook` and its secret to `STRIPE_PAYOUT_WEBHOOK_SECRET`; `STRIPE_PUBLISHABLE_KEY` goes to Vercel, as a runtime variable like `API_ORIGIN`. Both destinations deliver in the API version the API pins (`STRIPE_API_VERSION` in `apps/api/src/payment/infrastructure/stripe.ts`); the API logs a warning when an event arrives in another.
 
 On the Vercel side `API_ORIGIN` is a runtime variable of the frontend — it is read on the server, never inlined into the bundle, so a changed API address is a redeploy without a rebuild. `TRUST_PROXY` on the Railway side has to account for the extra `X-Forwarded-For` entry the frontend server's own request produces, or the rate limiter buckets every visitor together.
 

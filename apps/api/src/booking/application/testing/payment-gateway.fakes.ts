@@ -1,5 +1,6 @@
 import type { PublicOf } from "../../../common/testing/public-of.fakes";
 import {
+  type CaptureOutcome,
   PaymentGateway,
   PaymentOpeningInProgressError,
   RefundExceedsPaymentError,
@@ -62,6 +63,41 @@ export class FakePaymentGateway implements PublicOf<PaymentGateway> {
     this.withdrawn.push(paymentId);
 
     return Promise.resolve();
+  }
+
+  /** The authorizations taken, one entry per call; and what each one set aside. */
+  readonly captured: string[] = [];
+  readonly authorized = new Map<string, Cents>();
+
+  /** Set to have a capture fail, as a provider that cannot be reached would. */
+  refusingCapture = false;
+
+  /** Set to have a capture leave the payment settling, as Stripe does for some methods. */
+  settlingCapture = false;
+
+  /**
+   * Set to run something between the stay's read and the capture: a release by the
+   * deadline, which takes no lease and can land there.
+   */
+  beforeCapture: (() => Promise<void>) | null = null;
+
+  /** A withdrawn authorization is no longer there to take, as at the provider. */
+  async capture(paymentId: string): Promise<CaptureOutcome> {
+    await this.beforeCapture?.();
+
+    if (this.refusingCapture) throw new Error("api_connection_error");
+
+    if (this.withdrawn.includes(paymentId)) return { kind: "withdrawn" };
+
+    this.captured.push(paymentId);
+
+    if (this.settlingCapture) return { kind: "processing" };
+
+    return {
+      kind: "captured",
+      chargeId: `ch_${paymentId}`,
+      amount: this.authorized.get(paymentId) ?? NO_CENTS,
+    };
   }
 
   refund(paymentId: string, amount: Cents, key: string): Promise<Cents> {

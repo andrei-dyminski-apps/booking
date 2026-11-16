@@ -714,7 +714,7 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
       again a second later, up to four times, the skeleton still drawn — a hold that moved
       on takes the form off the page, which stops the retries, and one still waiting gets
       the secret from the request that won (`CONFLICT_RETRIES` in `payment-form.tsx`).
-- [ ] **Authorize the hold, capture the stay.** The guest is charged at once today, so a
+- [x] **Authorize the hold, capture the stay.** The guest is charged at once today, so a
       payment that lands on a lapsed or cancelled hold is a full charge and a full refund,
       and Stripe keeps its processing fee on both. Opening the intent with
       `capture_method: "manual"` makes a hold an authorization: `confirmPayment` captures
@@ -724,6 +724,16 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
       cards (fine for a fifteen-minute hold), and the methods without manual capture —
       iDEAL, Bancontact, EPS, MB WAY, Zip — have to stay on immediate capture, so
       `INSTANT_PAYMENT_METHODS` splits in two.
+      Done: `MANUAL_CAPTURE_METHODS` are opened with `capture_method: "manual"` each in
+      `payment_method_options`, `IMMEDIATE_CAPTURE_METHODS` (Wero joined the list above)
+      keep the automatic one. The authorization is captured and the stay confirmed in one
+      run of the `authorized` event under the stay's lease, through the `confirmOrRefund` a
+      `succeeded` already went through; one that no longer confirms anything is withdrawn.
+      A capture that leaves the intent `processing` ends the run, and the capture's own
+      `succeeded` confirms the stay. Wero stays on immediate capture: its page lists manual
+      capture, but the pinned API has no option to ask for it. One departure: the guest
+      whose authorization is let go gets no notice — nothing was taken, and the stay's page
+      already says the hold is gone. See "Payments" in `apps/api/CLAUDE.md`.
 - [x] **Money as whole cents, named by its unit.** The contract used to speak dollars as a
       `number` exact to the cent, and the API did arithmetic on it, which is why
       `roundCents` sat after nearly every subtraction. Now every amount is a whole number of

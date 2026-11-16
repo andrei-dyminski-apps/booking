@@ -70,7 +70,7 @@ services:
       - --latest
       # The events the API acts on; the rest would be acknowledged and ignored.
       - --events
-      - payment_intent.succeeded,charge.refunded,refund.failed,charge.dispute.created,charge.dispute.closed
+      - payment_intent.amount_capturable_updated,payment_intent.succeeded,charge.refunded,refund.failed,charge.dispute.created,charge.dispute.closed
     # The API runs on the host, not in this network; on Linux the name needs declaring.
     extra_hosts:
       - "host.docker.internal:host-gateway"

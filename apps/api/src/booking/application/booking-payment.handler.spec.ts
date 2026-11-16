@@ -314,6 +314,224 @@ describe("BookingPaymentHandler", () => {
     });
   });
 
+  describe("the authorization of a hold", () => {
+    const authorized = (
+      bookingId: string | null,
+      amount: Cents = AMOUNT,
+      paymentId = "pi_1",
+    ): PaymentEvent => {
+      paymentGateway.authorized.set(paymentId, amount);
+
+      return {
+        kind: "authorized",
+        eventId: "evt_authorized",
+        type: "payment_intent.amount_capturable_updated",
+        paymentId,
+        bookingId,
+        amount,
+      };
+    };
+
+    it("takes the money a pending hold's payment set aside and confirms the stay with it", async () => {
+      const id = await bookedByGuest();
+      await service.payment(id, guest);
+
+      await paymentHandler.handle(authorized(id));
+
+      expect(bookingTable.rows.get(id)?.booking.status).toBe(
+        BookingStatus.CONFIRMED,
+      );
+      expect(paymentGateway.captured).toEqual(["pi_1"]);
+      expect(stayEventsListener.scheduled).toEqual([id]);
+      expect(
+        noticesOf(NotificationType.BOOKING_CONFIRMED).map(
+          ({ userId }) => userId,
+        ),
+      ).toEqual([GUEST_ID, OWNER_ID]);
+    });
+
+    it("takes it once, however often the authorization comes", async () => {
+      const id = await bookedByGuest();
+      await service.payment(id, guest);
+
+      await paymentHandler.handle(authorized(id));
+      await paymentHandler.handle(authorized(id));
+
+      expect(paymentGateway.captured).toEqual(["pi_1"]);
+      expect(noticesOf(NotificationType.BOOKING_CONFIRMED)).toHaveLength(2);
+    });
+
+    it("finishes what an earlier run left unannounced when the authorization comes again", async () => {
+      const id = await bookedByGuest();
+      await service.payment(id, guest);
+      stayEventsListener.refusingSchedule = true;
+
+      // The first run takes the money and confirms the stay, and dies before anybody heard.
+      await expect(paymentHandler.handle(authorized(id))).rejects.toThrow();
+
+      await paymentHandler.handle(authorized(id));
+
+      expect(paymentGateway.captured).toEqual(["pi_1"]);
+      expect(stayEventsListener.scheduled).toEqual([id]);
+      expect(
+        noticesOf(NotificationType.BOOKING_CONFIRMED).map(
+          ({ userId }) => userId,
+        ),
+      ).toEqual([GUEST_ID, OWNER_ID]);
+    });
+
+    it("refunds what it took when a release by the deadline slipped between the read and the capture", async () => {
+      const id = await bookedByGuest();
+      await service.payment(id, guest);
+      // The release takes no lease; its withdrawal is queued and has not run yet.
+      paymentGateway.beforeCapture = async () => {
+        bookingRepository.lapsed.add(id);
+        await service.releaseHold(id);
+      };
+
+      await paymentHandler.handle(authorized(id));
+
+      const found = bookingTable.rows.get(id)?.booking;
+      expect(found?.status).toBe(BookingStatus.EXPIRED);
+      expect(found?.refundedAmountCents).toBe(AMOUNT);
+      expect(paymentGateway.captured).toEqual(["pi_1"]);
+      expect([...paymentGateway.refunds]).toEqual([
+        ["payment-pi_1-unheld", { paymentId: "pi_1", amount: AMOUNT }],
+      ]);
+      expect(noticesOf(NotificationType.BOOKING_CONFIRMED)).toEqual([]);
+      expect(
+        noticesOf(NotificationType.PAYMENT_REFUNDED).map(
+          ({ userId }) => userId,
+        ),
+      ).toEqual([GUEST_ID]);
+    });
+
+    it("lets go, at no cost, an authorization for a hold no longer holding its nights", async () => {
+      const id = await bookedByGuest();
+      await service.payment(id, guest);
+      bookingRepository.lapsed.add(id);
+      await service.releaseHold(id);
+
+      await paymentHandler.handle(authorized(id));
+
+      const found = bookingTable.rows.get(id)?.booking;
+      expect(found?.status).toBe(BookingStatus.EXPIRED);
+      expect(found?.refundedAmountCents).toBeNull();
+      expect(paymentGateway.captured).toEqual([]);
+      expect(paymentGateway.withdrawn).toContain("pi_1");
+      expect(paymentGateway.refunds.size).toBe(0);
+      expect(noticesOf(NotificationType.PAYMENT_REFUNDED)).toEqual([]);
+    });
+
+    it("lets go an authorization of another sum rather than taking it and giving it back", async () => {
+      const id = await bookedByGuest();
+      await service.payment(id, guest);
+
+      await paymentHandler.handle(
+        authorized(id, subtractCents(AMOUNT, cents(1))),
+      );
+
+      expect(bookingTable.rows.get(id)?.booking.status).toBe(
+        BookingStatus.PENDING_PAYMENT,
+      );
+      expect(paymentGateway.captured).toEqual([]);
+      expect(paymentGateway.withdrawn).toEqual(["pi_1"]);
+    });
+
+    it("lets go another payment naming the hold, and leaves the hold waiting for its own", async () => {
+      const id = await bookedByGuest();
+      await service.payment(id, guest);
+
+      await paymentHandler.handle(authorized(id, AMOUNT, "pi_stray"));
+
+      expect(bookingTable.rows.get(id)?.booking.status).toBe(
+        BookingStatus.PENDING_PAYMENT,
+      );
+      expect(paymentGateway.withdrawn).toEqual(["pi_stray"]);
+    });
+
+    it("confirms nothing when the authorization was withdrawn before it could be taken", async () => {
+      const id = await bookedByGuest();
+      await service.payment(id, guest);
+      paymentGateway.withdrawn.push("pi_1");
+
+      await paymentHandler.handle(authorized(id));
+
+      expect(bookingTable.rows.get(id)?.booking.status).toBe(
+        BookingStatus.PENDING_PAYMENT,
+      );
+      expect(paymentGateway.refunds.size).toBe(0);
+    });
+
+    it("throws when the capture fails, so the delivery comes again and takes it", async () => {
+      const id = await bookedByGuest();
+      await service.payment(id, guest);
+      paymentGateway.refusingCapture = true;
+
+      await expect(paymentHandler.handle(authorized(id))).rejects.toThrow();
+
+      paymentGateway.refusingCapture = false;
+      await paymentHandler.handle(authorized(id));
+
+      expect(bookingTable.rows.get(id)?.booking.status).toBe(
+        BookingStatus.CONFIRMED,
+      );
+    });
+
+    it("leaves a capture that is still settling to the payment's own news, and counts no failure", async () => {
+      const id = await bookedByGuest();
+      await service.payment(id, guest);
+      paymentGateway.settlingCapture = true;
+
+      await paymentHandler.handle(authorized(id));
+
+      expect(bookingTable.rows.get(id)?.booking.status).toBe(
+        BookingStatus.PENDING_PAYMENT,
+      );
+      expect(paymentGateway.captured).toEqual(["pi_1"]);
+
+      // What Stripe sends once the capture settles.
+      await paymentHandler.handle({
+        kind: "succeeded",
+        eventId: "evt_succeeded",
+        type: "payment_intent.succeeded",
+        paymentId: "pi_1",
+        chargeId: "ch_pi_1",
+        bookingId: id,
+        amount: AMOUNT,
+      });
+
+      expect(bookingTable.rows.get(id)?.booking.status).toBe(
+        BookingStatus.CONFIRMED,
+      );
+      expect(paymentGateway.refunds.size).toBe(0);
+      expect(
+        noticesOf(NotificationType.BOOKING_CONFIRMED).map(
+          ({ userId }) => userId,
+        ),
+      ).toEqual([GUEST_ID, OWNER_ID]);
+    });
+
+    it("touches nothing for a payment that names no booking or one this database does not hold", async () => {
+      await paymentHandler.handle(authorized(null));
+      await paymentHandler.handle(authorized(randomUUID()));
+
+      expect(paymentGateway.captured).toEqual([]);
+      expect(paymentGateway.withdrawn).toEqual([]);
+    });
+
+    it("hands an authorization whose stay a cancellation holds back to the inbox as busy", async () => {
+      const id = await bookedByGuest();
+      await service.payment(id, guest);
+      bookingCancellationRepository.held.add(id);
+
+      await expect(
+        paymentHandler.handle(authorized(id)),
+      ).rejects.toBeInstanceOf(PaymentEventBusyError);
+      expect(paymentGateway.captured).toEqual([]);
+    });
+  });
+
   describe("a refund of a paid stay", () => {
     const refunded = (amountRefunded: Cents): PaymentEvent => ({
       kind: "refunded",

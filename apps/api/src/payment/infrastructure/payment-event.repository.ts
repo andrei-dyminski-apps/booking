@@ -202,6 +202,14 @@ const storedAmount = z.int().transform(cents);
 /** Nothing in the database holds `payload` to its type, so it is parsed on the way out. */
 const paymentEventSchema = z.discriminatedUnion("kind", [
   z.object({
+    kind: z.literal("authorized"),
+    eventId: z.string(),
+    type: z.string(),
+    paymentId: z.string(),
+    bookingId: z.string().nullable(),
+    amount: storedAmount,
+  }),
+  z.object({
     kind: z.literal("succeeded"),
     eventId: z.string(),
     type: z.string(),

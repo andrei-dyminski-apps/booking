@@ -44,6 +44,7 @@ export class PayoutEventHandler
         case "account":
           await this.hostAccountService.handleAccountEvent(event);
           break;
+        case "authorized":
         case "succeeded":
         case "refunded":
         case "refundFailed":
