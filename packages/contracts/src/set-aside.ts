@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { RefundFailureStatus } from "./enums.js";
 import { bookingSchema } from "./booking.js";
 import { stayNoticeSchema } from "./notification.js";
 import { centsSchema, currencySchema } from "./money.js";
@@ -96,13 +97,7 @@ export const failedPaymentEventPageSchema = z.object({
   nextCursor: z.string().nullable(),
 });
 
-/**
- * Open until a person has sent the money back some other way and said how; resolved after,
- * kept as the record of it.
- */
-export const refundFailureStatusSchema = z.enum(["OPEN", "RESOLVED"]);
-
-export const RefundFailureStatus = refundFailureStatusSchema.enum;
+export const refundFailureStatusSchema = z.enum(RefundFailureStatus);
 
 /**
  * A refund the guest's bank sent back. `stay` is `null` once no booking names the payment
@@ -201,7 +196,6 @@ export type FailedPaymentEventQuery = z.infer<
 export type FailedPaymentEventPage = z.infer<
   typeof failedPaymentEventPageSchema
 >;
-export type RefundFailureStatus = z.infer<typeof refundFailureStatusSchema>;
 export type RefundFailure = z.infer<typeof refundFailureSchema>;
 export type RefundFailureQuery = z.infer<typeof refundFailureQuerySchema>;
 export type RefundFailurePage = z.infer<typeof refundFailurePageSchema>;

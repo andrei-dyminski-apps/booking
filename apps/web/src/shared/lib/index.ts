@@ -1,7 +1,6 @@
 export { badgeCount } from "./badge-count";
 export {
   addDays,
-  browserTimeZone,
   dayLabelOrAny,
   formatDate,
   formatDay,
@@ -12,6 +11,7 @@ export {
   today,
   WEEKDAY_NAMES,
 } from "./dates/dates";
+export { browserTimeZone } from "./dates/time-zone";
 export {
   fieldMessages,
   messagesExcept,

@@ -1,4 +1,4 @@
-import { Role, roleSchema, type Role as RoleName } from "@repo/contracts";
+import { Role, type Role as RoleName } from "@repo/contracts";
 
 /**
  * The roles, named for a person. Keyed by the contract's enum, so a third role
@@ -12,7 +12,9 @@ export const ROLE_LABELS: Record<RoleName, string> = {
   [Role.ADMIN]: "Administrator",
 };
 
-export const roleOptions = roleSchema.options.map((value) => ({
+// From the plain enum rather than `roleSchema.options`: the account panel reaches this
+// module on every page, and the schema would bring zod along with it.
+export const roleOptions = Object.values(Role).map((value) => ({
   value,
   label: ROLE_LABELS[value],
 }));

@@ -1,14 +1,8 @@
 import { z } from "zod";
+import { Role } from "./enums.js";
 
-/** Kept in sync with the `Role` enum of the Prisma schema; `RolesGuard` in `apps/api` is what enforces it. */
-export const roleSchema = z.enum(["USER", "ADMIN"]);
-
-/**
- * The same names as a runtime value, so `@Roles(Role.ADMIN)` reads like an enum
- * without there being a second list to keep in step — zod derives it from the schema
- * above, and the type of the same name below is derived from it too.
- */
-export const Role = roleSchema.enum;
+/** Built from the runtime value in `enums.ts`, so `@Roles(Role.ADMIN)` and the schema share one list. */
+export const roleSchema = z.enum(Role);
 
 /**
  * Checks run in the order they are written, so the address is validated first and
@@ -102,7 +96,6 @@ export const loginSchema = z.object({
   password: z.string().min(1, { error: "Password is required" }),
 });
 
-export type Role = z.infer<typeof roleSchema>;
 export type User = z.infer<typeof userSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type RegisterFormInput = z.infer<typeof registerFormSchema>;

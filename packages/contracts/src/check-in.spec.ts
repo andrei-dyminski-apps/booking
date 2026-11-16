@@ -1,12 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  canonicalTimeZone,
   checkInDayEnd,
   checkInInstant,
   isCheckInDayPast,
-  runtimeTimeZone,
   timeZoneSchema,
 } from "./check-in.js";
+import { withoutZone } from "./testing/without-zone.js";
 
 describe("timeZoneSchema", () => {
   it("keeps a region's name as Intl spells it", () => {
@@ -99,35 +98,14 @@ describe("checkInDayEnd", () => {
   });
 });
 
-describe("runtimeTimeZone", () => {
-  const RealDateTimeFormat = Intl.DateTimeFormat;
-
-  /** A runtime whose zone data predates `zone`'s rename: it knows the zone by its old name only. */
-  function withoutZone(zone: string): void {
-    vi.spyOn(Intl, "DateTimeFormat").mockImplementation(function (
-      locales?: Intl.LocalesArgument,
-      options?: Intl.DateTimeFormatOptions,
-    ) {
-      if (options?.timeZone?.toLowerCase() === zone.toLowerCase()) {
-        throw new RangeError(`Invalid time zone specified: ${zone}`);
-      }
-
-      return new RealDateTimeFormat(locales, options);
-    } as typeof Intl.DateTimeFormat);
-  }
-
+describe("checkInInstant", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-  });
-
-  it("is the stored name itself where the runtime knows it", () => {
-    expect(runtimeTimeZone("Europe/Berlin")).toBe("Europe/Berlin");
   });
 
   it("converts by the older name IANA keeps as a link where the runtime predates the rename", () => {
     withoutZone("Pacific/Kanton");
 
-    expect(runtimeTimeZone("Pacific/Kanton")).toBe("Pacific/Enderbury");
     // Kanton is UTC+13 all year: 15:00 there is 02:00 UTC.
     expect(
       checkInInstant({
@@ -138,14 +116,7 @@ describe("runtimeTimeZone", () => {
     ).toBe("2026-11-20T02:00:00.000Z");
   });
 
-  it("lets such a runtime check a form whose zone it knows only by the older name", () => {
-    withoutZone("America/Nuuk");
-
-    expect(canonicalTimeZone("America/Nuuk")).toBe("America/Nuuk");
-  });
-
-  it("is null for a zone newer than the runtime's data, and a rule refuses it in words", () => {
-    expect(runtimeTimeZone("Mars/Olympus_Mons")).toBeNull();
+  it("refuses in words a zone newer than the runtime's data", () => {
     expect(() =>
       checkInInstant({
         from: "2026-11-20",

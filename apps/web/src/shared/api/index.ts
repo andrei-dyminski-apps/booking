@@ -20,9 +20,9 @@ export { waitlistApi } from "./waitlist";
 export {
   ApiResponseError,
   ApiUnreachableError,
-  refreshSession,
   type ReadOptions,
 } from "./http-client";
+export { refreshSession } from "./session-refresh";
 export { pageOrNullOnStaleCursor } from "./keyset-page";
 export {
   subscribeToServerEvents,

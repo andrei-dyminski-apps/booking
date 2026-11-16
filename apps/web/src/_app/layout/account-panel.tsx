@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { type User } from "@repo/contracts";
 import { ROLE_LABELS } from "#entities/user";
-import { LogoutButton } from "#features/logout";
 import { ROUTES } from "#shared/config";
 import { ButtonLink } from "#shared/ui";
+import { AccountLogout } from "./account-logout";
 
 /**
  * The foot of the navigation, in both places that draw it: the sidebar on a wide screen
@@ -45,7 +45,7 @@ export const AccountPanel = ({ user }: { user: User | null }) => {
         </span>
       </Link>
 
-      <LogoutButton variant="ghost" />
+      <AccountLogout variant="ghost" />
     </div>
   );
 };
