@@ -134,9 +134,15 @@ describe("BookingService", () => {
   it("turns an overlap raised by the repository into a 409", async () => {
     await bookedByGuest();
 
-    await expect(
-      service.create(STRANGER_ID, { ...input, from: "2026-09-04" }),
-    ).rejects.toThrow(ConflictException);
+    const refused = service.create(STRANGER_ID, {
+      ...input,
+      from: "2026-09-04",
+    });
+
+    await expect(refused).rejects.toThrow(ConflictException);
+    // The guest's sentence, not the repository's, which names the listing.
+    await expect(refused).rejects.toThrow(/no longer free/);
+    await expect(refused).rejects.not.toThrow(input.listingId);
     expect(bookingTable.rows.size).toBe(1);
   });
 

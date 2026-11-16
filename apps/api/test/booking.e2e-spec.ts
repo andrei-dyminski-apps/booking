@@ -237,7 +237,10 @@ describe("BookingController (e2e)", () => {
     const error = apiErrorSchema.parse(response.body);
 
     expect(error.errors).toBeUndefined();
-    expect(error.message).toContain(input.listingId);
+    // The guest reads this sentence as it is: it says what happened and what to do, and
+    // names no row.
+    expect(error.message).toContain("no longer free");
+    expect(error.message).not.toContain(input.listingId);
   });
 
   it("refuses a hold on terms other than the ones the guest was shown, and takes it on the ones they were", async () => {
