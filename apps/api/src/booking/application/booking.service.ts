@@ -56,6 +56,14 @@ import { readerOf } from "./stay-reader";
 import { decodeCursor, encodeCursor } from "./booking-cursor";
 
 /**
+ * The `409` of a hold refused for nights that are held or booked, as the guest reads it. It
+ * does not say who holds them or since when: it can be a guest's own hold, or nights taken
+ * long before and lying past the calendar's window.
+ */
+const DATES_UNAVAILABLE =
+  "Some of these nights are no longer free. Pick other dates, or ask to be told when they come free.";
+
+/**
  * The application layer of the booking module: HTTP takes, reads and pays for stays, and
  * the BullMQ jobs release unpaid holds and withdraw their payments. The cancellation is
  * `BookingCancellationService`'s, the refund it owes `BookingRefundService`'s, and the
@@ -196,9 +204,11 @@ export class BookingService {
       }
 
       // An overlap with an active stay, caught by the in-transaction check or the
-      // EXCLUDE constraint behind it.
+      // EXCLUDE constraint behind it. The guest reads this sentence as it is, so it names
+      // no ids; the error's own message, which does, goes to the log instead.
       if (error instanceof DatesUnavailableError) {
-        throw new ConflictException(error.message);
+        this.logger.log(`Hold refused: ${error.message}`);
+        throw new ConflictException(DATES_UNAVAILABLE);
       }
 
       // Not a `409`: the frontend reads that as its calendar being stale, and the nights

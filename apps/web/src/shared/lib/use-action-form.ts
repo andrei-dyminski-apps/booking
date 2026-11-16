@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  startTransition,
   useActionState,
   useEffect,
   useRef,
@@ -187,8 +188,12 @@ export function useActionForm<
 
   return {
     form,
+    // `handleSubmit` calls back after an awaited validation, outside the event's own
+    // transition, so the dispatch opens one itself — without it `pending` never turns on.
     submit: form.handleSubmit((values) => {
-      dispatch(values);
+      startTransition(() => {
+        dispatch(values);
+      });
     }),
     pending,
     message: errors.message,

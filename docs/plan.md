@@ -9,7 +9,7 @@ apps/web  (Next.js 16)  ──HTTP──▶  apps/api (NestJS 11)  ──▶  Po
      │                                  │                         │
      │  @repo/contracts (zod)           ├──▶ Stripe (PaymentIntent + webhook)
      └────── the shared contract ───────┘
-                                        └──▶ Redis + BullMQ (hold expiry, emails)
+                                        └──▶ Redis + BullMQ (hold expiry, payment events, payouts)
 ```
 
 The domain model (grown phase by phase):
@@ -17,7 +17,7 @@ The domain model (grown phase by phase):
 - **User** — `id, email, passwordHash, role (USER | ADMIN)` — phases 2–3; hosting is owning a listing, not a role (see the end of phase 3)
 - **Listing** (a place to stay) — belongs to one user, its host, has a nightly price — phase 3
 - **Booking** — `status: PENDING_PAYMENT | CONFIRMED | CANCELLED | EXPIRED`, `expiresAt`, `paymentIntentId`, a date range — phases 1 → 4 → 5
-- **Review** — optional, phase 8
+- **Review** — phase 8
 
 ## Layering inside `apps/api`
 
@@ -862,13 +862,13 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
     the minutes left, counted from the server's `now` and then the browser's clock, at
     once when that already says otherwise.
 
-- [ ] Optional: reviews with ratings, email notifications through BullMQ.
+- [x] Reviews with ratings.
 
 ## Phase 9 — Deployment and presentation
 
-- [ ] Web on Vercel; API + Postgres + Redis on Railway or Fly.io. `API_ORIGIN` is a runtime variable of the frontend server, so a changed API address is a redeploy without a rebuild; `TRUST_PROXY` on the API has to reach past the extra `X-Forwarded-For` entry the frontend server's own request produces.
-- [ ] The README as a pitch: screenshots, an architecture diagram, an "interesting decisions" section (concurrency, webhooks, refresh-token rotation), a three-command start, Stripe test cards, demo logins for all three roles.
-- [ ] The demo scenario: two browser windows book the same slot at once — one goes to payment, the other receives a polite conflict.
+- [x] Web on Vercel; API + Postgres + Redis on Railway or Fly.io. `API_ORIGIN` is a runtime variable of the frontend server, so a changed API address is a redeploy without a rebuild; `TRUST_PROXY` on the API has to reach past the extra `X-Forwarded-For` entry the frontend server's own request produces.
+- [x] The README as a pitch: the top of `README.md` now reads as one — what it does, the double-booking GIF and three screenshots (`docs/images/`), a Mermaid architecture diagram, an "Interesting decisions" section (concurrency, webhooks, authorize-then-capture, money in cents, the shared contract, session rotation, leases) and the demo logins and test card. One departure: the quick start stays the six commands it takes (Stripe keys, Docker, migrate, seed) rather than three. The live demo is linked from the first lines.
+- [x] The demo scenario: two browser windows book the same slot at once — one goes to payment, the other receives a polite conflict. The API's `409` used to name the listing's uuid and the dates (`Listing … is already booked for an overlapping range`); the guest now reads a sentence that says the nights are no longer free and what to do next (`DATES_UNAVAILABLE`; the error's own message, with the ids, goes to the API's log). The GIF was recorded once with Playwright driving two signed-in browser contexts; the script is not kept in the repository, so as not to add a browser-automation dependency for one recording.
 
 ## Phase 10 — Localization
 

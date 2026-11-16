@@ -2,9 +2,69 @@
 
 [![CI](https://github.com/andrei-dyminski-apps/booking/actions/workflows/ci.yml/badge.svg)](https://github.com/andrei-dyminski-apps/booking/actions/workflows/ci.yml)
 
-A booking service monorepo: a Next.js frontend and a NestJS backend in one repository, managed by Turborepo and pnpm workspaces.
+A stay-booking marketplace built as a Turborepo monorepo: a Next.js 16 frontend, a NestJS 11 API, PostgreSQL through Prisma 7, Redis behind BullMQ, and Stripe for the money. Guests hold nights and pay for them, hosts publish listings and are paid out, an admin deals with what the background jobs could not. One zod contract in `packages/contracts` is the single description of the API for both sides.
 
-> Status: the API is a working vertical slice — any account publishes listings and books other people's and the dates are checked for overlaps. Storage is PostgreSQL via Prisma 7, and the API is behind hand-written authentication: argon2, a JWT pair in httpOnly cookies, refresh-token rotation, and role-based authorization on top. The frontend has the session half of it — sign up, sign in, a guarded profile page rendered on the server as the visitor, and a session that survives an expired access token — plus the dashboard, where a listing is published, edited and taken down, and the catalogue: a filtered, cursor-paged list of stays whose filters live in the URL, a listing page with an availability calendar and the form that takes a hold, and a bookings screen with a "Trips" and a "Hosting" side for every user and everything for an admin, filtered and paged out of the URL like the catalogue. A hold is paid for on the stay's own page through Stripe Elements, and becomes a confirmed stay when Stripe's webhook says the money arrived; cancelling a paid stay refunds it by a rule both sides read from the contract. The rest are in [docs/plan.md](docs/plan.md).
+**Live demo: <https://booking-beige-five.vercel.app>** — the web on Vercel, the API with PostgreSQL and Redis on Railway. Sign in with one of the [demo logins](#try-it) and pay with a Stripe test card; the data is reset from time to time.
+
+<img src="docs/images/double-booking.gif" alt="Two guests press &quot;Hold these dates&quot; for the same nights at the same moment: one is taken to payment, the other is told the nights are gone" width="100%">
+
+Two guests press **Hold these dates** for the same nights at the same moment. One is taken to the payment form; the other is told the nights are no longer free, shown the calendar as it is now, and offered the waitlist. Which one wins is decided by the database, not by the browser (see [Concurrent booking](#concurrent-booking)).
+
+|                                                      |                                                                      |
+| ---------------------------------------------------- | -------------------------------------------------------------------- |
+| ![The catalogue of stays](docs/images/catalogue.png) | ![A listing with its availability calendar](docs/images/listing.png) |
+| A catalogue whose filters live in the URL            | A listing with the calendar and the booking form                     |
+
+![A guest's trips](docs/images/trips.png)
+
+## What it does
+
+- **Catalogue and listings.** A keyset-paged, filtered and ordered catalogue; a nightly price that is a default plus weekday and date exceptions; a calendar of the nights already held; JSON-LD, a sitemap and `noindex` rules so a crawler reads it the way a person does.
+- **Booking and payment.** A fifteen-minute hold, paid through Stripe Elements; the hold is an authorization and the stay is captured when it is confirmed. A waitlist for nights somebody else holds.
+- **Cancellation and refunds.** A policy frozen onto each stay, host cancellations with a fee, ending a stay early for the unused nights, a partial refund by an admin, a non-refundable rate for a discount.
+- **Hosts.** Payouts through Stripe Connect once the stay has begun, with the fees a host owes withheld from them.
+- **Everybody.** Reviews from both sides of a stay, messages between a guest and a host, notifications over one Server-Sent Events stream per browser.
+- **Admin.** Accounts, listings, and the money that waits for a person: provider events the worker gave up on, refunds a bank sent back, stuck refunds and payouts.
+
+The full plan, phase by phase, is in [docs/plan.md](docs/plan.md).
+
+## Architecture
+
+```mermaid
+flowchart LR
+  Browser["Browser"] -->|"/api/*"| Web["apps/web\nNext.js 16 (Vercel)"]
+  Web -->|"BFF proxy, server renders"| Api["apps/api\nNestJS 11 (Railway)"]
+  Api --> Pg[("PostgreSQL\nPrisma 7")]
+  Api --> Redis[("Redis\nBullMQ, pub/sub")]
+  Api <-->|"PaymentIntents, transfers"| Stripe["Stripe"]
+  Stripe -->|"signed webhooks"| Api
+  Contracts[/"packages/contracts\nzod schemas"/] -.-> Web
+  Contracts -.-> Api
+```
+
+The browser never talks to the API: it calls `/api` on the frontend's own origin and a route handler forwards the request, so the session stays a first-party cookie on every host, preview deployments included. Details are in [Deployment](#deployment) and in [apps/web/CLAUDE.md](apps/web/CLAUDE.md).
+
+## Interesting decisions
+
+- **A double booking is closed three times.** The create transaction locks the listing row (`SELECT ... FOR UPDATE`) so competing requests queue and the second gets an honest `409`; an `EXCLUDE` constraint over `daterange(from, to)` makes two overlapping active stays unwritable even for a buggy service; a BullMQ job releases an unpaid hold at its deadline, and a repeatable sweep catches the ones whose job a Redis restart dropped. [Concurrent booking](#concurrent-booking).
+- **Webhooks are an inbox.** A delivery is verified over the raw body, written to `payment_events` and answered `200` at once; a worker handles it afterwards. Every handler is idempotent, every write to Stripe goes under an idempotency key, a failing event is retried with a growing pause and, after a fixed number of attempts, set aside and put in front of an admin instead of being retried for good. [Payments](#payments).
+- **A hold is authorized, the stay is captured.** Charging at once turns a payment that lands on a lapsed hold into a full charge and a full refund, with Stripe keeping its fee on both. With manual capture a late payment is simply cancelled. Methods that cannot be authorized stay on immediate capture, and the code says which is which.
+- **Money is whole cents, named by its unit.** Columns are `*_cents`, contract fields `*Cents`, and both sides parse them into a branded `Cents` type, so a dollar figure where cents are meant does not compile. Turning cents into a currency happens at one edge in the frontend.
+- **Rules both sides read live in the contract.** `nightlyPrice`, `refundQuote` and `hostShare` are pure functions in `@repo/contracts`: the screen states a refund by the same function the API pays it by.
+- **Sessions are hand-written and rotate.** argon2id, a JWT pair in httpOnly cookies scoped to different paths, refresh tokens burned on every use with reuse detection that revokes the whole family. [Authentication](#authentication).
+- **Long work holds a lease, not a transaction.** Anything that calls Stripe runs under a per-booking lease the holder renews, so a slow provider never pins a database connection and a crashed worker cannot hold a stay for good.
+
+## Try it
+
+On the [live demo](https://booking-beige-five.vercel.app), or locally after the seed, there are demo logins, all with the password `password123`:
+
+| Account             | What it is for                                            |
+| ------------------- | --------------------------------------------------------- |
+| `guest@example.com` | Books stays; has finished stays waiting for a review      |
+| `owner@example.com` | Hosts most of the catalogue; has a conversation to answer |
+| `admin@example.com` | Reads everything and works the money screens              |
+
+Pay for a hold with the Stripe test card `4242 4242 4242 4242` (any future expiry, any CVC); the other test cards are in [Payments](#payments). To see the double-booking race yourself, sign in as two different users in two browsers, open the same listing and press **Hold these dates** for the same nights together.
 
 ## Requirements
 
@@ -28,7 +88,7 @@ pnpm dev
 - API — http://localhost:3001 (`/health` says whether it reaches Postgres and Redis)
 - OpenAPI — http://localhost:3001/docs (not published when `NODE_ENV=production`)
 
-The seed also creates three demo logins: `guest@example.com` (books stays), `owner@example.com` (hosts most of the catalogue) — both plain users, since hosting is owning a listing rather than a role — and `admin@example.com` — password `password123`. A few more accounts (`ines@example.com`, a second host who also books one of the owner's stays; `alex.morgan@example.com`, `amorgan@example.com`, `sam@example.com`, guests) share that password and exist so the filter boxes have names to suggest.
+The seed creates the three [demo logins](#try-it) and a few more accounts with the same password (`ines@example.com`, a second host who also books one of the owner's stays; `alex.morgan@example.com`, `amorgan@example.com`, `sam@example.com`, guests) that exist so the filter boxes have names to suggest. Hosting is owning a listing rather than a role, so `guest@example.com` and `owner@example.com` are both plain users.
 
 ## Layout
 
@@ -483,7 +543,7 @@ Implemented by hand rather than taken from Auth.js or Clerk — the parts an int
 
 The secrets have no fallback in the code: an unset `JWT_ACCESS_SECRET` stops the process at boot instead of shipping a key that is in a public repository. `.env.example` carries development values — replace them anywhere else, `openssl rand -hex 32` generates one.
 
-`pnpm --filter @repo/api db:seed` creates three demo logins — `guest@example.com` and `owner@example.com`, both plain users (one books, the other hosts), and `admin@example.com`, all with the password `password123` — plus a second host who also books a stay at the owner's, so one account has both a Trips and a Hosting side, and three more guests, two of whom share the name "Alex Morgan" so a lookup has two rows of one name to tell apart; eight listings, six owned by the owner and two by the second host, and eleven bookings ahead spread over the guests — enough for the catalogue's filters to have something to keep as well as something to drop — plus three stays of the demo guest that are already over, reviewed by both sides, by the guest alone and by nobody, so the demo guest and the demo owner each have a review left to write — and two conversations between the guest and the owner, one of them unread by the owner — and five waitlist entries over nights already taken, three of them the demo guest's, so `/waitlist` has something to show on each of its sides, and one a guest's wait for a stay of the demo guest's, so cancelling it sends the notice — so every rule below has something to act on from the first request. The stays are dated from the day the seed runs, so the data never ages into a puzzle. The bookings ahead are ones the API itself would accept; the three that are over are the exception it cannot write — the contract refuses a check-in in the past — which is why only the seed can give a review something to be about.
+`pnpm --filter @repo/api db:seed` creates the three [demo logins](#try-it) — plus a second host who also books a stay at the owner's, so one account has both a Trips and a Hosting side, and three more guests, two of whom share the name "Alex Morgan" so a lookup has two rows of one name to tell apart; eight listings, six owned by the owner and two by the second host, and eleven bookings ahead spread over the guests — enough for the catalogue's filters to have something to keep as well as something to drop — plus three stays of the demo guest that are already over, reviewed by both sides, by the guest alone and by nobody, so the demo guest and the demo owner each have a review left to write — and two conversations between the guest and the owner, one of them unread by the owner — and five waitlist entries over nights already taken, three of them the demo guest's, so `/waitlist` has something to show on each of its sides, and one a guest's wait for a stay of the demo guest's, so cancelling it sends the notice — so every rule below has something to act on from the first request. The stays are dated from the day the seed runs, so the data never ages into a puzzle. The bookings ahead are ones the API itself would accept; the three that are over are the exception it cannot write — the contract refuses a check-in in the past — which is why only the seed can give a review something to be about.
 
 ### The same session on the frontend
 
