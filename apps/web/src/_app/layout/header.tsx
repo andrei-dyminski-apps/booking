@@ -3,9 +3,8 @@ import { SearchIcon } from "lucide-react";
 import type { User } from "@repo/contracts";
 import { ROUTES } from "#shared/config";
 import { ButtonLink } from "#shared/ui";
+import { AccountNotifications } from "./account-notifications";
 import { MobileNav } from "./mobile-nav";
-import { NotificationBell } from "./notification-bell";
-import { NotificationToasts } from "./notification-toasts";
 import { SessionRecovery } from "./session-recovery";
 import { ThemeToggle } from "./theme-toggle";
 import { TimeZoneCookie } from "./time-zone-cookie";
@@ -66,12 +65,7 @@ export const Header = ({ user }: { user: User | null }) => (
         )}
 
         {/* Only for a session: the stream behind both is the account's own. */}
-        {user !== null && (
-          <>
-            <NotificationBell />
-            <NotificationToasts />
-          </>
-        )}
+        {user !== null && <AccountNotifications />}
 
         <ThemeToggle />
       </div>
