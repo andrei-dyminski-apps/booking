@@ -45,7 +45,7 @@ export const Header = ({ user }: { user: User | null }) => (
         */}
         <ButtonLink href={ROUTES.catalogue} variant="ghost" size="sm">
           <SearchIcon />
-          <span className="hidden sm:inline">Find a stay</span>
+          <span className="sr-only sm:not-sr-only">Find a stay</span>
         </ButtonLink>
 
         {user === null && (

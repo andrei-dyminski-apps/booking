@@ -38,7 +38,7 @@ export const AvailabilityCalendar = ({
                   day.taken
                     ? "rounded-md bg-muted py-1 text-muted-foreground line-through"
                     : day.past
-                      ? "py-1 text-muted-foreground/50"
+                      ? "py-1 text-muted-foreground"
                       : "rounded-md bg-primary/10 py-1 font-medium"
                 }
               >
