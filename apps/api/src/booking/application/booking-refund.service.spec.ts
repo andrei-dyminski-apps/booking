@@ -1,9 +1,6 @@
-import {
-  BadRequestException,
-  ConflictException,
-  NotFoundException,
-} from "@nestjs/common";
+import { BadRequestException } from "@nestjs/common";
 import { BookingStatus, NotificationType, type Booking } from "@repo/contracts";
+import { refusalOf } from "../../common/testing/refusal";
 import { type FakeNotificationService } from "../../notification/testing/notification-service.fakes";
 import {
   MAX_REFUND_ATTEMPTS,
@@ -218,12 +215,15 @@ describe("BookingRefundService", () => {
     it("refuses a retry of a refund not set aside, and of a stay that is not there", async () => {
       const id = await paidStay(30);
 
-      await expect(refundService.retryStuckRefund(id)).rejects.toThrow(
-        ConflictException,
-      );
-      await expect(refundService.retryStuckRefund(LISTING_ID)).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        refusalOf(refundService.retryStuckRefund(id)),
+      ).resolves.toEqual({
+        status: 409,
+        code: "REFUND_NOT_SET_ASIDE",
+      });
+      await expect(
+        refusalOf(refundService.retryStuckRefund(LISTING_ID)),
+      ).resolves.toEqual({ status: 404, code: "BOOKING_NOT_FOUND" });
     });
   });
 

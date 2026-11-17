@@ -12,6 +12,7 @@ import { ApiExcludeEndpoint } from "@nestjs/swagger";
 import { SkipThrottle } from "@nestjs/throttler";
 import type { Request } from "express";
 import { Public } from "../../auth/decorators/public.decorator";
+import { apiException } from "../../common/api-exception";
 import { PaymentEventDispatcher } from "../application/payment-event-dispatcher";
 import {
   InvalidPaymentEventError,
@@ -43,7 +44,11 @@ export class PaymentWebhookController {
     @Headers("stripe-signature") signature: string | undefined,
   ): Promise<{ received: true }> {
     if (request.rawBody === undefined || signature === undefined) {
-      throw new BadRequestException("A signed webhook delivery is required");
+      throw apiException(
+        BadRequestException,
+        "WEBHOOK_SIGNATURE_MISSING",
+        "A signed webhook delivery is required",
+      );
     }
 
     let event: PaymentEvent;
@@ -52,7 +57,11 @@ export class PaymentWebhookController {
       event = this.paymentGateway.readEvent(request.rawBody, signature);
     } catch (error) {
       if (error instanceof InvalidPaymentEventError) {
-        throw new BadRequestException(error.message);
+        throw apiException(
+          BadRequestException,
+          "WEBHOOK_EVENT_INVALID",
+          error.message,
+        );
       }
 
       throw error;

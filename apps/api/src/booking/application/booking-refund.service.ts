@@ -144,8 +144,14 @@ export class BookingRefundService {
       this.bookingRefundRepository.handBackRefund(id),
       () => this.bookingRepository.exists(id),
       {
-        conflict: `The refund owed on booking ${id} is not set aside`,
-        notFound: `Booking ${id} not found`,
+        conflict: {
+          code: "REFUND_NOT_SET_ASIDE",
+          message: `The refund owed on booking ${id} is not set aside`,
+        },
+        notFound: {
+          code: "BOOKING_NOT_FOUND",
+          message: `Booking ${id} not found`,
+        },
       },
     );
 

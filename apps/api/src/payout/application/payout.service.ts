@@ -448,8 +448,14 @@ export class PayoutService {
       this.payoutRepository.handBackPayout(bookingId),
       () => this.payoutRepository.exists(bookingId),
       {
-        conflict: `The payout of booking ${bookingId} is not stuck: it is not set aside, an open dispute holds it, or a lost dispute or a full refund leaves nothing to send`,
-        notFound: `Booking ${bookingId} not found`,
+        conflict: {
+          code: "PAYOUT_NOT_STUCK",
+          message: `The payout of booking ${bookingId} is not stuck: it is not set aside, an open dispute holds it, or a lost dispute or a full refund leaves nothing to send`,
+        },
+        notFound: {
+          code: "BOOKING_NOT_FOUND",
+          message: `Booking ${bookingId} not found`,
+        },
       },
     );
 

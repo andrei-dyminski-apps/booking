@@ -154,6 +154,39 @@ export const ERROR_CODES = [
   "REFUND_AMOUNT_INVALID",
   "REFUND_REASON_REQUIRED",
   "REFUND_REASON_TOO_LONG",
+
+  // What the money paths set aside, and what an admin does about it. A retry or a
+  // resolution that matched nothing is one of two refusals: the row is not there, or it is
+  // there in another state.
+  "PAYMENT_EVENT_NOT_FOUND",
+  "PAYMENT_EVENT_NOT_SET_ASIDE",
+  "REFUND_FAILURE_NOT_FOUND",
+  "REFUND_FAILURE_ALREADY_RESOLVED",
+  "REFUND_NOT_SET_ASIDE",
+  "PAYOUT_NOT_STUCK",
+
+  // Host fees and the payout account.
+  "HOST_FEE_NOT_FOUND",
+  "HOST_FEE_NOT_OWED",
+  "PAYOUT_ACCOUNT_UNAVAILABLE",
+
+  // The providers' webhooks, which no browser calls: the code is for the logs and the
+  // provider's dashboard. A delivery with no signature header, or no raw body to check one
+  // against, is `WEBHOOK_SIGNATURE_MISSING`; one the gateway refused to read is
+  // `WEBHOOK_EVENT_INVALID`.
+  "WEBHOOK_SIGNATURE_MISSING",
+  "WEBHOOK_EVENT_INVALID",
+
+  // Set-aside and host-fee schema rules. A day of a window reuses the date codes.
+  "PROVIDER_ID_REQUIRED",
+  "PROVIDER_ID_TOO_LONG",
+  "EVENT_TYPE_REQUIRED",
+  "EVENT_TYPE_TOO_LONG",
+  "WINDOW_END_BEFORE_START",
+  "RESOLUTION_REQUIRED",
+  "RESOLUTION_TOO_LONG",
+  "WAIVE_REASON_REQUIRED",
+  "WAIVE_REASON_TOO_LONG",
 ] as const;
 
 export const errorCodeSchema = z.enum(ERROR_CODES);

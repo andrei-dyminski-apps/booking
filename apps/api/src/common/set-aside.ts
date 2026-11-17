@@ -1,4 +1,9 @@
 import { ConflictException, NotFoundException } from "@nestjs/common";
+import type { ErrorCode } from "@repo/contracts";
+import { apiException } from "./api-exception";
+
+/** One refusal of `writeOrRefuse`: the rule's code and the sentence beside it. */
+type Refusal = { code: ErrorCode; message: string };
 
 /**
  * What every admin action on something set aside answers when its conditional write
@@ -9,11 +14,21 @@ import { ConflictException, NotFoundException } from "@nestjs/common";
 export async function writeOrRefuse(
   write: Promise<boolean>,
   exists: () => Promise<boolean>,
-  refusal: { conflict: string; notFound: string },
+  refusal: { conflict: Refusal; notFound: Refusal },
 ): Promise<void> {
   if (await write) return;
 
-  if (await exists()) throw new ConflictException(refusal.conflict);
+  if (await exists()) {
+    throw apiException(
+      ConflictException,
+      refusal.conflict.code,
+      refusal.conflict.message,
+    );
+  }
 
-  throw new NotFoundException(refusal.notFound);
+  throw apiException(
+    NotFoundException,
+    refusal.notFound.code,
+    refusal.notFound.message,
+  );
 }

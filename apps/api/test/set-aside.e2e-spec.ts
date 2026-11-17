@@ -8,6 +8,7 @@ import { App } from "supertest/types";
 import {
   DisputeStatus,
   Role,
+  apiErrorSchema,
   failedPaymentEventPageSchema,
   refundFailurePageSchema,
   stuckStayPageSchema,
@@ -18,6 +19,15 @@ import { resetDatabase } from "./database";
 import { inDays } from "./dates";
 import { resetQueue } from "./queue";
 import { signInAs, type Agent } from "./session";
+
+/** An `.expect(...)` that the refusal answered with this code. */
+const hasCode = (code: string) => (response: { body: unknown }) => {
+  expect(apiErrorSchema.parse(response.body).code).toBe(code);
+};
+
+/** The rule behind each issue of a body the contract refused. */
+const issueCodesOf = (response: { body: unknown }): string[] =>
+  (apiErrorSchema.parse(response.body).errors ?? []).map(({ code }) => code);
 
 /**
  * What the money paths set aside, as an admin reads and acts on it — the SQL the unit specs
@@ -198,7 +208,10 @@ describe("What the money paths set aside (e2e)", () => {
       ]);
       await admin
         .get("/payment-events/failed?from=2026-10-26&to=2026-10-25")
-        .expect(400);
+        .expect(400)
+        .expect((response) => {
+          expect(issueCodesOf(response)).toEqual(["WINDOW_END_BEFORE_START"]);
+        });
     });
 
     it("hands an event back to the worker with a whole count", async () => {
@@ -209,9 +222,18 @@ describe("What the money paths set aside (e2e)", () => {
           where: { id: "evt_failed" },
         }),
       ).toMatchObject({ failedAt: null, attempts: 0 });
-      await admin.post("/payment-events/evt_failed/retry").expect(409);
-      await admin.post("/payment-events/evt_pending/retry").expect(409);
-      await admin.post("/payment-events/evt_unknown/retry").expect(404);
+      await admin
+        .post("/payment-events/evt_failed/retry")
+        .expect(409)
+        .expect(hasCode("PAYMENT_EVENT_NOT_SET_ASIDE"));
+      await admin
+        .post("/payment-events/evt_pending/retry")
+        .expect(409)
+        .expect(hasCode("PAYMENT_EVENT_NOT_SET_ASIDE"));
+      await admin
+        .post("/payment-events/evt_unknown/retry")
+        .expect(404)
+        .expect(hasCode("PAYMENT_EVENT_NOT_FOUND"));
     });
   });
 
@@ -342,7 +364,10 @@ describe("What the money paths set aside (e2e)", () => {
       await admin
         .post("/refund-failures/re_stay/resolve")
         .send({ resolution: "  " })
-        .expect(400);
+        .expect(400)
+        .expect((response) => {
+          expect(issueCodesOf(response)).toEqual(["RESOLUTION_REQUIRED"]);
+        });
       await admin
         .post("/refund-failures/re_stay/resolve")
         .send({ resolution: "Sent by bank transfer" })
@@ -350,11 +375,13 @@ describe("What the money paths set aside (e2e)", () => {
       await admin
         .post("/refund-failures/re_stay/resolve")
         .send({ resolution: "Paid in cash" })
-        .expect(409);
+        .expect(409)
+        .expect(hasCode("REFUND_FAILURE_ALREADY_RESOLVED"));
       await admin
         .post("/refund-failures/re_unknown/resolve")
         .send({ resolution: "Paid in cash" })
-        .expect(404);
+        .expect(404)
+        .expect(hasCode("REFUND_FAILURE_NOT_FOUND"));
 
       const resolved = refundFailurePageSchema.parse(
         (await admin.get("/refund-failures?status=RESOLVED").expect(200)).body,
@@ -459,7 +486,8 @@ describe("What the money paths set aside (e2e)", () => {
 
       await admin
         .get(`/bookings/stuck?kind=refund&cursor=${forged}`)
-        .expect(400);
+        .expect(400)
+        .expect(hasCode("CURSOR_MALFORMED"));
     });
 
     it("narrows the stuck stays by the stay, its people and the days", async () => {
@@ -562,7 +590,10 @@ describe("What the money paths set aside (e2e)", () => {
       });
 
       expect(await listPayouts()).toEqual([]);
-      await admin.post(`/bookings/${bookingId}/stuck/payout/retry`).expect(409);
+      await admin
+        .post(`/bookings/${bookingId}/stuck/payout/retry`)
+        .expect(409)
+        .expect(hasCode("PAYOUT_NOT_STUCK"));
 
       await prismaService.booking.update({
         where: { id: bookingId },
@@ -595,7 +626,10 @@ describe("What the money paths set aside (e2e)", () => {
     });
 
     it("hands a refund back to its sweep, and refuses one not set aside", async () => {
-      await admin.post(`/bookings/${bookingId}/stuck/refund/retry`).expect(409);
+      await admin
+        .post(`/bookings/${bookingId}/stuck/refund/retry`)
+        .expect(409)
+        .expect(hasCode("REFUND_NOT_SET_ASIDE"));
 
       await prismaService.booking.update({
         where: { id: bookingId },
@@ -615,11 +649,15 @@ describe("What the money paths set aside (e2e)", () => {
       ).toMatchObject({ refundFailedAt: null, refundAttempts: 0 });
       await admin
         .post(`/bookings/${randomUUID()}/stuck/refund/retry`)
-        .expect(404);
+        .expect(404)
+        .expect(hasCode("BOOKING_NOT_FOUND"));
     });
 
     it("hands a payout back, and refuses one not set aside", async () => {
-      await admin.post(`/bookings/${bookingId}/stuck/payout/retry`).expect(409);
+      await admin
+        .post(`/bookings/${bookingId}/stuck/payout/retry`)
+        .expect(409)
+        .expect(hasCode("PAYOUT_NOT_STUCK"));
 
       await prismaService.booking.update({
         where: { id: bookingId },
@@ -635,7 +673,12 @@ describe("What the money paths set aside (e2e)", () => {
       ).toMatchObject({ payoutFailedAt: null, payoutAttempts: 0 });
       await admin
         .post(`/bookings/${randomUUID()}/stuck/payout/retry`)
-        .expect(404);
+        .expect(404)
+        .expect(hasCode("BOOKING_NOT_FOUND"));
+      await admin
+        .post("/bookings/not-a-uuid/stuck/payout/retry")
+        .expect(400)
+        .expect(hasCode("INVALID_ID"));
     });
 
     it("refuses a payout a lost dispute left owing nothing, as the list leaves it out", async () => {
@@ -653,7 +696,10 @@ describe("What the money paths set aside (e2e)", () => {
       );
 
       expect(payouts.items).toEqual([]);
-      await admin.post(`/bookings/${bookingId}/stuck/payout/retry`).expect(409);
+      await admin
+        .post(`/bookings/${bookingId}/stuck/payout/retry`)
+        .expect(409)
+        .expect(hasCode("PAYOUT_NOT_STUCK"));
 
       const row = await prismaService.booking.findUniqueOrThrow({
         where: { id: bookingId },

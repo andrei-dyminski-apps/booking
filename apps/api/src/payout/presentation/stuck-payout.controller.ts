@@ -1,11 +1,4 @@
-import {
-  Controller,
-  HttpCode,
-  HttpStatus,
-  Param,
-  ParseUUIDPipe,
-  Post,
-} from "@nestjs/common";
+import { Controller, HttpCode, HttpStatus, Param, Post } from "@nestjs/common";
 import {
   ApiConflictResponse,
   ApiNoContentResponse,
@@ -16,6 +9,7 @@ import {
 import { Role } from "@repo/contracts";
 import { Roles } from "../../auth/decorators/roles.decorator";
 import { ApiErrorDto } from "../../common/dto/api-error.dto";
+import { ParseIdPipe } from "../../common/parse-id.pipe";
 import { PayoutService } from "../application/payout.service";
 
 /**
@@ -42,7 +36,7 @@ export class StuckPayoutController {
       "The booking's payout is not set aside, an open dispute holds it, or a lost dispute or a full refund leaves nothing to send",
     type: ApiErrorDto,
   })
-  retry(@Param("id", ParseUUIDPipe) id: string): Promise<void> {
+  retry(@Param("id", ParseIdPipe) id: string): Promise<void> {
     return this.payoutService.retryStuckPayout(id);
   }
 }

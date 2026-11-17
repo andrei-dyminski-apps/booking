@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { dayMessage, isDay } from "./day.js";
 import { RefundFailureStatus } from "./enums.js";
+import { rule } from "./error-code.js";
 import { bookingSchema } from "./booking.js";
 import { stayNoticeSchema } from "./notification.js";
 import { centsSchema, currencySchema } from "./money.js";
@@ -22,15 +24,44 @@ export const setAsideSortSchema = z.enum(["newest"]);
  * is a whole question about a queue, where a stay's half window was not.
  */
 const SET_ASIDE_WINDOW = {
-  from: blank(z.iso.date().optional()),
-  to: blank(z.iso.date().optional()),
+  from: blank(
+    z.iso
+      .date({
+        error: dayMessage(
+          "A first day is required",
+          "A first day must be written as YYYY-MM-DD",
+        ),
+      })
+      .optional(),
+  ),
+  to: blank(
+    z.iso
+      .date({
+        error: dayMessage(
+          "A last day is required",
+          "A last day must be written as YYYY-MM-DD",
+        ),
+      })
+      .optional(),
+  ),
 };
 
+/**
+ * Waits for two readable days, as a stay's own check-out rule does (`withStayRules`): a day
+ * nothing could read has no order, and is refused once, as the day it is.
+ */
 const windowInOrder = (query: { from?: string; to?: string }) =>
-  query.from === undefined || query.to === undefined || query.from <= query.to;
+  query.from === undefined ||
+  query.to === undefined ||
+  !isDay(query.from) ||
+  !isDay(query.to) ||
+  query.from <= query.to;
 
 const WINDOW_IN_ORDER = {
-  error: "The last day must not be earlier than the first",
+  error: rule(
+    "WINDOW_END_BEFORE_START",
+    "The last day must not be earlier than the first",
+  ),
   path: ["to"],
 };
 
@@ -40,8 +71,16 @@ const providerId = (what: string) =>
     z
       .string()
       .trim()
-      .min(1, { error: `Type the ${what}'s id` })
-      .max(255, { error: `A ${what}'s id is never longer than 255 characters` })
+      .min(1, {
+        error: rule("PROVIDER_ID_REQUIRED", `Type the ${what}'s id`),
+      })
+      .max(255, {
+        error: rule(
+          "PROVIDER_ID_TOO_LONG",
+          `A ${what}'s id is never longer than 255 characters`,
+          { maximum: 255 },
+        ),
+      })
       .optional(),
   );
 
@@ -81,9 +120,18 @@ export const failedPaymentEventQuerySchema = z
       z
         .string()
         .trim()
-        .min(1, { error: "Type at least one character of the type" })
+        .min(1, {
+          error: rule(
+            "EVENT_TYPE_REQUIRED",
+            "Type at least one character of the type",
+          ),
+        })
         .max(100, {
-          error: "An event type is never longer than 100 characters",
+          error: rule(
+            "EVENT_TYPE_TOO_LONG",
+            "An event type is never longer than 100 characters",
+            { maximum: 100 },
+          ),
         })
         .optional(),
     ),
@@ -144,9 +192,15 @@ export const resolveRefundFailureSchema = z.object({
   resolution: z
     .string()
     .trim()
-    .min(1, { error: "Say how the money went back" })
+    .min(1, {
+      error: rule("RESOLUTION_REQUIRED", "Say how the money went back"),
+    })
     .max(MAX_RESOLUTION_LENGTH, {
-      error: `A resolution may not be longer than ${String(MAX_RESOLUTION_LENGTH)} characters`,
+      error: rule(
+        "RESOLUTION_TOO_LONG",
+        `A resolution may not be longer than ${String(MAX_RESOLUTION_LENGTH)} characters`,
+        { maximum: MAX_RESOLUTION_LENGTH },
+      ),
     }),
 });
 

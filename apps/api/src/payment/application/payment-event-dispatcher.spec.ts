@@ -1,4 +1,3 @@
-import { ConflictException, NotFoundException } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import {
   NotificationType,
@@ -9,6 +8,7 @@ import { subDays } from "date-fns";
 import type { Page } from "../../common/paging";
 import type { SetAsideCursor } from "../../common/set-aside-cursor";
 import type { PublicOf } from "../../common/testing/public-of.fakes";
+import { refusalOf } from "../../common/testing/refusal";
 import { NotificationService } from "../../notification/notification.service";
 import { PaymentEventRepository } from "../infrastructure/payment-event.repository";
 import {
@@ -504,11 +504,17 @@ describe("PaymentEventDispatcher", () => {
     it("refuses to retry an event not set aside, and one never received", async () => {
       await dispatcher.receive(event("evt_pending"));
 
-      await expect(dispatcher.retry("evt_pending")).rejects.toThrow(
-        ConflictException,
+      await expect(refusalOf(dispatcher.retry("evt_pending"))).resolves.toEqual(
+        {
+          status: 409,
+          code: "PAYMENT_EVENT_NOT_SET_ASIDE",
+        },
       );
-      await expect(dispatcher.retry("evt_unknown")).rejects.toThrow(
-        NotFoundException,
+      await expect(refusalOf(dispatcher.retry("evt_unknown"))).resolves.toEqual(
+        {
+          status: 404,
+          code: "PAYMENT_EVENT_NOT_FOUND",
+        },
       );
     });
   });

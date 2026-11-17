@@ -5,7 +5,6 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  ParseUUIDPipe,
   Post,
   Query,
 } from "@nestjs/common";
@@ -24,6 +23,7 @@ import type { AuthenticatedUser } from "../../auth/auth.types";
 import { CurrentUser } from "../../auth/decorators/current-user.decorator";
 import { Roles } from "../../auth/decorators/roles.decorator";
 import { ApiErrorDto } from "../../common/dto/api-error.dto";
+import { ParseIdPipe } from "../../common/parse-id.pipe";
 import { HostFeeService } from "../application/host-fee.service";
 import {
   HostFeeOverviewDto,
@@ -79,7 +79,7 @@ export class HostFeeController {
     type: ApiErrorDto,
   })
   waive(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
     @Body() dto: WaiveHostFeeDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<void> {

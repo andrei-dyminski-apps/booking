@@ -13,6 +13,7 @@ import {
   type Caller,
 } from "./ports/payout-gateway";
 import { PayoutJobs } from "./ports/payout-jobs";
+import { apiException } from "../../common/api-exception";
 import { sessionNotFound } from "../../common/session-errors";
 
 const ACCOUNT_CHANGES = new Set([
@@ -128,7 +129,11 @@ export class HostAccountService {
         `Could not open the payout session of user ${user.id}: ${String(error)}`,
       );
 
-      throw new BadGatewayException("The payout account could not be opened");
+      throw apiException(
+        BadGatewayException,
+        "PAYOUT_ACCOUNT_UNAVAILABLE",
+        "The payout account could not be opened",
+      );
     }
   }
 

@@ -913,9 +913,19 @@ message, params?)` in `apps/api/src/common`; a global filter guarantees the fiel
       `BookingEarlyEndService` and `BookingAdjustmentService`, with `bookingNotFound` in
       `stay-reader.ts` for the `404` they share; the `:id` of the booking routes through
       `ParseIdPipe`; a stay no payment can carry is `STAY_TOO_EXPENSIVE` or `STAY_TOO_CHEAP`
-      with the bound it crossed in `params`), then payments and payouts (the stuck lists and their
-      retries, refund failures, the host's fees), the rest (reviews, conversations, waitlist,
-      notifications, lookup, users). Three things of that slice reach the others before they are
+      with the bound it crossed in `params`), payments and payouts ✅ (what the money paths
+      set aside and what an admin does about it: `writeOrRefuse` takes a code and a sentence
+      for each of its two refusals, so a retry or a resolution that matched nothing is
+      `PAYMENT_EVENT_NOT_FOUND` / `_NOT_SET_ASIDE`, `REFUND_FAILURE_NOT_FOUND` /
+      `_ALREADY_RESOLVED`, `BOOKING_NOT_FOUND` with `REFUND_NOT_SET_ASIDE` or
+      `PAYOUT_NOT_STUCK`, `HOST_FEE_NOT_FOUND` / `_NOT_OWED`; the payout account's `502` is
+      `PAYOUT_ACCOUNT_UNAVAILABLE`; the two webhooks answer `WEBHOOK_SIGNATURE_MISSING` and
+      `WEBHOOK_EVENT_INVALID`, which no browser reads but the provider's dashboard and the
+      logs show; the contract's window over what was set aside, its provider-id and
+      event-type filters, a resolution and a waiver's reason carry their codes, and the
+      window's order waits for two readable days like a stay's check-out rule does; the `:id` of a host
+      fee and of a stuck payout's retry goes through `ParseIdPipe`), then the rest (reviews,
+      conversations, waitlist, notifications, lookup, users). Three things of that slice reach the others before they are
       migrated, because they are shared code: `readCursor` answers the two cursor codes for
       every paged read (stays, reviews, waitlist, conversations, notifications, lookup,
       users, refund failures, payment events), `dayMessage` stamps `DATE_REQUIRED` and

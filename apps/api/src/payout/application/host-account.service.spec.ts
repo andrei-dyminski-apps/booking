@@ -1,5 +1,6 @@
 import { BadGatewayException } from "@nestjs/common";
 import { HostAccountStatus } from "@repo/contracts";
+import { refusalOf } from "../../common/testing/refusal";
 import type { HostAccountService } from "./host-account.service";
 import type { PayoutService } from "./payout.service";
 import {
@@ -79,9 +80,10 @@ describe("HostAccountService", () => {
     hostWith(null, false);
     payoutGateway.refusingSessions = true;
 
-    await expect(hostAccountService.session(host)).rejects.toBeInstanceOf(
-      BadGatewayException,
-    );
+    await expect(refusalOf(hostAccountService.session(host))).resolves.toEqual({
+      status: 502,
+      code: "PAYOUT_ACCOUNT_UNAVAILABLE",
+    });
 
     payoutGateway.refusingSessions = false;
     hostWith(null, false);

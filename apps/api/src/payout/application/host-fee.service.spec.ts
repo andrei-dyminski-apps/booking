@@ -1,14 +1,9 @@
-import {
-  ConflictException,
-  ForbiddenException,
-  NotFoundException,
-  UnauthorizedException,
-} from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import type { HostFee } from "@repo/contracts";
 import { isBefore, parseISO } from "date-fns";
 import { cancellationsWindowStart } from "../../booking/infrastructure/booking-where";
 import type { PublicOf } from "../../common/testing/public-of.fakes";
+import { refusalOf } from "../../common/testing/refusal";
 import { cents, CURRENCY } from "../../payment/domain/money";
 import {
   WaivingAccountGoneError,
@@ -162,9 +157,9 @@ describe("HostFeeService", () => {
       id: ADMIN_ID,
       name: "Ada Admin",
     });
-    await expect(service.waive("a", "Again", ADMIN_ID)).rejects.toThrow(
-      ConflictException,
-    );
+    await expect(
+      refusalOf(service.waive("a", "Again", ADMIN_ID)),
+    ).resolves.toEqual({ status: 409, code: "HOST_FEE_NOT_OWED" });
     await expect(
       service.overviewOf(HOST_ID, "admin", NOW),
     ).resolves.toMatchObject({ owedCents: 0 });
@@ -184,27 +179,27 @@ describe("HostFeeService", () => {
   it("refuses a waiver from an account gone or no longer an admin, waiving nothing", async () => {
     fee("a");
 
-    await expect(service.waive("a", "Late", GONE_ID)).rejects.toThrow(
-      UnauthorizedException,
-    );
-    await expect(service.waive("a", "Late", DEMOTED_ID)).rejects.toThrow(
-      ForbiddenException,
-    );
+    await expect(
+      refusalOf(service.waive("a", "Late", GONE_ID)),
+    ).resolves.toEqual({ status: 401, code: "SESSION_NOT_FOUND" });
+    await expect(
+      refusalOf(service.waive("a", "Late", DEMOTED_ID)),
+    ).resolves.toEqual({ status: 403, code: "NOT_AN_ADMIN_ANYMORE" });
     // The caller is checked before the fee: a missing id tells a former admin nothing.
-    await expect(service.waive("missing", "Late", DEMOTED_ID)).rejects.toThrow(
-      ForbiddenException,
-    );
+    await expect(
+      refusalOf(service.waive("missing", "Late", DEMOTED_ID)),
+    ).resolves.toEqual({ status: 403, code: "NOT_AN_ADMIN_ANYMORE" });
     expect(hostFeeRepository.fees[0]?.waivedAt).toBeNull();
   });
 
   it("refuses to waive a fee withheld in full, and one that is not there", async () => {
     fee("a", { withheldCents: cents(10_000) });
 
-    await expect(service.waive("a", "Late", ADMIN_ID)).rejects.toThrow(
-      ConflictException,
-    );
-    await expect(service.waive("missing", "Late", ADMIN_ID)).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      refusalOf(service.waive("a", "Late", ADMIN_ID)),
+    ).resolves.toEqual({ status: 409, code: "HOST_FEE_NOT_OWED" });
+    await expect(
+      refusalOf(service.waive("missing", "Late", ADMIN_ID)),
+    ).resolves.toEqual({ status: 404, code: "HOST_FEE_NOT_FOUND" });
   });
 });

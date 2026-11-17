@@ -563,7 +563,12 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
     `payout`. Each clears its `*_failed_at` and `*_attempts` only while the money is still
     owed (a debt still on the row, a transfer still unsent) and queues the job at once.
     A retry of a row that is not set aside is a `409`, of one that is not there a `404`
-    (`writeOrRefuse`). A payout's retry hands back exactly what its list shows —
+    (`writeOrRefuse`, which takes a code and a sentence for each: `PAYMENT_EVENT_NOT_SET_ASIDE`
+    / `_NOT_FOUND`, `REFUND_FAILURE_ALREADY_RESOLVED` / `_NOT_FOUND`, `REFUND_NOT_SET_ASIDE`
+    and `PAYOUT_NOT_STUCK` with `BOOKING_NOT_FOUND`, `HOST_FEE_NOT_OWED` / `_NOT_FOUND`).
+    The two webhooks answer `WEBHOOK_SIGNATURE_MISSING` (no signature header, or no raw body
+    to check one against) and `WEBHOOK_EVENT_INVALID`; no browser reads them, the provider's
+    dashboard and the logs do. A payout's retry hands back exactly what its list shows —
     `stuckPayout` in `booking-where.ts` is the one condition both read, so a stay a
     lost dispute or a full refund left owing nothing is a `409` rather than a retry that
     would only find that out again, and so is one an open dispute holds until it is won,

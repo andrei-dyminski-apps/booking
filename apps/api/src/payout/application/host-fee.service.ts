@@ -55,8 +55,14 @@ export class HostFeeService {
         this.hostFeeRepository.waive(id, reason, adminId),
         () => this.hostFeeRepository.exists(id),
         {
-          conflict: `The fee ${id} is not owed any more: it was waived or withheld in full`,
-          notFound: `Fee ${id} not found`,
+          conflict: {
+            code: "HOST_FEE_NOT_OWED",
+            message: `The fee ${id} is not owed any more: it was waived or withheld in full`,
+          },
+          notFound: {
+            code: "HOST_FEE_NOT_FOUND",
+            message: `Fee ${id} not found`,
+          },
         },
       );
     } catch (error) {

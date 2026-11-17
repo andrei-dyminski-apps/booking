@@ -55,8 +55,14 @@ export class RefundFailureService {
       this.refundFailureRepository.resolve(refundId, input.resolution),
       () => this.refundFailureRepository.exists(refundId),
       {
-        conflict: `The failed refund ${refundId} is resolved already`,
-        notFound: `Failed refund ${refundId} not found`,
+        conflict: {
+          code: "REFUND_FAILURE_ALREADY_RESOLVED",
+          message: `The failed refund ${refundId} is resolved already`,
+        },
+        notFound: {
+          code: "REFUND_FAILURE_NOT_FOUND",
+          message: `Failed refund ${refundId} not found`,
+        },
       },
     );
   }

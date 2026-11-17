@@ -149,8 +149,14 @@ export class PaymentEventDispatcher {
       this.paymentEventRepository.handBack(eventId),
       () => this.paymentEventRepository.exists(eventId),
       {
-        conflict: `Payment event ${eventId} is not set aside`,
-        notFound: `Payment event ${eventId} not found`,
+        conflict: {
+          code: "PAYMENT_EVENT_NOT_SET_ASIDE",
+          message: `Payment event ${eventId} is not set aside`,
+        },
+        notFound: {
+          code: "PAYMENT_EVENT_NOT_FOUND",
+          message: `Payment event ${eventId} not found`,
+        },
       },
     );
 

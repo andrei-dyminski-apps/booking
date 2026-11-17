@@ -1,10 +1,7 @@
-import {
-  BadRequestException,
-  ConflictException,
-  NotFoundException,
-} from "@nestjs/common";
+import { BadRequestException } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { refundFailureQuerySchema } from "@repo/contracts";
+import { refusalOf } from "../../common/testing/refusal";
 import { CURRENCY, cents } from "../../payment/domain/money";
 import { RefundFailureRepository } from "../infrastructure/refund-failure.repository";
 import { RefundFailureService } from "./refund-failure.service";
@@ -84,11 +81,14 @@ describe("RefundFailureService", () => {
     await service.resolve("re_1", { resolution: "Sent by bank transfer" });
 
     await expect(
-      service.resolve("re_1", { resolution: "Paid in cash" }),
-    ).rejects.toThrow(ConflictException);
+      refusalOf(service.resolve("re_1", { resolution: "Paid in cash" })),
+    ).resolves.toEqual({
+      status: 409,
+      code: "REFUND_FAILURE_ALREADY_RESOLVED",
+    });
     await expect(
-      service.resolve("re_unknown", { resolution: "Paid in cash" }),
-    ).rejects.toThrow(NotFoundException);
+      refusalOf(service.resolve("re_unknown", { resolution: "Paid in cash" })),
+    ).resolves.toEqual({ status: 404, code: "REFUND_FAILURE_NOT_FOUND" });
     expect(refundFailureRepository.resolutions.get("re_1")).toBe(
       "Sent by bank transfer",
     );

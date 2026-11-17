@@ -3,6 +3,7 @@ import { isBefore, subHours } from "date-fns";
 import { z } from "zod";
 import { userSchema } from "./auth.js";
 import { BookingStatus, DisputeStatus, type Booking } from "./booking.js";
+import { rule } from "./error-code.js";
 import {
   centsSchema,
   currencySchema,
@@ -153,9 +154,15 @@ export const waiveHostFeeSchema = z.object({
   reason: z
     .string()
     .trim()
-    .min(1, { error: "Say why the fee is waived" })
+    .min(1, {
+      error: rule("WAIVE_REASON_REQUIRED", "Say why the fee is waived"),
+    })
     .max(MAX_WAIVE_REASON_LENGTH, {
-      error: `A reason can be at most ${String(MAX_WAIVE_REASON_LENGTH)} characters long`,
+      error: rule(
+        "WAIVE_REASON_TOO_LONG",
+        `A reason can be at most ${String(MAX_WAIVE_REASON_LENGTH)} characters long`,
+        { maximum: MAX_WAIVE_REASON_LENGTH },
+      ),
     }),
 });
 

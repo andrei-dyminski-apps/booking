@@ -1,6 +1,7 @@
 import { BadRequestException, type RawBodyRequest } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import type { Request } from "express";
+import { refusalOf } from "../../common/testing/refusal";
 import { PaymentEventDispatcher } from "../application/payment-event-dispatcher";
 import {
   InvalidPaymentEventError,
@@ -63,11 +64,11 @@ describe("PaymentWebhookController", () => {
 
   it("refuses a delivery with no signature or no raw body, as one never to repeat", async () => {
     await expect(
-      controller.receive(request(Buffer.from("{}")), undefined),
-    ).rejects.toBeInstanceOf(BadRequestException);
+      refusalOf(controller.receive(request(Buffer.from("{}")), undefined)),
+    ).resolves.toEqual({ status: 400, code: "WEBHOOK_SIGNATURE_MISSING" });
     await expect(
-      controller.receive(request(undefined), "t=1,v1=sig"),
-    ).rejects.toBeInstanceOf(BadRequestException);
+      refusalOf(controller.receive(request(undefined), "t=1,v1=sig")),
+    ).resolves.toEqual({ status: 400, code: "WEBHOOK_SIGNATURE_MISSING" });
     expect(dispatched).toEqual([]);
   });
 
@@ -77,8 +78,10 @@ describe("PaymentWebhookController", () => {
     };
 
     await expect(
-      controller.receive(request(Buffer.from("{}")), "t=1,v1=forged"),
-    ).rejects.toBeInstanceOf(BadRequestException);
+      refusalOf(
+        controller.receive(request(Buffer.from("{}")), "t=1,v1=forged"),
+      ),
+    ).resolves.toEqual({ status: 400, code: "WEBHOOK_EVENT_INVALID" });
     expect(dispatched).toEqual([]);
   });
 

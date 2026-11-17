@@ -1,6 +1,7 @@
-import { BadRequestException, type RawBodyRequest } from "@nestjs/common";
+import { type RawBodyRequest } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import type { Request } from "express";
+import { refusalOf } from "../../common/testing/refusal";
 import { PaymentEventDispatcher } from "../../payment/application/payment-event-dispatcher";
 import { InvalidPaymentEventError } from "../../payment/application/ports/payment-gateway";
 import {
@@ -61,16 +62,18 @@ describe("PayoutWebhookController", () => {
 
   it("refuses an unsigned or forged delivery with a 400", async () => {
     await expect(
-      controller.receive(request(Buffer.from("{}")), undefined),
-    ).rejects.toBeInstanceOf(BadRequestException);
+      refusalOf(controller.receive(request(Buffer.from("{}")), undefined)),
+    ).resolves.toEqual({ status: 400, code: "WEBHOOK_SIGNATURE_MISSING" });
 
     read = () => {
       throw new InvalidPaymentEventError("no match");
     };
 
     await expect(
-      controller.receive(request(Buffer.from("{}")), "t=1,v1=forged"),
-    ).rejects.toBeInstanceOf(BadRequestException);
+      refusalOf(
+        controller.receive(request(Buffer.from("{}")), "t=1,v1=forged"),
+      ),
+    ).resolves.toEqual({ status: 400, code: "WEBHOOK_EVENT_INVALID" });
     expect(handled).toEqual([]);
   });
 

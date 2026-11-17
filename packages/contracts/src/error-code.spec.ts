@@ -11,6 +11,7 @@ import {
 } from "./booking.js";
 import { endStayEarlySchema } from "./early-end.js";
 import { rule, toApiIssue, toErrorCode } from "./error-code.js";
+import { waiveHostFeeSchema } from "./host-fee.js";
 import {
   RATE_UNDER_NON_REFUNDABLE_POLICY,
   availabilityQuerySchema,
@@ -18,6 +19,11 @@ import {
   listingQuerySchema,
   updateListingSchema,
 } from "./listing.js";
+import {
+  failedPaymentEventQuerySchema,
+  refundFailureQuerySchema,
+  resolveRefundFailureSchema,
+} from "./set-aside.js";
 
 function issuesOf(schema: z.ZodType, input: unknown) {
   const result = schema.safeParse(input);
@@ -516,5 +522,85 @@ describe("the booking rules", () => {
     expect(
       codesOf(endStayEarlySchema, { checkOut: "tonight", refundCents: 0 }),
     ).toEqual([{ path: ["checkOut"], code: "DATE_INVALID" }]);
+  });
+});
+
+describe("the set-aside and host-fee rules", () => {
+  const codesOf = (schema: z.ZodType, input: unknown) =>
+    issuesOf(schema, input).map(({ path, code }) => ({ path, code }));
+
+  it("names the rule of a window over what was set aside", () => {
+    expect(
+      codesOf(failedPaymentEventQuerySchema, {
+        from: "2026-02-02",
+        to: "2026-02-01",
+      }),
+    ).toEqual([{ path: ["to"], code: "WINDOW_END_BEFORE_START" }]);
+    // Either end alone is a whole question, and a day is a day.
+    expect(
+      codesOf(refundFailureQuerySchema, {
+        from: "yesterday",
+        to: "2026-02-01",
+      }),
+    ).toEqual([{ path: ["from"], code: "DATE_INVALID" }]);
+  });
+
+  it("names a day nothing sent, and the ids and type of whitespace alone", () => {
+    // `blank` turns an empty string into an absence, so only whitespace reaches `min(1)`.
+    expect(
+      codesOf(failedPaymentEventQuerySchema, { eventId: " ", type: " " }),
+    ).toEqual([
+      { path: ["eventId"], code: "PROVIDER_ID_REQUIRED" },
+      { path: ["type"], code: "EVENT_TYPE_REQUIRED" },
+    ]);
+    expect(codesOf(refundFailureQuerySchema, { refundId: "\t" })).toEqual([
+      { path: ["refundId"], code: "PROVIDER_ID_REQUIRED" },
+    ]);
+    // A value that is no text at all (a repeated parameter) is a day nobody wrote.
+    expect(
+      codesOf(refundFailureQuerySchema, { from: ["2026-02-01", "2026-02-02"] }),
+    ).toEqual([{ path: ["from"], code: "DATE_REQUIRED" }]);
+    expect(
+      codesOf(failedPaymentEventQuerySchema, { to: ["2026-02-01"] }),
+    ).toEqual([{ path: ["to"], code: "DATE_REQUIRED" }]);
+  });
+
+  it("names the rule of a provider id and an event type", () => {
+    expect(
+      issuesOf(failedPaymentEventQuerySchema, { eventId: "e".repeat(256) }),
+    ).toMatchObject([
+      {
+        path: ["eventId"],
+        code: "PROVIDER_ID_TOO_LONG",
+        params: { maximum: 255 },
+      },
+    ]);
+    expect(
+      issuesOf(refundFailureQuerySchema, { paymentId: "p".repeat(256) }),
+    ).toMatchObject([{ path: ["paymentId"], code: "PROVIDER_ID_TOO_LONG" }]);
+    expect(
+      issuesOf(failedPaymentEventQuerySchema, { type: "t".repeat(101) }),
+    ).toMatchObject([
+      { path: ["type"], code: "EVENT_TYPE_TOO_LONG", params: { maximum: 100 } },
+    ]);
+  });
+
+  it("names the rule of a resolution and of a waiver's reason", () => {
+    expect(codesOf(resolveRefundFailureSchema, { resolution: " " })).toEqual([
+      { path: ["resolution"], code: "RESOLUTION_REQUIRED" },
+    ]);
+    expect(
+      issuesOf(resolveRefundFailureSchema, { resolution: "a".repeat(501) }),
+    ).toMatchObject([
+      { code: "RESOLUTION_TOO_LONG", params: { maximum: 500 } },
+    ]);
+    expect(codesOf(waiveHostFeeSchema, { reason: " " })).toEqual([
+      { path: ["reason"], code: "WAIVE_REASON_REQUIRED" },
+    ]);
+    expect(
+      issuesOf(waiveHostFeeSchema, { reason: "a".repeat(501) }),
+    ).toMatchObject([
+      { code: "WAIVE_REASON_TOO_LONG", params: { maximum: 500 } },
+    ]);
   });
 });

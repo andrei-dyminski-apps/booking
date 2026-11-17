@@ -214,6 +214,10 @@ const hasCode = (code: string) => (response: { body: unknown }) => {
   expect(apiErrorSchema.parse(response.body).code).toBe(code);
 };
 
+/** The rule behind each issue of a body the contract refused. */
+const issueCodesOf = (response: { body: unknown }): string[] =>
+  (apiErrorSchema.parse(response.body).errors ?? []).map(({ code }) => code);
+
 describe("Payments (e2e)", () => {
   let app: NestExpressApplication;
   let gateway: OfflineStripeGateway;
@@ -548,7 +552,11 @@ describe("Payments (e2e)", () => {
   it("refuses a delivery that is not signed by the provider, and changes nothing", async () => {
     const booking = await hold();
 
-    await settled(deliver(booking, { signature: "t=1,v1=forged" }).expect(400));
+    await settled(
+      deliver(booking, { signature: "t=1,v1=forged" })
+        .expect(400)
+        .expect(hasCode("WEBHOOK_EVENT_INVALID")),
+    );
 
     expect((await read(booking.id)).status).toBe("PENDING_PAYMENT");
   });
@@ -876,7 +884,8 @@ describe("Payments (e2e)", () => {
     await owner
       .post(`/host-fees/${feeId}/waive`)
       .send({ reason: "Mine" })
-      .expect(403);
+      .expect(403)
+      .expect(hasCode("ROLE_NOT_ALLOWED"));
     await admin
       .post(`/host-fees/${feeId}/waive`)
       .send({ reason: "A flood the policy could not foresee" })
@@ -884,7 +893,26 @@ describe("Payments (e2e)", () => {
     await admin
       .post(`/host-fees/${feeId}/waive`)
       .send({ reason: "Again" })
-      .expect(409);
+      .expect(409)
+      .expect(hasCode("HOST_FEE_NOT_OWED"));
+    await admin
+      .post(`/host-fees/${randomUUID()}/waive`)
+      .send({ reason: "Nobody's" })
+      .expect(404)
+      .expect(hasCode("HOST_FEE_NOT_FOUND"));
+    await admin
+      .post("/host-fees/not-a-uuid/waive")
+      .send({ reason: "Nobody's" })
+      .expect(400)
+      .expect(hasCode("INVALID_ID"));
+    await admin
+      .post(`/host-fees/${feeId}/waive`)
+      .send({ reason: " " })
+      .expect(400)
+      .expect(hasCode("VALIDATION_FAILED"))
+      .expect((response) => {
+        expect(issueCodesOf(response)).toEqual(["WAIVE_REASON_REQUIRED"]);
+      });
 
     const hostId = (await read(taken.id)).hostId;
     const seen = hostFeeOverviewSchema.parse(
@@ -917,7 +945,8 @@ describe("Payments (e2e)", () => {
     await admin
       .post(`/host-fees/${feeId}/waive`)
       .send({ reason: "After the demotion" })
-      .expect(403);
+      .expect(403)
+      .expect(hasCode("NOT_AN_ADMIN_ANYMORE"));
   });
 
   it("records the charge a payment produced, for the host's transfer", async () => {
@@ -1396,7 +1425,23 @@ describe("Payments (e2e)", () => {
       },
     };
 
-    await settled(post("/payouts/webhook", event, "t=1,v1=forged").expect(400));
+    await settled(
+      post("/payouts/webhook", event, "t=1,v1=forged")
+        .expect(400)
+        .expect(hasCode("WEBHOOK_EVENT_INVALID")),
+    );
+    await request(app.getHttpServer())
+      .post("/payouts/webhook")
+      .set("content-type", "application/json")
+      .send(JSON.stringify(event))
+      .expect(400)
+      .expect(hasCode("WEBHOOK_SIGNATURE_MISSING"));
+    await request(app.getHttpServer())
+      .post("/payments/webhook")
+      .set("content-type", "application/json")
+      .send(JSON.stringify(event))
+      .expect(400)
+      .expect(hasCode("WEBHOOK_SIGNATURE_MISSING"));
     await settled(post("/payouts/webhook", event).expect(200));
 
     expect(

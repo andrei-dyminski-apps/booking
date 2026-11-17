@@ -1,5 +1,5 @@
-import { ConflictException, NotFoundException } from "@nestjs/common";
 import { BookingStatus, hostShare, NotificationType } from "@repo/contracts";
+import { refusalOf } from "../../common/testing/refusal";
 import { PaymentNotConfirmedYetError } from "../../booking/domain/booking.errors";
 import type { FakeNotificationService } from "../../notification/testing/notification-service.fakes";
 import {
@@ -259,9 +259,9 @@ describe("PayoutService", () => {
 
       stay.disputeStatus = "LOST";
 
-      await expect(service.retryStuckPayout(BOOKING_ID)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        refusalOf(service.retryStuckPayout(BOOKING_ID)),
+      ).resolves.toEqual({ status: 409, code: "PAYOUT_NOT_STUCK" });
       expect(payoutRepository.payoutFailures.get(BOOKING_ID)?.setAside).toBe(
         true,
       );
@@ -283,9 +283,9 @@ describe("PayoutService", () => {
 
       stay.disputeStatus = "OPEN";
 
-      await expect(service.retryStuckPayout(BOOKING_ID)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        refusalOf(service.retryStuckPayout(BOOKING_ID)),
+      ).resolves.toEqual({ status: 409, code: "PAYOUT_NOT_STUCK" });
       expect(payoutJobs.scheduled).toEqual([]);
 
       // Won, the stay owes the host again and the retry goes through.
@@ -300,12 +300,12 @@ describe("PayoutService", () => {
       hostWith(ACCOUNT_ID, true);
       paidStay(PAST);
 
-      await expect(service.retryStuckPayout(BOOKING_ID)).rejects.toThrow(
-        ConflictException,
-      );
-      await expect(service.retryStuckPayout(LISTING_ID)).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        refusalOf(service.retryStuckPayout(BOOKING_ID)),
+      ).resolves.toEqual({ status: 409, code: "PAYOUT_NOT_STUCK" });
+      await expect(
+        refusalOf(service.retryStuckPayout(LISTING_ID)),
+      ).resolves.toEqual({ status: 404, code: "BOOKING_NOT_FOUND" });
       expect(payoutJobs.scheduled).toEqual([]);
     });
 
