@@ -21,6 +21,7 @@ import {
   signInAs,
   type Agent,
 } from "./session";
+import { hasCode, issueCodesOf } from "./api-error";
 
 describe("UserController (e2e)", () => {
   let app: INestApplication<App>;
@@ -123,8 +124,14 @@ describe("UserController (e2e)", () => {
   });
 
   it("answers 404 for an unknown account and 400 for an id that is not one", async () => {
-    await admin.get("/users/0b6f7f6e-2f4c-4a52-9a5e-8f1f6d2c3b4a").expect(404);
-    await admin.get("/users/not-an-id").expect(400);
+    await admin
+      .get("/users/0b6f7f6e-2f4c-4a52-9a5e-8f1f6d2c3b4a")
+      .expect(404)
+      .expect(hasCode("USER_NOT_FOUND"));
+    await admin
+      .get("/users/not-an-id")
+      .expect(400)
+      .expect(hasCode("INVALID_ID"));
   });
 
   it("pages every account, newest first, and back the other way", async () => {
@@ -181,9 +188,34 @@ describe("UserController (e2e)", () => {
 
   it("refuses a filter the contract refuses, and a cursor it did not issue", async () => {
     await admin.get("/users?role=SUPERUSER").expect(400);
-    await admin.get("/users?email=%20%20").expect(400);
-    await admin.get("/users?name=%20%20").expect(400);
-    await admin.get("/users?cursor=not-a-cursor").expect(400);
+    await admin
+      .get("/users?email=%20%20")
+      .expect(400)
+      .expect((response) => {
+        expect(issueCodesOf(response)).toEqual(["EMAIL_FILTER_REQUIRED"]);
+      });
+    await admin
+      .get("/users?name=%20%20")
+      .expect(400)
+      .expect((response) => {
+        expect(issueCodesOf(response)).toEqual(["NAME_FILTER_REQUIRED"]);
+      });
+    await admin
+      .get(`/users?name=${"n".repeat(101)}`)
+      .expect(400)
+      .expect((response) => {
+        expect(issueCodesOf(response)).toEqual(["NAME_FILTER_TOO_LONG"]);
+      });
+    await admin
+      .get(`/users?email=${"e".repeat(255)}`)
+      .expect(400)
+      .expect((response) => {
+        expect(issueCodesOf(response)).toEqual(["EMAIL_FILTER_TOO_LONG"]);
+      });
+    await admin
+      .get("/users?cursor=not-a-cursor")
+      .expect(400)
+      .expect(hasCode("CURSOR_MALFORMED"));
   });
 
   it("blocks an account: no refresh, no new sign-in, and `/auth/me` reads it as signed out", async () => {
@@ -284,9 +316,17 @@ describe("UserController (e2e)", () => {
     const adminId = await idOf(credentialsFor.ADMIN.email);
     const secondId = await idOf("e2e-admin-2@example.com");
 
-    await admin.patch(`/users/${adminId}`).send({ blocked: true }).expect(403);
-    await admin.patch(`/users/${secondId}`).send({ blocked: true }).expect(403);
-    await second.patch(`/users/${adminId}`).send({ blocked: true }).expect(403);
+    for (const [actor, target] of [
+      [admin, adminId],
+      [admin, secondId],
+      [second, adminId],
+    ] as const) {
+      await actor
+        .patch(`/users/${target}`)
+        .send({ blocked: true })
+        .expect(403)
+        .expect(hasCode("ADMIN_ACCOUNT_CANNOT_BE_BLOCKED"));
+    }
     expect(
       await app
         .get(PrismaService)
@@ -307,6 +347,12 @@ describe("UserController (e2e)", () => {
     await admin
       .patch("/users/0b6f7f6e-2f4c-4a52-9a5e-8f1f6d2c3b4a")
       .send({ blocked: true })
-      .expect(404);
+      .expect(404)
+      .expect(hasCode("USER_NOT_FOUND"));
+    await admin
+      .patch("/users/not-an-id")
+      .send({ blocked: true })
+      .expect(400)
+      .expect(hasCode("INVALID_ID"));
   });
 });

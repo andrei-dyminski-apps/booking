@@ -1,12 +1,4 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  ParseUUIDPipe,
-  Patch,
-  Query,
-} from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Query } from "@nestjs/common";
 import {
   ApiBadRequestResponse,
   ApiForbiddenResponse,
@@ -25,6 +17,7 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { Roles } from "../auth/decorators/roles.decorator";
 import { ApiErrorDto } from "../common/dto/api-error.dto";
+import { ParseIdPipe } from "../common/parse-id.pipe";
 import {
   ManagedUserDetailDto,
   ManagedUserDto,
@@ -72,7 +65,7 @@ export class UserController {
     description: "The user does not exist",
     type: ApiErrorDto,
   })
-  findOne(@Param("id", ParseUUIDPipe) id: string): Promise<ManagedUserDetail> {
+  findOne(@Param("id", ParseIdPipe) id: string): Promise<ManagedUserDetail> {
     return this.userService.findOne(id);
   }
 
@@ -96,7 +89,7 @@ export class UserController {
     type: ApiErrorDto,
   })
   update(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
     @Body() dto: UpdateUserDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<ManagedUser> {

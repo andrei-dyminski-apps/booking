@@ -901,7 +901,7 @@ message, params?)` in `apps/api/src/common`; a global filter guarantees the fiel
       body the parser refused gets its status's, an unexpected error is a bare
       `INTERNAL_ERROR` (logged with its stack, as Nest's own filter did), and a status with
       no code of its own is `UNKNOWN_ERROR` rather than a guess.
-- [ ] **Migrated slice by slice**, each one a change that lands whole: auth ✅ (its schema
+- [x] **Migrated slice by slice**, each one a change that lands whole: auth ✅ (its schema
       rules, `AuthService`, `RolesGuard`, and the session and admin-standing refusals every
       service shares, `common/session-errors.ts`), listings ✅ (the contract's listing,
       check-in, date and window rules, `ListingService`, the `:id` of its paths through
@@ -924,9 +924,22 @@ message, params?)` in `apps/api/src/common`; a global filter guarantees the fiel
       logs show; the contract's window over what was set aside, its provider-id and
       event-type filters, a resolution and a waiver's reason carry their codes, and the
       window's order waits for two readable days like a stay's check-out rule does; the `:id` of a host
-      fee and of a stuck payout's retry goes through `ParseIdPipe`), then the rest (reviews,
-      conversations, waitlist, notifications, lookup, users). Three things of that slice reach the others before they are
-      migrated, because they are shared code: `readCursor` answers the two cursor codes for
+      fee and of a stuck payout's retry goes through `ParseIdPipe`), and the rest ✅: reviews
+      (the rating's and the comment's rules, `GUEST_NOT_FOUND`, `REVIEW_NOT_FOUND`,
+      `STAY_NOT_REVIEWABLE`, `REVIEW_ALREADY_WRITTEN`), conversations (the message's and
+      the listing's rules, `CONVERSATION_NOT_FOUND`, `CANNOT_WRITE_TO_YOURSELF`), the
+      waitlist (`WAITLIST_OWN_LISTING`, `WAITLIST_FULL`, `WAITLIST_NIGHTS_HELD_BY_YOU`,
+      `NIGHTS_AVAILABLE`, `WAITLIST_ENTRY_NOT_FOUND`, the booking's `CHECK_IN_DAY_PAST`),
+      notifications (`NOTIFICATION_NOT_FOUND`), lookups (`LOOKUP_TOO_SHORT` / `_TOO_LONG`)
+      and users (`USER_NOT_FOUND`, `ADMIN_ACCOUNT_CANNOT_BE_BLOCKED`, the name and address
+      filters' rules), every `:id` of those routes through `ParseIdPipe`, and the
+      `LISTING_NOT_FOUND` of bookings, reviews, waitlist and conversations from the one
+      `listingNotFound` in `listing/listing-not-found.ts`. Nothing is thrown bare any more:
+      the `never` branch of an exhaustive role switch answers `ROLE_NOT_ALLOWED` in every
+      service that has one. A malformed listing id in a new thread's body is
+      `LISTING_ID_INVALID` apart from a missing one (`LISTING_REQUIRED`), and a rating that
+      is no number `RATING_NOT_A_NUMBER` apart from one that is no whole star. Three things of
+      that slice reached the others before they were migrated, because they are shared code: `readCursor` answers the two cursor codes for
       every paged read (stays, reviews, waitlist, conversations, notifications, lookup,
       users, refund failures, payment events), `dayMessage` stamps `DATE_REQUIRED` and
       `DATE_INVALID` onto the stay's `from` and `to` as well, and `ParseIdPipe` is what a
@@ -934,7 +947,7 @@ message, params?)` in `apps/api/src/common`; a global filter guarantees the fiel
       own e2e spec when it lands. A `Listing … not found` raised outside this slice —
       bookings, reviews, waitlist, conversations — takes `LISTING_NOT_FOUND` in the slice
       that raises it. The e2e spec of a slice asserts the code next to the status.
-- [ ] **The web branches on a code where a status is ambiguous.** The interface decides by
+- [x] **The web branches on a code where a status is ambiguous.** The interface decides by
       HTTP status today, which is right wherever a status has one reason (`404` is a missing
       row, `401` a dead session, `400` on a read a stale cursor) and wrong where it has
       several. Those are the places to move onto a code, each in the change that migrates the
@@ -949,11 +962,12 @@ message, params?)` in `apps/api/src/common`; a global filter guarantees the fiel
     list only after the codes that may have let a claim go (`mayHaveReleasedClaim` in `model/refund-claim.ts`). The
     dialog still shows the API's `message`; wording it from the code is the interface's
     own change, and out of this phase.
-  - `create-booking-action.ts` ✅ and `join-waitlist-action.ts` — a `409` was read as "the
+  - `create-booking-action.ts` ✅ and `join-waitlist-action.ts` ✅ — a `409` was read as "the
     calendar is stale", true only because nothing else in those routes answered one; the
     booking action now checks `DATES_UNAVAILABLE`, so a second `409` added later cannot
     flip the form into the waitlist offer, and the `412` is `LISTING_CHANGED_SINCE_SHOWN`.
-    The waitlist action moves with the waitlist slice, which raises its `409`.
+    The waitlist action moved with the waitlist slice and checks `NIGHTS_AVAILABLE`, so its
+    full list (`WAITLIST_FULL`, a `403`) and any later `409` leave the calendar alone.
   - `keyset-page.ts` stays on `400`: a stale cursor is the only `400` a read answers, and
     the filter's `VALIDATION_FAILED` already tells a refused search apart from it.
 

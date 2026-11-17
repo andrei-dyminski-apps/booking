@@ -3,9 +3,10 @@
 import { refresh, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { joinWaitlistSchema, type JoinWaitlistInput } from "@repo/contracts";
-import { ApiResponseError, waitlistApi } from "#shared/api";
-import { availabilityTag, HTTP_STATUS, ROUTES } from "#shared/config";
+import { waitlistApi } from "#shared/api";
+import { availabilityTag, ROUTES } from "#shared/config";
 import { toFieldErrors, toFormErrors, type FormErrors } from "#shared/lib";
+import { isNightsAvailable } from "../model/booking-refusal";
 import type { ReservationErrors } from "../model/reservation-errors";
 
 /**
@@ -34,13 +35,11 @@ export async function joinWaitlistAction(
   try {
     await waitlistApi.join(parsed.data);
   } catch (error) {
-    // A `409` is only ever nights that came free since the calendar was read — a full list
-    // is a `403`, which says nothing about the nights and leaves the cache alone. The
+    // `NIGHTS_AVAILABLE` is nights that came free since the calendar was read — a full
+    // list is a `403`, which says nothing about the nights and leaves the cache alone. The
     // calendar is read again, and the form offers to hold the nights instead, beside the
     // message saying so.
-    const stale =
-      error instanceof ApiResponseError &&
-      error.status === HTTP_STATUS.CONFLICT;
+    const stale = isNightsAvailable(error);
 
     if (stale) {
       updateTag(availabilityTag(listingId));

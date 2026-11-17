@@ -8,7 +8,6 @@ import { App } from "supertest/types";
 import {
   DisputeStatus,
   Role,
-  apiErrorSchema,
   failedPaymentEventPageSchema,
   refundFailurePageSchema,
   stuckStayPageSchema,
@@ -19,15 +18,7 @@ import { resetDatabase } from "./database";
 import { inDays } from "./dates";
 import { resetQueue } from "./queue";
 import { signInAs, type Agent } from "./session";
-
-/** An `.expect(...)` that the refusal answered with this code. */
-const hasCode = (code: string) => (response: { body: unknown }) => {
-  expect(apiErrorSchema.parse(response.body).code).toBe(code);
-};
-
-/** The rule behind each issue of a body the contract refused. */
-const issueCodesOf = (response: { body: unknown }): string[] =>
-  (apiErrorSchema.parse(response.body).errors ?? []).map(({ code }) => code);
+import { hasCode, issueCodesOf } from "./api-error";
 
 /**
  * What the money paths set aside, as an admin reads and acts on it — the SQL the unit specs

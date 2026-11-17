@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BookingStatus, type Booking } from "./booking.js";
+import { rule } from "./error-code.js";
 import { blank, PAGING } from "./query.js";
 
 /**
@@ -24,21 +25,41 @@ export const ReviewKind = reviewKindSchema.enum;
 export const MIN_RATING = 1;
 export const MAX_RATING = 5;
 
+const ratingMissing = rule("RATING_REQUIRED", "A rating is required");
+const ratingNotANumber = rule(
+  "RATING_NOT_A_NUMBER",
+  "A rating must be a number of stars",
+);
+const ratingNotWhole = rule(
+  "RATING_NOT_WHOLE",
+  "A rating must be a whole number of stars",
+);
+
 const ratingSchema = z
   .int({
     error: (issue) => {
       if (issue.code !== "invalid_type") return undefined;
 
-      return issue.input === undefined
-        ? "A rating is required"
-        : "A rating must be a whole number of stars";
+      if (issue.input === undefined) return ratingMissing(issue);
+
+      return typeof issue.input === "number"
+        ? ratingNotWhole(issue)
+        : ratingNotANumber(issue);
     },
   })
   .min(MIN_RATING, {
-    error: `A rating is at least ${String(MIN_RATING)} star`,
+    error: rule(
+      "RATING_TOO_LOW",
+      `A rating is at least ${String(MIN_RATING)} star`,
+      { minimum: MIN_RATING },
+    ),
   })
   .max(MAX_RATING, {
-    error: `A rating is at most ${String(MAX_RATING)} stars`,
+    error: rule(
+      "RATING_TOO_HIGH",
+      `A rating is at most ${String(MAX_RATING)} stars`,
+      { maximum: MAX_RATING },
+    ),
   });
 
 /**
@@ -56,6 +77,9 @@ export const reviewSchema = z.object({
   createdAt: z.iso.datetime(),
 });
 
+const MIN_COMMENT_LENGTH = 10;
+const MAX_COMMENT_LENGTH = 1000;
+
 /**
  * What a request may say. The kind is not on it: it follows from who is writing — the
  * guest of the stay reviews the listing, its host reviews the guest — and a field the
@@ -66,8 +90,20 @@ export const createReviewSchema = z.object({
   comment: z
     .string()
     .trim()
-    .min(10, { error: "A review needs at least 10 characters" })
-    .max(1000, { error: "A review may not be longer than 1000 characters" }),
+    .min(MIN_COMMENT_LENGTH, {
+      error: rule(
+        "REVIEW_COMMENT_TOO_SHORT",
+        `A review needs at least ${String(MIN_COMMENT_LENGTH)} characters`,
+        { minimum: MIN_COMMENT_LENGTH },
+      ),
+    })
+    .max(MAX_COMMENT_LENGTH, {
+      error: rule(
+        "REVIEW_COMMENT_TOO_LONG",
+        `A review may not be longer than ${String(MAX_COMMENT_LENGTH)} characters`,
+        { maximum: MAX_COMMENT_LENGTH },
+      ),
+    }),
 });
 
 /**

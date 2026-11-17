@@ -10,6 +10,7 @@ import {
   CHECK_IN_DAY_PAST,
   NotificationType,
   Role,
+  MAX_WAITLIST_ENTRIES,
   type JoinWaitlistInput,
   type WaitlistDemandEntry,
   type WaitlistDemandPage,
@@ -17,7 +18,9 @@ import {
   type WaitlistEntry,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
+import { apiException } from "../common/api-exception";
 import { readCursor, type Page } from "../common/paging";
+import { listingNotFound } from "../listing/listing-not-found";
 import { NotificationService } from "../notification/notification.service";
 import {
   decodeCursor,
@@ -100,7 +103,9 @@ export class WaitlistService {
       default: {
         const unknownRole: never = user.role;
 
-        throw new ForbiddenException(
+        throw apiException(
+          ForbiddenException,
+          "ROLE_NOT_ALLOWED",
           `Unknown role ${JSON.stringify(unknownRole)}`,
         );
       }
@@ -110,7 +115,7 @@ export class WaitlistService {
   /**
    * The refusals of `WaitlistRepository.join`, answered the way a booking's are — and only
    * free nights are a `409`, because that one is the calendar having moved: the client
-   * reads it again on that status alone. A full list and one's own stay are a `403`, the
+   * reads it again on that code alone, `NIGHTS_AVAILABLE`. A full list and one's own stay are a `403`, the
    * caller's own limit rather than news about the nights.
    *
    * Once the entry is in, the nights are announced as if just freed. `join` locks the
@@ -126,11 +131,13 @@ export class WaitlistService {
       entry = await this.waitlistRepository.join(userId, input);
     } catch (error) {
       if (error instanceof WaitlistListingNotFoundError) {
-        throw new NotFoundException(error.message);
+        throw listingNotFound(input.listingId);
       }
 
       if (error instanceof WaitlistOwnListingError) {
-        throw new ForbiddenException(
+        throw apiException(
+          ForbiddenException,
+          "WAITLIST_OWN_LISTING",
           "You cannot join the waitlist of your own listing",
         );
       }
@@ -140,18 +147,33 @@ export class WaitlistService {
       }
 
       if (error instanceof WaitlistCheckInPastError) {
-        throw new BadRequestException(CHECK_IN_DAY_PAST);
+        throw apiException(
+          BadRequestException,
+          "CHECK_IN_DAY_PAST",
+          CHECK_IN_DAY_PAST,
+        );
       }
 
-      if (
-        error instanceof WaitlistFullError ||
-        error instanceof WaiterHoldsNightsError
-      ) {
-        throw new ForbiddenException(error.message);
+      if (error instanceof WaitlistFullError) {
+        throw apiException(ForbiddenException, "WAITLIST_FULL", error.message, {
+          maximum: MAX_WAITLIST_ENTRIES,
+        });
+      }
+
+      if (error instanceof WaiterHoldsNightsError) {
+        throw apiException(
+          ForbiddenException,
+          "WAITLIST_NIGHTS_HELD_BY_YOU",
+          error.message,
+        );
       }
 
       if (error instanceof NightsAvailableError) {
-        throw new ConflictException(error.message);
+        throw apiException(
+          ConflictException,
+          "NIGHTS_AVAILABLE",
+          error.message,
+        );
       }
 
       throw error;
@@ -164,7 +186,11 @@ export class WaitlistService {
 
   async leave(userId: string, id: string): Promise<void> {
     if (!(await this.waitlistRepository.leave(userId, id))) {
-      throw new NotFoundException(`Waitlist entry ${id} not found`);
+      throw apiException(
+        NotFoundException,
+        "WAITLIST_ENTRY_NOT_FOUND",
+        `Waitlist entry ${id} not found`,
+      );
     }
   }
 

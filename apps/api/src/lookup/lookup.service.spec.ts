@@ -1,4 +1,3 @@
-import { BadRequestException } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import {
   LookupKind,
@@ -10,6 +9,7 @@ import {
 import type { AuthenticatedUser } from "../auth/auth.types";
 import type { Page } from "../common/paging";
 import type { PublicOf } from "../common/testing/public-of.fakes";
+import { refusalOf } from "../common/testing/refusal";
 import { encodeCursor, type LookupCursor } from "./lookup-cursor";
 import { LookupRepository } from "./lookup.repository";
 import { LookupService } from "./lookup.service";
@@ -273,24 +273,24 @@ describe("LookupService", () => {
 
     it("refuses a cursor it cannot read", async () => {
       await expect(
-        service.owners(query({ cursor: "not-a-cursor" })),
-      ).rejects.toBeInstanceOf(BadRequestException);
+        refusalOf(service.owners(query({ cursor: "not-a-cursor" }))),
+      ).resolves.toEqual({ status: 400, code: "CURSOR_MALFORMED" });
     });
 
     it("refuses a cursor another lookup issued", async () => {
       const cursor = encodeCursor(LookupKind.guests, option("a@example.com"));
 
-      await expect(service.owners(query({ cursor }))).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
+      await expect(
+        refusalOf(service.owners(query({ cursor }))),
+      ).resolves.toEqual({ status: 400, code: "CURSOR_MALFORMED" });
     });
 
     it("tells the owners' cursor from the hosts', both of them accounts by name", async () => {
       const cursor = encodeCursor(LookupKind.owners, option("a@example.com"));
 
-      await expect(service.hosts(query({ cursor }))).rejects.toBeInstanceOf(
-        BadRequestException,
-      );
+      await expect(
+        refusalOf(service.hosts(query({ cursor }))),
+      ).resolves.toEqual({ status: 400, code: "CURSOR_MALFORMED" });
     });
   });
 });

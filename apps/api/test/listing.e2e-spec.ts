@@ -23,6 +23,7 @@ import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";
 import { hostCredentials, signIn, signInAs, type Agent } from "./session";
+import { issueCodesOf } from "./api-error";
 
 const input: CreateListingInput = {
   title: "Loft above the harbour",
@@ -34,10 +35,6 @@ const input: CreateListingInput = {
 /** The code a refused call answered with. The status is asserted by the `.expect(...)` before it. */
 const codeOf = (response: { body: unknown }): string =>
   apiErrorSchema.parse(response.body).code;
-
-/** The rule behind each issue of a body the contract refused, in the order they were found. */
-const issueCodesOf = (response: { body: unknown }): string[] =>
-  (apiErrorSchema.parse(response.body).errors ?? []).map(({ code }) => code);
 
 describe("ListingController (e2e)", () => {
   let app: INestApplication<App>;

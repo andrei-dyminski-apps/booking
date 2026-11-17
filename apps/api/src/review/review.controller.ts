@@ -6,7 +6,6 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  ParseUUIDPipe,
   Post,
   Query,
 } from "@nestjs/common";
@@ -27,6 +26,7 @@ import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { Public } from "../auth/decorators/public.decorator";
 import { Roles } from "../auth/decorators/roles.decorator";
 import { ApiErrorDto } from "../common/dto/api-error.dto";
+import { ParseIdPipe } from "../common/parse-id.pipe";
 import { CATALOGUE_READS } from "../common/throttle";
 import {
   CreateReviewDto,
@@ -65,7 +65,7 @@ export class ReviewController {
     type: ApiErrorDto,
   })
   findForListing(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
     @Query() query: ReviewQueryDto,
   ): Promise<ReviewPage> {
     return this.reviewService.findListingPage(id, query);
@@ -81,7 +81,7 @@ export class ReviewController {
     type: ApiErrorDto,
   })
   findForGuest(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: ReviewQueryDto,
   ): Promise<ReviewPage> {
@@ -104,7 +104,7 @@ export class ReviewController {
     type: ApiErrorDto,
   })
   create(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateReviewDto,
   ): Promise<Review> {
@@ -120,7 +120,7 @@ export class ReviewController {
     description: "The review does not exist, or was already removed",
     type: ApiErrorDto,
   })
-  remove(@Param("id", ParseUUIDPipe) id: string): Promise<void> {
+  remove(@Param("id", ParseIdPipe) id: string): Promise<void> {
     return this.reviewService.remove(id);
   }
 }

@@ -17,7 +17,10 @@ import {
 import type { AuthenticatedUser } from "../auth/auth.types";
 import type { BookingWithListingOwner } from "../booking/domain/booking.types";
 import { BookingRepository } from "../booking/infrastructure/booking.repository";
+import { bookingNotFound } from "../booking/application/stay-reader";
+import { apiException } from "../common/api-exception";
 import { readCursor, type Page } from "../common/paging";
+import { listingNotFound } from "../listing/listing-not-found";
 import { ListingRepository } from "../listing/listing.repository";
 import { NotificationService } from "../notification/notification.service";
 import { toIsoDate } from "../common/iso-date";
@@ -53,7 +56,7 @@ export class ReviewService {
     query: ReviewQuery,
   ): Promise<ReviewPage> {
     if ((await this.listingRepository.findById(listingId)) === null) {
-      throw new NotFoundException(`Listing ${listingId} not found`);
+      throw listingNotFound(listingId);
     }
 
     const cursor = this.cursorOf(ReviewKind.LISTING, query);
@@ -81,7 +84,11 @@ export class ReviewService {
     query: ReviewQuery,
   ): Promise<ReviewPage> {
     if (!(await this.mayReadGuest(guestId, user))) {
-      throw new NotFoundException(`Guest ${guestId} not found`);
+      throw apiException(
+        NotFoundException,
+        "GUEST_NOT_FOUND",
+        `Guest ${guestId} not found`,
+      );
     }
 
     const cursor = this.cursorOf(ReviewKind.GUEST, query);
@@ -121,11 +128,13 @@ export class ReviewService {
     const kind = found === null ? null : kindWrittenBy(user, found);
 
     if (found === null || kind === null) {
-      throw new NotFoundException(`Booking ${bookingId} not found`);
+      throw bookingNotFound(bookingId);
     }
 
     if (!isReviewable(found.booking, today())) {
-      throw new ConflictException(
+      throw apiException(
+        ConflictException,
+        "STAY_NOT_REVIEWABLE",
         "A stay can be reviewed once it has been confirmed and is over",
       );
     }
@@ -136,7 +145,11 @@ export class ReviewService {
       review = await this.reviewRepository.create(bookingId, kind, input);
     } catch (error) {
       if (error instanceof ReviewAlreadyWrittenError) {
-        throw new ConflictException("You have already reviewed this stay");
+        throw apiException(
+          ConflictException,
+          "REVIEW_ALREADY_WRITTEN",
+          "You have already reviewed this stay",
+        );
       }
 
       throw error;
@@ -179,7 +192,11 @@ export class ReviewService {
   /** Moderation, the admin's alone — `@Roles` on the route says so, and nothing here re-checks it. */
   async remove(id: string): Promise<void> {
     if (!(await this.reviewRepository.delete(id))) {
-      throw new NotFoundException(`Review ${id} not found`);
+      throw apiException(
+        NotFoundException,
+        "REVIEW_NOT_FOUND",
+        `Review ${id} not found`,
+      );
     }
   }
 
@@ -207,7 +224,9 @@ export class ReviewService {
       default: {
         const unknownRole: never = user.role;
 
-        throw new ForbiddenException(
+        throw apiException(
+          ForbiddenException,
+          "ROLE_NOT_ALLOWED",
           `Unknown role ${JSON.stringify(unknownRole)}`,
         );
       }

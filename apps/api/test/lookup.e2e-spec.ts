@@ -13,6 +13,7 @@ import {
   signInAs,
   type Agent,
 } from "./session";
+import { hasCode, issueCodesOf } from "./api-error";
 
 const LISTING = {
   description: "Two rooms under the roof and a wall of glass.",
@@ -103,16 +104,34 @@ describe("LookupController (e2e)", () => {
 
   it("opens each lookup to the roles whose filter it fills in", async () => {
     await request(app.getHttpServer()).get("/lookups/owners?q=e2e").expect(401);
-    await owner.get("/lookups/owners?q=e2e").expect(403);
-    await owner.get("/lookups/hosts?q=e2e").expect(403);
+    await owner
+      .get("/lookups/owners?q=e2e")
+      .expect(403)
+      .expect(hasCode("ROLE_NOT_ALLOWED"));
+    await owner
+      .get("/lookups/hosts?q=e2e")
+      .expect(403)
+      .expect(hasCode("ROLE_NOT_ALLOWED"));
     // Any account may host, so the guests of its listings are its to ask for — an account
     // with no stays against them is answered an empty page, not a refusal.
     expect((await lookup(guest, "guests", "e2e")).items).toEqual([]);
   });
 
   it("refuses a search shorter than three characters", async () => {
-    await admin.get("/lookups/owners?q=e2").expect(400);
-    await admin.get("/lookups/owners?q=%20%20e2%20").expect(400);
+    for (const q of ["e2", "%20%20e2%20"]) {
+      await admin
+        .get(`/lookups/owners?q=${q}`)
+        .expect(400)
+        .expect((response) => {
+          expect(issueCodesOf(response)).toEqual(["LOOKUP_TOO_SHORT"]);
+        });
+    }
+    await admin
+      .get(`/lookups/owners?q=${"e".repeat(255)}`)
+      .expect(400)
+      .expect((response) => {
+        expect(issueCodesOf(response)).toEqual(["LOOKUP_TOO_LONG"]);
+      });
   });
 
   it("offers the owners of what is on offer by name, with the address beside it", async () => {
@@ -227,7 +246,8 @@ describe("LookupController (e2e)", () => {
     // A cursor of the listings is not a place among the guests.
     await owner
       .get(`/lookups/guests?q=e2e&cursor=${first.nextCursor ?? ""}`)
-      .expect(400);
+      .expect(400)
+      .expect(hasCode("CURSOR_MALFORMED"));
   });
 
   it("pages past two guests of one name by their ids", async () => {

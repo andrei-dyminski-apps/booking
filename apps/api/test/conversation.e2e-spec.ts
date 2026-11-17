@@ -3,6 +3,7 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { App } from "supertest/types";
 import {
   ConversationSide,
+  MAX_MESSAGE_LENGTH,
   Role,
   apiErrorSchema,
   conversationPageSchema,
@@ -24,6 +25,7 @@ import {
   signInAs,
   type Agent,
 } from "./session";
+import { hasCode, issueCodesOf } from "./api-error";
 
 const listingInput: CreateListingInput = {
   title: "Loft above the harbour",
@@ -414,34 +416,54 @@ describe("ConversationController (e2e)", () => {
     const { id } = await start(guest);
 
     for (const outsider of [otherGuest, otherOwner]) {
-      await outsider.get(`/conversations/${id}`).expect(404);
-      await outsider.get(`/conversations/${id}/messages`).expect(404);
+      await outsider
+        .get(`/conversations/${id}`)
+        .expect(404)
+        .expect(hasCode("CONVERSATION_NOT_FOUND"));
+      await outsider
+        .get(`/conversations/${id}/messages`)
+        .expect(404)
+        .expect(hasCode("CONVERSATION_NOT_FOUND"));
       await outsider
         .post(`/conversations/${id}/messages`)
         .send({ body: "Hi" })
-        .expect(404);
+        .expect(404)
+        .expect(hasCode("CONVERSATION_NOT_FOUND"));
       await outsider
         .post(`/conversations/${id}/read`)
         .send({ upTo: new Date().toISOString() })
-        .expect(404);
+        .expect(404)
+        .expect(hasCode("CONVERSATION_NOT_FOUND"));
     }
 
-    await admin.get(`/conversations/${id}`).expect(403);
-    await admin.get("/conversations").expect(403);
+    await admin
+      .get(`/conversations/${id}`)
+      .expect(403)
+      .expect(hasCode("ROLE_NOT_ALLOWED"));
+    await admin
+      .get("/conversations")
+      .expect(403)
+      .expect(hasCode("ROLE_NOT_ALLOWED"));
+    await guest
+      .get("/conversations/not-a-uuid")
+      .expect(400)
+      .expect(hasCode("INVALID_ID"));
   });
 
   it("lets only a guest start a thread, about a listing on offer", async () => {
     await owner
       .post("/conversations")
       .send({ listingId, body: "Hello" })
-      .expect(403);
+      .expect(403)
+      .expect(hasCode("CANNOT_WRITE_TO_YOURSELF"));
 
     await owner.delete(`/listings/${listingId}`).expect(204);
 
     const refused = await guest
       .post("/conversations")
       .send({ listingId, body: "Hello" })
-      .expect(404);
+      .expect(404)
+      .expect(hasCode("LISTING_NOT_FOUND"));
 
     expect(apiErrorSchema.parse(refused.body).statusCode).toBe(404);
   });
@@ -458,7 +480,7 @@ describe("ConversationController (e2e)", () => {
     expect((await threads(guest))[0]?.listing.title).toBe(listingInput.title);
   });
 
-  it("refuses an empty message under its field", async () => {
+  it("refuses an empty message and one past the limit under its field", async () => {
     const refused = await guest
       .post("/conversations")
       .send({ listingId, body: "   " })
@@ -467,5 +489,26 @@ describe("ConversationController (e2e)", () => {
     expect(
       apiErrorSchema.parse(refused.body).errors?.map((issue) => issue.path),
     ).toContainEqual(["body"]);
+    expect(issueCodesOf(refused)).toEqual(["MESSAGE_REQUIRED"]);
+
+    const tooLong = await guest
+      .post("/conversations")
+      .send({ listingId, body: "a".repeat(MAX_MESSAGE_LENGTH + 1) })
+      .expect(400);
+
+    expect(apiErrorSchema.parse(tooLong.body).errors).toMatchObject([
+      {
+        path: ["body"],
+        code: "MESSAGE_TOO_LONG",
+        params: { maximum: MAX_MESSAGE_LENGTH },
+      },
+    ]);
+    await guest
+      .post("/conversations")
+      .send({ listingId: "nothing", body: "Hello" })
+      .expect(400)
+      .expect((response) => {
+        expect(issueCodesOf(response)).toEqual(["LISTING_ID_INVALID"]);
+      });
   });
 });

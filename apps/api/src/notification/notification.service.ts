@@ -5,6 +5,7 @@ import type {
   NotificationQuery,
   UnreadCount,
 } from "@repo/contracts";
+import { apiException } from "../common/api-exception";
 import { readCursor } from "../common/paging";
 import { RealtimeService } from "../realtime/realtime.service";
 import { unreadFieldsOf, type UnreadCounts } from "../unread/unread.types";
@@ -122,7 +123,11 @@ export class NotificationService {
     const marked = await this.notificationRepository.markRead(userId, id);
 
     if (marked === null) {
-      throw new NotFoundException(`Notification ${id} not found`);
+      throw apiException(
+        NotFoundException,
+        "NOTIFICATION_NOT_FOUND",
+        `Notification ${id} not found`,
+      );
     }
 
     return this.announceRead(userId, marked.changed, marked.count);

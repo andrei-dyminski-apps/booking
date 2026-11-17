@@ -19,6 +19,7 @@ import { EventStream } from "./event-stream";
 import { resetQueue } from "./queue";
 import { hostCredentials, signIn, signInAs, type Agent } from "./session";
 import { waitUntil } from "./wait-until";
+import { hasCode } from "./api-error";
 
 const listingInput: CreateListingInput = {
   title: "Loft above the harbour",
@@ -205,7 +206,14 @@ describe("Notifications (e2e)", () => {
     const [newest] = (await feedOf(owner)).items;
     const id = String(newest?.id);
 
-    await guest.post(`/notifications/${id}/read`).expect(404);
+    await guest
+      .post(`/notifications/${id}/read`)
+      .expect(404)
+      .expect(hasCode("NOTIFICATION_NOT_FOUND"));
+    await guest
+      .post("/notifications/not-a-uuid/read")
+      .expect(400)
+      .expect(hasCode("INVALID_ID"));
 
     const afterOne = await owner.post(`/notifications/${id}/read`).expect(200);
 

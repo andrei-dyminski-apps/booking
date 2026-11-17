@@ -32,6 +32,7 @@ import {
   signInAs,
   type Agent,
 } from "./session";
+import { issueCodesOf } from "./api-error";
 
 const IN_UTC = { in: tz("UTC") };
 
@@ -45,10 +46,6 @@ const listingInput: CreateListingInput = {
 /** The code a refused call answered with. The status is asserted by the `.expect(...)` before it. */
 const codeOf = (response: { body: unknown }): string =>
   apiErrorSchema.parse(response.body).code;
-
-/** The rule behind each issue of a body the contract refused, in the order they were found. */
-const issueCodesOf = (response: { body: unknown }): string[] =>
-  (apiErrorSchema.parse(response.body).errors ?? []).map(({ code }) => code);
 
 describe("BookingController (e2e)", () => {
   let app: INestApplication<App>;

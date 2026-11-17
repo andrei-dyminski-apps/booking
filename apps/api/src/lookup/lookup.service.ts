@@ -8,6 +8,7 @@ import {
   type LookupQuery,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
+import { apiException } from "../common/api-exception";
 import { readCursor, type Page } from "../common/paging";
 import {
   decodeCursor,
@@ -61,7 +62,9 @@ export class LookupService {
         default: {
           const unknownRole: never = user.role;
 
-          throw new ForbiddenException(
+          throw apiException(
+            ForbiddenException,
+            "ROLE_NOT_ALLOWED",
             `Unknown role ${JSON.stringify(unknownRole)}`,
           );
         }
@@ -91,7 +94,9 @@ export class LookupService {
         default: {
           const unknownRole: never = user.role;
 
-          throw new ForbiddenException(
+          throw apiException(
+            ForbiddenException,
+            "ROLE_NOT_ALLOWED",
             `Unknown role ${JSON.stringify(unknownRole)}`,
           );
         }

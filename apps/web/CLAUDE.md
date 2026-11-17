@@ -591,12 +591,14 @@ this side decided.
   `/waitlist` shares no route segment with anything. Joining starts on the listing: the
   booking form compares its dates with the calendar's taken ranges (`callsForWaitlist`) and
   submits to `joinWaitlistAction` instead of a hold when they overlap. Both actions read the
-  calendar again on a `409` and answer `stale` — the hold's by its code, `DATES_UNAVAILABLE`,
-  the waitlist's by its status until that slice carries codes — so a stale one flips the
-  form the right way rather than repeating the refusal. The calendar is a window, so
+  calendar again and answer `stale` — the hold's on `DATES_UNAVAILABLE`, the waitlist's on
+  `NIGHTS_AVAILABLE` (`model/booking-refusal.ts`), each by its code rather than the `409`
+  they share — so a stale one flips the form the right way rather than repeating the
+  refusal. The calendar is a window, so
   the form also remembers the range a hold was last refused for — nights past the
   window could otherwise never reach the waitlist. Only free nights are a `409` from the
-  waitlist; a full list is a `403`, which leaves the shared availability cache alone.
+  waitlist (`NIGHTS_AVAILABLE`); a full list is a `403` (`WAITLIST_FULL`), which leaves the
+  shared availability cache alone.
 - **The admin's section is `/admin`**, three screens: every listing on offer, each one
   edited and retired through the same `save-listing` and `delete-listing` features the
   owner runs; `/admin/users`, the accounts, each leading to `/admin/users/[id]` — where

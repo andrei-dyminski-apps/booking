@@ -5,7 +5,6 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  ParseUUIDPipe,
   Post,
   Query,
 } from "@nestjs/common";
@@ -31,6 +30,7 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { Roles } from "../auth/decorators/roles.decorator";
 import { ApiErrorDto } from "../common/dto/api-error.dto";
+import { ParseIdPipe } from "../common/parse-id.pipe";
 import { ConversationService } from "./conversation.service";
 import {
   ConversationDto,
@@ -108,7 +108,7 @@ export class ConversationController {
   @ApiOkResponse({ type: ConversationDto })
   @ApiNotFoundResponse(NOT_A_SIDE)
   findOne(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<Conversation> {
     return this.conversationService.findOne(id, user);
@@ -122,7 +122,7 @@ export class ConversationController {
   @ApiBadRequestResponse(MALFORMED_CURSOR)
   @ApiNotFoundResponse(NOT_A_SIDE)
   findMessages(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: MessageQueryDto,
   ): Promise<MessagePage> {
@@ -135,7 +135,7 @@ export class ConversationController {
   @ApiCreatedResponse({ type: MessageDto })
   @ApiNotFoundResponse(NOT_A_SIDE)
   send(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: SendMessageDto,
   ): Promise<Message> {
@@ -154,7 +154,7 @@ export class ConversationController {
   @ApiNoContentResponse()
   @ApiNotFoundResponse(NOT_A_SIDE)
   markRead(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: MarkReadDto,
   ): Promise<void> {

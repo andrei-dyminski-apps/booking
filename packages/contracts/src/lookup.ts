@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { stayPartySchema } from "./booking.js";
+import { rule } from "./error-code.js";
 import { blank, PAGING } from "./query.js";
 
 /**
@@ -35,9 +36,19 @@ export const lookupQuerySchema = z.object({
     .string()
     .trim()
     .min(LOOKUP_MIN_LENGTH, {
-      error: `Type at least ${LOOKUP_MIN_LENGTH} characters`,
+      error: rule(
+        "LOOKUP_TOO_SHORT",
+        `Type at least ${LOOKUP_MIN_LENGTH} characters`,
+        { minimum: LOOKUP_MIN_LENGTH },
+      ),
     })
-    .max(254, { error: "A search is never longer than 254 characters" }),
+    .max(254, {
+      error: rule(
+        "LOOKUP_TOO_LONG",
+        "A search is never longer than 254 characters",
+        { maximum: 254 },
+      ),
+    }),
   side: blank(stayPartySchema.default("GUEST")),
   ...PAGING,
 });

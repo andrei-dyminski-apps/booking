@@ -2,6 +2,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  type HttpException,
 } from "@nestjs/common";
 import {
   type ManagedUser,
@@ -11,6 +12,7 @@ import {
   type UserQuery,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
+import { apiException } from "../common/api-exception";
 import { readCursor } from "../common/paging";
 import { decodeCursor, encodeCursor } from "./user-cursor";
 import {
@@ -54,7 +56,7 @@ export class UserService {
     const user = await this.userRepository.findDetailById(id);
 
     if (user === null) {
-      throw new NotFoundException(`User ${id} not found`);
+      throw userNotFound(id);
     }
 
     return user;
@@ -87,7 +89,11 @@ export class UserService {
       updated = await this.userRepository.update(actor.id, id, change);
     } catch (error) {
       if (error instanceof AdminAccountError) {
-        throw new ForbiddenException("Admin accounts cannot be blocked");
+        throw apiException(
+          ForbiddenException,
+          "ADMIN_ACCOUNT_CANNOT_BE_BLOCKED",
+          "Admin accounts cannot be blocked",
+        );
       }
 
       if (error instanceof CallerNotAdminError) {
@@ -98,9 +104,18 @@ export class UserService {
     }
 
     if (updated === null) {
-      throw new NotFoundException(`User ${id} not found`);
+      throw userNotFound(id);
     }
 
     return updated;
   }
+}
+
+/** The id stays in the sentence for the log; a client reads the code. */
+function userNotFound(id: string): HttpException {
+  return apiException(
+    NotFoundException,
+    "USER_NOT_FOUND",
+    `User ${id} not found`,
+  );
 }

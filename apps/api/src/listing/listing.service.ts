@@ -2,7 +2,6 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
-  NotFoundException,
 } from "@nestjs/common";
 import {
   RATE_UNDER_NON_REFUNDABLE_POLICY,
@@ -21,17 +20,9 @@ import { BookingRepository } from "../booking/infrastructure/booking.repository"
 import { apiException } from "../common/api-exception";
 import { readCursor } from "../common/paging";
 import { decodeCursor, encodeCursor } from "./catalogue-cursor";
+import { listingNotFound } from "./listing-not-found";
 import { RateUnderNonRefundablePolicyError } from "./listing.errors";
 import { ListingRepository } from "./listing.repository";
-
-/** The id stays in the sentence for the log; a client reads the code. */
-function listingNotFound(id: string): Error {
-  return apiException(
-    NotFoundException,
-    "LISTING_NOT_FOUND",
-    `Listing ${id} not found`,
-  );
-}
 
 /**
  * Which roles may reach these methods at all is decided before them, by RolesGuard on the

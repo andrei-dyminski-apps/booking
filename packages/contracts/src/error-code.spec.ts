@@ -9,9 +9,13 @@ import {
   createBookingSchema,
   hostCancelBookingSchema,
 } from "./booking.js";
+import { startConversationSchema } from "./conversation.js";
 import { endStayEarlySchema } from "./early-end.js";
 import { rule, toApiIssue, toErrorCode } from "./error-code.js";
 import { waiveHostFeeSchema } from "./host-fee.js";
+import { lookupQuerySchema } from "./lookup.js";
+import { createReviewSchema } from "./review.js";
+import { userQuerySchema } from "./user.js";
 import {
   RATE_UNDER_NON_REFUNDABLE_POLICY,
   availabilityQuerySchema,
@@ -601,6 +605,115 @@ describe("the set-aside and host-fee rules", () => {
       issuesOf(waiveHostFeeSchema, { reason: "a".repeat(501) }),
     ).toMatchObject([
       { code: "WAIVE_REASON_TOO_LONG", params: { maximum: 500 } },
+    ]);
+  });
+});
+
+describe("the review rules", () => {
+  const input = { rating: 5, comment: "Quiet, warm and exactly as described." };
+
+  it("names a rating nobody sent, one that is no number, no whole star or out of range", () => {
+    expect(
+      issuesOf(createReviewSchema, { comment: input.comment }),
+    ).toMatchObject([{ path: ["rating"], code: "RATING_REQUIRED" }]);
+    expect(
+      issuesOf(createReviewSchema, { ...input, rating: "five" }),
+    ).toMatchObject([{ path: ["rating"], code: "RATING_NOT_A_NUMBER" }]);
+    expect(
+      issuesOf(createReviewSchema, { ...input, rating: 4.5 }),
+    ).toMatchObject([{ path: ["rating"], code: "RATING_NOT_WHOLE" }]);
+    expect(issuesOf(createReviewSchema, { ...input, rating: 0 })).toMatchObject(
+      [{ path: ["rating"], code: "RATING_TOO_LOW", params: { minimum: 1 } }],
+    );
+    expect(issuesOf(createReviewSchema, { ...input, rating: 6 })).toMatchObject(
+      [{ path: ["rating"], code: "RATING_TOO_HIGH", params: { maximum: 5 } }],
+    );
+  });
+
+  it("names the length of a comment", () => {
+    expect(
+      issuesOf(createReviewSchema, { ...input, comment: " too short " }),
+    ).toMatchObject([
+      {
+        path: ["comment"],
+        code: "REVIEW_COMMENT_TOO_SHORT",
+        params: { minimum: 10 },
+      },
+    ]);
+    expect(
+      issuesOf(createReviewSchema, { ...input, comment: "a".repeat(1001) }),
+    ).toMatchObject([
+      {
+        path: ["comment"],
+        code: "REVIEW_COMMENT_TOO_LONG",
+        params: { maximum: 1000 },
+      },
+    ]);
+  });
+});
+
+describe("the conversation rules", () => {
+  const listingId = "2f3a4b5c-6d7e-4f80-9a1b-2c3d4e5f6a7b";
+
+  it("names an empty message and one past the limit", () => {
+    expect(
+      issuesOf(startConversationSchema, { listingId, body: "  " }),
+    ).toMatchObject([{ path: ["body"], code: "MESSAGE_REQUIRED" }]);
+    expect(
+      issuesOf(startConversationSchema, { listingId, body: "a".repeat(2001) }),
+    ).toMatchObject([
+      { path: ["body"], code: "MESSAGE_TOO_LONG", params: { maximum: 2000 } },
+    ]);
+  });
+
+  it("names a listing nobody chose apart from an id that is not one", () => {
+    expect(
+      issuesOf(startConversationSchema, { listingId: "nothing", body: "Hi" }),
+    ).toMatchObject([{ path: ["listingId"], code: "LISTING_ID_INVALID" }]);
+    expect(
+      issuesOf(startConversationSchema, { listingId: 7, body: "Hi" }),
+    ).toMatchObject([{ path: ["listingId"], code: "LISTING_ID_INVALID" }]);
+    expect(issuesOf(startConversationSchema, { body: "Hi" })).toMatchObject([
+      { path: ["listingId"], code: "LISTING_REQUIRED" },
+    ]);
+  });
+});
+
+describe("the lookup and user filter rules", () => {
+  it("names a search too short or too long for a lookup", () => {
+    expect(issuesOf(lookupQuerySchema, { q: " e2 " })).toMatchObject([
+      { path: ["q"], code: "LOOKUP_TOO_SHORT", params: { minimum: 3 } },
+    ]);
+    expect(issuesOf(lookupQuerySchema, { q: "e".repeat(255) })).toMatchObject([
+      { path: ["q"], code: "LOOKUP_TOO_LONG", params: { maximum: 254 } },
+    ]);
+  });
+
+  it("names the filters of the users' list", () => {
+    expect(
+      issuesOf(userQuerySchema, { name: " ", email: " " }).map(
+        ({ path, code }) => ({ path, code }),
+      ),
+    ).toEqual([
+      { path: ["name"], code: "NAME_FILTER_REQUIRED" },
+      { path: ["email"], code: "EMAIL_FILTER_REQUIRED" },
+    ]);
+    expect(
+      issuesOf(userQuerySchema, {
+        name: "n".repeat(101),
+        email: "e".repeat(255),
+      }),
+    ).toMatchObject([
+      {
+        path: ["name"],
+        code: "NAME_FILTER_TOO_LONG",
+        params: { maximum: 100 },
+      },
+      {
+        path: ["email"],
+        code: "EMAIL_FILTER_TOO_LONG",
+        params: { maximum: 254 },
+      },
     ]);
   });
 });

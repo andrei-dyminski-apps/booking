@@ -1,8 +1,3 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  NotFoundException,
-} from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import {
   Role,
@@ -15,6 +10,7 @@ import {
 import type { AuthenticatedUser } from "../auth/auth.types";
 import type { Page } from "../common/paging";
 import type { PublicOf } from "../common/testing/public-of.fakes";
+import { refusalOf } from "../common/testing/refusal";
 import { decodeCursor, type UserCursor } from "./user-cursor";
 import {
   AdminAccountError,
@@ -194,8 +190,11 @@ describe("UserService", () => {
     for (const target of [self, otherAdmin]) {
       for (const blocked of [true, false]) {
         await expect(
-          service.update(admin, target.id, { blocked }),
-        ).rejects.toThrow(ForbiddenException);
+          refusalOf(service.update(admin, target.id, { blocked })),
+        ).resolves.toEqual({
+          status: 403,
+          code: "ADMIN_ACCOUNT_CANNOT_BE_BLOCKED",
+        });
       }
     }
 
@@ -212,8 +211,8 @@ describe("UserService", () => {
       const victim = userRepository.add();
 
       await expect(
-        service.update(admin, victim.id, { blocked: true }),
-      ).rejects.toThrow(ForbiddenException);
+        refusalOf(service.update(admin, victim.id, { blocked: true })),
+      ).resolves.toEqual({ status: 403, code: "NOT_AN_ADMIN_ANYMORE" });
       expect(userRepository.rows[1]).toEqual(victim);
     }
   });
@@ -222,8 +221,8 @@ describe("UserService", () => {
     addCaller();
 
     await expect(
-      service.update(admin, UNKNOWN_ID, { blocked: true }),
-    ).rejects.toThrow(NotFoundException);
+      refusalOf(service.update(admin, UNKNOWN_ID, { blocked: true })),
+    ).resolves.toEqual({ status: 404, code: "USER_NOT_FOUND" });
   });
 
   it("reads one account, blocked or not, an admin's included", async () => {
@@ -241,9 +240,10 @@ describe("UserService", () => {
   });
 
   it("answers 404 when reading an account that does not exist", async () => {
-    await expect(service.findOne(UNKNOWN_ID)).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(refusalOf(service.findOne(UNKNOWN_ID))).resolves.toEqual({
+      status: 404,
+      code: "USER_NOT_FOUND",
+    });
   });
 
   it("issues a cursor while there is another page, and none on the last one", async () => {
@@ -282,15 +282,17 @@ describe("UserService", () => {
     for (let index = 0; index < 2; index += 1) userRepository.add();
 
     await expect(
-      service.findPage(query({ cursor: "not-a-cursor" })),
-    ).rejects.toThrow(BadRequestException);
+      refusalOf(service.findPage(query({ cursor: "not-a-cursor" }))),
+    ).resolves.toEqual({ status: 400, code: "CURSOR_MALFORMED" });
 
     const newest = await service.findPage(query({ limit: 1 }));
 
     await expect(
-      service.findPage(
-        query({ sort: "oldest", cursor: newest.nextCursor ?? undefined }),
+      refusalOf(
+        service.findPage(
+          query({ sort: "oldest", cursor: newest.nextCursor ?? undefined }),
+        ),
       ),
-    ).rejects.toThrow(BadRequestException);
+    ).resolves.toEqual({ status: 400, code: "CURSOR_ORDERING_MISMATCH" });
   });
 });

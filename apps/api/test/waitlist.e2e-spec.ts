@@ -4,9 +4,12 @@ import { Test, TestingModule } from "@nestjs/testing";
 import { addDays, format, parseISO } from "date-fns";
 import { App } from "supertest/types";
 import {
+  MAX_WAITLIST_ENTRIES,
   NotificationType,
   Role,
+  apiErrorSchema,
   bookingSchema,
+  earliestToday,
   notificationPageSchema,
   waitlistDemandPageSchema,
   waitlistEntrySchema,
@@ -22,6 +25,7 @@ import { resetDatabase } from "./database";
 import { inDays } from "./dates";
 import { resetQueue } from "./queue";
 import { hostCredentials, signIn, signInAs, type Agent } from "./session";
+import { hasCode } from "./api-error";
 
 const IN_UTC = { in: tz("UTC") };
 
@@ -106,12 +110,24 @@ describe("WaitlistController (e2e)", () => {
   });
 
   it("refuses free nights, the owner's own listing and an admin", async () => {
-    await waiter.post("/waitlist").send(stay).expect(409);
+    await waiter
+      .post("/waitlist")
+      .send(stay)
+      .expect(409)
+      .expect(hasCode("NIGHTS_AVAILABLE"));
 
     await hold();
 
-    await owner.post("/waitlist").send(stay).expect(403);
-    await admin.post("/waitlist").send(stay).expect(403);
+    await owner
+      .post("/waitlist")
+      .send(stay)
+      .expect(403)
+      .expect(hasCode("WAITLIST_OWN_LISTING"));
+    await admin
+      .post("/waitlist")
+      .send(stay)
+      .expect(403)
+      .expect(hasCode("ROLE_NOT_ALLOWED"));
   });
 
   it("tells the waiter when the holder cancels, and takes the entry off the list", async () => {
@@ -169,7 +185,59 @@ describe("WaitlistController (e2e)", () => {
   it("refuses a range only the caller's own stay holds", async () => {
     await hold();
 
-    await holder.post("/waitlist").send(stay).expect(403);
+    await holder
+      .post("/waitlist")
+      .send(stay)
+      .expect(403)
+      .expect(hasCode("WAITLIST_NIGHTS_HELD_BY_YOU"));
+  });
+
+  it("refuses a range past the cap, before it asks whether the nights are held", async () => {
+    const { id: userId } = (await waiter.get("/auth/me").expect(200)).body as {
+      id: string;
+    };
+
+    // The cap is checked before the nights, so the entries need no stays behind them.
+    await app.get(PrismaService).waitlistEntry.createMany({
+      data: Array.from({ length: MAX_WAITLIST_ENTRIES }, (_, index) => ({
+        listingId: stay.listingId,
+        userId,
+        from: new Date(inDays(20 + index * 2)),
+        to: new Date(inDays(21 + index * 2)),
+        checkInDayEndsAt: new Date(inDays(21 + index * 2)),
+      })),
+    });
+
+    const refused = await waiter
+      .post("/waitlist")
+      .send(stay)
+      .expect(403)
+      .expect(hasCode("WAITLIST_FULL"));
+
+    expect(apiErrorSchema.parse(refused.body).params).toEqual({
+      maximum: MAX_WAITLIST_ENTRIES,
+    });
+  });
+
+  // The earliest today of any zone passes the schema at any hour, and is always gone in
+  // Kiritimati, a day or two ahead of it — so the refusal is the lock's, never the schema's.
+  it("refuses a check-in day already gone where the listing is", async () => {
+    await owner
+      .patch(`/listings/${stay.listingId}`)
+      .send({ timeZone: "Pacific/Kiritimati" })
+      .expect(200);
+
+    const from = earliestToday();
+
+    await waiter
+      .post("/waitlist")
+      .send({
+        ...stay,
+        from,
+        to: format(addDays(parseISO(from, IN_UTC), 3), "yyyy-MM-dd"),
+      })
+      .expect(400)
+      .expect(hasCode("CHECK_IN_DAY_PAST"));
   });
 
   // The listing's tonight, whatever day UTC has reached: an entry for it is taken, listed
@@ -231,7 +299,14 @@ describe("WaitlistController (e2e)", () => {
       (await waiter.post("/waitlist").send(stay).expect(201)).body,
     );
 
-    await holder.delete(`/waitlist/${entry.id}`).expect(404);
+    await holder
+      .delete(`/waitlist/${entry.id}`)
+      .expect(404)
+      .expect(hasCode("WAITLIST_ENTRY_NOT_FOUND"));
+    await waiter
+      .delete("/waitlist/not-a-uuid")
+      .expect(400)
+      .expect(hasCode("INVALID_ID"));
     await waiter.delete(`/waitlist/${entry.id}`).expect(204);
     await expect(waitingFor(waiter)).resolves.toEqual([]);
   });
@@ -284,6 +359,7 @@ describe("WaitlistController (e2e)", () => {
     expect(second.nextCursor).toBeNull();
     await admin
       .get(`/waitlist/demand?sort=newest&cursor=${encodeURIComponent(cursor)}`)
-      .expect(400);
+      .expect(400)
+      .expect(hasCode("CURSOR_ORDERING_MISMATCH"));
   });
 });

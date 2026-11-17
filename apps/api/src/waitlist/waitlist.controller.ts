@@ -6,7 +6,6 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  ParseUUIDPipe,
   Post,
   Query,
 } from "@nestjs/common";
@@ -31,6 +30,7 @@ import type { AuthenticatedUser } from "../auth/auth.types";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { Roles } from "../auth/decorators/roles.decorator";
 import { ApiErrorDto } from "../common/dto/api-error.dto";
+import { ParseIdPipe } from "../common/parse-id.pipe";
 import {
   JoinWaitlistDto,
   WaitlistDemandPageDto,
@@ -127,7 +127,7 @@ export class WaitlistController {
   })
   leave(
     @CurrentUser() user: AuthenticatedUser,
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
   ): Promise<void> {
     return this.waitlistService.leave(user.id, id);
   }

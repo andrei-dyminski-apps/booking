@@ -5,7 +5,6 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
-  NotFoundException,
   PreconditionFailedException,
   UnprocessableEntityException,
   type HttpException,
@@ -26,6 +25,7 @@ import {
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
 import { readCursor, type Page } from "../../common/paging";
+import { listingNotFound } from "../../listing/listing-not-found";
 import { NotificationService } from "../../notification/notification.service";
 import { WaitlistService } from "../../waitlist/waitlist.service";
 import { BookingRepository } from "../infrastructure/booking.repository";
@@ -201,11 +201,7 @@ export class BookingService {
     } catch (error) {
       // A hard delete of the listing from outside the API — retiring one leaves the row.
       if (error instanceof ListingNotFoundError) {
-        throw apiException(
-          NotFoundException,
-          "LISTING_NOT_FOUND",
-          error.message,
-        );
+        throw listingNotFound(input.listingId);
       }
 
       // A host does not book their own nights — the answer `POST /conversations` gives.

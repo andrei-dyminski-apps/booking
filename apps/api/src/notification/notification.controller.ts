@@ -4,7 +4,6 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  ParseUUIDPipe,
   Post,
   Query,
 } from "@nestjs/common";
@@ -19,6 +18,7 @@ import type { NotificationPage, UnreadCount } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { ApiErrorDto } from "../common/dto/api-error.dto";
+import { ParseIdPipe } from "../common/parse-id.pipe";
 import {
   NotificationPageDto,
   NotificationQueryDto,
@@ -75,7 +75,7 @@ export class NotificationController {
   })
   markRead(
     @CurrentUser() user: AuthenticatedUser,
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
   ): Promise<UnreadCount> {
     return this.notificationService.markRead(user.id, id);
   }

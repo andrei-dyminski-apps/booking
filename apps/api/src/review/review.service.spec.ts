@@ -1,8 +1,3 @@
-import {
-  BadRequestException,
-  ConflictException,
-  NotFoundException,
-} from "@nestjs/common";
 import { tz } from "@date-fns/tz";
 import { Test } from "@nestjs/testing";
 import { addDays, format } from "date-fns";
@@ -26,6 +21,7 @@ import type { BookingWithListingOwner } from "../booking/domain/booking.types";
 import { BookingRepository } from "../booking/infrastructure/booking.repository";
 import type { Page } from "../common/paging";
 import type { PublicOf } from "../common/testing/public-of.fakes";
+import { refusalOf } from "../common/testing/refusal";
 import { ListingRepository } from "../listing/listing.repository";
 import { NotificationService } from "../notification/notification.service";
 import { cents, CURRENCY } from "../payment/domain/money";
@@ -387,9 +383,9 @@ describe("ReviewService", () => {
 
     await service.create(bookingId, guest, input);
 
-    await expect(service.create(bookingId, guest, input)).rejects.toThrow(
-      ConflictException,
-    );
+    await expect(
+      refusalOf(service.create(bookingId, guest, input)),
+    ).resolves.toEqual({ status: 409, code: "REVIEW_ALREADY_WRITTEN" });
   });
 
   it("refuses a stay that has not ended, or never happened", async () => {
@@ -402,9 +398,9 @@ describe("ReviewService", () => {
     ] satisfies Partial<Booking>[]) {
       const bookingId = bookingRepository.add(stay(overrides));
 
-      await expect(service.create(bookingId, guest, input)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        refusalOf(service.create(bookingId, guest, input)),
+      ).resolves.toEqual({ status: 409, code: "STAY_NOT_REVIEWABLE" });
     }
   });
 
@@ -422,14 +418,14 @@ describe("ReviewService", () => {
     const bookingId = bookingRepository.add(stay());
 
     for (const user of [stranger, otherOwner]) {
-      await expect(service.create(bookingId, user, input)).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        refusalOf(service.create(bookingId, user, input)),
+      ).resolves.toEqual({ status: 404, code: "BOOKING_NOT_FOUND" });
     }
 
-    await expect(service.create(randomUUID(), guest, input)).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      refusalOf(service.create(randomUUID(), guest, input)),
+    ).resolves.toEqual({ status: 404, code: "BOOKING_NOT_FOUND" });
     expect(reviewRepository.rows).toHaveLength(0);
   });
 
@@ -474,8 +470,8 @@ describe("ReviewService", () => {
 
   it("answers 404 for the reviews of a retired listing", async () => {
     await expect(
-      service.findListingPage(RETIRED_LISTING_ID, query()),
-    ).rejects.toThrow(NotFoundException);
+      refusalOf(service.findListingPage(RETIRED_LISTING_ID, query())),
+    ).resolves.toEqual({ status: 404, code: "LISTING_NOT_FOUND" });
   });
 
   it("refuses a cursor issued by the other list of reviews", async () => {
@@ -492,11 +488,13 @@ describe("ReviewService", () => {
     );
 
     await expect(
-      service.findListingPage(
-        LISTING_ID,
-        query({ limit: "1", cursor: nextCursor ?? "" }),
+      refusalOf(
+        service.findListingPage(
+          LISTING_ID,
+          query({ limit: "1", cursor: nextCursor ?? "" }),
+        ),
       ),
-    ).rejects.toThrow(BadRequestException);
+    ).resolves.toEqual({ status: 400, code: "CURSOR_MALFORMED" });
   });
 
   it("shows a guest's reviews to the guest, an admin and the hosts they booked with", async () => {
@@ -514,8 +512,8 @@ describe("ReviewService", () => {
 
     for (const user of [stranger, otherOwner]) {
       await expect(
-        service.findGuestPage(GUEST_ID, user, query()),
-      ).rejects.toThrow(NotFoundException);
+        refusalOf(service.findGuestPage(GUEST_ID, user, query())),
+      ).resolves.toEqual({ status: 404, code: "GUEST_NOT_FOUND" });
     }
   });
 
@@ -548,8 +546,8 @@ describe("ReviewService", () => {
     bookingRepository.add(stay({ ...future, status: BookingStatus.EXPIRED }));
 
     await expect(
-      service.findGuestPage(GUEST_ID, owner, query()),
-    ).rejects.toThrow(NotFoundException);
+      refusalOf(service.findGuestPage(GUEST_ID, owner, query())),
+    ).resolves.toEqual({ status: 404, code: "GUEST_NOT_FOUND" });
   });
 
   it("lets one account review as the guest of one stay and the host of another", async () => {
@@ -581,6 +579,9 @@ describe("ReviewService", () => {
     await service.remove(review.id);
 
     expect(reviewRepository.rows).toHaveLength(0);
-    await expect(service.remove(review.id)).rejects.toThrow(NotFoundException);
+    await expect(refusalOf(service.remove(review.id))).resolves.toEqual({
+      status: 404,
+      code: "REVIEW_NOT_FOUND",
+    });
   });
 });

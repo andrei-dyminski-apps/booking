@@ -2,6 +2,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  type HttpException,
 } from "@nestjs/common";
 import {
   ConversationSide,
@@ -17,7 +18,9 @@ import {
   type StartConversationInput,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../auth/auth.types";
+import { apiException } from "../common/api-exception";
 import { readCursor, type Page } from "../common/paging";
+import { listingNotFound } from "../listing/listing-not-found";
 import { RealtimeService } from "../realtime/realtime.service";
 import { unreadFieldsOf } from "../unread/unread.types";
 import {
@@ -92,11 +95,18 @@ export class ConversationService {
       case Role.USER:
         return this.conversationRepository.findPageFor(user.id, query, cursor);
       case Role.ADMIN:
-        throw new ForbiddenException("Conversations are read by their sides");
+        throw apiException(
+          ForbiddenException,
+          "ROLE_NOT_ALLOWED",
+          "Conversations are read by their sides",
+          { roles: [Role.USER] },
+        );
       default: {
         const unknownRole: never = user.role;
 
-        throw new ForbiddenException(
+        throw apiException(
+          ForbiddenException,
+          "ROLE_NOT_ALLOWED",
           `Unknown role ${JSON.stringify(unknownRole)}`,
         );
       }
@@ -130,11 +140,15 @@ export class ConversationService {
       return conversation;
     } catch (error) {
       if (error instanceof ListingNotFoundError) {
-        throw new NotFoundException(error.message);
+        throw listingNotFound(input.listingId);
       }
 
       if (error instanceof OwnListingError) {
-        throw new ForbiddenException("You cannot write to yourself");
+        throw apiException(
+          ForbiddenException,
+          "CANNOT_WRITE_TO_YOURSELF",
+          "You cannot write to yourself",
+        );
       }
 
       // An ended session, answered the way `BookingService.create` answers it.
@@ -256,6 +270,10 @@ export class ConversationService {
   }
 }
 
-function notFound(id: string): NotFoundException {
-  return new NotFoundException(`Conversation ${id} not found`);
+function notFound(id: string): HttpException {
+  return apiException(
+    NotFoundException,
+    "CONVERSATION_NOT_FOUND",
+    `Conversation ${id} not found`,
+  );
 }

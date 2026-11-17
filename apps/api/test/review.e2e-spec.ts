@@ -26,6 +26,7 @@ import {
   signInAs,
   type Agent,
 } from "./session";
+import { hasCode, issueCodesOf } from "./api-error";
 
 const listingInput: CreateListingInput = {
   title: "Loft above the harbour",
@@ -154,7 +155,8 @@ describe("ReviewController (e2e)", () => {
     const again = await guest
       .post(`/bookings/${bookingId}/reviews`)
       .send(review)
-      .expect(409);
+      .expect(409)
+      .expect(hasCode("REVIEW_ALREADY_WRITTEN"));
 
     expect(apiErrorSchema.parse(again.body).statusCode).toBe(409);
   });
@@ -167,7 +169,8 @@ describe("ReviewController (e2e)", () => {
       await guest
         .post(`/bookings/${bookingId}/reviews`)
         .send(review)
-        .expect(409);
+        .expect(409)
+        .expect(hasCode("STAY_NOT_REVIEWABLE"));
     }
   });
 
@@ -177,12 +180,23 @@ describe("ReviewController (e2e)", () => {
     await otherGuest
       .post(`/bookings/${bookingId}/reviews`)
       .send(review)
-      .expect(404);
+      .expect(404)
+      .expect(hasCode("BOOKING_NOT_FOUND"));
     await otherOwner
       .post(`/bookings/${bookingId}/reviews`)
       .send(review)
-      .expect(404);
-    await admin.post(`/bookings/${bookingId}/reviews`).send(review).expect(403);
+      .expect(404)
+      .expect(hasCode("BOOKING_NOT_FOUND"));
+    await admin
+      .post(`/bookings/${bookingId}/reviews`)
+      .send(review)
+      .expect(403)
+      .expect(hasCode("ROLE_NOT_ALLOWED"));
+    await guest
+      .post("/bookings/not-a-uuid/reviews")
+      .send(review)
+      .expect(400)
+      .expect(hasCode("INVALID_ID"));
   });
 
   it("validates the body against the contract", async () => {
@@ -191,7 +205,27 @@ describe("ReviewController (e2e)", () => {
     await guest
       .post(`/bookings/${bookingId}/reviews`)
       .send({ rating: 6, comment: "short" })
-      .expect(400);
+      .expect(400)
+      .expect((response) => {
+        expect(issueCodesOf(response)).toEqual([
+          "RATING_TOO_HIGH",
+          "REVIEW_COMMENT_TOO_SHORT",
+        ]);
+      });
+    await guest
+      .post(`/bookings/${bookingId}/reviews`)
+      .send({ comment: review.comment })
+      .expect(400)
+      .expect((response) => {
+        expect(issueCodesOf(response)).toEqual(["RATING_REQUIRED"]);
+      });
+    await guest
+      .post(`/bookings/${bookingId}/reviews`)
+      .send({ ...review, rating: "five" })
+      .expect(400)
+      .expect((response) => {
+        expect(issueCodesOf(response)).toEqual(["RATING_NOT_A_NUMBER"]);
+      });
   });
 
   it("shows the guests' reviews of a listing to anybody, with a summary", async () => {
@@ -227,8 +261,18 @@ describe("ReviewController (e2e)", () => {
       expect(reviewPageSchema.parse(response.body).summary.count).toBe(1);
     }
 
-    await otherGuest.get(`/guests/${guestId}/reviews`).expect(404);
-    await otherOwner.get(`/guests/${guestId}/reviews`).expect(404);
+    await otherGuest
+      .get(`/guests/${guestId}/reviews`)
+      .expect(404)
+      .expect(hasCode("GUEST_NOT_FOUND"));
+    await otherOwner
+      .get(`/guests/${guestId}/reviews`)
+      .expect(404)
+      .expect(hasCode("GUEST_NOT_FOUND"));
+    await guest
+      .get(`/guests/${guestId}/reviews?cursor=forged`)
+      .expect(400)
+      .expect(hasCode("CURSOR_MALFORMED"));
     await request(app.getHttpServer())
       .get(`/guests/${guestId}/reviews`)
       .expect(401);
@@ -252,10 +296,20 @@ describe("ReviewController (e2e)", () => {
       .expect(201);
     const { id } = reviewSchema.parse(created.body);
 
-    await guest.delete(`/reviews/${id}`).expect(403);
+    await guest
+      .delete(`/reviews/${id}`)
+      .expect(403)
+      .expect(hasCode("ROLE_NOT_ALLOWED"));
     await owner.delete(`/reviews/${id}`).expect(403);
     await admin.delete(`/reviews/${id}`).expect(204);
-    await admin.delete(`/reviews/${id}`).expect(404);
+    await admin
+      .delete(`/reviews/${id}`)
+      .expect(404)
+      .expect(hasCode("REVIEW_NOT_FOUND"));
+    await admin
+      .delete("/reviews/not-a-uuid")
+      .expect(400)
+      .expect(hasCode("INVALID_ID"));
   });
 
   it("answers 404 for the reviews of a retired listing", async () => {
@@ -263,6 +317,11 @@ describe("ReviewController (e2e)", () => {
 
     await request(app.getHttpServer())
       .get(`/listings/${listingId}/reviews`)
-      .expect(404);
+      .expect(404)
+      .expect(hasCode("LISTING_NOT_FOUND"));
+    await request(app.getHttpServer())
+      .get("/listings/not-a-uuid/reviews")
+      .expect(400)
+      .expect(hasCode("INVALID_ID"));
   });
 });

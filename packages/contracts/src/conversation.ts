@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { userSchema } from "./auth.js";
+import { rule } from "./error-code.js";
 import { listingSchema } from "./listing.js";
 import { blank, PAGING } from "./query.js";
 
@@ -23,9 +24,13 @@ export const MAX_MESSAGE_LENGTH = 2000;
 export const messageBodySchema = z
   .string()
   .trim()
-  .min(1, { error: "Write a message first" })
+  .min(1, { error: rule("MESSAGE_REQUIRED", "Write a message first") })
   .max(MAX_MESSAGE_LENGTH, {
-    error: `A message may not be longer than ${MAX_MESSAGE_LENGTH} characters`,
+    error: rule(
+      "MESSAGE_TOO_LONG",
+      `A message may not be longer than ${MAX_MESSAGE_LENGTH} characters`,
+      { maximum: MAX_MESSAGE_LENGTH },
+    ),
   });
 
 export const messageSchema = z.object({
@@ -67,13 +72,27 @@ export const conversationSchema = z.object({
   createdAt: z.iso.datetime(),
 });
 
+const listingMissing = rule(
+  "LISTING_REQUIRED",
+  "Choose a listing to write about",
+);
+const listingIdInvalid = rule(
+  "LISTING_ID_INVALID",
+  "The listing to write about is not a valid id",
+);
+
 /**
  * How a guest opens a thread: the listing it is about and what they want to say. There
  * is no empty conversation — the first message is the reason one exists. The guest is the
  * session, and the host is whoever owns the listing; neither is the client's to name.
  */
 export const startConversationSchema = z.object({
-  listingId: z.uuid({ error: "Choose a listing to write about" }),
+  listingId: z.uuid({
+    error: (issue) =>
+      issue.input === undefined
+        ? listingMissing(issue)
+        : listingIdInvalid(issue),
+  }),
   body: messageBodySchema,
 });
 

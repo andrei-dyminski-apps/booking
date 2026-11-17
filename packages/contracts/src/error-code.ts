@@ -155,6 +155,45 @@ export const ERROR_CODES = [
   "REFUND_REASON_REQUIRED",
   "REFUND_REASON_TOO_LONG",
 
+  // Reviews. The rating and the comment are the schema's; the rest is the service's.
+  "RATING_REQUIRED",
+  "RATING_NOT_A_NUMBER",
+  "RATING_NOT_WHOLE",
+  "RATING_TOO_LOW",
+  "RATING_TOO_HIGH",
+  "REVIEW_COMMENT_TOO_SHORT",
+  "REVIEW_COMMENT_TOO_LONG",
+  "REVIEW_NOT_FOUND",
+  "GUEST_NOT_FOUND",
+  "STAY_NOT_REVIEWABLE",
+  "REVIEW_ALREADY_WRITTEN",
+
+  // The waitlist. A range the booking form would refuse is refused in the booking's codes.
+  "WAITLIST_ENTRY_NOT_FOUND",
+  "WAITLIST_OWN_LISTING",
+  "WAITLIST_FULL",
+  "WAITLIST_NIGHTS_HELD_BY_YOU",
+  "NIGHTS_AVAILABLE",
+
+  // Conversations.
+  "CONVERSATION_NOT_FOUND",
+  "CANNOT_WRITE_TO_YOURSELF",
+  "MESSAGE_REQUIRED",
+  "MESSAGE_TOO_LONG",
+  "LISTING_REQUIRED",
+  "LISTING_ID_INVALID",
+
+  // Notifications, lookups and users.
+  "NOTIFICATION_NOT_FOUND",
+  "LOOKUP_TOO_SHORT",
+  "LOOKUP_TOO_LONG",
+  "USER_NOT_FOUND",
+  "ADMIN_ACCOUNT_CANNOT_BE_BLOCKED",
+  "NAME_FILTER_REQUIRED",
+  "NAME_FILTER_TOO_LONG",
+  "EMAIL_FILTER_REQUIRED",
+  "EMAIL_FILTER_TOO_LONG",
+
   // What the money paths set aside, and what an admin does about it. A retry or a
   // resolution that matched nothing is one of two refusals: the row is not there, or it is
   // there in another state.

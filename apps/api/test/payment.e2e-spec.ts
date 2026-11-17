@@ -52,6 +52,7 @@ import { inDays } from "./dates";
 import { resetQueue } from "./queue";
 import { waitUntil } from "./wait-until";
 import { hostCredentials, signIn, signInAs, type Agent } from "./session";
+import { hasCode, issueCodesOf } from "./api-error";
 
 /**
  * The payment cycle over HTTP, against the real database: a hold, its payment page, the
@@ -208,15 +209,6 @@ const listingInput: CreateListingInput = {
   pricePerNightCents: cents(12_035),
   capacity: 4,
 };
-
-/** An `.expect(...)` that the refusal answered with this code. */
-const hasCode = (code: string) => (response: { body: unknown }) => {
-  expect(apiErrorSchema.parse(response.body).code).toBe(code);
-};
-
-/** The rule behind each issue of a body the contract refused. */
-const issueCodesOf = (response: { body: unknown }): string[] =>
-  (apiErrorSchema.parse(response.body).errors ?? []).map(({ code }) => code);
 
 describe("Payments (e2e)", () => {
   let app: NestExpressApplication;

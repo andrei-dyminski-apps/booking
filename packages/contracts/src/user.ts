@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { roleSchema, userSchema } from "./auth.js";
+import { rule } from "./error-code.js";
 import { blank, PAGING } from "./query.js";
 
 /**
@@ -68,16 +69,38 @@ export const userQuerySchema = z.object({
     z
       .string()
       .trim()
-      .min(1, { error: "Type at least one character of the name" })
-      .max(100, { error: "A name is never longer than 100 characters" })
+      .min(1, {
+        error: rule(
+          "NAME_FILTER_REQUIRED",
+          "Type at least one character of the name",
+        ),
+      })
+      .max(100, {
+        error: rule(
+          "NAME_FILTER_TOO_LONG",
+          "A name is never longer than 100 characters",
+          { maximum: 100 },
+        ),
+      })
       .optional(),
   ),
   email: blank(
     z
       .string()
       .trim()
-      .min(1, { error: "Type at least one character of the address" })
-      .max(254, { error: "An address is never longer than 254 characters" })
+      .min(1, {
+        error: rule(
+          "EMAIL_FILTER_REQUIRED",
+          "Type at least one character of the address",
+        ),
+      })
+      .max(254, {
+        error: rule(
+          "EMAIL_FILTER_TOO_LONG",
+          "An address is never longer than 254 characters",
+          { maximum: 254 },
+        ),
+      })
       .toLowerCase()
       .optional(),
   ),

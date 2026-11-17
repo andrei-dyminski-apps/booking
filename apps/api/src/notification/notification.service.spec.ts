@@ -1,4 +1,3 @@
-import { BadRequestException, NotFoundException } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { randomUUID } from "node:crypto";
 import {
@@ -10,6 +9,7 @@ import {
   type ServerEvent,
 } from "@repo/contracts";
 import type { PublicOf } from "../common/testing/public-of.fakes";
+import { refusalOf } from "../common/testing/refusal";
 import { cents, CURRENCY } from "../payment/domain/money";
 import type { Page } from "../common/paging";
 import { RealtimeService } from "../realtime/realtime.service";
@@ -271,8 +271,8 @@ describe("NotificationService", () => {
 
   it("refuses a cursor it did not issue", async () => {
     await expect(
-      service.findPage(ALICE, searchFor({ cursor: "not-a-cursor" })),
-    ).rejects.toThrow(BadRequestException);
+      refusalOf(service.findPage(ALICE, searchFor({ cursor: "not-a-cursor" }))),
+    ).resolves.toEqual({ status: 400, code: "CURSOR_MALFORMED" });
   });
 
   it("marks one read, tells every tab of the account, and answers what is left", async () => {
@@ -333,9 +333,9 @@ describe("NotificationService", () => {
 
     const [bobs] = (await service.findPage(BOB, searchFor())).items;
 
-    await expect(service.markRead(ALICE, String(bobs?.id))).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      refusalOf(service.markRead(ALICE, String(bobs?.id))),
+    ).resolves.toEqual({ status: 404, code: "NOTIFICATION_NOT_FOUND" });
     await expect(service.unreadCount(BOB)).resolves.toMatchObject({
       unread: 1,
     });

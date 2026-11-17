@@ -1,13 +1,7 @@
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  NotFoundException,
-  UnauthorizedException,
-} from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { randomUUID } from "node:crypto";
 import {
+  MAX_WAITLIST_ENTRIES,
   NotificationType,
   Role,
   type JoinWaitlistInput,
@@ -17,6 +11,7 @@ import {
   type WaitlistEntry,
 } from "@repo/contracts";
 import type { PublicOf } from "../common/testing/public-of.fakes";
+import { refusalOf, type Refusal } from "../common/testing/refusal";
 import { cents } from "../payment/domain/money";
 import type { AuthenticatedUser } from "../auth/auth.types";
 import type { Page } from "../common/paging";
@@ -25,6 +20,7 @@ import {
   NightsAvailableError,
   WaiterHoldsNightsError,
   WaiterNotFoundError,
+  WaitlistCheckInPastError,
   WaitlistFullError,
   WaitlistListingNotFoundError,
   WaitlistOwnListingError,
@@ -230,28 +226,56 @@ describe("WaitlistService", () => {
   });
 
   it("answers each refusal of the repository the way a booking's is answered", async () => {
-    const cases: [Error, new (...args: never[]) => Error][] = [
-      [new WaitlistListingNotFoundError(LISTING_ID), NotFoundException],
-      [new WaitlistOwnListingError(LISTING_ID), ForbiddenException],
-      [new WaiterNotFoundError(WAITER_ID), UnauthorizedException],
-      [new NightsAvailableError(input), ConflictException],
-      [new WaitlistFullError(), ForbiddenException],
-      [new WaiterHoldsNightsError(input), ForbiddenException],
+    const cases: [Error, Refusal][] = [
+      [
+        new WaitlistListingNotFoundError(LISTING_ID),
+        { status: 404, code: "LISTING_NOT_FOUND" },
+      ],
+      [
+        new WaitlistOwnListingError(LISTING_ID),
+        { status: 403, code: "WAITLIST_OWN_LISTING" },
+      ],
+      [
+        new WaiterNotFoundError(WAITER_ID),
+        { status: 401, code: "SESSION_NOT_FOUND" },
+      ],
+      [
+        new WaitlistCheckInPastError(LISTING_ID, input.from),
+        { status: 400, code: "CHECK_IN_DAY_PAST" },
+      ],
+      [
+        new NightsAvailableError(input),
+        { status: 409, code: "NIGHTS_AVAILABLE" },
+      ],
+      [
+        new WaitlistFullError(),
+        {
+          status: 403,
+          code: "WAITLIST_FULL",
+          params: { maximum: MAX_WAITLIST_ENTRIES },
+        },
+      ],
+      [
+        new WaiterHoldsNightsError(input),
+        { status: 403, code: "WAITLIST_NIGHTS_HELD_BY_YOU" },
+      ],
     ];
 
     for (const [refusal, answer] of cases) {
       waitlistRepository.refusal = refusal;
 
-      await expect(service.join(WAITER_ID, input)).rejects.toThrow(answer);
+      await expect(refusalOf(service.join(WAITER_ID, input))).resolves.toEqual(
+        answer,
+      );
     }
   });
 
   it("lets a waiter leave their own entry, and answers 404 for anybody else's", async () => {
     const entry = await service.join(WAITER_ID, input);
 
-    await expect(service.leave(OTHER_WAITER_ID, entry.id)).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      refusalOf(service.leave(OTHER_WAITER_ID, entry.id)),
+    ).resolves.toEqual({ status: 404, code: "WAITLIST_ENTRY_NOT_FOUND" });
     await service.leave(WAITER_ID, entry.id);
     await expect(service.findMine(WAITER_ID)).resolves.toEqual([]);
   });
@@ -356,7 +380,9 @@ describe("WaitlistService", () => {
 
   it("refuses a cursor it did not issue", async () => {
     await expect(
-      service.findDemand(owner, { ...firstPage(), cursor: "not-a-cursor" }),
-    ).rejects.toThrow(BadRequestException);
+      refusalOf(
+        service.findDemand(owner, { ...firstPage(), cursor: "not-a-cursor" }),
+      ),
+    ).resolves.toEqual({ status: 400, code: "CURSOR_MALFORMED" });
   });
 });

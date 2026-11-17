@@ -1,9 +1,3 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  NotFoundException,
-  UnauthorizedException,
-} from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { randomUUID } from "node:crypto";
 import {
@@ -21,6 +15,7 @@ import {
 import type { AuthenticatedUser } from "../auth/auth.types";
 import type { Page } from "../common/paging";
 import type { PublicOf } from "../common/testing/public-of.fakes";
+import { refusalOf } from "../common/testing/refusal";
 import { RealtimeService } from "../realtime/realtime.service";
 import type { AccountUnread, UnreadCounts } from "../unread/unread.types";
 import {
@@ -403,22 +398,22 @@ describe("ConversationService", () => {
 
     it("answers a listing that is not on offer with a 404", async () => {
       await expect(
-        service.start(GUEST_ID, about(RETIRED_LISTING_ID)),
-      ).rejects.toThrow(NotFoundException);
+        refusalOf(service.start(GUEST_ID, about(RETIRED_LISTING_ID))),
+      ).resolves.toEqual({ status: 404, code: "LISTING_NOT_FOUND" });
     });
 
     it("refuses a guest writing about a listing of their own", async () => {
-      await expect(service.start(OWNER_ID, about(LISTING_ID))).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        refusalOf(service.start(OWNER_ID, about(LISTING_ID))),
+      ).resolves.toEqual({ status: 403, code: "CANNOT_WRITE_TO_YOURSELF" });
     });
 
     it("answers a guest whose account is gone as an ended session", async () => {
       conversationRepository.vanishingGuest = true;
 
-      await expect(service.start(GUEST_ID, about(LISTING_ID))).rejects.toThrow(
-        UnauthorizedException,
-      );
+      await expect(
+        refusalOf(service.start(GUEST_ID, about(LISTING_ID))),
+      ).resolves.toEqual({ status: 401, code: "SESSION_NOT_FOUND" });
     });
   });
 
@@ -482,14 +477,20 @@ describe("ConversationService", () => {
       expect(second.nextCursor).toBeNull();
 
       await expect(
-        service.findPage(guest, threadsFor({ cursor: "not-a-cursor" })),
-      ).rejects.toThrow(BadRequestException);
+        refusalOf(
+          service.findPage(guest, threadsFor({ cursor: "not-a-cursor" })),
+        ),
+      ).resolves.toEqual({ status: 400, code: "CURSOR_MALFORMED" });
     });
 
     it("refuses an admin rather than handing them a scope", async () => {
-      await expect(service.findPage(admin, threadsFor())).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        refusalOf(service.findPage(admin, threadsFor())),
+      ).resolves.toEqual({
+        status: 403,
+        code: "ROLE_NOT_ALLOWED",
+        params: { roles: ["USER"] },
+      });
     });
   });
 
@@ -574,20 +575,24 @@ describe("ConversationService", () => {
       const { id } = await service.start(GUEST_ID, about(LISTING_ID));
 
       for (const outsider of [stranger, otherOwner, admin]) {
-        await expect(service.findOne(id, outsider)).rejects.toThrow(
-          NotFoundException,
+        const gone = { status: 404, code: "CONVERSATION_NOT_FOUND" };
+
+        await expect(refusalOf(service.findOne(id, outsider))).resolves.toEqual(
+          gone,
         );
         await expect(
-          service.findMessages(id, outsider, messagesFor()),
-        ).rejects.toThrow(NotFoundException);
+          refusalOf(service.findMessages(id, outsider, messagesFor())),
+        ).resolves.toEqual(gone);
         await expect(
-          service.send(id, outsider, { body: "Hi" }),
-        ).rejects.toThrow(NotFoundException);
+          refusalOf(service.send(id, outsider, { body: "Hi" })),
+        ).resolves.toEqual(gone);
         await expect(
-          service.markRead(id, outsider, {
-            upTo: "2026-08-17T12:00:01.000Z",
-          }),
-        ).rejects.toThrow(NotFoundException);
+          refusalOf(
+            service.markRead(id, outsider, {
+              upTo: "2026-08-17T12:00:01.000Z",
+            }),
+          ),
+        ).resolves.toEqual(gone);
       }
 
       expect(
@@ -596,9 +601,9 @@ describe("ConversationService", () => {
     });
 
     it("answers a thread that does not exist the same way", async () => {
-      await expect(service.findOne(randomUUID(), guest)).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        refusalOf(service.findOne(randomUUID(), guest)),
+      ).resolves.toEqual({ status: 404, code: "CONVERSATION_NOT_FOUND" });
     });
   });
 
