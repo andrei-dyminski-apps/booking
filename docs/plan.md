@@ -246,9 +246,8 @@ The backend of it is done. `GET /listings` is a filtered, cursor-paged catalogue
 public — a catalogue behind a login is not a catalogue, and a read that carried a session
 could not be cached by URL for every visitor at once. The frontend is built on top of it:
 `/listings` is the catalogue, `/listings/:id` the page a stay is booked from, `/bookings`
-the list of stays every role reads its own scope of. PPR was the one box left, and it moved
-to the end of the roadmap, phase 11: what it buys is a measured time to first byte, and
-there is nothing to measure before a deploy.
+the list of stays every role reads its own scope of. PPR was the one box left; it was tried
+after the deploy and not kept — see "Decisions deliberately not taken".
 
 - [x] A list of listings with filters (dates, price, capacity); filters live in the **URL searchParams** (shareable links), Server Components, cursor pagination.
       The filters and the page are `listingQuerySchema` in the contract, so the same shape
@@ -981,19 +980,6 @@ What stays out: everything that touches the interface — a catalogue, a locale 
 `proxy.ts` composed with a locale middleware, formatters, `<html lang>`, the SEO of two
 languages. A listing's title and description stay their author's text.
 
-## Phase 11 — Partial prerendering
-
-- [ ] `cacheComponents: true` and PPR — moved here from phase 5, so the win is
-      measured on the site phase 9 deployed. The catalogue is the page whose shell is worth
-      prerendering, and the flag turned out not to be a flag. Under
-      `cacheComponents` the `cache` and `next` options of `fetch` stop being how a read is
-      cached: `"use cache"` with `cacheLife`/`cacheTag` replaces them, which is a rewrite
-      of the `ReadOptions` argument every read method of `shared/api` takes and of the
-      rule that the call site decides. It is its own change, on top of the reads phase 5
-      wrote down, rather than a line in `next.config.js` — and the header
-      still reads the session in the root layout, so it also needs the `<Suspense>`
-      boundary that turns the shell into the prerendered part.
-
 ## Decisions already made
 
 - **Prisma** (v7: `prisma.config.ts`, the `prisma-client` generator, the `@prisma/adapter-pg` driver adapter) — the most recognizable ORM; interactive transactions and raw migrations cover phase 4.
@@ -1051,3 +1037,25 @@ languages. A listing's title and description stay their author's text.
   already shared as zod schemas in `@repo/contracts`, which gives both sides the same
   types and the same validation from one source; a generator would add a build step to
   produce a second description of the same thing.
+
+- **Partial prerendering (`cacheComponents: true`)** — it was built (commit `deb1721`: the
+  reads rewritten to `"use cache"`, a `<Suspense>` boundary around the session in the shell,
+  a loading state per route) and measured on the deployed site, signed in, then reverted.
+  The plan expected a better time to first byte, and the measurements did not show one:
+  - TTFB stayed at about 24 ms on every page, before and after.
+  - Lighthouse (mobile profile, 3 runs per page, 20 pages): the score went from 99 to 97,
+    9 pages lost 2–4 points and none gained; LCP moved later on 11 pages (0.8–1.0 s → 2.4–2.7
+    s, the cause was not isolated); total blocking time was the one gain, 79 → 52 ms.
+  - Client-side navigation (16 navigations, 3 samples each, unthrottled and Slow 4G): the
+    skeleton appears after about 29 ms with or without it, because the route `loading.tsx`
+    files are prefetched either way, and the content was not faster, 346 → 410 ms unthrottled
+    and 628 → 647 ms throttled, slower on 4–6 navigations.
+
+  The likely reason is that every page measured is behind a login and shows one user's data,
+  so the time to content is set by the API call behind it, which a prerendered shell does not
+  shorten. What was not measured: the anonymous pages (`/`, `/listings`, `/listings/:id`),
+  where a shell and a cached read are shared by every visitor and the gain should be, and the
+  load a cached read takes off the API. If PPR is reconsidered, measure those first, on a
+  preview deployment of the branch. The numbers are in `docs/lighthouse-2026-11-17.md`,
+  `docs/lighthouse-phase-11-comparison.md`, `docs/lighthouse-phase-11-navigation.md` and
+  `docs/lighthouse-phase-11-navigation-comparison.md`.
