@@ -1,13 +1,9 @@
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { ACCESS_TOKEN_COOKIE } from "@repo/contracts";
-import { THEME_SCRIPT } from "#shared/config";
+import { NONCE_HEADER } from "#shared/config";
 import { config } from "../../../proxy";
-import { REACT_SHELL_TIME_SCRIPT } from "./content-security-policy";
 import { proxy } from "./proxy";
 
 /**
@@ -15,8 +11,7 @@ import { proxy } from "./proxy";
  * protected page. What has to hold is the redirect target — `next` has to carry the visitor
  * back to where they were going, query string included — since that is the one part of
  * this function a stranger's URL can influence. And every page it lets through carries a
- * Content-Security-Policy whose script nonce is fresh and handed to the render as well,
- * inside the policy Next.js reads off the request.
+ * Content-Security-Policy whose script nonce is fresh and handed to the render as well.
  */
 
 const requestFor = (path: string, cookie?: string): NextRequest =>
@@ -64,12 +59,14 @@ describe("proxy", () => {
     expect(proxy(requestFor("/bookings/abc")).status).toBe(307);
   });
 
-  it("sends a policy with a fresh script nonce, and hands the policy to the render", () => {
+  it("sends a policy with a fresh script nonce, and hands the nonce to the render", () => {
     const first = proxy(requestFor("/listings"));
     const second = proxy(requestFor("/listings"));
     const policy = first.headers.get("content-security-policy") ?? "";
+    const nonce = first.headers.get(`x-middleware-request-${NONCE_HEADER}`);
 
-    expect(policy).toMatch(/'nonce-[^']+'/);
+    expect(nonce).toBeTruthy();
+    expect(policy).toContain(`'nonce-${String(nonce)}'`);
     expect(
       policy
         .split("; ")
@@ -79,32 +76,6 @@ describe("proxy", () => {
       first.headers.get("x-middleware-request-content-security-policy"),
     ).toBe(policy);
     expect(second.headers.get("content-security-policy")).not.toBe(policy);
-  });
-
-  it("allows the two scripts of the prerendered shell by the hash of their text", () => {
-    const scriptSrc = (
-      proxy(requestFor("/listings")).headers.get("content-security-policy") ??
-      ""
-    )
-      .split("; ")
-      .find((directive) => directive.startsWith("script-src"));
-
-    for (const script of [THEME_SCRIPT, REACT_SHELL_TIME_SCRIPT]) {
-      const hash = createHash("sha256").update(script).digest("base64");
-
-      expect(scriptSrc).toContain(`'sha256-${hash}'`);
-    }
-  });
-
-  it("allows the shell script the React inside Next.js actually writes", () => {
-    // A React upgrade that rewords it would be blocked without a word from anything else.
-    const require = createRequire(import.meta.url);
-    const server =
-      require.resolve("next/dist/compiled/react-dom/cjs/react-dom-server.node.production.js");
-
-    expect(readFileSync(server, "utf8")).toContain(
-      JSON.stringify(REACT_SHELL_TIME_SCRIPT),
-    );
   });
 
   it("lets Vercel's toolbar through on a preview deployment and nowhere else", () => {

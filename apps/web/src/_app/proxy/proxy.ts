@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { ACCESS_TOKEN_COOKIE } from "@repo/contracts";
-import { ROUTES } from "#shared/config";
+import { NONCE_HEADER, ROUTES } from "#shared/config";
 import { contentSecurityPolicy } from "./content-security-policy";
 
 /**
@@ -25,10 +25,9 @@ export const PROTECTED: readonly string[] = [
  *
  * **The Content-Security-Policy, with a nonce per request.** The policy names the nonce,
  * and the same policy goes on the request as well as the response: Next.js reads it there
- * and puts the nonce on the scripts it streams into the page. A page is a prerendered
- * shell with the request's own parts streamed after it, and Next.js keeps every inline
- * script out of the shell for exactly this reason — the shell was written before there was
- * a nonce. The one script of this site's own in it, the theme's, is allowed by its hash.
+ * and puts the nonce on the scripts it writes into the page, and the root layout reads
+ * `x-nonce` for the one script of its own (the theme). Every page here renders per request
+ * already — the shell reads the session — so a nonce costs no static page.
  *
  * **The cheap half of protecting a route**: a visitor with no access cookie is sent to the
  * login page before Next.js renders anything. It is deliberately not the check that
@@ -55,6 +54,7 @@ export function proxy(request: NextRequest): NextResponse {
   });
   const headers = new Headers(request.headers);
 
+  headers.set(NONCE_HEADER, nonce);
   headers.set("Content-Security-Policy", policy);
 
   const response = NextResponse.next({ request: { headers } });

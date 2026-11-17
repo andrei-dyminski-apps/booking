@@ -981,45 +981,18 @@ What stays out: everything that touches the interface — a catalogue, a locale 
 `proxy.ts` composed with a locale middleware, formatters, `<html lang>`, the SEO of two
 languages. A listing's title and description stay their author's text.
 
-## Phase 11 — Partial prerendering ✅
+## Phase 11 — Partial prerendering
 
-- [x] `cacheComponents: true` and PPR — moved here from phase 5, so the win is
-      measured on the site phase 9 deployed. Every page is now a prerendered shell with
-      the request's parts streamed into it (`◐` in `next build`), `partialPrefetching`
-      on beside it. It took the four things the flag turned out to stand for:
-  - **The shell reads no session.** `AppShell` reading `/auth/me` for the whole frame
-    became three islands (`WithUser` under a `<Suspense>` each: the sidebar's links and
-    account panel, the header's menu and calls to action, the footer's second link), still
-    one call to the API through `currentUser`'s `cache()`.
-  - **Reads are cached by `"use cache"`.** `ReadOptions` became `{ cache: "no-store" }` or
-    `{ cached }`, a `"use cache"` function the call site writes with `cacheLife` and
-    `cacheTag` around `answerOf(url)`. The scope is the call site's because a `"use cache"`
-    function may not sit in a module a client component reaches, which `shared/api` is;
-    it stores the raw answer, because what a cached function throws loses its class on
-    the way out and `orNotFound` reads an `ApiResponseError`. `revalidate: false` is
-    `cacheLife("max")`, the hold-sweep minute `cacheLife({ revalidate })`.
-  - **The clock waits for the request.** Next.js renders ahead of a request (a prefetch,
-    the dev server's instant-navigation check) and refuses `Date.now()` there; a `no-store`
-    read awaits `connection()` in the transport, and the two pages that read the clock
-    before one say it themselves.
-  - **The CSP nonce never reaches the shell**, which is written before any request. The
-    theme's script is a constant allowed by its hash and `next-themes`' own is left inert;
-    React's one inline script in a shell is allowed by its hash too, with a spec that
-    checks its text against the React Next.js bundles. The login page is allowed to block
-    (`instant = false`): streamed content needs a script to be shown, and that form must
-    work without one.
-
-  Measured before the change on the deployed site (Lighthouse mobile, median of five;
-  `curl` time to first byte, median of fifteen): Lighthouse 99–100, FCP = LCP ≈ 0.78–0.82 s
-  on `/`, `/listings` and a listing, and a TTFB of ≈ 300 ms — every page rendered by the
-  function before its first byte. Locally, `main` against this branch on one API: the
-  first byte went from 8–13 ms to 2 ms, and the observed FCP stayed at ≈ 70 ms. Lighthouse's
-  simulated FCP went the other way locally, 755 → 905 ms, because the document is heavier:
-  the shell's RSC payload is sent again with the resumed part, and the streamed response
-  compresses worse (`/`: 15 → 26 KB on the wire). Local runs cannot show what the change
-  is for — a first byte from Vercel's CDN rather than from the function — so the number
-  that decides it is the deployed TTFB and FCP, to be measured the same way after the
-  deploy and written here.
+- [ ] `cacheComponents: true` and PPR — moved here from phase 5, so the win is
+      measured on the site phase 9 deployed. The catalogue is the page whose shell is worth
+      prerendering, and the flag turned out not to be a flag. Under
+      `cacheComponents` the `cache` and `next` options of `fetch` stop being how a read is
+      cached: `"use cache"` with `cacheLife`/`cacheTag` replaces them, which is a rewrite
+      of the `ReadOptions` argument every read method of `shared/api` takes and of the
+      rule that the call site decides. It is its own change, on top of the reads phase 5
+      wrote down, rather than a line in `next.config.js` — and the header
+      still reads the session in the root layout, so it also needs the `<Suspense>`
+      boundary that turns the shell into the prerendered part.
 
 ## Decisions already made
 

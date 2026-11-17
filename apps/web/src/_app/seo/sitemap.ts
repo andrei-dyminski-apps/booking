@@ -1,8 +1,7 @@
 import type { MetadataRoute } from "next";
-import { cacheLife, cacheTag } from "next/cache";
 import { connection } from "next/server";
 import { MAX_PAGE_LIMIT, type Listing } from "@repo/contracts";
-import { answerOf, listingsApi, type ReadOptions } from "#shared/api";
+import { listingsApi, type ReadOptions } from "#shared/api";
 import { CATALOGUE_TAG, ROUTES, siteUrl } from "#shared/config";
 
 /** How many addresses one sitemap may hold, by the protocol's own limit. */
@@ -12,20 +11,13 @@ const MAX_URLS = 50_000;
 const FIXED_URLS = 2;
 
 /**
- * Every page of the unfiltered catalogue, cached under the catalogue's tag —
+ * Every page of the unfiltered catalogue, from the Data Cache under the catalogue's tag —
  * the writes that add, edit or retire a listing are the ones that change this list, and
  * they name that tag. No lifetime beside it, unlike the catalogue's own pages: a hold
  * changes what is free, never which listings exist, and no search here asks about dates.
  */
 const SITEMAP_READ: ReadOptions = {
-  cached: async (url) => {
-    "use cache";
-
-    cacheLife("max");
-    cacheTag(CATALOGUE_TAG);
-
-    return await answerOf(url);
-  },
+  next: { revalidate: false, tags: [CATALOGUE_TAG] },
 };
 
 async function everyListing(): Promise<Listing[]> {
@@ -60,8 +52,10 @@ async function everyListing(): Promise<Listing[]> {
  * Past fifty thousand listings it is cut short, and `generateSitemaps` is the step after.
  *
  * Rendered per request: the API is not there to be asked while the site builds, and the
- * origin is read at runtime. `connection()` is what says so — the pages above are cached
- * reads, and without it the build would prerender the route and ask the API for them.
+ * origin is read at runtime. That is `connection()` rather than the route's
+ * `dynamic = "force-dynamic"`, which would also turn every `fetch` that sets no `cache`
+ * into a `no-store` — `revalidate: false` is falsy to the check Next.js makes — and the
+ * pages above would skip the Data Cache on every request.
  */
 export async function sitemap(): Promise<MetadataRoute.Sitemap> {
   await connection();

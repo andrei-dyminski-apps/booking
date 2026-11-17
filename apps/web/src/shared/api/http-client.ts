@@ -12,7 +12,6 @@ import {
   HTTP_STATUS,
   REQUEST_TIMEOUT_MS,
 } from "../config";
-import type { AnswerCache } from "./cached-answer";
 import { refreshSession } from "./session-refresh";
 
 /**
@@ -49,21 +48,20 @@ export class ApiResponseError extends Error {
 }
 
 /**
- * How a read is cached — a decision of the call site, not a default of this module, hence
- * a mandatory argument rather than an optional one. There are two answers and they differ
- * in more than freshness.
+ * Caching of a read is a decision of the call site, not a default of this module —
+ * hence a mandatory argument rather than an optional one.
  *
- * `{ cache: "no-store" }` is a read of this request: it carries the visitor's session and
- * address (`serverHeaders`), runs on every render and is never stored. A page that makes
- * one has a part that differs per visitor, which is what a `<Suspense>` is for.
- *
- * `{ cached }` is an answer shared between visitors. `cached` is a `"use cache"` function
- * of the call site that calls `answerOf` — which is where the read's `cacheLife` and
- * `cacheTag` are written, and why the decision stays at the call site. It carries nothing
- * of the visitor's, so a route that needs the session cannot be read this way; asked of
- * one, it answers `401` rather than somebody else's data.
+ * `revalidate` is mandatory too, and that is not symmetry for its own sake. A `fetch` has
+ * not been cached by default since Next 15, and tags alone do not opt one back in: the
+ * decision is read off `cache` and `revalidate`, and a request that names neither is
+ * turned into a `no-store` with its tags attached to nothing. `{ next: { tags } }` is
+ * therefore a spelling that looks like caching and is not, and the mutation invalidating
+ * that tag has nothing to invalidate — a mistake nothing reports, because it fails by
+ * being fresh. `false` is what a read whose only invalidation is its tag says.
  */
-export type ReadOptions = { cache: "no-store" } | { cached: AnswerCache };
+export type ReadOptions =
+  | { cache: RequestCache }
+  | { next: { revalidate: number | false; tags?: string[] } };
 
 type RequestOptions<T> = {
   method: "GET" | "POST" | "PATCH" | "DELETE";
@@ -120,12 +118,8 @@ async function send<T>({
   read,
   signal,
 }: RequestOptions<T>): Promise<Response> {
-  if (read !== undefined && "cached" in read && typeof window === "undefined") {
-    return await sendCached(path, read.cached);
-  }
-
   const headers = {
-    ...(await serverHeaders()),
+    ...(await serverHeaders(read)),
     ...(body === undefined ? {} : { "Content-Type": "application/json" }),
   };
 
@@ -136,44 +130,13 @@ async function send<T>({
       // cookie and travels by default. `include` would still work and would still be
       // describing a topology this application no longer has.
       credentials: "same-origin",
-      // Nothing of this request is stored, on either side: an answer that carries the
-      // session is the visitor's own.
-      cache: "no-store",
       signal: withTimeout(signal),
       headers,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      ...read,
     });
   } catch (cause) {
     // Only a transport error means the API is not running: any status code is an answer.
-    throw new ApiUnreachableError(cause);
-  }
-}
-
-/**
- * A cached read, answered as if it had just been fetched: the call site's cache hands back
- * the status and the text `answerOf` stored, and they are put back into a `Response` here,
- * so the parse and the errors that follow are the same code a read of this request goes
- * through.
- *
- * The cache throws only when there was nothing worth storing — no answer at all, or a 5xx
- * — and what it throws arrives serialized, its class lost on the way. Both are an API that
- * could not answer this read, which is what the caller is told.
- */
-async function sendCached(
-  path: string,
-  cached: AnswerCache,
-): Promise<Response> {
-  try {
-    const { status, contentLength, text } = await cached(
-      `${apiOrigin()}${path}`,
-    );
-
-    return new Response(text === "" ? null : text, {
-      status,
-      headers:
-        contentLength === null ? {} : { "content-length": contentLength },
-    });
-  } catch (cause) {
     throw new ApiUnreachableError(cause);
   }
 }
@@ -273,23 +236,17 @@ function canRetry<T>(
  * them together, which would make the rate limit on `/auth/login` a limit for the whole
  * site rather than for one attacker.
  *
- * A cached read never comes here (`sendCached`). Its answer is stored and served to whoever
- * asks for it next, so attaching one person's credential to it would hand their data to the
- * following visitor — and `cookies()` inside a `"use cache"` scope is refused anyway.
+ * A cached read is left out of both deliberately. Its answer goes into Next's Data Cache
+ * under the URL and is then served to whoever asks for it next, so attaching one person's
+ * credential to it would hand their data to the following visitor. It keeps the reads that
+ * need no session out of `cookies()` as well, and with it out of dynamic rendering.
  */
-async function serverHeaders(): Promise<HeadersInit> {
-  if (typeof window !== "undefined") return {};
+async function serverHeaders(
+  read: ReadOptions | undefined,
+): Promise<HeadersInit> {
+  if (typeof window !== "undefined" || isCached(read)) return {};
 
-  const [{ cookies, headers }, { connection }] = await Promise.all([
-    import("next/headers"),
-    import("next/server"),
-  ]);
-
-  // A read of this request is work of this request, and `connection()` says so to the
-  // renders Next.js makes ahead of one — a prefetch of a page, the dev server's check that
-  // a navigation is instant. They stop here rather than read on into what only a request
-  // may do, such as asking the clock.
-  await connection();
+  const { cookies, headers } = await import("next/headers");
   const result: Record<string, string> = {};
 
   const token = (await cookies()).get(ACCESS_TOKEN_COOKIE)?.value;
@@ -309,6 +266,15 @@ async function serverHeaders(): Promise<HeadersInit> {
   }
 
   return result;
+}
+
+/** A mutation carries no `read` and is never cached; the rest say so themselves. */
+function isCached(read: ReadOptions | undefined): boolean {
+  if (read === undefined) return false;
+
+  return "cache" in read
+    ? read.cache !== "no-store"
+    : read.next.revalidate !== 0;
 }
 
 /**
@@ -346,8 +312,8 @@ async function toResponseError(response: Response): Promise<ApiResponseError> {
 }
 
 /**
- * The query string of a read, and part of the key a cached read is stored under (the URL
- * is the argument of the call site's `"use cache"` scope) — which is why the parameters are sorted rather than left in the order the object
+ * The query string of a read, and the second half of the Data Cache key it is stored
+ * under — which is why the parameters are sorted rather than left in the order the object
  * happened to carry them. Two callers asking the same question have to produce the same
  * URL, or each of them warms a cache entry the other never reads.
  *

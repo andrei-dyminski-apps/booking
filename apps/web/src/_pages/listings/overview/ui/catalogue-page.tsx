@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import { connection } from "next/server";
 import { WarehouseIcon } from "lucide-react";
 import { earliestToday } from "@repo/contracts";
 import {
@@ -46,10 +45,6 @@ export const CataloguePage = async ({
   // and which addresses this one collapses is a decision of this slice rather than a
   // property of the URL.
   if (canonical !== null) redirect(canonical);
-
-  // The date boxes start at today, which is the request's to say: a prefetch of this page
-  // stops here rather than reading the clock.
-  await connection();
 
   // A question the contract refuses is not put to the API at all: the messages are under
   // the boxes, and an unfiltered list beside them would read as the answer to it.

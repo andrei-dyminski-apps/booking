@@ -22,7 +22,6 @@ export {
   ApiUnreachableError,
   type ReadOptions,
 } from "./http-client";
-export { answerOf, type AnswerCache, type CachedAnswer } from "./cached-answer";
 export { refusedWith } from "./refusal";
 export { refreshSession } from "./session-refresh";
 export { pageOrNullOnStaleCursor } from "./keyset-page";

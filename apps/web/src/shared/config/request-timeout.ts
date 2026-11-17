@@ -5,9 +5,9 @@
  * `ApiUnreachableError` describes.
  *
  * The price is Next's per-render memoization: a `signal` in the init opts the request out
- * of it, so two components asking for the same booking in one pass make two requests. A
- * cached read — the call site's `"use cache"` scope — is not affected, and a render that
- * never finishes costs more than a duplicated call.
+ * of it, so two components asking for the same booking in one pass make two requests. The
+ * Data Cache — the decision `read` carries from the call site — is not affected, and a
+ * render that never finishes costs more than a duplicated call.
  *
  * Here rather than in `http-client.ts` because the session refresh waits by the same
  * deadline from a module of its own (`session-refresh.ts`), which must not import the

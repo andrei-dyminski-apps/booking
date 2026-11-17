@@ -1,5 +1,4 @@
 import { Suspense } from "react";
-import { connection } from "next/server";
 import { parseISO } from "date-fns";
 import { UsersIcon } from "lucide-react";
 import { earliestToday, Role, stayDay, weekdaySchema } from "@repo/contracts";
@@ -17,8 +16,8 @@ import {
   CANCELLATION_POLICY_LABELS,
   sharePercent,
 } from "#entities/booking";
-import { currentUser } from "#shared/api";
-import { ROUTES } from "#shared/config";
+import { currentUser, listingsApi } from "#shared/api";
+import { availabilityTag, HOLD_SWEEP_REVALIDATE, ROUTES } from "#shared/config";
 import {
   addDays,
   formatMoney,
@@ -28,7 +27,6 @@ import {
   WEEKDAY_NAMES,
 } from "#shared/lib";
 import { BackLink, ButtonLink, JsonLd } from "#shared/ui";
-import { readAvailability } from "../api/read-availability";
 import { readListing } from "../api/read-listing";
 import { readListingReviews } from "../api/read-listing-reviews";
 import { listingJsonLd } from "../lib/listing-json-ld";
@@ -63,11 +61,6 @@ const REVIEWS_SHOWN = 10;
 
 export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
   const id = requireId((await params).id);
-
-  // The calendar and the quotes are measured from now, which is the request's to say: a
-  // prefetch of this page stops here rather than reading the clock.
-  await connection();
-
   const from = earliestToday();
   const now = new Date().toISOString();
 
@@ -89,7 +82,16 @@ export const ListingPage = async ({ params }: PageProps<"/listings/[id]">) => {
     orNotFound(
       Promise.all([
         readListing(id),
-        readAvailability(id, { from, to: addDays(from, WINDOW_DAYS) }),
+        listingsApi.availability(
+          id,
+          { from, to: addDays(from, WINDOW_DAYS) },
+          {
+            next: {
+              revalidate: HOLD_SWEEP_REVALIDATE,
+              tags: [availabilityTag(id)],
+            },
+          },
+        ),
       ]),
     ),
     readListingReviews(id, REVIEWS_SHOWN),
