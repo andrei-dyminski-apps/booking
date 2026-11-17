@@ -1,7 +1,15 @@
 import { addDays, format, parseISO } from "date-fns";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import { adminRefundSchema } from "./adjustment.js";
 import { loginSchema, registerFormSchema, registerSchema } from "./auth.js";
+import {
+  bookingQuerySchema,
+  cancelBookingSchema,
+  createBookingSchema,
+  hostCancelBookingSchema,
+} from "./booking.js";
+import { endStayEarlySchema } from "./early-end.js";
 import { rule, toApiIssue, toErrorCode } from "./error-code.js";
 import {
   RATE_UNDER_NON_REFUNDABLE_POLICY,
@@ -423,5 +431,90 @@ describe("the listing rules", () => {
         params: { maximum: 366 },
       },
     ]);
+  });
+});
+
+describe("the booking rules", () => {
+  const LISTING_ID = "6d0f2c1e-1a2b-4c3d-8e5f-9a0b1c2d3e4f";
+  const tomorrow = format(addDays(new Date(), 30), "yyyy-MM-dd");
+  const later = format(addDays(new Date(), 33), "yyyy-MM-dd");
+  const stay = { listingId: LISTING_ID, from: tomorrow, to: later };
+
+  const codesOf = (schema: z.ZodType, input: unknown) =>
+    issuesOf(schema, input).map(({ path, code }) => ({ path, code }));
+
+  it("names the rule of a stay's days", () => {
+    expect(
+      codesOf(createBookingSchema, { ...stay, from: later, to: tomorrow }),
+    ).toEqual([{ path: ["to"], code: "CHECK_OUT_NOT_AFTER_CHECK_IN" }]);
+    expect(
+      codesOf(createBookingSchema, { ...stay, from: "2020-01-01" }),
+    ).toEqual([{ path: ["from"], code: "CHECK_IN_DAY_PAST" }]);
+    expect(
+      codesOf(createBookingSchema, { ...stay, from: "", to: undefined }),
+    ).toEqual([
+      { path: ["from"], code: "DATE_REQUIRED" },
+      { path: ["to"], code: "DATE_REQUIRED" },
+    ]);
+    expect(codesOf(createBookingSchema, { ...stay, to: "soon" })).toEqual([
+      { path: ["to"], code: "DATE_INVALID" },
+    ]);
+  });
+
+  it("names the rule of a cancellation's reason", () => {
+    expect(
+      issuesOf(hostCancelBookingSchema, { reason: " " }).map(
+        ({ code }) => code,
+      ),
+    ).toEqual(["CANCELLATION_REASON_REQUIRED"]);
+    expect(
+      issuesOf(cancelBookingSchema, { reason: "a".repeat(501) }),
+    ).toMatchObject([
+      { code: "CANCELLATION_REASON_TOO_LONG", params: { maximum: 500 } },
+    ]);
+  });
+
+  it("names the rule of the window and the dates of a list of stays", () => {
+    expect(codesOf(bookingQuerySchema, { from: tomorrow })).toEqual([
+      { path: ["to"], code: "SEARCH_DATES_INCOMPLETE" },
+    ]);
+    expect(codesOf(bookingQuerySchema, { from: later, to: tomorrow })).toEqual([
+      { path: ["to"], code: "WINDOW_END_NOT_AFTER_START" },
+    ]);
+  });
+
+  it("names the rule of an admin's refund", () => {
+    const refund = {
+      amountCents: 500,
+      reason: "Goodwill",
+      requestId: "0b7e8f9a-1c2d-4e3f-8a4b-5c6d7e8f9a0b",
+    };
+
+    expect(codesOf(adminRefundSchema, { ...refund, amountCents: 0 })).toEqual([
+      { path: ["amountCents"], code: "REFUND_AMOUNT_INVALID" },
+    ]);
+    // Whatever is no whole positive amount is one refusal, not zod's own beside it.
+    for (const amountCents of [-5, 1.5, undefined, "ten"]) {
+      expect(codesOf(adminRefundSchema, { ...refund, amountCents })).toEqual([
+        { path: ["amountCents"], code: "REFUND_AMOUNT_INVALID" },
+      ]);
+    }
+    expect(codesOf(adminRefundSchema, { ...refund, reason: " " })).toEqual([
+      { path: ["reason"], code: "REFUND_REASON_REQUIRED" },
+    ]);
+    expect(
+      issuesOf(adminRefundSchema, { ...refund, reason: "a".repeat(501) }),
+    ).toMatchObject([
+      { code: "REFUND_REASON_TOO_LONG", params: { maximum: 500 } },
+    ]);
+  });
+
+  it("names the rule of the check-out an early end is stated for", () => {
+    expect(
+      codesOf(endStayEarlySchema, { checkOut: undefined, refundCents: 0 }),
+    ).toEqual([{ path: ["checkOut"], code: "DATE_REQUIRED" }]);
+    expect(
+      codesOf(endStayEarlySchema, { checkOut: "tonight", refundCents: 0 }),
+    ).toEqual([{ path: ["checkOut"], code: "DATE_INVALID" }]);
   });
 });

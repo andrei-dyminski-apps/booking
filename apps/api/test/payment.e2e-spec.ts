@@ -7,7 +7,10 @@ import { subDays } from "date-fns";
 import {
   BASIS_POINTS,
   Role,
+  MAX_CHARGE,
+  MIN_CHARGE,
   STAY_TOO_CHEAP,
+  STAY_TOO_EXPENSIVE,
   apiErrorSchema,
   bookingAdjustmentListSchema,
   bookingAdjustmentSchema,
@@ -204,6 +207,11 @@ const listingInput: CreateListingInput = {
   description: "Two rooms under the roof and a wall of glass facing the water.",
   pricePerNightCents: cents(12_035),
   capacity: 4,
+};
+
+/** An `.expect(...)` that the refusal answered with this code. */
+const hasCode = (code: string) => (response: { body: unknown }) => {
+  expect(apiErrorSchema.parse(response.body).code).toBe(code);
 };
 
 describe("Payments (e2e)", () => {
@@ -416,7 +424,10 @@ describe("Payments (e2e)", () => {
       currency: "usd",
     });
     // The host may read the stay; paying for it is the guest's alone.
-    await owner.post(`/bookings/${booking.id}/payment`).expect(403);
+    await owner
+      .post(`/bookings/${booking.id}/payment`)
+      .expect(403)
+      .expect(hasCode("ONLY_GUEST_PAYS"));
   });
 
   it("refuses a stay cheaper than one payment can carry, and holds no nights for it", async () => {
@@ -432,12 +443,43 @@ describe("Payments (e2e)", () => {
     const refused = await guest
       .post("/bookings")
       .send({ listingId: cheap, from: inDays(10), to: inDays(11) })
-      .expect(422);
+      .expect(422)
+      .expect(hasCode("STAY_TOO_CHEAP"));
     // The words of `chargeRefusal`, which the booking form shows before the press.
     expect(apiErrorSchema.parse(refused.body).message).toBe(STAY_TOO_CHEAP);
+    expect(apiErrorSchema.parse(refused.body).params).toEqual({
+      minimumCents: MIN_CHARGE,
+    });
     await guest
       .post("/bookings")
       .send({ listingId: cheap, from: inDays(10), to: inDays(12) })
+      .expect(201);
+  });
+
+  it("refuses a stay dearer than one payment can carry, naming the ceiling", async () => {
+    const dear = (
+      (
+        await owner
+          .post("/listings")
+          .send({ ...listingInput, pricePerNightCents: MAX_CHARGE })
+          .expect(201)
+      ).body as { id: string }
+    ).id;
+
+    const refused = await guest
+      .post("/bookings")
+      .send({ listingId: dear, from: inDays(10), to: inDays(12) })
+      .expect(422)
+      .expect(hasCode("STAY_TOO_EXPENSIVE"));
+
+    expect(apiErrorSchema.parse(refused.body)).toMatchObject({
+      message: STAY_TOO_EXPENSIVE,
+      params: { maximumCents: MAX_CHARGE },
+    });
+    // One night at the ceiling is what a payment can still carry.
+    await guest
+      .post("/bookings")
+      .send({ listingId: dear, from: inDays(10), to: inDays(11) })
       .expect(201);
   });
 
@@ -497,7 +539,10 @@ describe("Payments (e2e)", () => {
       }),
     ).toBe(1);
     // A paid stay has nothing left to pay.
-    await guest.post(`/bookings/${booking.id}/payment`).expect(409);
+    await guest
+      .post(`/bookings/${booking.id}/payment`)
+      .expect(409)
+      .expect(hasCode("BOOKING_NOT_AWAITING_PAYMENT"));
   });
 
   it("refuses a delivery that is not signed by the provider, and changes nothing", async () => {
@@ -782,7 +827,8 @@ describe("Payments (e2e)", () => {
         to: inDays(63),
         rate: "NON_REFUNDABLE",
       })
-      .expect(400);
+      .expect(400)
+      .expect(hasCode("RATE_NOT_OFFERED"));
 
     const standard = await hold(60, 63);
     expect(standard.amountCents).toBe(36_105);
@@ -968,12 +1014,21 @@ describe("Payments (e2e)", () => {
       requestId,
     };
 
-    await guest.post(`/bookings/${booking.id}/refunds`).send(body).expect(403);
-    await owner.post(`/bookings/${booking.id}/refunds`).send(body).expect(403);
+    await guest
+      .post(`/bookings/${booking.id}/refunds`)
+      .send(body)
+      .expect(403)
+      .expect(hasCode("ROLE_NOT_ALLOWED"));
+    await owner
+      .post(`/bookings/${booking.id}/refunds`)
+      .send(body)
+      .expect(403)
+      .expect(hasCode("ROLE_NOT_ALLOWED"));
     await admin
       .post(`/bookings/${booking.id}/refunds`)
       .send({ ...body, reason: " " })
-      .expect(400);
+      .expect(400)
+      .expect(hasCode("VALIDATION_FAILED"));
 
     const first = bookingAdjustmentSchema.parse(
       (
@@ -1016,7 +1071,8 @@ describe("Payments (e2e)", () => {
         amountCents: booking.amountCents - 5_000,
         requestId: randomUUID(),
       })
-      .expect(409);
+      .expect(409)
+      .expect(hasCode("REFUND_EXCEEDS_REMAINING"));
     expect(gateway.refunds).toHaveLength(1);
 
     // The total is the provider's news to raise, and the stay stays as it is.
@@ -1036,7 +1092,8 @@ describe("Payments (e2e)", () => {
         amountCents: booking.amountCents - 5_000,
         requestId: randomUUID(),
       })
-      .expect(409);
+      .expect(409)
+      .expect(hasCode("REFUND_EXCEEDS_REMAINING"));
     expect(gateway.refunds).toHaveLength(1);
 
     const listed = bookingAdjustmentListSchema.parse(
@@ -1077,7 +1134,8 @@ describe("Payments (e2e)", () => {
     await admin
       .post(`/bookings/${booking.id}/refunds`)
       .send({ amountCents: 100, reason: "Goodwill", requestId: randomUUID() })
-      .expect(409);
+      .expect(409)
+      .expect(hasCode("NOTHING_LEFT_TO_REFUND"));
     expect(gateway.refunds).toEqual([]);
   });
 
@@ -1096,14 +1154,16 @@ describe("Payments (e2e)", () => {
     await admin
       .post(`/bookings/${booking.id}/refunds`)
       .send({ ...body, requestId: randomUUID() })
-      .expect(409);
+      .expect(409)
+      .expect(hasCode("PAYMENT_DISPUTED"));
 
     const unpaid = await hold(20, 22);
 
     await admin
       .post(`/bookings/${unpaid.id}/refunds`)
       .send({ ...body, requestId: randomUUID() })
-      .expect(409);
+      .expect(409)
+      .expect(hasCode("STAY_NOT_PAID"));
     expect(gateway.refunds).toEqual([]);
   });
 
@@ -1174,7 +1234,8 @@ describe("Payments (e2e)", () => {
     await guest
       .post(`/bookings/${booking.id}/end-early`)
       .send({ checkOut: inDays(1), refundCents: unused + 1 })
-      .expect(409);
+      .expect(409)
+      .expect(hasCode("EARLY_END_REFUND_CHANGED"));
     await guest
       .post(`/bookings/${booking.id}/end-early`)
       .send({ checkOut: inDays(1), refundCents: unused })
@@ -1244,25 +1305,31 @@ describe("Payments (e2e)", () => {
     await owner
       .post(`/bookings/${booking.id}/end-early`)
       .send({ checkOut: inDays(1), refundCents: 0 })
-      .expect(403);
+      .expect(403)
+      .expect(hasCode("EARLY_END_NOT_FOR_HOST"));
 
     const ahead = await paid(20, 23);
 
     await guest
       .post(`/bookings/${ahead.id}/end-early`)
       .send({ checkOut: inDays(1), refundCents: 0 })
-      .expect(409);
+      .expect(409)
+      .expect(hasCode("STAY_NOT_BEGUN"));
 
     await app.get(PrismaService).booking.update({
       where: { id: booking.id },
       data: { cancellationPolicy: "FIRM" },
     });
     // Without the check-out it was stated for, and with one the day has left behind.
-    await admin.post(`/bookings/${booking.id}/end-early`).expect(400);
+    await admin
+      .post(`/bookings/${booking.id}/end-early`)
+      .expect(400)
+      .expect(hasCode("VALIDATION_FAILED"));
     await admin
       .post(`/bookings/${booking.id}/end-early`)
       .send({ checkOut: inDays(0), refundCents: 0 })
-      .expect(409);
+      .expect(409)
+      .expect(hasCode("EARLY_END_CHECK_OUT_CHANGED"));
     await admin
       .post(`/bookings/${booking.id}/end-early`)
       .send({ checkOut: inDays(1), refundCents: 0 })
@@ -1270,7 +1337,8 @@ describe("Payments (e2e)", () => {
     await guest
       .post(`/bookings/${booking.id}/end-early`)
       .send({ checkOut: inDays(1), refundCents: 0 })
-      .expect(409);
+      .expect(409)
+      .expect(hasCode("STAY_ALREADY_ENDED_EARLY"));
 
     expect(await read(booking.id)).toMatchObject({
       to: inDays(1),

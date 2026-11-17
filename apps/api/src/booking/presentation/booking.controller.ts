@@ -6,7 +6,6 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  ParseUUIDPipe,
   Post,
   Query,
 } from "@nestjs/common";
@@ -38,6 +37,7 @@ import type { AuthenticatedUser } from "../../auth/auth.types";
 import { CurrentUser } from "../../auth/decorators/current-user.decorator";
 import { Roles } from "../../auth/decorators/roles.decorator";
 import { ApiErrorDto } from "../../common/dto/api-error.dto";
+import { ParseIdPipe } from "../../common/parse-id.pipe";
 import { BookingAdjustmentService } from "../application/booking-adjustment.service";
 import { BookingCancellationService } from "../application/booking-cancellation.service";
 import { BookingEarlyEndService } from "../application/booking-early-end.service";
@@ -135,7 +135,7 @@ export class BookingController {
     description: "The booking owes no refund that was set aside",
     type: ApiErrorDto,
   })
-  retryStuckRefund(@Param("id", ParseUUIDPipe) id: string): Promise<void> {
+  retryStuckRefund(@Param("id", ParseIdPipe) id: string): Promise<void> {
     return this.bookingRefundService.retryStuckRefund(id);
   }
 
@@ -147,7 +147,7 @@ export class BookingController {
     type: ApiErrorDto,
   })
   findOne(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<BookingDetail> {
     return this.bookingService.findOne(id, user);
@@ -188,7 +188,7 @@ export class BookingController {
     type: ApiErrorDto,
   })
   refund(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: AdminRefundDto,
   ): Promise<BookingAdjustment> {
@@ -204,7 +204,7 @@ export class BookingController {
     type: ApiErrorDto,
   })
   findRefunds(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
   ): Promise<BookingAdjustment[]> {
     return this.bookingAdjustmentService.listOf(id);
   }
@@ -242,7 +242,7 @@ export class BookingController {
     type: ApiErrorDto,
   })
   endEarly(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: EndStayEarlyDto,
   ): Promise<void> {
@@ -279,7 +279,7 @@ export class BookingController {
     type: ApiErrorDto,
   })
   payment(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<BookingPayment> {
     return this.bookingService.payment(id, user);
@@ -349,7 +349,7 @@ export class BookingController {
     type: ApiErrorDto,
   })
   remove(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CancelBookingDto,
   ): Promise<void> {

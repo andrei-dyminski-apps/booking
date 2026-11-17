@@ -1,4 +1,4 @@
-import type { CreateBookingInput } from "@repo/contracts";
+import type { CreateBookingInput, ErrorParams } from "@repo/contracts";
 import { RetryLaterError } from "../../common/retry-later.error";
 import {
   formatCents,
@@ -104,13 +104,25 @@ export class RateNotOfferedError extends Error {
  */
 export class UnchargeableStayError extends Error {
   constructor(
-    amount: Cents,
+    readonly amount: Cents,
     readonly refusal: string,
   ) {
     super(
       `A stay costing ${formatCents(amount)} is outside what one payment can carry (${formatCents(MIN_CHARGE)} to ${formatCents(MAX_CHARGE)})`,
     );
     this.name = "UnchargeableStayError";
+  }
+
+  /** Which side of the payment's bounds the quote fell on. */
+  get code(): "STAY_TOO_EXPENSIVE" | "STAY_TOO_CHEAP" {
+    return this.amount > MAX_CHARGE ? "STAY_TOO_EXPENSIVE" : "STAY_TOO_CHEAP";
+  }
+
+  /** The bound it crossed, which a client words the refusal by. */
+  get params(): ErrorParams {
+    return this.code === "STAY_TOO_EXPENSIVE"
+      ? { maximumCents: MAX_CHARGE }
+      : { minimumCents: MIN_CHARGE };
   }
 }
 

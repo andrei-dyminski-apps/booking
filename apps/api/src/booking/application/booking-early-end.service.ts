@@ -17,9 +17,12 @@ import {
   unusedNightsRefund,
   type Booking,
   type EndStayEarlyInput,
+  type ErrorCode,
+  type ErrorParams,
   type StayNotice,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
+import { apiException } from "../../common/api-exception";
 import { NotificationService } from "../../notification/notification.service";
 import { PaymentGateway } from "../../payment/application/ports/payment-gateway";
 import {
@@ -81,7 +84,9 @@ export class BookingEarlyEndService {
     );
 
     if (reader === Canceller.HOST) {
-      throw new ForbiddenException(
+      throw apiException(
+        ForbiddenException,
+        "EARLY_END_NOT_FOR_HOST",
         "Only the guest or an admin can end a stay early",
       );
     }
@@ -90,7 +95,9 @@ export class BookingEarlyEndService {
       .whileCancelling(id, () => this.endReadable(id, user, stated))
       .catch((error: unknown) => {
         if (error instanceof CancellationInProgressError) {
-          throw new ConflictException(
+          throw apiException(
+            ConflictException,
+            "BOOKING_BUSY",
             "The booking is being changed by another request — try again",
           );
         }
@@ -143,14 +150,16 @@ export class BookingEarlyEndService {
     const expectedCheckOut = stated.checkOut;
 
     if (!mayEndEarly(booking, now)) {
-      throw new ConflictException(
-        whyNotEndable(booking, now, expectedCheckOut),
-      );
+      const why = whyNotEndable(booking, now, expectedCheckOut);
+
+      throw apiException(ConflictException, why.code, why.message, why.params);
     }
 
     // What the unused nights cost is all the refund is measured by.
     if (nights.length === 0) {
-      throw new ConflictException(
+      throw apiException(
+        ConflictException,
+        "STAY_NIGHTS_NOT_RECORDED",
         "This stay was booked before its nights were recorded and cannot end early",
       );
     }
@@ -158,10 +167,13 @@ export class BookingEarlyEndService {
     // What the caller agreed to was stated for another day: tonight is another night, so the
     // stay would check out on another day and give back other than the dialog said.
     if (checkOut !== expectedCheckOut) {
-      throw new ConflictException(
+      throw apiException(
+        ConflictException,
+        "EARLY_END_CHECK_OUT_CHANGED",
         expectedCheckOut < checkOut
           ? `The day has turned since the refund was stated — ending the stay now checks out on ${checkOut}; read the refund again`
           : `The refund was stated for checking out on ${expectedCheckOut}, but ending the stay now checks out on ${checkOut}; read the refund again`,
+        { statedCheckOut: expectedCheckOut, checkOut },
       );
     }
 
@@ -175,8 +187,14 @@ export class BookingEarlyEndService {
     // caller agreed to more than ending the stay gives back now. More than stated is not a
     // reason to refuse — the page may have read a refund the rule no longer counts.
     if ((refundCents ?? NO_CENTS) < stated.refundCents) {
-      throw new ConflictException(
+      throw apiException(
+        ConflictException,
+        "EARLY_END_REFUND_CHANGED",
         `The refund has changed since it was stated: a refund the page had not read yet gave back part of the unused nights, and ending the stay now gives back ${formatCents(refundCents ?? NO_CENTS)} ${booking.currency} — read it again`,
+        {
+          statedRefundCents: stated.refundCents,
+          refundCents: refundCents ?? NO_CENTS,
+        },
       );
     }
 
@@ -190,7 +208,9 @@ export class BookingEarlyEndService {
     );
 
     if (!written) {
-      throw new ConflictException(
+      throw apiException(
+        ConflictException,
+        "BOOKING_CHANGED",
         "The booking changed while it was being ended — try again",
       );
     }
@@ -237,7 +257,9 @@ export class BookingEarlyEndService {
     if (!booking.paid || paymentId === null) return null;
 
     if (booking.dispute === DisputeStatus.OPEN) {
-      throw new ConflictException(
+      throw apiException(
+        ConflictException,
+        "PAYMENT_DISPUTED",
         "The payment of this stay is disputed with the bank — it can be ended early once the dispute is settled",
       );
     }
@@ -249,7 +271,9 @@ export class BookingEarlyEndService {
     );
 
     if (provider.sent !== null) {
-      throw new ConflictException(
+      throw apiException(
+        ConflictException,
+        "CANCELLATION_REFUND_SENT",
         "A cancellation refund has been sent for this stay already — it cannot end early",
       );
     }
@@ -281,7 +305,9 @@ export class BookingEarlyEndService {
         `Could not read the refunds of booking ${id} to end it early: ${String(error)}`,
       );
 
-      throw new BadGatewayException(
+      throw apiException(
+        BadGatewayException,
+        "PAYMENT_PROVIDER_UNREACHABLE",
         "The payment provider could not be reached — the stay was not ended, try again",
       );
     }
@@ -299,22 +325,38 @@ function whyNotEndable(
   booking: Booking,
   now: Date,
   expectedCheckOut: string,
-): string {
+): { code: ErrorCode; message: string; params?: ErrorParams } {
   if (booking.endedEarlyAt !== null) {
-    return `This stay has been ended early already — it checks out on ${booking.to}`;
+    return {
+      code: "STAY_ALREADY_ENDED_EARLY",
+      message: `This stay has been ended early already — it checks out on ${booking.to}`,
+      params: { checkOut: booking.to },
+    };
   }
 
   if (booking.status === BookingStatus.CONFIRMED) {
     if (isBefore(now, checkInInstant(booking))) {
-      return "The stay has not begun yet — until check-in it can be cancelled instead";
+      return {
+        code: "STAY_NOT_BEGUN",
+        message:
+          "The stay has not begun yet — until check-in it can be cancelled instead",
+      };
     }
 
     if (expectedCheckOut < earlyCheckOut(booking, now)) {
-      return `The day has turned since the refund was stated, and tonight is now the stay's last night — it checks out on ${booking.to} as booked`;
+      return {
+        code: "EARLY_END_DAY_TURNED",
+        message: `The day has turned since the refund was stated, and tonight is now the stay's last night — it checks out on ${booking.to} as booked`,
+        params: { checkOut: booking.to },
+      };
     }
   }
 
-  return "Only a confirmed stay in progress with a night left after tonight can end early";
+  return {
+    code: "EARLY_END_NOT_AVAILABLE",
+    message:
+      "Only a confirmed stay in progress with a night left after tonight can end early",
+  };
 }
 
 /** What `STAY_ENDED_EARLY` copies off the stay, and the two people it may go to. */

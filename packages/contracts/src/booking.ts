@@ -8,6 +8,7 @@ import {
   type CheckIn,
 } from "./check-in.js";
 import { dayMessage, earliestToday, isDay } from "./day.js";
+import { rule } from "./error-code.js";
 import { listingSummarySchema } from "./listing.js";
 import { centsSchema, currencySchema } from "./money.js";
 import { bookingRateSchema, pricedNightSchema } from "./pricing.js";
@@ -196,6 +197,8 @@ const stayRequestFields = bookingSchema.omit({
   reviewed: true,
 });
 
+const checkInDayPast = rule("CHECK_IN_DAY_PAST", CHECK_IN_DAY_PAST);
+
 /**
  * Both rules are about a date and wait for one: without the guard an empty check-in box
  * reads as a stay in the past — `"" >= earliestToday()` is false — and the form puts that under a
@@ -213,7 +216,10 @@ function withStayRules<T extends z.ZodType<{ from: string; to: string }>>(
           !isDay(booking.to) ||
           booking.from < booking.to,
         {
-          error: "Check-out date must be later than check-in date",
+          error: rule(
+            "CHECK_OUT_NOT_AFTER_CHECK_IN",
+            "Check-out date must be later than check-in date",
+          ),
           path: ["to"],
         },
       )
@@ -221,7 +227,7 @@ function withStayRules<T extends z.ZodType<{ from: string; to: string }>>(
       // takes the hold (`isCheckInDayPast`), since this schema does not know where it is.
       .refine(
         (booking) => !isDay(booking.from) || booking.from >= earliestToday(),
-        { error: CHECK_IN_DAY_PAST, path: ["from"] },
+        { error: checkInDayPast, path: ["from"] },
       )
   );
 }
@@ -266,7 +272,7 @@ export function createBookingSchemaIn(listing: Pick<CheckIn, "timeZone">) {
       !isDay(booking.from) ||
       booking.from < earliestToday() ||
       !isCheckInDayPast(listing, booking.from, new Date()),
-    { error: CHECK_IN_DAY_PAST, path: ["from"] },
+    { error: checkInDayPast, path: ["from"] },
   );
 }
 
@@ -274,7 +280,11 @@ const cancellationReason = z
   .string()
   .trim()
   .max(MAX_CANCELLATION_REASON_LENGTH, {
-    error: `A reason can be at most ${String(MAX_CANCELLATION_REASON_LENGTH)} characters long`,
+    error: rule(
+      "CANCELLATION_REASON_TOO_LONG",
+      `A reason can be at most ${String(MAX_CANCELLATION_REASON_LENGTH)} characters long`,
+      { maximum: MAX_CANCELLATION_REASON_LENGTH },
+    ),
   });
 
 /** What a host who cancels without a reason is told — by the API and by the form alike. */
@@ -295,7 +305,9 @@ export const cancelBookingSchema = z.object({
 
 /** The host's cancellation: the same body, the reason required. */
 export const hostCancelBookingSchema = z.object({
-  reason: cancellationReason.min(1, { error: HOST_REASON_REQUIRED }),
+  reason: cancellationReason.min(1, {
+    error: rule("CANCELLATION_REASON_REQUIRED", HOST_REASON_REQUIRED),
+  }),
 });
 
 export const bookingListSchema = z.array(bookingSchema);
@@ -388,7 +400,10 @@ export const bookingQuerySchema = z
     ...PAGING,
   })
   .refine((query) => (query.from === undefined) === (query.to === undefined), {
-    error: "Filtering by dates needs both a start and an end",
+    error: rule(
+      "SEARCH_DATES_INCOMPLETE",
+      "Filtering by dates needs both a start and an end",
+    ),
     path: ["to"],
   })
   .refine(
@@ -397,7 +412,10 @@ export const bookingQuerySchema = z
       query.to === undefined ||
       query.from < query.to,
     {
-      error: "The end of the window must be later than its start",
+      error: rule(
+        "WINDOW_END_NOT_AFTER_START",
+        "The end of the window must be later than its start",
+      ),
       path: ["to"],
     },
   );

@@ -42,6 +42,14 @@ const listingInput: CreateListingInput = {
   capacity: 4,
 };
 
+/** The code a refused call answered with. The status is asserted by the `.expect(...)` before it. */
+const codeOf = (response: { body: unknown }): string =>
+  apiErrorSchema.parse(response.body).code;
+
+/** The rule behind each issue of a body the contract refused, in the order they were found. */
+const issueCodesOf = (response: { body: unknown }): string[] =>
+  (apiErrorSchema.parse(response.body).errors ?? []).map(({ code }) => code);
+
 describe("BookingController (e2e)", () => {
   let app: INestApplication<App>;
   // Every booking route sits behind the global JwtAuthGuard, so the spec talks to the API
@@ -162,6 +170,7 @@ describe("BookingController (e2e)", () => {
     expect(apiErrorSchema.parse(response.body).message).toBe(
       "You cannot book your own listing",
     );
+    expect(codeOf(response)).toBe("CANNOT_BOOK_OWN_LISTING");
     expect(await stays(admin)).toEqual([]);
   });
 
@@ -178,13 +187,16 @@ describe("BookingController (e2e)", () => {
     expect(error.errors).toEqual([
       expect.objectContaining({ path: ["listingId"] }),
     ]);
+    expect(codeOf(response)).toBe("VALIDATION_FAILED");
   });
 
   it("rejects check-out before check-in — the rule lives in the schema", async () => {
-    await guest
+    const response = await guest
       .post("/bookings")
       .send({ ...input, from: inDays(14), to: inDays(10) })
       .expect(400);
+
+    expect(issueCodesOf(response)).toEqual(["CHECK_OUT_NOT_AFTER_CHECK_IN"]);
   });
 
   it("rejects a check-in in the past — the rule lives in the schema", async () => {
@@ -198,13 +210,30 @@ describe("BookingController (e2e)", () => {
     expect(apiErrorSchema.parse(response.body).errors).toEqual([
       expect.objectContaining({ path: ["from"] }),
     ]);
+    expect(issueCodesOf(response)).toEqual(["CHECK_IN_DAY_PAST"]);
+  });
+
+  it("names the rule of a day left empty and of one that is not a day", async () => {
+    const empty = await guest
+      .post("/bookings")
+      .send({ ...input, from: "", to: undefined })
+      .expect(400);
+    const garbled = await guest
+      .post("/bookings")
+      .send({ ...input, from: "next week" })
+      .expect(400);
+
+    expect(issueCodesOf(empty)).toEqual(["DATE_REQUIRED", "DATE_REQUIRED"]);
+    expect(issueCodesOf(garbled)).toEqual(["DATE_INVALID"]);
   });
 
   it("answers 404 for a listing that does not exist", async () => {
-    await guest
+    const response = await guest
       .post("/bookings")
       .send({ ...input, listingId: "8c9d0e1f-2a3b-4c5d-9e6f-7a8b9c0d1e2f" })
       .expect(404);
+
+    expect(codeOf(response)).toBe("LISTING_NOT_FOUND");
   });
 
   /**
@@ -223,6 +252,7 @@ describe("BookingController (e2e)", () => {
     expect(apiErrorSchema.parse(response.body).message).toBe(
       "Session no longer exists",
     );
+    expect(codeOf(response)).toBe("SESSION_NOT_FOUND");
   });
 
   it("answers 409 when the dates overlap an existing booking", async () => {
@@ -241,6 +271,7 @@ describe("BookingController (e2e)", () => {
     // names no row.
     expect(error.message).toContain("no longer free");
     expect(error.message).not.toContain(input.listingId);
+    expect(error.code).toBe("DATES_UNAVAILABLE");
   });
 
   it("refuses a hold on terms other than the ones the guest was shown, and takes it on the ones they were", async () => {
@@ -264,6 +295,7 @@ describe("BookingController (e2e)", () => {
       .expect(412);
 
     expect(apiErrorSchema.parse(refused.body).message).toContain("has changed");
+    expect(codeOf(refused)).toBe("LISTING_CHANGED_SINCE_SHOWN");
 
     // A price is a term as much as the policy: the same version covers both.
     const priceSaved = versionOf(
@@ -352,6 +384,9 @@ describe("BookingController (e2e)", () => {
       refusal.message,
       ...(refusal.errors ?? []).map((issue) => issue.message),
     ]).toContain(CHECK_IN_DAY_PAST);
+    expect([refusal.code, ...issueCodesOf(gone)]).toContain(
+      "CHECK_IN_DAY_PAST",
+    );
 
     await owner
       .patch(`/listings/${input.listingId}`)
@@ -402,6 +437,7 @@ describe("BookingController (e2e)", () => {
       .expect(400);
 
     expect(apiErrorSchema.parse(gone.body).message).toBe(CHECK_IN_DAY_PAST);
+    expect(codeOf(gone)).toBe("CHECK_IN_DAY_PAST");
   });
 
   // The overlap is a pair of strict inequalities, and this is what says so now that the
@@ -584,11 +620,17 @@ describe("BookingController (e2e)", () => {
     const first = await page(guest, { limit: "1" });
     const cursor = String(first.nextCursor);
 
-    await guest
+    const mismatched = await guest
       .get("/bookings")
       .query({ limit: "1", cursor, sort: "oldest" })
       .expect(400);
-    await guest.get("/bookings").query({ cursor: "not-a-cursor" }).expect(400);
+    const stray = await guest
+      .get("/bookings")
+      .query({ cursor: "not-a-cursor" })
+      .expect(400);
+
+    expect(codeOf(mismatched)).toBe("CURSOR_ORDERING_MISMATCH");
+    expect(codeOf(stray)).toBe("CURSOR_MALFORMED");
   });
 
   it("records each night of a stay at its price, adding up to the amount, in the site's currency", async () => {
@@ -618,7 +660,12 @@ describe("BookingController (e2e)", () => {
 
     // 404, not 403: nothing lets a stranger list bookings, so a 403 would be the one way
     // to learn that an id exists at all.
-    await otherGuest.get(`/bookings/${id}`).expect(404);
+    const hidden = await otherGuest.get(`/bookings/${id}`).expect(404);
+
+    expect(codeOf(hidden)).toBe("BOOKING_NOT_FOUND");
+    expect(codeOf(await guest.get("/bookings/not-an-id").expect(400))).toBe(
+      "INVALID_ID",
+    );
   });
 
   it("is cancelled by its guest, an admin, or the owner of the listing with a reason", async () => {
@@ -627,9 +674,18 @@ describe("BookingController (e2e)", () => {
 
     // The owner may cancel, but owes the guest a reason. A stranger gets the 404 they get
     // for reading it.
-    await owner.delete(`/bookings/${id}`).expect(400);
-    await owner.delete(`/bookings/${id}`).send({ reason: "   " }).expect(400);
-    await otherGuest.delete(`/bookings/${id}`).expect(404);
+    const bare = await owner.delete(`/bookings/${id}`).expect(400);
+    const blank = await owner
+      .delete(`/bookings/${id}`)
+      .send({ reason: "   " })
+      .expect(400);
+
+    expect(codeOf(bare)).toBe("CANCELLATION_REASON_REQUIRED");
+    // Blank is nothing: the body passes the schema and the service asks for the reason.
+    expect(codeOf(blank)).toBe("CANCELLATION_REASON_REQUIRED");
+    expect(codeOf(await otherGuest.delete(`/bookings/${id}`).expect(404))).toBe(
+      "BOOKING_NOT_FOUND",
+    );
     await guest.delete(`/bookings/${id}`).expect(204);
 
     // Not gone: the row is what phase 5 refunds against, so it keeps answering its guest
@@ -637,7 +693,9 @@ describe("BookingController (e2e)", () => {
     const cancelled = await guest.get(`/bookings/${id}`).expect(200);
 
     expect(bookingSchema.parse(cancelled.body).status).toBe("CANCELLED");
-    await guest.delete(`/bookings/${id}`).expect(404);
+    expect(codeOf(await guest.delete(`/bookings/${id}`).expect(404))).toBe(
+      "BOOKING_NOT_FOUND",
+    );
 
     const second = await guest.post("/bookings").send(input).expect(201);
 

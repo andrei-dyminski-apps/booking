@@ -1,10 +1,5 @@
-import {
-  BadGatewayException,
-  ConflictException,
-  ForbiddenException,
-  NotFoundException,
-} from "@nestjs/common";
 import { BookingStatus, NotificationType, StayParty } from "@repo/contracts";
+import { refusalOf } from "../../common/testing/refusal";
 import { type FakeNotificationService } from "../../notification/testing/notification-service.fakes";
 import { cents } from "../../payment/domain/money";
 import type { BookingEarlyEndService } from "./booking-early-end.service";
@@ -211,11 +206,11 @@ describe("BookingEarlyEndService", () => {
     const leases = [...bookingCancellationRepository.leases];
 
     await expect(
-      earlyEndService.endEarly(id, owner, TOMORROW),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+      refusalOf(earlyEndService.endEarly(id, owner, TOMORROW)),
+    ).resolves.toMatchObject({ status: 403, code: "EARLY_END_NOT_FOR_HOST" });
     await expect(
-      earlyEndService.endEarly(id, stranger, TOMORROW),
-    ).rejects.toBeInstanceOf(NotFoundException);
+      refusalOf(earlyEndService.endEarly(id, stranger, TOMORROW)),
+    ).resolves.toMatchObject({ status: 404, code: "BOOKING_NOT_FOUND" });
     expect(bookingCancellationRepository.leases).toEqual(leases);
     expect(row(id)?.to).toBe(fromToday(3));
   });
@@ -224,8 +219,8 @@ describe("BookingEarlyEndService", () => {
     const id = await paidStay(1);
 
     await expect(
-      earlyEndService.endEarly(id, guest, TOMORROW),
-    ).rejects.toBeInstanceOf(ConflictException);
+      refusalOf(earlyEndService.endEarly(id, guest, TOMORROW)),
+    ).resolves.toMatchObject({ status: 409, code: "STAY_NOT_BEGUN" });
     expect(paymentGateway.refunds.size).toBe(0);
   });
 
@@ -235,9 +230,9 @@ describe("BookingEarlyEndService", () => {
     bookingRepository.listingCheckInTime = "23:59";
     const id = await paidStay(0);
 
-    await expect(earlyEndService.endEarly(id, guest, TOMORROW)).rejects.toThrow(
-      "The stay has not begun yet",
-    );
+    await expect(
+      refusalOf(earlyEndService.endEarly(id, guest, TOMORROW)),
+    ).resolves.toMatchObject({ status: 409, code: "STAY_NOT_BEGUN" });
     expect(row(id)?.endedEarlyAt).toBeNull();
 
     // A cancellation is what the stay still takes.
@@ -249,8 +244,8 @@ describe("BookingEarlyEndService", () => {
     const id = await paidStay(-2);
 
     await expect(
-      earlyEndService.endEarly(id, guest, TOMORROW),
-    ).rejects.toBeInstanceOf(ConflictException);
+      refusalOf(earlyEndService.endEarly(id, guest, TOMORROW)),
+    ).resolves.toMatchObject({ status: 409, code: "EARLY_END_NOT_AVAILABLE" });
     expect(row(id)?.endedEarlyAt).toBeNull();
   });
 
@@ -258,11 +253,13 @@ describe("BookingEarlyEndService", () => {
     const id = await paidStay(0);
 
     await earlyEndService.endEarly(id, guest, TOMORROW);
-    await expect(earlyEndService.endEarly(id, guest, TOMORROW)).rejects.toThrow(
-      new ConflictException(
-        `This stay has been ended early already — it checks out on ${fromToday(1)}`,
-      ),
-    );
+    await expect(
+      refusalOf(earlyEndService.endEarly(id, guest, TOMORROW)),
+    ).resolves.toEqual({
+      status: 409,
+      code: "STAY_ALREADY_ENDED_EARLY",
+      params: { checkOut: fromToday(1) },
+    });
     expect(paymentGateway.refunds.size).toBe(1);
   });
 
@@ -292,11 +289,17 @@ describe("BookingEarlyEndService", () => {
     paymentGateway.refundedUnreported.set(paymentId, cents(12_000));
 
     await expect(
-      earlyEndService.endEarly(id, guest, {
-        checkOut: fromToday(1),
-        refundCents: cents(2 * NIGHT),
-      }),
-    ).rejects.toThrow(/refund has changed.*240\.00/);
+      refusalOf(
+        earlyEndService.endEarly(id, guest, {
+          checkOut: fromToday(1),
+          refundCents: cents(2 * NIGHT),
+        }),
+      ),
+    ).resolves.toEqual({
+      status: 409,
+      code: "EARLY_END_REFUND_CHANGED",
+      params: { statedRefundCents: 2 * NIGHT, refundCents: 24_000 },
+    });
     expect(row(id)).toMatchObject({
       to: fromToday(3),
       endedEarlyAt: null,
@@ -318,13 +321,28 @@ describe("BookingEarlyEndService", () => {
     paymentGateway.refusing = true;
 
     await expect(
-      earlyEndService.endEarly(id, guest, TOMORROW),
-    ).rejects.toBeInstanceOf(BadGatewayException);
+      refusalOf(earlyEndService.endEarly(id, guest, TOMORROW)),
+    ).resolves.toMatchObject({
+      status: 502,
+      code: "PAYMENT_PROVIDER_UNREACHABLE",
+    });
     expect(row(id)).toMatchObject({
       to: fromToday(3),
       endedEarlyAt: null,
       refundOwedCents: null,
     });
+  });
+
+  it("refuses a stay booked before its nights were recorded", async () => {
+    const id = await paidStay(0);
+
+    bookingRepository.withoutNights.add(id);
+
+    await expect(
+      refusalOf(earlyEndService.endEarly(id, guest, TOMORROW)),
+    ).resolves.toMatchObject({ status: 409, code: "STAY_NIGHTS_NOT_RECORDED" });
+    expect(row(id)?.endedEarlyAt).toBeNull();
+    expect(paymentGateway.refunds.size).toBe(0);
   });
 
   it("refuses a stay whose cancellation key has a refund already", async () => {
@@ -337,8 +355,8 @@ describe("BookingEarlyEndService", () => {
     });
 
     await expect(
-      earlyEndService.endEarly(id, guest, TOMORROW),
-    ).rejects.toBeInstanceOf(ConflictException);
+      refusalOf(earlyEndService.endEarly(id, guest, TOMORROW)),
+    ).resolves.toMatchObject({ status: 409, code: "CANCELLATION_REFUND_SENT" });
     expect(row(id)?.endedEarlyAt).toBeNull();
   });
 
@@ -350,8 +368,8 @@ describe("BookingEarlyEndService", () => {
     if (found !== undefined) found.booking.dispute = "OPEN";
 
     await expect(
-      earlyEndService.endEarly(id, guest, TOMORROW),
-    ).rejects.toBeInstanceOf(ConflictException);
+      refusalOf(earlyEndService.endEarly(id, guest, TOMORROW)),
+    ).resolves.toMatchObject({ status: 409, code: "PAYMENT_DISPUTED" });
     expect(row(id)?.to).toBe(fromToday(3));
   });
 
@@ -362,8 +380,8 @@ describe("BookingEarlyEndService", () => {
     if (open !== undefined) open.booking.dispute = "OPEN";
 
     await expect(
-      earlyEndService.endEarly(disputed, guest, TOMORROW),
-    ).rejects.toBeInstanceOf(ConflictException);
+      refusalOf(earlyEndService.endEarly(disputed, guest, TOMORROW)),
+    ).resolves.toMatchObject({ status: 409, code: "PAYMENT_DISPUTED" });
     expect(row(disputed)?.to).toBe(fromToday(3));
 
     if (open !== undefined) open.booking.dispute = "LOST";
@@ -381,11 +399,16 @@ describe("BookingEarlyEndService", () => {
     const id = await paidStay(-1);
 
     await expect(
-      earlyEndService.endEarly(id, guest, {
-        checkOut: fromToday(0),
-        refundCents: cents(0),
-      }),
-    ).rejects.toBeInstanceOf(ConflictException);
+      refusalOf(
+        earlyEndService.endEarly(id, guest, {
+          checkOut: fromToday(0),
+          refundCents: cents(0),
+        }),
+      ),
+    ).resolves.toMatchObject({
+      status: 409,
+      code: "EARLY_END_CHECK_OUT_CHANGED",
+    });
     expect(row(id)).toMatchObject({ to: fromToday(2), endedEarlyAt: null });
     expect(paymentGateway.refunds.size).toBe(0);
   });
@@ -394,11 +417,13 @@ describe("BookingEarlyEndService", () => {
     const id = await paidStay(-2);
 
     await expect(
-      earlyEndService.endEarly(id, guest, {
-        checkOut: fromToday(0),
-        refundCents: cents(0),
-      }),
-    ).rejects.toThrow(/day has turned.*last night/);
+      refusalOf(
+        earlyEndService.endEarly(id, guest, {
+          checkOut: fromToday(0),
+          refundCents: cents(0),
+        }),
+      ),
+    ).resolves.toMatchObject({ status: 409, code: "EARLY_END_DAY_TURNED" });
     expect(row(id)?.endedEarlyAt).toBeNull();
   });
 
@@ -408,7 +433,7 @@ describe("BookingEarlyEndService", () => {
     bookingCancellationRepository.held.add(id);
 
     await expect(
-      earlyEndService.endEarly(id, guest, TOMORROW),
-    ).rejects.toBeInstanceOf(ConflictException);
+      refusalOf(earlyEndService.endEarly(id, guest, TOMORROW)),
+    ).resolves.toMatchObject({ status: 409, code: "BOOKING_BUSY" });
   });
 });

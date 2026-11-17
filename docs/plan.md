@@ -907,9 +907,15 @@ message, params?)` in `apps/api/src/common`; a global filter guarantees the fiel
       check-in, date and window rules, `ListingService`, the `:id` of its paths through
       `ParseIdPipe`, the days of a search and of an availability window worded like any other
       day, and the two refusals of a keyset cursor in `common/paging.ts` —
-      `CURSOR_MALFORMED`, `CURSOR_ORDERING_MISMATCH`), then bookings and cancellations,
-      payments and payouts, the rest (reviews, conversations, waitlist, notifications,
-      lookup, users). Three things of that slice reach the others before they are
+      `CURSOR_MALFORMED`, `CURSOR_ORDERING_MISMATCH`), bookings and cancellations ✅ (the
+      stay's days, a cancellation's reason, an admin's refund and an early end's check-out in
+      the contract; `BookingService`, `BookingCancellationService`,
+      `BookingEarlyEndService` and `BookingAdjustmentService`, with `bookingNotFound` in
+      `stay-reader.ts` for the `404` they share; the `:id` of the booking routes through
+      `ParseIdPipe`; a stay no payment can carry is `STAY_TOO_EXPENSIVE` or `STAY_TOO_CHEAP`
+      with the bound it crossed in `params`), then payments and payouts (the stuck lists and their
+      retries, refund failures, the host's fees), the rest (reviews, conversations, waitlist,
+      notifications, lookup, users). Three things of that slice reach the others before they are
       migrated, because they are shared code: `readCursor` answers the two cursor codes for
       every paged read (stays, reviews, waitlist, conversations, notifications, lookup,
       users, refund failures, payment events), `dayMessage` stamps `DATE_REQUIRED` and
@@ -924,17 +930,20 @@ message, params?)` in `apps/api/src/common`; a global filter guarantees the fiel
       several. Those are the places to move onto a code, each in the change that migrates the
       slice raising it, since the code has to exist first:
 
-  - `payment-form.tsx` — a `409` is both "the hold moved on" and "another request is
-    opening this payment", and the form retries on either; with codes it retries on the
-    second only, and takes the form away on the first at once.
-  - `refund-stay-action.ts` — a `409` is a dispute, Stripe's refusal, more than is left to
-    refund, a claim another press holds, or a stay that moved on; the action refreshes
-    the list on all of them, and the dialog should say which.
-  - `create-booking-action.ts` and `join-waitlist-action.ts` — a `409` is read as "the
-    calendar is stale", true today only because nothing else in those routes answers one;
-    the check moves to `DATES_UNAVAILABLE` so a second `409` added later cannot flip the
-    form into the waitlist offer. Likewise the `412` there, to the code for a listing
-    changed since it was read.
+  - `payment-form.tsx` ✅ — a `409` was both "the hold moved on" and "another request is
+    opening this payment", and the form retried on either; it now retries on
+    `PAYMENT_BEING_OPENED` only, and on `BOOKING_NOT_AWAITING_PAYMENT` reads the booking at
+    once, which takes the form away.
+  - `refund-stay-action.ts` ✅ — a `409` is a dispute, Stripe's refusal, more than is left to
+    refund, a claim another press holds, or a stay that moved on; the action refreshes the
+    list only after the codes that may have let a claim go (`mayHaveReleasedClaim` in `model/refund-claim.ts`). The
+    dialog still shows the API's `message`; wording it from the code is the interface's
+    own change, and out of this phase.
+  - `create-booking-action.ts` ✅ and `join-waitlist-action.ts` — a `409` was read as "the
+    calendar is stale", true only because nothing else in those routes answered one; the
+    booking action now checks `DATES_UNAVAILABLE`, so a second `409` added later cannot
+    flip the form into the waitlist offer, and the `412` is `LISTING_CHANGED_SINCE_SHOWN`.
+    The waitlist action moves with the waitlist slice, which raises its `409`.
   - `keyset-page.ts` stays on `400`: a stale cursor is the only `400` a read answers, and
     the filter's `VALIDATION_FAILED` already tells a refused search apart from it.
 

@@ -4,6 +4,7 @@ import { z } from "zod";
 import { BookingStatus, type Booking } from "./booking.js";
 import { CANCELLATION_TERMS } from "./cancellation-policy.js";
 import { checkInInstant, stayDay, type CheckIn } from "./check-in.js";
+import { dayMessage } from "./day.js";
 import {
   addCents,
   BASIS_POINTS,
@@ -51,7 +52,10 @@ export function earlyCheckOut(
  */
 export const endStayEarlySchema = z.object({
   checkOut: z.iso.date({
-    error: "Name the check-out the refund was stated for",
+    error: dayMessage(
+      "Name the check-out the refund was stated for",
+      "A check-out date must be written as YYYY-MM-DD",
+    ),
   }),
   refundCents: centsSchema,
 });

@@ -1,18 +1,15 @@
 import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  NotFoundException,
-  UnauthorizedException,
-} from "@nestjs/common";
-import {
   BookingStatus,
+  MAX_CHARGE,
+  MIN_CHARGE,
   NotificationType,
   Role,
   StayParty,
   type Booking,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
+import { refusalOf } from "../../common/testing/refusal";
+import { cents } from "../../payment/domain/money";
 import { type FakeNotificationService } from "../../notification/testing/notification-service.fakes";
 import type { BookingCancellationService } from "./booking-cancellation.service";
 import type { BookingService } from "./booking.service";
@@ -104,9 +101,9 @@ describe("BookingService", () => {
   it("answers 404, not 500, when the listing is deleted just before the insert", async () => {
     bookingRepository.vanishingListing = true;
 
-    await expect(service.create(GUEST_ID, input)).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      refusalOf(service.create(GUEST_ID, input)),
+    ).resolves.toMatchObject({ status: 404, code: "LISTING_NOT_FOUND" });
   });
 
   // The token names the guest and JwtStrategy reads no database, so nothing checks that row
@@ -115,20 +112,43 @@ describe("BookingService", () => {
   it("answers 401 when the account behind the token is gone", async () => {
     bookingRepository.vanishingGuest = true;
 
-    await expect(service.create(GUEST_ID, input)).rejects.toThrow(
-      UnauthorizedException,
-    );
+    await expect(
+      refusalOf(service.create(GUEST_ID, input)),
+    ).resolves.toMatchObject({ status: 401, code: "SESSION_NOT_FOUND" });
   });
 
   it("answers 403 to a host booking their own listing, and stores nothing", async () => {
     bookingRepository.listingOwnerId = GUEST_ID;
 
-    await expect(service.create(GUEST_ID, input)).rejects.toThrow(
-      ForbiddenException,
-    );
+    await expect(
+      refusalOf(service.create(GUEST_ID, input)),
+    ).resolves.toMatchObject({ status: 403, code: "CANNOT_BOOK_OWN_LISTING" });
     expect(bookingTable.rows.size).toBe(0);
     expect(bookingJobs.scheduled).toEqual([]);
     expect(notificationService.notices).toEqual([]);
+  });
+
+  it("answers 422 with the bound a quote crossed, on whichever side it did", async () => {
+    bookingRepository.unchargeableAmount = cents(MAX_CHARGE + 1);
+
+    await expect(
+      refusalOf(service.create(GUEST_ID, input)),
+    ).resolves.toMatchObject({
+      status: 422,
+      code: "STAY_TOO_EXPENSIVE",
+      params: { maximumCents: MAX_CHARGE },
+    });
+
+    bookingRepository.unchargeableAmount = cents(MIN_CHARGE - 1);
+
+    await expect(
+      refusalOf(service.create(GUEST_ID, input)),
+    ).resolves.toMatchObject({
+      status: 422,
+      code: "STAY_TOO_CHEAP",
+      params: { minimumCents: MIN_CHARGE },
+    });
+    expect(bookingTable.rows.size).toBe(0);
   });
 
   it("turns an overlap raised by the repository into a 409", async () => {
@@ -139,7 +159,10 @@ describe("BookingService", () => {
       from: "2026-09-04",
     });
 
-    await expect(refused).rejects.toThrow(ConflictException);
+    await expect(refusalOf(refused)).resolves.toMatchObject({
+      status: 409,
+      code: "DATES_UNAVAILABLE",
+    });
     // The guest's sentence, not the repository's, which names the listing.
     await expect(refused).rejects.toThrow(/no longer free/);
     await expect(refused).rejects.not.toThrow(input.listingId);
@@ -251,15 +274,17 @@ describe("BookingService", () => {
     const cursor = String(page.nextCursor);
 
     await expect(
-      service.findPage(
-        guest,
-        searchFor({ limit: "1", cursor, sort: "oldest" }),
+      refusalOf(
+        service.findPage(
+          guest,
+          searchFor({ limit: "1", cursor, sort: "oldest" }),
+        ),
       ),
-    ).rejects.toThrow(BadRequestException);
+    ).resolves.toMatchObject({ status: 400, code: "CURSOR_ORDERING_MISMATCH" });
 
     await expect(
-      service.findPage(guest, searchFor({ cursor: "not-a-cursor" })),
-    ).rejects.toThrow(BadRequestException);
+      refusalOf(service.findPage(guest, searchFor({ cursor: "not-a-cursor" }))),
+    ).resolves.toMatchObject({ status: 400, code: "CURSOR_MALFORMED" });
   });
 
   it("orders by what was asked for, not by what was stored", async () => {
@@ -298,12 +323,12 @@ describe("BookingService", () => {
   it("hides it from everyone else, as if it were not there", async () => {
     const id = await bookedByGuest();
 
-    await expect(service.findOne(id, stranger)).rejects.toThrow(
-      NotFoundException,
-    );
-    await expect(cancellationService.remove(id, stranger)).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      refusalOf(service.findOne(id, stranger)),
+    ).resolves.toMatchObject({ status: 404, code: "BOOKING_NOT_FOUND" });
+    await expect(
+      refusalOf(cancellationService.remove(id, stranger)),
+    ).resolves.toMatchObject({ status: 404, code: "BOOKING_NOT_FOUND" });
     await expect(service.findOne(id, guest)).resolves.toMatchObject({ id });
   });
 
@@ -453,13 +478,13 @@ describe("BookingService", () => {
     });
   });
 
-  it("throws NotFoundException for an unknown id", async () => {
-    await expect(service.findOne(LISTING_ID, admin)).rejects.toThrow(
-      NotFoundException,
-    );
-    await expect(cancellationService.remove(LISTING_ID, admin)).rejects.toThrow(
-      NotFoundException,
-    );
+  it("answers BOOKING_NOT_FOUND for an unknown id", async () => {
+    await expect(
+      refusalOf(service.findOne(LISTING_ID, admin)),
+    ).resolves.toMatchObject({ status: 404, code: "BOOKING_NOT_FOUND" });
+    await expect(
+      refusalOf(cancellationService.remove(LISTING_ID, admin)),
+    ).resolves.toMatchObject({ status: 404, code: "BOOKING_NOT_FOUND" });
   });
 
   /**
@@ -473,9 +498,9 @@ describe("BookingService", () => {
 
     const stale = userWith(STRANGER_ID, "MODERATOR" as unknown as Role);
 
-    await expect(service.findPage(stale, searchFor())).rejects.toThrow(
-      ForbiddenException,
-    );
+    await expect(
+      refusalOf(service.findPage(stale, searchFor())),
+    ).resolves.toMatchObject({ status: 403, code: "ROLE_NOT_ALLOWED" });
   });
   describe("the payment", () => {
     it("opens one payment per hold and answers the same one again", async () => {
@@ -497,15 +522,15 @@ describe("BookingService", () => {
       const id = await bookedByGuest();
 
       // The host and an admin may read the stay; paying for it is not theirs.
-      await expect(service.payment(id, owner)).rejects.toThrow(
-        ForbiddenException,
-      );
-      await expect(service.payment(id, admin)).rejects.toThrow(
-        ForbiddenException,
-      );
-      await expect(service.payment(id, stranger)).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        refusalOf(service.payment(id, owner)),
+      ).resolves.toMatchObject({ status: 403, code: "ONLY_GUEST_PAYS" });
+      await expect(
+        refusalOf(service.payment(id, admin)),
+      ).resolves.toMatchObject({ status: 403, code: "ONLY_GUEST_PAYS" });
+      await expect(
+        refusalOf(service.payment(id, stranger)),
+      ).resolves.toMatchObject({ status: 404, code: "BOOKING_NOT_FOUND" });
       expect(paymentGateway.opened.size).toBe(0);
     });
 
@@ -513,9 +538,12 @@ describe("BookingService", () => {
       const cancelled = await bookedByGuest();
       await cancellationService.remove(cancelled, guest);
 
-      await expect(service.payment(cancelled, guest)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        refusalOf(service.payment(cancelled, guest)),
+      ).resolves.toMatchObject({
+        status: 409,
+        code: "BOOKING_NOT_AWAITING_PAYMENT",
+      });
 
       // Past its deadline but not released yet: the sweep is about to give the nights away.
       const lapsing = (await service.create(GUEST_ID, stayAfter(1))).id;
@@ -525,9 +553,12 @@ describe("BookingService", () => {
 
       found.booking.expiresAt = new Date(Date.now() - 1_000).toISOString();
 
-      await expect(service.payment(lapsing, guest)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        refusalOf(service.payment(lapsing, guest)),
+      ).resolves.toMatchObject({
+        status: 409,
+        code: "BOOKING_NOT_AWAITING_PAYMENT",
+      });
       expect(paymentGateway.opened.size).toBe(0);
     });
 
@@ -535,9 +566,9 @@ describe("BookingService", () => {
       const id = await bookedByGuest();
       paymentGateway.openingElsewhere = true;
 
-      await expect(service.payment(id, guest)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        refusalOf(service.payment(id, guest)),
+      ).resolves.toMatchObject({ status: 409, code: "PAYMENT_BEING_OPENED" });
       expect(bookingTable.rows.get(id)?.paymentId).toBeNull();
 
       paymentGateway.openingElsewhere = false;
@@ -547,14 +578,30 @@ describe("BookingService", () => {
       });
     });
 
+    it("answers a provider that cannot open the payment with a 502, and keeps the hold", async () => {
+      const id = await bookedByGuest();
+      paymentGateway.refusingOpen = true;
+
+      await expect(
+        refusalOf(service.payment(id, guest)),
+      ).resolves.toMatchObject({ status: 502, code: "PAYMENT_NOT_OPENED" });
+      expect(bookingTable.rows.get(id)?.paymentId).toBeNull();
+      expect(bookingTable.rows.get(id)?.booking.status).toBe(
+        BookingStatus.PENDING_PAYMENT,
+      );
+    });
+
     it("withdraws a payment opened while the hold was being released", async () => {
       const id = await bookedByGuest();
       bookingRepository.lapsed.add(id);
       bookingTable.racing = () => service.releaseHold(id);
 
-      await expect(service.payment(id, guest)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        refusalOf(service.payment(id, guest)),
+      ).resolves.toMatchObject({
+        status: 409,
+        code: "BOOKING_NOT_AWAITING_PAYMENT",
+      });
       expect(bookingTable.rows.get(id)?.paymentId).toBeNull();
       expect(bookingJobs.withdrawals).toEqual(["pi_1"]);
     });

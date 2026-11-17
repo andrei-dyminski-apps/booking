@@ -40,7 +40,14 @@ export class FakePaymentGateway implements PublicOf<PaymentGateway> {
   /** Set to have `open` find another request opening the same payment under its key. */
   openingElsewhere = false;
 
+  /** Set to have `open` fail as a provider that cannot be reached would. */
+  refusingOpen = false;
+
   open(bookingId: string): Promise<OpenedPayment> {
+    if (this.refusingOpen) {
+      return Promise.reject(new Error("api_connection_error"));
+    }
+
     if (this.openingElsewhere) {
       return Promise.reject(new PaymentOpeningInProgressError(bookingId));
     }

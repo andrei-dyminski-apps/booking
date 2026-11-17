@@ -17,10 +17,11 @@ import type { Cents, Currency } from "@repo/contracts";
 import { Button } from "@repo/ui/components/button";
 import { FieldError } from "@repo/ui/components/field";
 import { Skeleton } from "@repo/ui/components/skeleton";
-import { ApiResponseError, bookingsApi } from "#shared/api";
-import { HTTP_STATUS, stripeVariables } from "#shared/config";
+import { bookingsApi } from "#shared/api";
+import { stripeVariables } from "#shared/config";
 import { formatMoney, toFormErrors } from "#shared/lib";
 import { bookingPaymentKey } from "../api/booking-query";
+import { isBeingOpened, isHoldRefusal } from "../model/payment-refusal";
 
 /**
  * Stripe.js for one key, held by the query cache for the life of the tab: `Elements`
@@ -41,17 +42,13 @@ async function loadStripeOrFail(publishableKey: string): Promise<Stripe> {
   return stripe;
 }
 
-/** A conflict from the API: the hold moved on, or another request is opening its payment. */
-const isConflict = (error: unknown): boolean =>
-  error instanceof ApiResponseError && error.status === HTTP_STATUS.CONFLICT;
-
 /**
- * How long a conflict waits before the payment is asked for again, and how many times. Stripe
- * refuses a second request under the same idempotency key only while the first is in flight,
- * which is a second or two — a hold that moved on has taken the form off the page by then.
+ * How long a payment another request is opening (`PAYMENT_BEING_OPENED`) waits before it is
+ * asked for again, and how many times. Stripe refuses a second request under the same
+ * idempotency key only while the first is in flight, which is a second or two.
  */
-const CONFLICT_RETRY_DELAY_MS = 1_000;
-const CONFLICT_RETRIES = 4;
+const BEING_OPENED_RETRY_DELAY_MS = 1_000;
+const BEING_OPENED_RETRIES = 4;
 
 /**
  * What an intent is in once the guest's part is done; the webhook says the rest.
@@ -76,13 +73,13 @@ const PAID: ReadonlySet<PaymentIntent.Status> = new Set([
  * the first press puts the query back to pending, and the skeleton takes the button away.
  *
  * Success here is the browser's word, and the page does not take it: `onPaid` only starts
- * the poll that waits for the webhook. A `409` is either a hold that stopped waiting for
- * payment — paid, cancelled or lapsed — or another tab opening the same payment at the same
- * moment, and only the booking tells the two apart. So every `409` has the page read it
- * again (`onRefused`) and is asked again after a pause, the skeleton still drawn: a hold
- * that moved on takes this form off the page, which stops the retries, and one still
- * waiting gets its secret from the request that won. Past the last retry the form shows
- * the API's reason and the way to ask again.
+ * the poll that waits for the webhook. A `409` has two reasons and the API names which. A
+ * hold that stopped waiting for payment — paid, cancelled or lapsed — is not asked again:
+ * the page reads the booking (`onRefused`), which takes this form off it. Another tab
+ * opening the same payment at the same moment (`PAYMENT_BEING_OPENED`) is asked again after
+ * a pause, the skeleton still drawn, and gets its secret from the request that won; the page
+ * reads the booking on each of those too, in case the hold moved on meanwhile. Past the last
+ * retry the form shows the API's reason and the way to ask again.
  */
 export const PaymentForm = ({
   bookingId,
@@ -107,8 +104,8 @@ export const PaymentForm = ({
     staleTime: Infinity,
     gcTime: Infinity,
     retry: (failures, error) =>
-      isConflict(error) && failures < CONFLICT_RETRIES,
-    retryDelay: CONFLICT_RETRY_DELAY_MS,
+      isBeingOpened(error) && failures < BEING_OPENED_RETRIES,
+    retryDelay: BEING_OPENED_RETRY_DELAY_MS,
     refetchOnWindowFocus: false,
   });
   const stripeJs = useQuery({
@@ -121,7 +118,9 @@ export const PaymentForm = ({
   });
   // Per attempt rather than once: each conflict, retried or final, reads the booking again.
   // The count starts over with every fetch, so a "Try again" refused again reads it too.
-  const refusals = isConflict(payment.failureReason) ? payment.failureCount : 0;
+  const refusals = isHoldRefusal(payment.failureReason)
+    ? payment.failureCount
+    : 0;
 
   useEffect(() => {
     if (refusals > 0) onRefused();

@@ -1,12 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-  BadGatewayException,
-  ConflictException,
-  ForbiddenException,
-  NotFoundException,
-  UnauthorizedException,
-} from "@nestjs/common";
-import {
   BookingStatus,
   DisputeStatus,
   RefundFailureStatus,
@@ -21,6 +14,7 @@ import {
 import type { BookingPaymentHandler } from "./booking-payment.handler";
 import type { BookingService } from "./booking.service";
 import { createBookingTestbed, payForStay } from "./testing/booking.fakes";
+import { refusalOf } from "../../common/testing/refusal";
 import { type FakeBookingAdjustmentRepository } from "./testing/booking-adjustment-repository.fakes";
 import { type FakeBookingCancellationRepository } from "./testing/booking-cancellation-repository.fakes";
 import {
@@ -132,8 +126,8 @@ describe("BookingAdjustmentService", () => {
     const id = await paidStay(5);
 
     await expect(
-      adjustmentService.refund(id, admin, press(AMOUNT)),
-    ).rejects.toBeInstanceOf(ConflictException);
+      refusalOf(adjustmentService.refund(id, admin, press(AMOUNT))),
+    ).resolves.toMatchObject({ status: 409, code: "REFUND_EXCEEDS_REMAINING" });
     expect(paymentGateway.refunds.size).toBe(0);
 
     await adjustmentService.refund(id, admin, press(AMOUNT - 1));
@@ -152,8 +146,8 @@ describe("BookingAdjustmentService", () => {
 
     // The record still says nothing went back; the provider says PART did.
     await expect(
-      adjustmentService.refund(id, admin, press(AMOUNT - PART)),
-    ).rejects.toBeInstanceOf(ConflictException);
+      refusalOf(adjustmentService.refund(id, admin, press(AMOUNT - PART))),
+    ).resolves.toMatchObject({ status: 409, code: "REFUND_EXCEEDS_REMAINING" });
     expect(paymentGateway.refunds.size).toBe(1);
     expect(bookingAdjustmentRepository.rows).toHaveLength(1);
 
@@ -183,8 +177,8 @@ describe("BookingAdjustmentService", () => {
     const left = subtractCents(AMOUNT, cents(PART * 2));
 
     await expect(
-      adjustmentService.refund(id, admin, press(left + 1)),
-    ).rejects.toBeInstanceOf(ConflictException);
+      refusalOf(adjustmentService.refund(id, admin, press(left + 1))),
+    ).resolves.toMatchObject({ status: 409, code: "REFUND_EXCEEDS_REMAINING" });
     await expect(
       adjustmentService.refund(id, admin, press(left)),
     ).resolves.toMatchObject({ amountCents: left });
@@ -198,8 +192,8 @@ describe("BookingAdjustmentService", () => {
     paymentGateway.losingAnswers = true;
 
     await expect(
-      adjustmentService.refund(id, admin, body),
-    ).rejects.toBeInstanceOf(BadGatewayException);
+      refusalOf(adjustmentService.refund(id, admin, body)),
+    ).resolves.toMatchObject({ status: 502, code: "REFUND_NOT_SENT" });
     expect(bookingAdjustmentRepository.rows).toMatchObject([
       { requestId: body.requestId, amountCents: PART, refundId: null },
     ]);
@@ -213,8 +207,16 @@ describe("BookingAdjustmentService", () => {
 
     // Another amount under the same press would be a second refund.
     await expect(
-      adjustmentService.refund(id, admin, { ...body, amountCents: cents(500) }),
-    ).rejects.toBeInstanceOf(ConflictException);
+      refusalOf(
+        adjustmentService.refund(id, admin, {
+          ...body,
+          amountCents: cents(500),
+        }),
+      ),
+    ).resolves.toMatchObject({
+      status: 409,
+      code: "REFUND_REQUEST_AMOUNT_MISMATCH",
+    });
 
     await expect(
       adjustmentService.refund(id, admin, body),
@@ -232,8 +234,8 @@ describe("BookingAdjustmentService", () => {
 
     paymentGateway.losingAnswers = true;
     await expect(
-      adjustmentService.refund(id, admin, body),
-    ).rejects.toBeInstanceOf(BadGatewayException);
+      refusalOf(adjustmentService.refund(id, admin, body)),
+    ).resolves.toMatchObject({ status: 502, code: "REFUND_NOT_SENT" });
     paymentGateway.losingAnswers = false;
 
     // Since then the webhook raised the total and the bank opened a dispute: a new press
@@ -278,9 +280,9 @@ describe("BookingAdjustmentService", () => {
     rowOf(id).booking.dispute = DisputeStatus.OPEN;
 
     // A minute old at most, its own request may still land at Stripe: the claim stays.
-    await expect(adjustmentService.refund(id, admin, refused)).rejects.toThrow(
-      /may still be reaching Stripe/,
-    );
+    await expect(
+      refusalOf(adjustmentService.refund(id, admin, refused)),
+    ).resolves.toMatchObject({ status: 409, code: "REFUND_CLAIM_PENDING" });
     expect(bookingAdjustmentRepository.rows).toHaveLength(2);
 
     const [, young] = bookingAdjustmentRepository.rows;
@@ -289,9 +291,9 @@ describe("BookingAdjustmentService", () => {
 
     young.attemptedAt = new Date(Date.now() - 61_000).toISOString();
 
-    await expect(adjustmentService.refund(id, admin, refused)).rejects.toThrow(
-      /disputed/,
-    );
+    await expect(
+      refusalOf(adjustmentService.refund(id, admin, refused)),
+    ).resolves.toMatchObject({ status: 409, code: "PAYMENT_DISPUTED" });
     // Nothing went out for it, so the claim goes: the press may name another amount now.
     expect(
       bookingAdjustmentRepository.rows.map((row) => row.requestId),
@@ -304,8 +306,8 @@ describe("BookingAdjustmentService", () => {
 
     paymentGateway.losingAnswers = true;
     await expect(
-      adjustmentService.refund(id, admin, body),
-    ).rejects.toBeInstanceOf(BadGatewayException);
+      refusalOf(adjustmentService.refund(id, admin, body)),
+    ).resolves.toMatchObject({ status: 502, code: "REFUND_NOT_SENT" });
     paymentGateway.losingAnswers = false;
     // The refund never went out after all, and Stripe refuses it now: a dispute opened
     // before its webhook arrived.
@@ -313,9 +315,9 @@ describe("BookingAdjustmentService", () => {
     paymentGateway.refusingRefund =
       "Charge ch_spec has been charged back; cannot issue a refund.";
 
-    await expect(adjustmentService.refund(id, admin, body)).rejects.toThrow(
-      "Stripe refused the refund: Charge ch_spec has been charged back; cannot issue a refund.",
-    );
+    await expect(
+      refusalOf(adjustmentService.refund(id, admin, body)),
+    ).resolves.toEqual({ status: 409, code: "REFUND_REFUSED_BY_PROVIDER" });
     expect(bookingAdjustmentRepository.rows).toEqual([]);
   });
 
@@ -325,8 +327,8 @@ describe("BookingAdjustmentService", () => {
 
     paymentGateway.losingAnswers = true;
     await expect(
-      adjustmentService.refund(id, admin, body),
-    ).rejects.toBeInstanceOf(BadGatewayException);
+      refusalOf(adjustmentService.refund(id, admin, body)),
+    ).resolves.toMatchObject({ status: 502, code: "REFUND_NOT_SENT" });
     // The first request never reached Stripe, and the claim is long past its minute.
     paymentGateway.refunds.clear();
 
@@ -340,16 +342,16 @@ describe("BookingAdjustmentService", () => {
     // Pressed again: a request of its own goes out, and its answer is lost too — Stripe has
     // not carried it out yet, so the next read finds nothing.
     await expect(
-      adjustmentService.refund(id, admin, body),
-    ).rejects.toBeInstanceOf(BadGatewayException);
+      refusalOf(adjustmentService.refund(id, admin, body)),
+    ).resolves.toMatchObject({ status: 502, code: "REFUND_NOT_SENT" });
     paymentGateway.refunds.clear();
     paymentGateway.losingAnswers = false;
     rowOf(id).booking.dispute = DisputeStatus.OPEN;
 
     // That request may still land, so the claim stays although it was made over a minute ago.
-    await expect(adjustmentService.refund(id, admin, body)).rejects.toThrow(
-      /may still be reaching Stripe/,
-    );
+    await expect(
+      refusalOf(adjustmentService.refund(id, admin, body)),
+    ).resolves.toMatchObject({ status: 409, code: "REFUND_CLAIM_PENDING" });
     expect(bookingAdjustmentRepository.rows).toMatchObject([
       { requestId: body.requestId, refundId: null },
     ]);
@@ -361,14 +363,14 @@ describe("BookingAdjustmentService", () => {
     rowOf(disputed).booking.dispute = DisputeStatus.OPEN;
 
     await expect(
-      adjustmentService.refund(disputed, admin, press()),
-    ).rejects.toBeInstanceOf(ConflictException);
+      refusalOf(adjustmentService.refund(disputed, admin, press())),
+    ).resolves.toMatchObject({ status: 409, code: "PAYMENT_DISPUTED" });
 
     const unpaid = (await service.create(GUEST_ID, input)).id;
 
     await expect(
-      adjustmentService.refund(unpaid, admin, press()),
-    ).rejects.toBeInstanceOf(ConflictException);
+      refusalOf(adjustmentService.refund(unpaid, admin, press())),
+    ).resolves.toMatchObject({ status: 409, code: "STAY_NOT_PAID" });
     expect(paymentGateway.looked).toEqual([]);
     expect(paymentGateway.refunds.size).toBe(0);
     expect(bookingAdjustmentRepository.rows).toEqual([]);
@@ -381,8 +383,8 @@ describe("BookingAdjustmentService", () => {
     paymentGateway.exceeding = true;
 
     await expect(
-      adjustmentService.refund(id, admin, body),
-    ).rejects.toBeInstanceOf(ConflictException);
+      refusalOf(adjustmentService.refund(id, admin, body)),
+    ).resolves.toMatchObject({ status: 409, code: "REFUND_EXCEEDS_PAYMENT" });
     // Nothing went out, so the press holds no claim on its amount.
     expect(bookingAdjustmentRepository.rows).toEqual([]);
 
@@ -400,8 +402,8 @@ describe("BookingAdjustmentService", () => {
     paymentGateway.refusing = true;
 
     await expect(
-      adjustmentService.refund(id, admin, body),
-    ).rejects.toBeInstanceOf(BadGatewayException);
+      refusalOf(adjustmentService.refund(id, admin, body)),
+    ).resolves.toMatchObject({ status: 502, code: "REFUND_NOT_SENT" });
     // The read failed before anything was claimed.
     expect(bookingAdjustmentRepository.rows).toEqual([]);
 
@@ -418,13 +420,13 @@ describe("BookingAdjustmentService", () => {
 
     bookingAdjustmentRepository.standing = "GONE";
     await expect(
-      adjustmentService.refund(id, admin, press()),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
+      refusalOf(adjustmentService.refund(id, admin, press())),
+    ).resolves.toMatchObject({ status: 401, code: "SESSION_NOT_FOUND" });
 
     bookingAdjustmentRepository.standing = "NOT_ADMIN";
     await expect(
-      adjustmentService.refund(randomUUID(), admin, press()),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+      refusalOf(adjustmentService.refund(randomUUID(), admin, press())),
+    ).resolves.toMatchObject({ status: 403, code: "NOT_AN_ADMIN_ANYMORE" });
 
     expect(bookingCancellationRepository.leases).toEqual(leases);
     expect(paymentGateway.refunds.size).toBe(0);
@@ -437,13 +439,13 @@ describe("BookingAdjustmentService", () => {
     bookingCancellationRepository.waits.length = 0;
 
     await expect(
-      adjustmentService.refund(id, admin, press()),
-    ).rejects.toBeInstanceOf(ConflictException);
+      refusalOf(adjustmentService.refund(id, admin, press())),
+    ).resolves.toMatchObject({ status: 409, code: "BOOKING_BUSY" });
     // A second of waiting rather than a cancellation's three: Stripe comes after it.
     expect(bookingCancellationRepository.waits).toEqual([1_000]);
     await expect(
-      adjustmentService.refund(randomUUID(), admin, press()),
-    ).rejects.toBeInstanceOf(NotFoundException);
+      refusalOf(adjustmentService.refund(randomUUID(), admin, press())),
+    ).resolves.toMatchObject({ status: 404, code: "BOOKING_NOT_FOUND" });
     expect(paymentGateway.refunds.size).toBe(0);
   });
 
@@ -455,8 +457,8 @@ describe("BookingAdjustmentService", () => {
 
     paymentGateway.losingAnswers = true;
     await expect(
-      adjustmentService.refund(id, admin, lost),
-    ).rejects.toBeInstanceOf(BadGatewayException);
+      refusalOf(adjustmentService.refund(id, admin, lost)),
+    ).resolves.toMatchObject({ status: 502, code: "REFUND_NOT_SENT" });
 
     if (first.refundId === null) throw new Error("The refund was not recorded");
 
@@ -475,8 +477,8 @@ describe("BookingAdjustmentService", () => {
       { ...second, bounce: null },
       { ...first, bounce: RefundFailureStatus.OPEN },
     ]);
-    await expect(adjustmentService.listOf(randomUUID())).rejects.toBeInstanceOf(
-      NotFoundException,
-    );
+    await expect(
+      refusalOf(adjustmentService.listOf(randomUUID())),
+    ).resolves.toMatchObject({ status: 404, code: "BOOKING_NOT_FOUND" });
   });
 });

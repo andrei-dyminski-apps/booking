@@ -3,15 +3,15 @@
 import { refresh, revalidateTag, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { createBookingSchema, type CreateBookingInput } from "@repo/contracts";
-import { ApiResponseError, bookingsApi } from "#shared/api";
+import { bookingsApi } from "#shared/api";
 import {
   availabilityTag,
   CATALOGUE_TAG,
-  HTTP_STATUS,
   listingTag,
   ROUTES,
 } from "#shared/config";
 import { toFieldErrors, toFormErrors, type FormErrors } from "#shared/lib";
+import { isDatesUnavailable, isListingChanged } from "../model/booking-refusal";
 import type { ReservationErrors } from "../model/reservation-errors";
 
 /**
@@ -26,15 +26,18 @@ import type { ReservationErrors } from "../model/reservation-errors";
  * browser before a request is spent, and refused again here because an action is an
  * endpoint of its own. What it cannot answer either time is whether the nights are free:
  * that is a question about other rows, and the only place it can be settled without a
- * race is inside the transaction that locks the listing. Its answer arrives here as a
- * `409` and is shown the way every other refusal is, with `stale` set: the form remembers
- * these nights as taken even when they lie past the window its calendar draws.
+ * race is inside the transaction that locks the listing. Its answer arrives here as
+ * `DATES_UNAVAILABLE` and is shown the way every other refusal is, with `stale` set: the
+ * form remembers these nights as taken even when they lie past the window its calendar
+ * draws. It is read off the code, not the `409` it travels with, so a second kind of
+ * conflict added to this route cannot flip the form into the waitlist offer.
  *
  * The listing's `updatedAt` travels the other way round: it is the version of the terms
  * the page showed beside the button — the prices the quote was worked out from and the
  * cancellation policy — so the API can refuse a hold at a price, or under a policy, the
- * guest never read. That refusal is a `412`, not a `409` — the nights are free — and it
- * reads the listing again, so the page redraws with the terms now in force.
+ * guest never read. That refusal is `LISTING_CHANGED_SINCE_SHOWN` (a `412`, not a `409` —
+ * the nights are free), and it reads the listing again, so the page redraws with the terms
+ * now in force.
  */
 export async function createBookingAction(
   listingId: string,
@@ -64,19 +67,14 @@ export async function createBookingAction(
     // Somebody else holds some of these nights, and the calendar the visitor chose them
     // from did not know: it is read again, so the taken nights are drawn and the form
     // offers the waitlist for them in place of a hold.
-    const stale =
-      error instanceof ApiResponseError &&
-      error.status === HTTP_STATUS.CONFLICT;
+    const stale = isDatesUnavailable(error);
 
     if (stale) {
       updateTag(availabilityTag(listingId));
       refresh();
     }
 
-    if (
-      error instanceof ApiResponseError &&
-      error.status === HTTP_STATUS.PRECONDITION_FAILED
-    ) {
+    if (isListingChanged(error)) {
       updateTag(listingTag(listingId));
       refresh();
     }

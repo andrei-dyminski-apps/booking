@@ -22,6 +22,7 @@ export {
   ApiUnreachableError,
   type ReadOptions,
 } from "./http-client";
+export { refusedWith } from "./refusal";
 export { refreshSession } from "./session-refresh";
 export { pageOrNullOnStaleCursor } from "./keyset-page";
 export {

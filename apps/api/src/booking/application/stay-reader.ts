@@ -1,7 +1,17 @@
-import { NotFoundException } from "@nestjs/common";
+import { NotFoundException, type HttpException } from "@nestjs/common";
 import { Canceller, cancellerOf } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
+import { apiException } from "../../common/api-exception";
 import type { BookingWithListingOwner } from "../domain/booking.types";
+
+/** The id stays in the sentence for the log; a client reads the code. */
+export function bookingNotFound(id: string): HttpException {
+  return apiException(
+    NotFoundException,
+    "BOOKING_NOT_FOUND",
+    `Booking ${id} not found`,
+  );
+}
 
 /**
  * `getReadable`'s rule over a row already read, whatever else was read beside it, answering
@@ -23,7 +33,7 @@ export function readerOf<Found extends BookingWithListingOwner>(
         );
 
   if (found === null || reader === null) {
-    throw new NotFoundException(`Booking ${id} not found`);
+    throw bookingNotFound(id);
   }
 
   return { found, reader };

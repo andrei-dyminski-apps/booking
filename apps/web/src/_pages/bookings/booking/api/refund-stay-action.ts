@@ -10,6 +10,7 @@ import {
   toFormErrors,
   type FormErrors,
 } from "#shared/lib";
+import { mayHaveReleasedClaim } from "../model/refund-claim";
 import type { RefundErrors } from "../model/refund-form";
 
 /**
@@ -48,14 +49,10 @@ export async function refundStayAction(
       error.status < HTTP_STATUS.INTERNAL_SERVER_ERROR
     );
 
-    // An unknown answer lists the press under the stay as unconfirmed; a 409 may have let a
-    // listed claim go — Stripe refused it, or the stay no longer covers it — or found it
-    // finished meanwhile, and the list has to say so rather than keep offering to finish it.
-    if (
-      uncertain ||
-      (error instanceof ApiResponseError &&
-        error.status === HTTP_STATUS.CONFLICT)
-    ) {
+    // An unknown answer lists the press under the stay as unconfirmed; a refusal that let a
+    // listed claim go — Stripe refused it, or the stay no longer covers it — has to be said
+    // by the list rather than leave it offering to finish a press that is gone.
+    if (uncertain || mayHaveReleasedClaim(error)) {
       refresh();
     }
 

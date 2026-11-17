@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { userSchema } from "./auth.js";
 import { DisputeStatus, type Booking } from "./booking.js";
+import { rule } from "./error-code.js";
 import {
   cents,
   centsSchema,
@@ -62,6 +63,11 @@ export function refundableCents(
 
 export const MAX_ADJUSTMENT_REASON_LENGTH = 500;
 
+const refundAmountInvalid = rule(
+  "REFUND_AMOUNT_INVALID",
+  "Name an amount to refund",
+);
+
 /**
  * `POST /bookings/:id/refunds` — a part of the payment given back by an admin, the stay left
  * as it is. `requestId` is minted by the dialog when it opens and names the refund at the
@@ -69,15 +75,28 @@ export const MAX_ADJUSTMENT_REASON_LENGTH = 500;
  * another one. The ceiling is the stay's on the day (`refundableCents`), so the API checks it.
  */
 export const adminRefundSchema = z.object({
-  amountCents: centsSchema.refine((amount) => amount > 0, {
-    error: "Name an amount to refund",
-  }),
+  // Spelled out rather than `centsSchema.refine(...)`: a refinement runs after the cents'
+  // own checks have failed, so a negative amount was answered twice, once in zod's words.
+  // Whatever is no whole positive number of cents is one refusal, this one.
+  amountCents: z
+    .int({ error: refundAmountInvalid })
+    .positive({ error: refundAmountInvalid })
+    .brand<"Cents">(),
   reason: z
     .string()
     .trim()
-    .min(1, { error: "Say why the money goes back — the record keeps it" })
+    .min(1, {
+      error: rule(
+        "REFUND_REASON_REQUIRED",
+        "Say why the money goes back — the record keeps it",
+      ),
+    })
     .max(MAX_ADJUSTMENT_REASON_LENGTH, {
-      error: `A reason can be at most ${String(MAX_ADJUSTMENT_REASON_LENGTH)} characters long`,
+      error: rule(
+        "REFUND_REASON_TOO_LONG",
+        `A reason can be at most ${String(MAX_ADJUSTMENT_REASON_LENGTH)} characters long`,
+        { maximum: MAX_ADJUSTMENT_REASON_LENGTH },
+      ),
     }),
   requestId: z.uuid(),
 });

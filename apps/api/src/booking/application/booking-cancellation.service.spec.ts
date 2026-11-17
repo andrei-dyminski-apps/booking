@@ -1,9 +1,4 @@
 import {
-  BadRequestException,
-  ConflictException,
-  NotFoundException,
-} from "@nestjs/common";
-import {
   BookingStatus,
   NotificationType,
   Role,
@@ -11,6 +6,7 @@ import {
   type Booking,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
+import { refusalOf } from "../../common/testing/refusal";
 import { type FakeNotificationService } from "../../notification/testing/notification-service.fakes";
 import { CURRENCY, cents, subtractCents } from "../../payment/domain/money";
 import type { BookingCancellationService } from "./booking-cancellation.service";
@@ -93,9 +89,12 @@ describe("BookingCancellationService", () => {
     const id = await bookedByGuest();
 
     // A host takes a stay away from its guest, who is owed a reason.
-    await expect(cancellationService.remove(id, owner)).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      refusalOf(cancellationService.remove(id, owner)),
+    ).resolves.toMatchObject({
+      status: 400,
+      code: "CANCELLATION_REASON_REQUIRED",
+    });
     await expect(service.findOne(id, owner)).resolves.toMatchObject({
       id,
       status: BookingStatus.PENDING_PAYMENT,
@@ -125,12 +124,15 @@ describe("BookingCancellationService", () => {
   it("takes the cancellation lease only for somebody who may cancel", async () => {
     const id = await bookedByGuest();
 
-    await expect(cancellationService.remove(id, owner)).rejects.toThrow(
-      BadRequestException,
-    );
-    await expect(cancellationService.remove(id, stranger)).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      refusalOf(cancellationService.remove(id, owner)),
+    ).resolves.toMatchObject({
+      status: 400,
+      code: "CANCELLATION_REASON_REQUIRED",
+    });
+    await expect(
+      refusalOf(cancellationService.remove(id, stranger)),
+    ).resolves.toMatchObject({ status: 404, code: "BOOKING_NOT_FOUND" });
     expect(bookingCancellationRepository.leases).toEqual([]);
 
     await cancellationService.remove(id, guest);
@@ -168,9 +170,12 @@ describe("BookingCancellationService", () => {
     const id = await bookedByGuest();
 
     notificationService.notices.length = 0;
-    await expect(cancellationService.remove(id, owner)).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      refusalOf(cancellationService.remove(id, owner)),
+    ).resolves.toMatchObject({
+      status: 400,
+      code: "CANCELLATION_REASON_REQUIRED",
+    });
 
     expect(notificationService.notices).toEqual([]);
   });
@@ -189,9 +194,9 @@ describe("BookingCancellationService", () => {
     it("hands it nothing for a cancellation it refused", async () => {
       const id = await bookedByGuest();
 
-      await expect(cancellationService.remove(id, stranger)).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        refusalOf(cancellationService.remove(id, stranger)),
+      ).resolves.toMatchObject({ status: 404, code: "BOOKING_NOT_FOUND" });
 
       expect(waitlistService.freed).toEqual([]);
     });
@@ -237,9 +242,12 @@ describe("BookingCancellationService", () => {
       const id = await paidStay(40);
       const promoted = { ...owner, role: Role.ADMIN };
 
-      await expect(cancellationService.remove(id, promoted)).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        refusalOf(cancellationService.remove(id, promoted)),
+      ).resolves.toMatchObject({
+        status: 400,
+        code: "CANCELLATION_REASON_REQUIRED",
+      });
 
       await cancellationService.remove(id, promoted, why);
 
@@ -336,17 +344,17 @@ describe("BookingCancellationService", () => {
 
       await cancellationService.remove(id, guest);
 
-      await expect(cancellationService.remove(id, owner)).rejects.toThrow(
-        NotFoundException,
-      );
+      await expect(
+        refusalOf(cancellationService.remove(id, owner)),
+      ).resolves.toMatchObject({ status: 404, code: "BOOKING_NOT_FOUND" });
     });
 
     it("refuses the host once the stay has begun, as everybody else", async () => {
       const id = await paidStay(0);
 
-      await expect(cancellationService.remove(id, owner, why)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        refusalOf(cancellationService.remove(id, owner, why)),
+      ).resolves.toMatchObject({ status: 409, code: "STAY_HAS_BEGUN" });
       expect(bookingCancellationRepository.hostFees.size).toBe(0);
     });
   });
@@ -367,9 +375,9 @@ describe("BookingCancellationService", () => {
       status: BookingStatus.CANCELLED,
       expiresAt: held.expiresAt,
     });
-    await expect(cancellationService.remove(id, guest)).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      refusalOf(cancellationService.remove(id, guest)),
+    ).resolves.toMatchObject({ status: 404, code: "BOOKING_NOT_FOUND" });
   });
 
   describe("cancelling", () => {
@@ -562,9 +570,9 @@ describe("BookingCancellationService", () => {
 
       if (found !== undefined) found.booking.dispute = "OPEN";
 
-      await expect(cancellationService.remove(id, admin)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        refusalOf(cancellationService.remove(id, admin)),
+      ).resolves.toMatchObject({ status: 409, code: "PAYMENT_DISPUTED" });
       expect(paymentGateway.refunds.size).toBe(0);
       expect(found?.booking.status).toBe(BookingStatus.CONFIRMED);
     });
@@ -609,11 +617,11 @@ describe("BookingCancellationService", () => {
       const id = await paidStay(0);
 
       await expect(
-        cancellationService.remove(id, guest),
-      ).rejects.toBeInstanceOf(ConflictException);
+        refusalOf(cancellationService.remove(id, guest)),
+      ).resolves.toMatchObject({ status: 409, code: "STAY_HAS_BEGUN" });
       await expect(
-        cancellationService.remove(id, admin),
-      ).rejects.toBeInstanceOf(ConflictException);
+        refusalOf(cancellationService.remove(id, admin)),
+      ).resolves.toMatchObject({ status: 409, code: "STAY_HAS_BEGUN" });
       expect(bookingTable.rows.get(id)?.booking.status).toBe(
         BookingStatus.CONFIRMED,
       );
@@ -631,8 +639,11 @@ describe("BookingCancellationService", () => {
       }
 
       await expect(
-        cancellationService.remove(id, guest),
-      ).rejects.toBeInstanceOf(ConflictException);
+        refusalOf(cancellationService.remove(id, guest)),
+      ).resolves.toMatchObject({
+        status: 409,
+        code: "STAY_ALREADY_ENDED_EARLY",
+      });
       expect(found?.booking.status).toBe(BookingStatus.CONFIRMED);
       expect(paymentGateway.refunds.size).toBe(0);
     });
@@ -663,9 +674,9 @@ describe("BookingCancellationService", () => {
         await bookingRepository.confirmPayment(racedId, "pi_1", null, AMOUNT);
       };
 
-      await expect(cancellationService.remove(id, guest)).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        refusalOf(cancellationService.remove(id, guest)),
+      ).resolves.toMatchObject({ status: 409, code: "BOOKING_CHANGED" });
       expect(bookingTable.rows.get(id)?.booking.status).toBe(
         BookingStatus.CONFIRMED,
       );

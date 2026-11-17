@@ -8,6 +8,7 @@ import {
   NotFoundException,
   PreconditionFailedException,
   UnprocessableEntityException,
+  type HttpException,
 } from "@nestjs/common";
 import {
   BookingStatus,
@@ -53,6 +54,7 @@ import { BookingJobs } from "./ports/booking-jobs";
 import { notifyBothSides, stayNoticeOf } from "./stay-notices";
 import { readerOf } from "./stay-reader";
 import { decodeCursor, encodeCursor } from "./booking-cursor";
+import { apiException } from "../../common/api-exception";
 import { sessionNotFound } from "../../common/session-errors";
 
 /**
@@ -60,8 +62,17 @@ import { sessionNotFound } from "../../common/session-errors";
  * does not say who holds them or since when: it can be a guest's own hold, or nights taken
  * long before and lying past the calendar's window.
  */
-const DATES_UNAVAILABLE =
+const DATES_UNAVAILABLE_MESSAGE =
   "Some of these nights are no longer free. Pick other dates, or ask to be told when they come free.";
+
+/** A payment asked for outside the hold's deadline, or for a booking that is no hold. */
+function notAwaitingPayment(): HttpException {
+  return apiException(
+    ConflictException,
+    "BOOKING_NOT_AWAITING_PAYMENT",
+    "This booking is not waiting for payment",
+  );
+}
 
 /**
  * The application layer of the booking module: HTTP takes, reads and pays for stays, and
@@ -147,7 +158,9 @@ export class BookingService {
       default: {
         const unknownRole: never = user.role;
 
-        throw new ForbiddenException(
+        throw apiException(
+          ForbiddenException,
+          "ROLE_NOT_ALLOWED",
           `Unknown role ${JSON.stringify(unknownRole)}`,
         );
       }
@@ -188,12 +201,20 @@ export class BookingService {
     } catch (error) {
       // A hard delete of the listing from outside the API — retiring one leaves the row.
       if (error instanceof ListingNotFoundError) {
-        throw new NotFoundException(error.message);
+        throw apiException(
+          NotFoundException,
+          "LISTING_NOT_FOUND",
+          error.message,
+        );
       }
 
       // A host does not book their own nights — the answer `POST /conversations` gives.
       if (error instanceof OwnListingError) {
-        throw new ForbiddenException("You cannot book your own listing");
+        throw apiException(
+          ForbiddenException,
+          "CANNOT_BOOK_OWN_LISTING",
+          "You cannot book your own listing",
+        );
       }
 
       // The guest is gone: nothing checks that row beforehand, because the token names it
@@ -208,31 +229,50 @@ export class BookingService {
       // no ids; the error's own message, which does, goes to the log instead.
       if (error instanceof DatesUnavailableError) {
         this.logger.log(`Hold refused: ${error.message}`);
-        throw new ConflictException(DATES_UNAVAILABLE);
+        throw apiException(
+          ConflictException,
+          "DATES_UNAVAILABLE",
+          DATES_UNAVAILABLE_MESSAGE,
+        );
       }
 
       // Not a `409`: the frontend reads that as its calendar being stale, and the nights
       // are free — it is the terms beside them that may have moved.
       if (error instanceof ListingChangedError) {
-        throw new PreconditionFailedException(
+        throw apiException(
+          PreconditionFailedException,
+          "LISTING_CHANGED_SINCE_SHOWN",
           "The host has changed this listing since it was shown — review its price and cancellation terms and book again",
         );
       }
 
       // In the schema's words: the same rule, the half of it that needs the listing's zone.
       if (error instanceof CheckInDayPastError) {
-        throw new BadRequestException(CHECK_IN_DAY_PAST);
+        throw apiException(
+          BadRequestException,
+          "CHECK_IN_DAY_PAST",
+          CHECK_IN_DAY_PAST,
+        );
       }
 
       // A rate the listing does not offer is the request's mistake rather than a change of
       // terms: a client that read the listing before it withdrew the rate gets the `412` above.
       if (error instanceof RateNotOfferedError) {
-        throw new BadRequestException(RATE_NOT_OFFERED);
+        throw apiException(
+          BadRequestException,
+          "RATE_NOT_OFFERED",
+          RATE_NOT_OFFERED,
+        );
       }
 
       // Valid dates on a valid listing that add up to more, or less, than a payment can carry.
       if (error instanceof UnchargeableStayError) {
-        throw new UnprocessableEntityException(error.refusal);
+        throw apiException(
+          UnprocessableEntityException,
+          error.code,
+          error.refusal,
+          error.params,
+        );
       }
 
       throw error;
@@ -268,7 +308,11 @@ export class BookingService {
     const { booking } = await this.getReadable(id, user);
 
     if (booking.guestId !== user.id) {
-      throw new ForbiddenException("Only the guest of a stay pays for it");
+      throw apiException(
+        ForbiddenException,
+        "ONLY_GUEST_PAYS",
+        "Only the guest of a stay pays for it",
+      );
     }
 
     if (
@@ -276,7 +320,7 @@ export class BookingService {
       booking.expiresAt === null ||
       new Date(booking.expiresAt) <= new Date()
     ) {
-      throw new ConflictException("This booking is not waiting for payment");
+      throw notAwaitingPayment();
     }
 
     let opened: OpenedPayment;
@@ -291,7 +335,9 @@ export class BookingService {
       // Not the provider failing: a second request for the same payment, answered once the
       // first one is.
       if (error instanceof PaymentOpeningInProgressError) {
-        throw new ConflictException(
+        throw apiException(
+          ConflictException,
+          "PAYMENT_BEING_OPENED",
           "The payment is being opened by another request — try again",
         );
       }
@@ -300,14 +346,18 @@ export class BookingService {
         `Could not open the payment of booking ${id}: ${String(error)}`,
       );
 
-      throw new BadGatewayException("The payment could not be opened");
+      throw apiException(
+        BadGatewayException,
+        "PAYMENT_NOT_OPENED",
+        "The payment could not be opened",
+      );
     }
 
     // Released while the provider answered: the release read no payment to withdraw.
     if (!(await this.bookingRepository.attachPayment(id, opened.id))) {
       await this.withdrawPayments([{ paymentId: opened.id }]);
 
-      throw new ConflictException("This booking is not waiting for payment");
+      throw notAwaitingPayment();
     }
 
     return {

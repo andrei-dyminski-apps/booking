@@ -13,6 +13,7 @@ import type { Page } from "../../../common/paging";
 import type { PublicOf } from "../../../common/testing/public-of.fakes";
 import {
   cents,
+  chargeRefusal,
   CURRENCY,
   NO_CENTS,
   type Cents,
@@ -23,6 +24,7 @@ import {
   GuestNotFoundError,
   ListingNotFoundError,
   OwnListingError,
+  UnchargeableStayError,
 } from "../../domain/booking.errors";
 import type {
   BookingCursor,
@@ -73,6 +75,12 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
 
   /** Set to have `create` fail on the other key: the account behind the token is gone. */
   vanishingGuest = false;
+
+  /** Set to have `create` quote a stay of this many cents, which no payment can carry. */
+  unchargeableAmount: Cents | null = null;
+
+  /** The stays whose nights were never recorded — those taken before `store_money_in_cents`. */
+  readonly withoutNights = new Set<string>();
 
   /**
    * The holds whose deadline has passed. The fake keeps no clock: a spec names the holds it
@@ -137,7 +145,9 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
         ? null
         : {
             ...found,
-            nights: nightsAddingUpTo(found.booking),
+            nights: this.withoutNights.has(id)
+              ? []
+              : nightsAddingUpTo(found.booking),
             discountCents: NO_CENTS,
           },
     );
@@ -172,6 +182,15 @@ export class FakeBookingRepository implements PublicOf<BookingRepository> {
 
     if (this.listingOwnerId === guestId) {
       return Promise.reject(new OwnListingError(booking.listingId));
+    }
+
+    if (this.unchargeableAmount !== null) {
+      return Promise.reject(
+        new UnchargeableStayError(
+          this.unchargeableAmount,
+          chargeRefusal(this.unchargeableAmount) ?? "",
+        ),
+      );
     }
 
     // Released before the overlap check, as the transaction does; a refusal below would

@@ -1,9 +1,9 @@
 import {
   BadGatewayException,
   ConflictException,
+  HttpException,
   Injectable,
   Logger,
-  NotFoundException,
 } from "@nestjs/common";
 import {
   DisputeStatus,
@@ -14,6 +14,7 @@ import {
   type BookingAdjustment,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
+import { apiException } from "../../common/api-exception";
 import {
   PaymentGateway,
   RefundExceedsPaymentError,
@@ -34,6 +35,7 @@ import {
 } from "../infrastructure/booking-adjustment.repository";
 import { BookingCancellationRepository } from "../infrastructure/booking-cancellation.repository";
 import { BookingRepository } from "../infrastructure/booking.repository";
+import { bookingNotFound } from "./stay-reader";
 import {
   sessionNotFound,
   notAnAdminAnymore,
@@ -103,7 +105,9 @@ export class BookingAdjustmentService {
       )
       .catch((error: unknown) => {
         if (error instanceof CancellationInProgressError) {
-          throw new ConflictException(
+          throw apiException(
+            ConflictException,
+            "BOOKING_BUSY",
             "The booking is being refunded or cancelled by another request — try again",
           );
         }
@@ -115,7 +119,7 @@ export class BookingAdjustmentService {
   /** The refunds admins sent for the stay, newest first; `404` for a stay that is not there. */
   async listOf(id: string): Promise<BookingAdjustment[]> {
     if (!(await this.bookingRepository.exists(id))) {
-      throw new NotFoundException(`Booking ${id} not found`);
+      throw bookingNotFound(id);
     }
 
     return this.bookingAdjustmentRepository.listOf(id);
@@ -159,15 +163,18 @@ export class BookingAdjustmentService {
   ): Promise<BookingAdjustment> {
     const found = await this.bookingRepository.findByIdWithListingOwner(id);
 
-    if (found === null) throw new NotFoundException(`Booking ${id} not found`);
+    if (found === null) throw bookingNotFound(id);
 
     const press = await this.bookingAdjustmentRepository.find(id, requestId);
 
     if (press?.status === "SENT") return press.adjustment;
 
     if (press !== null && press.amountCents !== amountCents) {
-      throw new ConflictException(
+      throw apiException(
+        ConflictException,
+        "REFUND_REQUEST_AMOUNT_MISMATCH",
         `This request went out for ${formatCents(press.amountCents)} already — press again with that amount, or open the dialog anew for another`,
+        { amountCents: press.amountCents },
       );
     }
 
@@ -203,7 +210,9 @@ export class BookingAdjustmentService {
         press !== null &&
         Date.now() - press.attemptedAt.getTime() < CLAIM_SETTLE_MS
       ) {
-        throw new ConflictException(
+        throw apiException(
+          ConflictException,
+          "REFUND_CLAIM_PENDING",
           "The first press of this refund may still be reaching Stripe — press again in a minute",
         );
       }
@@ -221,7 +230,7 @@ export class BookingAdjustmentService {
 
     const answer = await this.askProvider(id, () =>
       this.paymentGateway.refundNow(paymentId, amountCents, key).then(
-        (sent): SentRefund | ConflictException => sent,
+        (sent): SentRefund | HttpException => sent,
         (error: unknown) => {
           const refusedBy = providerRefusal(error);
 
@@ -232,7 +241,7 @@ export class BookingAdjustmentService {
       ),
     );
 
-    if (answer instanceof ConflictException) {
+    if (answer instanceof HttpException) {
       await this.bookingAdjustmentRepository.release(id, requestId);
 
       throw answer;
@@ -263,7 +272,11 @@ export class BookingAdjustmentService {
     } catch (error) {
       this.logger.error(`Could not refund booking ${id}: ${String(error)}`);
 
-      throw new BadGatewayException("The refund could not be sent");
+      throw apiException(
+        BadGatewayException,
+        "REFUND_NOT_SENT",
+        "The refund could not be sent",
+      );
     }
   }
 }
@@ -279,9 +292,11 @@ function refusalOf(
   refundedAtProvider: Cents,
   amount: AdminRefundInput["amountCents"],
   now: Date,
-): ConflictException | null {
+): HttpException | null {
   if (booking.dispute === DisputeStatus.OPEN) {
-    return new ConflictException(
+    return apiException(
+      ConflictException,
+      "PAYMENT_DISPUTED",
       "The payment of this stay is disputed with the bank — it can be refunded once the dispute is settled",
     );
   }
@@ -298,15 +313,22 @@ function refusalOf(
   );
 
   if (left === NO_CENTS) {
-    return new ConflictException("Nothing of this stay is left to refund");
+    return apiException(
+      ConflictException,
+      "NOTHING_LEFT_TO_REFUND",
+      "Nothing of this stay is left to refund",
+    );
   }
 
   if (amount <= left) return null;
 
-  return new ConflictException(
+  return apiException(
+    ConflictException,
+    "REFUND_EXCEEDS_REMAINING",
     isCancellableOn(booking, now)
       ? `At most ${formatCents(left)} of this stay is left to refund without cancelling it — refunding all of a stay not yet begun is cancelling it`
       : `At most ${formatCents(left)} of this stay is left to refund`,
+    { maximumCents: left },
   );
 }
 
@@ -316,15 +338,21 @@ function refusalOf(
  * the dashboard's — or a refusal of its own, a dispute whose webhook has not arrived yet
  * among them. `null` for a failure that leaves the outcome unknown.
  */
-function providerRefusal(error: unknown): ConflictException | null {
+function providerRefusal(error: unknown): HttpException | null {
   if (error instanceof RefundExceedsPaymentError) {
-    return new ConflictException(
+    return apiException(
+      ConflictException,
+      "REFUND_EXCEEDS_PAYMENT",
       "Less of this stay is left to refund than that — another refund went out since",
     );
   }
 
   if (error instanceof RefundRefusedError) {
-    return new ConflictException(`Stripe refused the refund: ${error.reason}`);
+    return apiException(
+      ConflictException,
+      "REFUND_REFUSED_BY_PROVIDER",
+      `Stripe refused the refund: ${error.reason}`,
+    );
   }
 
   return null;
@@ -333,7 +361,9 @@ function providerRefusal(error: unknown): ConflictException | null {
 /** The payment a refund goes back through; a stay nobody paid for is a `409`. */
 function paidWith({ booking, paymentId }: BookingWithListingOwner): string {
   if (!booking.paid || paymentId === null) {
-    throw new ConflictException(
+    throw apiException(
+      ConflictException,
+      "STAY_NOT_PAID",
       "Nobody paid for this stay — there is nothing to refund",
     );
   }

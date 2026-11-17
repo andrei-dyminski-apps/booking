@@ -355,8 +355,13 @@ is the wrong shape for a list that keeps growing.
   `message`/`errors` out of an `unknown` body by hand.
   `ApiResponseError.code` (an `ErrorCode`, `UNKNOWN_ERROR` for a code this build has no word for
   or an answer outside the contract) and each issue's `code`/`params` carry the rule that
-  refused, for a client that words it itself; the interface still shows `message`, which is the English
-  fallback and what every screen reads today.
+  refused, for a client that words it itself; the interface still shows `message`, which is
+  the English fallback. Where one status has several reasons, the code decides, not the
+  status: a slice keeps its checks in `model/*-refusal.ts` as one-liners over
+  `refusedWith` from `#shared/api` (`isDatesUnavailable`, `isBeingOpened`,
+  `mayHaveReleasedClaim`), which is `false` for `UNKNOWN_ERROR`, so an answer this
+  build cannot name is never acted on. A route whose slice carries no codes yet is
+  still read by its status.
 - Parse the API response with a schema (`bookingListSchema.parse(...)`) instead of casting
   with `as`: a mismatch with the contract has to fail immediately and loudly.
 - Validate a submitted form with the same schema that validates the request in Nest
@@ -586,11 +591,12 @@ this side decided.
   `/waitlist` shares no route segment with anything. Joining starts on the listing: the
   booking form compares its dates with the calendar's taken ranges (`callsForWaitlist`) and
   submits to `joinWaitlistAction` instead of a hold when they overlap. Both actions read the
-  calendar again on a `409` and answer `stale`, so a stale one flips the form the right way
-  rather than repeating the refusal. The calendar is a window, so the form also remembers
-  the range a hold was last refused for — nights past the window could otherwise never
-  reach the waitlist. Only free nights are a `409` from the waitlist; a full list is a
-  `403`, which leaves the shared availability cache alone.
+  calendar again on a `409` and answer `stale` — the hold's by its code, `DATES_UNAVAILABLE`,
+  the waitlist's by its status until that slice carries codes — so a stale one flips the
+  form the right way rather than repeating the refusal. The calendar is a window, so
+  the form also remembers the range a hold was last refused for — nights past the
+  window could otherwise never reach the waitlist. Only free nights are a `409` from the
+  waitlist; a full list is a `403`, which leaves the shared availability cache alone.
 - **The admin's section is `/admin`**, three screens: every listing on offer, each one
   edited and retired through the same `save-listing` and `delete-listing` features the
   owner runs; `/admin/users`, the accounts, each leading to `/admin/users/[id]` — where

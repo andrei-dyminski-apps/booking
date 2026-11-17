@@ -3,7 +3,6 @@ import {
   ConflictException,
   Injectable,
   Logger,
-  NotFoundException,
 } from "@nestjs/common";
 import {
   BookingStatus,
@@ -20,6 +19,7 @@ import {
   type CancelBookingInput,
 } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
+import { apiException } from "../../common/api-exception";
 import { NotificationService } from "../../notification/notification.service";
 import { NO_CENTS, type Cents } from "../../payment/domain/money";
 import { WaitlistService } from "../../waitlist/waitlist.service";
@@ -38,7 +38,7 @@ import {
   stayNoticeOf,
   type CancellationNotice,
 } from "./stay-notices";
-import { readerOf } from "./stay-reader";
+import { bookingNotFound, readerOf } from "./stay-reader";
 
 /**
  * The cancellation of a stay: who may cancel it and on what terms, the refund it owes and
@@ -81,7 +81,11 @@ export class BookingCancellationService {
       read.endedEarlyAt === null &&
       isCancellableOn(read, new Date())
     ) {
-      throw new BadRequestException(HOST_REASON_REQUIRED);
+      throw apiException(
+        BadRequestException,
+        "CANCELLATION_REASON_REQUIRED",
+        HOST_REASON_REQUIRED,
+      );
     }
     const { found, wasHold, cancelled, refundOwedCents, refundCents } =
       await this.bookingCancellationRepository
@@ -90,7 +94,9 @@ export class BookingCancellationService {
         )
         .catch((error: unknown) => {
           if (error instanceof CancellationInProgressError) {
-            throw new ConflictException(
+            throw apiException(
+              ConflictException,
+              "BOOKING_BUSY",
               "The booking is being cancelled by another request — try again",
             );
           }
@@ -159,7 +165,7 @@ export class BookingCancellationService {
     const { booking } = found;
 
     if (!isCancellable(booking.status)) {
-      throw new NotFoundException(`Booking ${id} not found`);
+      throw bookingNotFound(id);
     }
 
     // An early end has spent the refund key a cancellation would send under
@@ -167,7 +173,9 @@ export class BookingCancellationService {
     // `isCancellableOn` refuses such a stay too, and an early end is offered only from the
     // moment a cancellation stops; this says why in words of its own.
     if (booking.endedEarlyAt !== null) {
-      throw new ConflictException(
+      throw apiException(
+        ConflictException,
+        "STAY_ALREADY_ENDED_EARLY",
         "A stay that was ended early can no longer be cancelled",
       );
     }
@@ -176,7 +184,9 @@ export class BookingCancellationService {
 
     // The same moment for everybody: once the stay has begun, nobody lets it go.
     if (!isCancellableOn(booking, now)) {
-      throw new ConflictException(
+      throw apiException(
+        ConflictException,
+        "STAY_HAS_BEGUN",
         "A stay that has begun can no longer be cancelled",
       );
     }
@@ -212,12 +222,14 @@ export class BookingCancellationService {
     const now = await this.bookingRepository.findByIdWithListingOwner(id);
 
     if (now !== null && isCancellable(now.booking.status)) {
-      throw new ConflictException(
+      throw apiException(
+        ConflictException,
+        "BOOKING_CHANGED",
         "The booking changed while it was being cancelled — try again",
       );
     }
 
-    throw new NotFoundException(`Booking ${id} not found`);
+    throw bookingNotFound(id);
   }
 
   /**
@@ -239,7 +251,9 @@ export class BookingCancellationService {
     }
 
     if (booking.dispute === DisputeStatus.OPEN) {
-      throw new ConflictException(
+      throw apiException(
+        ConflictException,
+        "PAYMENT_DISPUTED",
         "The payment of this stay is disputed with the bank — it can be cancelled once the dispute is settled",
       );
     }
