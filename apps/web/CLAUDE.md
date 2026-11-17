@@ -150,18 +150,20 @@ The frame around every page is `_app/layout`, and it is a sidebar beside the con
 rather than a row of links above it: the navigation grew a section per role, and a header
 is the wrong shape for a list that keeps growing.
 
-- **`AppShell` reads the session once, for the whole frame.** The sidebar, the sheet
-  behind the menu button and the header all render differently for a signed-in visitor,
-  and each of them reading `/auth/me` would be three round trips for one answer — the
+- **The frame reads no session; its islands do.** The sidebar, the sheet behind the menu
+  button, the header and the footer all render differently for a signed-in visitor, so
+  each reads the session in an island of its own — `WithUser` under a `<Suspense>` whose
+  fallback is a placeholder of the same size — and the frame around them, with the page
+  inside it, is the prerendered shell (see "Prerendering" below). `AppShell` reading it
+  once for the whole frame would make every page wait for `/auth/me` before its first byte.
+- **`currentUser()` is memoized**, and that is what keeps the islands and the page under
+  them down to one call to `/auth/me` (`cache()` from React, in `shared/api`) — the
   transport gives up Next's per-render memoization in exchange for its timeout (see
-  `http-client.ts`), so nothing collapses them by itself. What the shell asks for is
-  handed down as a prop.
-- **`currentUser()` is memoized on top of that** (`cache()` from React, in `shared/api`),
-  which is what keeps the page under the shell from asking a fourth time. It takes no
-  `ReadOptions`, unlike every other read of that segment: the session is personal, so
-  `no-store` is the only answer a call site could give — and a function with no arguments
-  is one `cache()` can key.
-- **The footer is handed the session too**, and offers what the navigation offers: the
+  `http-client.ts`), so nothing else collapses them. It takes no `ReadOptions`, unlike
+  every other read of that segment: the session is personal, so `no-store` is the only
+  answer a call site could give — and a function with no arguments is one `cache()` can
+  key.
+- **The footer reads the session too**, and offers what the navigation offers: the
   catalogue to everybody, the stays only to somebody who has any. A link to `/bookings`
   left standing for a stranger is a click into `/login?next=/bookings` they never asked
   for, and the two halves of the shell disagreeing about one section is exactly the drift
@@ -193,6 +195,48 @@ is the wrong shape for a list that keeps growing.
   listener mounts. A new import into the shell is checked the same way: `next build`,
   then the chunks of the home page's entries in `page_client-reference-manifest.js`.
 
+## Prerendering
+
+`cacheComponents` and `partialPrefetching` are on (`next.config.js`), so every page is
+partially prerendered: a static shell written at build — on Vercel served from the CDN
+before any function runs — and the parts of this request streamed into its `<Suspense>`
+holes. `next build` marks such a route `◐`. What decides which part a piece of code
+lands in is what it reads:
+
+- **The request — `cookies()`, `headers()`, `params`, `searchParams`, a `no-store` read —
+  goes inside a `<Suspense>`.** A page's `loading.tsx` is that boundary for the page; the
+  shell's islands (`WithUser`) are it for the frame. Outside one, `next build` fails with
+  `blocking-prerender-dynamic`, which is the check working: the access would hold the
+  whole page back.
+- **The clock goes after `connection()`.** Next.js also renders a page ahead of a request
+  — a prefetch, the dev server's check that a navigation is instant — with the request's
+  data but without leave to read the clock, and `Date.now()` there is an error. A
+  `no-store` read awaits `connection()` in the transport (`serverHeaders`), so a page that
+  has asked for the session is past it already; a page that reads the clock before any
+  such read says it itself (`catalogue-page.tsx`, `listing-page.tsx`).
+- **A public read is cached at its call site** (`"use cache"`, `cacheLife`, `cacheTag` —
+  see "Data and API") and lands in the shell only when nothing it depends on comes from
+  the request. None does here yet: every cached read takes an id or a search from the URL,
+  so it streams like the rest, and no build ever asks the API.
+- **The login page is allowed to block** (`export const instant = false` in
+  `app/login/page.tsx`). Streamed content stays hidden until a script reveals it, and that
+  form is the one that has to work with no JavaScript — so it is rendered in the response
+  itself. Every other screen needs the script anyway; the register form streams under a
+  static card. On a page with no JavaScript the shell's islands stay placeholders, which
+  is the price of the shell for a visitor nobody here designs for besides that one form.
+- **Nothing in the shell may need a nonce**, since it is written before there is a
+  request to mint one. Next.js keeps its own inline scripts out of it and puts the nonce
+  on what it streams; the two inline scripts that are in it — the theme's
+  (`THEME_SCRIPT`, `ThemeScript` in the root layout) and React's note of when the shell
+  was painted (`REACT_SHELL_TIME_SCRIPT`) — are allowed by their hashes. `next-themes`'
+  own script could carry only a nonce, so `Providers` hands it a type that makes it an
+  inert data block. A new inline script in the shell is a hash in the policy or a
+  console error on every page; `proxy.spec.ts` checks React's text against the React that
+  Next.js bundles, so an upgrade that rewords it fails a test rather than the browser.
+- **What the root layout reads is frozen at build.** Its metadata and JSON-LD read
+  `siteOrigin()` with no request around them, so the origin in them is the one the build
+  saw — on Vercel the same variables the server runs with.
+
 ## Data and API
 
 - **Every call to the API goes through `src/shared/api`.** No `fetch` to the backend from a
@@ -206,8 +250,8 @@ is the wrong shape for a list that keeps growing.
   down method, path and the schema of the answer for each of them. A new endpoint means a
   new method there, a new resource means a sibling file — never a `fetch` at the call site.
 - **A query string is built there too, and it is sorted** (`queryString` in
-  `http-client.ts`, used by `listingsApi.page` and `bookingsApi.page`). The URL is the key
-  the Data Cache stores an answer under, so two callers asking the same question have to
+  `http-client.ts`, used by `listingsApi.page` and `bookingsApi.page`). The URL is the
+  argument a cached read is stored under, so two callers asking the same question have to
   produce the same one or each of them warms an entry the other never reads. An absent
   filter is left out rather than sent empty. It lives with the transport rather than beside
   one resource because both paged reads spell it, and a second copy would be a second set
@@ -248,10 +292,10 @@ is the wrong shape for a list that keeps growing.
   of a call site.** In the browser it is a first-party cookie of this origin, so
   `credentials: "same-origin"` is all it takes. A server render has no cookie jar at all,
   so `http-client.ts` copies the access cookie out of the request Next.js is answering
-  (`next/headers`) — in the transport, never at the call site. It does that only for an
-  uncached read: the answer to a cached one goes into the Data Cache under its URL and is
-  served to whoever asks next, so a personal credential must not reach it. That also keeps
-  a read which needs no session out of `cookies()`, and with it out of dynamic rendering.
+  (`next/headers`) — in the transport, never at the call site. It does that only for a
+  `no-store` read: a cached one is stored and served to whoever asks next, so a personal
+  credential must not reach it, and `cookies()` inside a `"use cache"` scope is refused
+  anyway.
 - **The client address travels with it, and for a reason that is easy to miss.** A Server
   Action and a server render are the one path that does not go through the BFF, so the
   `x-forwarded-for` the proxy forwards is never written for them. Without it the API sees
@@ -265,8 +309,8 @@ is the wrong shape for a list that keeps growing.
   for the routes of the session itself — see "The session" below.
 - **The transport gives up after ten seconds** (`AbortSignal.timeout`) instead of holding
   a render open for the five minutes undici allows; the abort arrives as
-  `ApiUnreachableError`. The signal costs Next's per-render memoization — the Data Cache,
-  which `read` decides, is untouched.
+  `ApiUnreachableError`. The signal costs Next's per-render memoization — a cached read,
+  which the call site's `"use cache"` decides, is untouched.
 - The client throws two errors and nothing else swallows the rest: `ApiUnreachableError`
   (the API never answered) and `ApiResponseError` (a non-2xx answer; `issues` carries the
   per-field validation problems from `apiErrorSchema`). Anything else — a `ZodError` above
@@ -374,9 +418,36 @@ is the wrong shape for a list that keeps growing.
   it is not inlined at `next build`, it does not belong to the environment of the build,
   and changing the address is a restart rather than a rebuild. There is still no fallback
   — an unset value fails the request with its own name in the message.
-- Server-side fetches carry an explicit `cache`/`next.revalidate`; do not silently rely on
-  the default. The read methods take those options as a required argument, so the decision
-  stays at the call site.
+- **Every read says how it is cached, and it is a required argument** (`ReadOptions`), so
+  the decision stays at the call site. `{ cache: "no-store" }` is a read of this request:
+  the session and the address travel with it, it awaits `connection()`, and nothing of it
+  is stored. `{ cached }` is a public answer, and `cached` is a `"use cache"` function the
+  call site writes — `cacheLife` and `cacheTag` are spelled there, then `answerOf(url)`:
+
+  ```ts
+  listingsApi.get(id, {
+    cached: async (url) => {
+      "use cache";
+
+      cacheLife("max");
+      cacheTag(listingTag(id));
+
+      return await answerOf(url);
+    },
+  });
+  ```
+
+  The scope is the call site's because it cannot be the transport's: a `"use cache"`
+  function may not sit in a module a client component reaches, and `shared/api` is reached
+  from both sides (the build says so in those words). The page slices that read public
+  answers are server-only. What the scope stores is the raw answer — status and text —
+  and not the parsed one, because what a cached function throws crosses the boundary
+  serialized and loses its class: an `ApiResponseError` thrown inside would reach
+  `orNotFound` as a plain `Error`. So the transport rebuilds a `Response` from what was
+  stored and parses, checks and throws exactly as it does for a fetch of its own. A 2xx
+  and a 4xx are stored — a missing listing is as missing for the next visitor; a 5xx and
+  a request that never came back are thrown, which stores nothing, and reach the caller as
+  `ApiUnreachableError`.
 
 ## The BFF
 
@@ -1025,7 +1096,7 @@ penalises, and that drift is what a shared schema exists to prevent.
   (`api/listing-metadata.ts`) states the title, the description cut to a result's length
   (`lib/description-summary.ts`, counted in the characters a reader sees and cut at the
   last word that fits whole) and the shared link off the row — through `readListing`,
-  the read the page makes, so the second ask is the Data Cache's answer and a missing
+  the read the page makes, so the second ask is the cached answer and a missing
   listing is the route's 404 here too. The sign-in and sign-up forms are `noindex, follow` in
   a static `metadata`: a form is not content, and every `?next=` is another address of it.
   None of these is a `Disallow` in `robots.txt`, which would stop a crawler from reading
@@ -1035,14 +1106,13 @@ penalises, and that drift is what a shared schema exists to prevent.
   `noindex` and a search engine stops following the links of a page left out for long.
   `sitemap.xml` names the home page, the catalogue and every listing with its
   `updatedAt`, read page by page through the unfiltered catalogue at `MAX_PAGE_LIMIT`
-  under `CATALOGUE_TAG` with no lifetime — a hold changes what is free, never which
+  under `CATALOGUE_TAG` with `cacheLife("max")` — a hold changes what is free, never which
   listings exist — and fails with the API rather than answering an empty list.
   `robots.txt` keeps a crawler out of the BFF and of the proxy's `PROTECTED` sections,
   each a redirect to the login page for a stranger, and names the sitemap. Both render
   per request through `await connection()`: the API is not there while the site builds,
-  and the origin is read at runtime. Not `dynamic = "force-dynamic"` — it turns every
-  `fetch` that sets no `cache` into a `no-store`, `revalidate: false` included (the check
-  reads it as falsy), so the sitemap's reads would skip the Data Cache every time.
+  and the origin is read at runtime. Without it the build would prerender the sitemap and
+  ask the API for its cached pages.
 - **JSON-LD goes on the page whose data it describes**, never into a graph assembled in
   one place for screens it cannot see: `Organization` and `WebSite` in the shell, the
   `ItemList` of the rows the catalogue drew under its search's address, the cursor left
@@ -1255,11 +1325,12 @@ enabled — bookings are taken either way.
 **The site sends a `Content-Security-Policy`** (`src/_app/proxy/content-security-policy.ts`,
 set by the proxy on every page): everything from this origin, plus Stripe's hosts for
 scripts, frames, API calls and images, and a script nonce minted per request instead of
-`'unsafe-inline'`. Next.js puts the nonce on its own scripts by reading the policy off the
-request; the root layout reads `x-nonce` and hands it to `next-themes`, the one inline
-script of this site's own. Every page renders per request already — the shell reads the
-session — so the nonce costs no static page. A new third-party origin is a line in the
-policy, and a new inline script needs the nonce, or the browser refuses it.
+`'unsafe-inline'`. Next.js puts the nonce on the scripts it streams by reading the policy
+off the request. The prerendered shell is written before any request and carries no
+nonce, so its two inline scripts — the theme's and React's — are allowed by their hashes
+instead (see "Prerendering"). A new third-party origin is a line in the policy, and a new
+inline script needs the nonce, or a hash if it is part of the shell, or the browser
+refuses it.
 
 The policy has no `'unsafe-eval'`, so zod's `new Function` probe (made when the first
 object schema is built) would be refused and logged in Chrome's Issues panel — a Lighthouse
@@ -1276,40 +1347,37 @@ switching Stripe accounts is a restart. A new hold lands on this page:
 
 How the result is made visible, by what kind of data it is:
 
-| Data                                            | Read                | Invalidated by                |
-| ----------------------------------------------- | ------------------- | ----------------------------- |
-| Personal (`/auth/me`, a visitor's own bookings) | `cache: "no-store"` | `refresh()` from `next/cache` |
-| Public and shared (the catalogue)               | `next: { tags }`    | `revalidateTag(tag, "max")`   |
-| A row its author has just edited                | `next: { tags }`    | `updateTag(tag)`              |
-| Anything, from a webhook (a Route Handler)      | —                   | `revalidateTag` only          |
+| Data                                            | Read                 | Invalidated by                |
+| ----------------------------------------------- | -------------------- | ----------------------------- |
+| Personal (`/auth/me`, a visitor's own bookings) | `cache: "no-store"`  | `refresh()` from `next/cache` |
+| Public and shared (the catalogue)               | `cached`, `cacheTag` | `revalidateTag(tag, "max")`   |
+| A row its author has just edited                | `cached`, `cacheTag` | `updateTag(tag)`              |
+| Anything, from a webhook (a Route Handler)      | —                    | `revalidateTag` only          |
 
 - `refresh()` and `updateTag` are Server Actions only; a Route Handler that calls either
   throws, and `revalidateTag` is what it has instead.
 - `revalidateTag(tag, "max")` — the single-argument form is deprecated in Next 16.
 - `router.refresh()` is the client-side equivalent of the first row and nothing more: it
-  re-renders, it does not touch the Data Cache. It is right where the change was made in
+  re-renders, it does not touch a cached read. It is right where the change was made in
   the browser (the session resume) and wrong for anything cached.
-- Personal data is never given a tag and never cached. The Data Cache is keyed by URL and
-  shared between visitors — a tag would only make it easier to serve one person's
-  bookings to the next one.
-- A cached read has to name its tags at the call site, in the `ReadOptions` the read
-  methods already take. Nothing checks that a tag exists; the linter cannot see it, so it
-  is a matter of review.
-- **A tag does not cache anything by itself, so `revalidate` is not optional.** A `fetch`
-  has not been cached by default since Next 15: the decision is read off `cache` and
-  `revalidate`, and a request naming neither becomes a `no-store` with its tags attached
-  to nothing — `{ next: { tags } }` looks like caching and is not, and the mutation
-  invalidating that tag then has nothing to invalidate. It fails by being fresh, which is
-  why nothing reports it. `ReadOptions` requires the field for that reason, and a read
-  whose only invalidation is its tag says `revalidate: false` — `listingTag(id)` and
-  `listingReviewsTag(id)` are that case, while the two reads a lapsing hold changes carry
-  the minute below instead.
-- **`revalidate: false` trusts that every write goes through a Server Action here.** A
-  row changed around the frontend — `db:seed`, `psql`, a call straight to the API — names
-  no tag, so the cached answer outlives it until the Data Cache is cleared (`rm -rf
-apps/web/.next/cache`, or a new deploy). After a re-seed that is the listings and their
-  reviews: the pages keep drawing the previous data until then. That is the trade of a read with no lifetime, made deliberately — nothing in the
-  API writes these rows on its own, unlike the holds below.
+- Personal data is never given a tag and never cached. A cached answer is shared between
+  visitors — a tag would only make it easier to serve one person's bookings to the next
+  one.
+- A cached read names its tags and its lifetime at the call site, inside the `"use cache"`
+  function it hands the read method as `cached` (see "Data and API"). Nothing checks that a
+  tag exists; the linter cannot see it, so it is a matter of review.
+- **Every cached read states a lifetime**, even where its tag is the whole of its
+  invalidation: `cacheLife("max")` is how that is said — `listingTag(id)` and
+  `listingReviewsTag(id)` are that case — while the two reads a lapsing hold changes carry
+  the minute below instead. Left out, the scope would fall back to `cacheLife`'s
+  `default` profile and refetch every fifteen minutes for an answer only a write changes.
+- **`"max"` trusts that every write goes through a Server Action here.** A row changed
+  around the frontend — `db:seed`, `psql`, a call straight to the API — names no tag, so
+  the cached answer outlives it until the cache is gone: a restart of `next start` or
+  `next dev`, whose `"use cache"` store is in memory, or a new deploy on Vercel. After a
+  re-seed that is the listings and their reviews: the pages keep drawing the previous data
+  until then. That is the trade of a read with no lifetime, made deliberately — nothing in
+  the API writes these rows on its own, unlike the holds below.
 - **The names live in `shared/config/cache-tags.ts`**, for the same reason `ROUTES` does:
   a tag is a string a read and a mutation have to spell the same way, and a typo in either
   half is a page that never updates or one that updates for nothing.
@@ -1323,23 +1391,22 @@ apps/web/.next/cache`, or a new deploy). After a re-seed that is the listings an
   two reads a hold affects are the case. A `PENDING_PAYMENT` hold lapses fifteen minutes
   after it was taken and puts its nights back on offer; nothing on this side mutates when
   it does, because the API releases it from a queue. So the catalogue and the availability
-  carry `next: { revalidate: HOLD_SWEEP_REVALIDATE, tags }` — a minute, which is the
+  carry `cacheLife({ revalidate: HOLD_SWEEP_REVALIDATE })` beside their tag — a minute, which is the
   interval of the sweep behind that queue rather than a number picked for the feel of it.
 - **That minute is named in `shared/config/cache-lifetimes.ts`**, and for the same reason
   the tags next door are: it is `SWEEP_INTERVAL_MS` of `apps/api/src/booking/infrastructure/booking-expiry.queue.ts`
   read from this side, and nothing across the wire checks that the two still agree — a
   literal at each call site is one more place to miss when that interval changes. Only a
   lifetime the API's own clock decides goes in there. A number chosen by this side for one
-  screen stays at that screen, and `revalidate: false` is not a lifetime at all — it is
-  how a read says its tag is the whole of its invalidation, and a name would only hide
-  that.
+  screen stays at that screen, and `"max"` is not a lifetime of that kind — it is how a
+  read says its tag is the whole of its invalidation, and a name would only hide that.
 - **Both halves of a write, in that order**: `updateTag` for the tag the author is about
   to read, `revalidateTag(tag, "max")` for the tags everybody else reads. The first makes
   the next request wait for a fresh answer, which is what stops an author's own save
   reading as lost; the second serves the previous answer while a new one is fetched
   behind it, which is what the rest of the site should get. `refresh()` after them is a
   third thing again — it throws away the router cache in the browser that made the
-  request, and is what a `no-store` read needs, since none of it is in the Data Cache.
+  request, and is what a `no-store` read needs, since none of it is cached.
 
 ### Confirming a destructive action
 
@@ -1394,8 +1461,8 @@ the confirmation being hit by the hand that was already moving.
   cannot name a row arrives there (`requireId`, `orNotFound`), so does a retired listing,
   and so does a user's section opened by an admin.
 - **Two error boundaries, because they catch different things.** `error.tsx` catches what
-  a page throws; it cannot catch what the layout above it throws, and this shell reads the
-  session before it renders anything — so an API that cannot be reached at all fails
+  a page throws; it cannot catch what the layout above it throws, and the shell's islands
+  read the session inside the root layout — so an API that cannot be reached at all fails
   there. `global-error.tsx` is that case, and it replaces the document, which is why it
   brings its own `<html>`, `<body>` and token import. Next.js decides from the file itself
   whether a boundary is a Client Component, so both of those `app/` files carry the

@@ -1,10 +1,15 @@
+import { cacheLife, cacheTag } from "next/cache";
 import type { ReviewPage } from "@repo/contracts";
-import { ApiResponseError, ApiUnreachableError, reviewsApi } from "#shared/api";
+import {
+  answerOf,
+  ApiResponseError,
+  ApiUnreachableError,
+  reviewsApi,
+} from "#shared/api";
 import { listingReviewsTag } from "#shared/config";
 
 /**
- * The newest page of what guests said about a listing, from the Data Cache under a tag of
- * its own: a review changes neither the row nor the calendar. No lifetime beside the tag,
+ * The newest page of what guests said about a listing, cached under a tag of its own: a review changes neither the row nor the calendar. No lifetime beside the tag,
  * like the row's — a review written or removed is the whole of its invalidation.
  *
  * `null` when the API refuses or cannot be reached, instead of an error: the reviews are
@@ -21,7 +26,16 @@ export async function readListingReviews(
     return await reviewsApi.ofListing(
       listingId,
       { sort: "newest", limit },
-      { next: { revalidate: false, tags: [listingReviewsTag(listingId)] } },
+      {
+        cached: async (url) => {
+          "use cache";
+
+          cacheLife("max");
+          cacheTag(listingReviewsTag(listingId));
+
+          return await answerOf(url);
+        },
+      },
     );
   } catch (error) {
     if (
