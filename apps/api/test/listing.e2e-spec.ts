@@ -31,6 +31,14 @@ const input: CreateListingInput = {
   capacity: 4,
 };
 
+/** The code a refused call answered with. The status is asserted by the `.expect(...)` before it. */
+const codeOf = (response: { body: unknown }): string =>
+  apiErrorSchema.parse(response.body).code;
+
+/** The rule behind each issue of a body the contract refused, in the order they were found. */
+const issueCodesOf = (response: { body: unknown }): string[] =>
+  (apiErrorSchema.parse(response.body).errors ?? []).map(({ code }) => code);
+
 describe("ListingController (e2e)", () => {
   let app: INestApplication<App>;
   let guest: Agent;
@@ -112,7 +120,26 @@ describe("ListingController (e2e)", () => {
 
   it("lets any user publish and refuses an admin — the role check, before any row", async () => {
     await guest.post("/listings").send(input).expect(201);
-    await admin.post("/listings").send(input).expect(403);
+    const refused = await admin.post("/listings").send(input).expect(403);
+
+    expect(codeOf(refused)).toBe("ROLE_NOT_ALLOWED");
+  });
+
+  it("answers INVALID_ID for a path id that is not a UUID, before any lookup", async () => {
+    const refusals = [
+      await anyone().get("/listings/not-an-id").expect(400),
+      await anyone()
+        .get("/listings/not-an-id/availability")
+        .query({ from: inDays(1), to: inDays(30) })
+        .expect(400),
+      await owner
+        .patch("/listings/not-an-id")
+        .send({ capacity: 2 })
+        .expect(400),
+      await owner.delete("/listings/not-an-id").expect(400),
+    ];
+
+    expect(refusals.map(codeOf)).toEqual(Array(4).fill("INVALID_ID"));
   });
 
   it("opens the catalogue, a listing and its calendar to a visitor with no session", async () => {
@@ -170,7 +197,12 @@ describe("ListingController (e2e)", () => {
     await expect(
       catalogue(`?ownerId=${ownerId}`).then(titles),
     ).resolves.toEqual(["Attic room"]);
-    await anyone().get("/listings?ownerId=not-an-id").expect(400);
+    const refused = await anyone()
+      .get("/listings?ownerId=not-an-id")
+      .expect(400);
+
+    expect(codeOf(refused)).toBe("VALIDATION_FAILED");
+    expect(issueCodesOf(refused)).toEqual(["INVALID_INPUT"]);
   });
 
   it("drops a listing whose nights are taken, and offers it again the moment they are not", async () => {
@@ -303,10 +335,13 @@ describe("ListingController (e2e)", () => {
       catalogue(`?sort=priceAsc&limit=2&cursor=${cursor}`).then(titles),
     ).resolves.toEqual(["Farmhouse"]);
 
-    await anyone()
-      .get(`/listings?sort=priceDesc&limit=2&cursor=${cursor}`)
-      .expect(400);
-    await anyone().get(`/listings?limit=2&cursor=${cursor}`).expect(400);
+    for (const other of ["sort=priceDesc&", ""]) {
+      const refused = await anyone()
+        .get(`/listings?${other}limit=2&cursor=${cursor}`)
+        .expect(400);
+
+      expect(codeOf(refused)).toBe("CURSOR_ORDERING_MISMATCH");
+    }
   });
 
   /**
@@ -337,16 +372,40 @@ describe("ListingController (e2e)", () => {
   it("refuses a query it cannot answer as asked", async () => {
     // One date is half a question, a cursor this API never issued is a mistake, and a
     // limit above the ceiling is the one parameter that could ask for the whole table.
-    await anyone()
+    const halfADateRange = await anyone()
       .get(`/listings?from=${inDays(1)}`)
       .expect(400);
-    await anyone().get("/listings?cursor=not-a-cursor").expect(400);
-    await anyone().get("/listings?sort=cheapest").expect(400);
-    await anyone().get("/listings?limit=500").expect(400);
-    await anyone().get("/listings?guests=none").expect(400);
+
+    expect(issueCodesOf(halfADateRange)).toEqual(["SEARCH_DATES_INCOMPLETE"]);
+
+    const strayCursor = await anyone()
+      .get("/listings?cursor=not-a-cursor")
+      .expect(400);
+
+    expect(codeOf(strayCursor)).toBe("CURSOR_MALFORMED");
+    // A parameter no rule of ours words — an enum, a ceiling, a number — is zod's own
+    // refusal, which the contract answers as `INVALID_INPUT`.
+    for (const parameter of ["sort=cheapest", "limit=500", "guests=none"]) {
+      const refused = await anyone().get(`/listings?${parameter}`).expect(400);
+
+      expect(codeOf(refused)).toBe("VALIDATION_FAILED");
+      expect(issueCodesOf(refused)).toEqual(["INVALID_INPUT"]);
+    }
+
     // A third decimal is finer than the column stores, so it is refused rather than
-    // rounded into a filter nobody asked for.
-    await anyone().get("/listings?minPriceCents=5000.5").expect(400);
+    // rounded into a filter nobody asked for — by the same rule a price is.
+    const fraction = await anyone()
+      .get("/listings?minPriceCents=5000.5")
+      .expect(400);
+
+    expect(issueCodesOf(fraction)).toEqual(["PRICE_NOT_WHOLE_CENTS"]);
+
+    // A day that is not one is worded as it is on a stay or a date price.
+    const notADay = await anyone()
+      .get(`/listings?from=${inDays(3)}&to=soon`)
+      .expect(400);
+
+    expect(issueCodesOf(notADay)).toEqual(["DATE_INVALID"]);
   });
 
   /**
@@ -382,14 +441,17 @@ describe("ListingController (e2e)", () => {
       .get(`/listings/${listingId}/availability`)
       .query({ from: inDays(1), to: inDays(367) })
       .expect(200);
-    await anyone()
-      .get(`/listings/${listingId}/availability`)
-      .query({ from: inDays(1), to: inDays(368) })
-      .expect(400);
-    await anyone()
-      .get(`/listings/${listingId}/availability`)
-      .query({ from: "0001-01-01", to: "9999-12-31" })
-      .expect(400);
+    for (const window of [
+      { from: inDays(1), to: inDays(368) },
+      { from: "0001-01-01", to: "9999-12-31" },
+    ]) {
+      const refused = await anyone()
+        .get(`/listings/${listingId}/availability`)
+        .query(window)
+        .expect(400);
+
+      expect(issueCodesOf(refused)).toEqual(["WINDOW_TOO_WIDE"]);
+    }
   });
 
   it("reports the nights a listing is taken for, whole and in order", async () => {
@@ -423,10 +485,13 @@ describe("ListingController (e2e)", () => {
     expect(listingAvailabilitySchema.parse(empty.body).booked).toEqual([]);
 
     await owner.delete(`/listings/${listingId}`).expect(204);
-    await anyone()
+
+    const gone = await anyone()
       .get(`/listings/${listingId}/availability`)
       .query({ from: inDays(1), to: inDays(30) })
       .expect(404);
+
+    expect(codeOf(gone)).toBe("LISTING_NOT_FOUND");
   });
 
   it("gives an owner only their own listings under /listings/mine", async () => {
@@ -447,7 +512,9 @@ describe("ListingController (e2e)", () => {
     const mine = await guest.get("/listings/mine").expect(200);
 
     expect(listingListSchema.parse(mine.body)).toEqual([]);
-    await admin.get("/listings/mine").expect(403);
+    expect(codeOf(await admin.get("/listings/mine").expect(403))).toBe(
+      "ROLE_NOT_ALLOWED",
+    );
   });
 
   it("lets the owner edit their listing", async () => {
@@ -535,9 +602,22 @@ describe("ListingController (e2e)", () => {
     expect((await read(honolulu)).timeZone).toBe("Pacific/Kiritimati");
 
     // An offset does not follow summer time, and a name nobody knows converts nothing.
-    for (const timeZone of ["+05:00", "Etc/GMT+5", "Mars/Olympus_Mons", ""]) {
-      await owner.patch(`/listings/${honolulu}`).send({ timeZone }).expect(400);
+    for (const timeZone of ["+05:00", "Etc/GMT+5", "Mars/Olympus_Mons"]) {
+      const refused = await owner
+        .patch(`/listings/${honolulu}`)
+        .send({ timeZone })
+        .expect(400);
+
+      expect(issueCodesOf(refused)).toEqual(["TIME_ZONE_INVALID"]);
     }
+    expect(
+      issueCodesOf(
+        await owner
+          .patch(`/listings/${honolulu}`)
+          .send({ timeZone: "" })
+          .expect(400),
+      ),
+    ).toEqual(["TIME_ZONE_REQUIRED"]);
 
     // Stored as `Intl` spells it, whatever the case or the alias it was typed in.
     await owner
@@ -547,10 +627,12 @@ describe("ListingController (e2e)", () => {
     expect((await read(honolulu)).timeZone).toBe("America/New_York");
 
     for (const checkInTime of ["24:00", "9:00", "15:00:00"]) {
-      await owner
+      const refused = await owner
         .patch(`/listings/${honolulu}`)
         .send({ checkInTime })
         .expect(400);
+
+      expect(issueCodesOf(refused)).toEqual(["CHECK_IN_TIME_INVALID"]);
     }
   });
 
@@ -582,10 +664,12 @@ describe("ListingController (e2e)", () => {
     expect(await read(discounted)).toBe(1_500);
 
     for (const nonRefundableDiscountBps of [50, 5_001, 12.5]) {
-      await owner
+      const refused = await owner
         .patch(`/listings/${discounted}`)
         .send({ nonRefundableDiscountBps })
         .expect(400);
+
+      expect(issueCodesOf(refused)).toEqual(["DISCOUNT_OUT_OF_RANGE"]);
     }
 
     await owner
@@ -596,14 +680,20 @@ describe("ListingController (e2e)", () => {
   });
 
   it("offers no non-refundable rate under the non-refundable policy, whichever half a save names", async () => {
-    // The contract's refusal is an issue under the discount; the API's own, the message.
+    // The contract's refusal is an issue under the discount; the API's own, the body's
+    // code. Both name the same rule and say the same sentence.
     const refused = async (
       response: Promise<{ body: unknown }>,
     ): Promise<void> => {
-      const { message, errors } = apiErrorSchema.parse((await response).body);
+      const { message, code, errors } = apiErrorSchema.parse(
+        (await response).body,
+      );
 
-      expect(errors ?? [{ path: [], message }]).toContainEqual(
-        expect.objectContaining({ message: RATE_UNDER_NON_REFUNDABLE_POLICY }),
+      expect(errors ?? [{ path: [], message, code }]).toContainEqual(
+        expect.objectContaining({
+          message: RATE_UNDER_NON_REFUNDABLE_POLICY,
+          code: "RATE_UNDER_NON_REFUNDABLE_POLICY",
+        }),
       );
     };
     const read = async (id: string) =>
@@ -661,10 +751,12 @@ describe("ListingController (e2e)", () => {
   });
 
   it("refuses the edit to another owner — the role passes, the ownership does not", async () => {
-    await otherOwner
+    const refused = await otherOwner
       .patch(`/listings/${listingId}`)
       .send({ pricePerNightCents: 100 })
       .expect(403);
+
+    expect(codeOf(refused)).toBe("LISTING_NOT_OWNED");
   });
 
   it("lets an admin edit and delete a listing they do not own", async () => {
@@ -673,7 +765,9 @@ describe("ListingController (e2e)", () => {
       .send({ capacity: 8 })
       .expect(200);
     await admin.delete(`/listings/${listingId}`).expect(204);
-    await owner.get(`/listings/${listingId}`).expect(404);
+    expect(codeOf(await owner.get(`/listings/${listingId}`).expect(404))).toBe(
+      "LISTING_NOT_FOUND",
+    );
   });
 
   it("retires a booked listing rather than refusing to let go of it", async () => {
@@ -709,11 +803,14 @@ describe("ListingController (e2e)", () => {
   it("refuses to edit a listing that has been retired", async () => {
     await owner.delete(`/listings/${listingId}`).expect(204);
 
-    await owner
+    const edit = await owner
       .patch(`/listings/${listingId}`)
       .send({ pricePerNightCents: 13_550 })
       .expect(404);
-    await owner.delete(`/listings/${listingId}`).expect(404);
+    const again = await owner.delete(`/listings/${listingId}`).expect(404);
+
+    expect(codeOf(edit)).toBe("LISTING_NOT_FOUND");
+    expect(codeOf(again)).toBe("LISTING_NOT_FOUND");
   });
 
   it("stores the exceptions to a price, answers them on the listing alone, and replaces them whole", async () => {
@@ -850,37 +947,67 @@ describe("ListingController (e2e)", () => {
       owner.patch(`/listings/${listingId}`).send({ pricing });
 
     // Two days back: yesterday in UTC is still today west of Greenwich until noon UTC.
-    await send({
-      weekdays: {},
-      dates: [{ date: inDays(-2), priceCents: 10_000 }],
-    }).expect(400);
-    await send({
-      weekdays: {},
-      dates: [
-        { date: inDays(5), priceCents: 10_000 },
-        { date: inDays(5), priceCents: 12_000 },
-      ],
-    }).expect(400);
-    await send({ weekdays: { fri: 0 }, dates: [] }).expect(400);
-    await send({ weekdays: { fri: 15_055.5 }, dates: [] }).expect(400);
+    expect(
+      issueCodesOf(
+        await send({
+          weekdays: {},
+          dates: [{ date: inDays(-2), priceCents: 10_000 }],
+        }).expect(400),
+      ),
+    ).toEqual(["DATE_PRICE_IN_PAST"]);
+    expect(
+      issueCodesOf(
+        await send({
+          weekdays: {},
+          dates: [
+            { date: inDays(5), priceCents: 10_000 },
+            { date: inDays(5), priceCents: 12_000 },
+          ],
+        }).expect(400),
+      ),
+    ).toEqual(["DATE_PRICE_DUPLICATED"]);
+    expect(
+      issueCodesOf(await send({ weekdays: { fri: 0 }, dates: [] }).expect(400)),
+    ).toEqual(["PRICE_NOT_POSITIVE"]);
+    expect(
+      issueCodesOf(
+        await send({ weekdays: { fri: 15_055.5 }, dates: [] }).expect(400),
+      ),
+    ).toEqual(["PRICE_NOT_WHOLE_CENTS"]);
     // Not a day of the week: refused rather than stripped, because a save that dropped the
     // key would replace the set with an empty one and still answer 200.
-    await send({ weekdays: { Fri: 15_000 }, dates: [] }).expect(400);
+    expect(
+      issueCodesOf(
+        await send({ weekdays: { Fri: 15_000 }, dates: [] }).expect(400),
+      ),
+    ).toEqual(["WEEKDAY_INVALID"]);
   });
 
   it("rejects a body that does not pass the schema", async () => {
-    await owner
+    const noRoom = await owner
       .post("/listings")
       .send({ ...input, capacity: 0 })
       .expect(400);
+
+    expect(codeOf(noRoom)).toBe("VALIDATION_FAILED");
+    expect(issueCodesOf(noRoom)).toEqual(["CAPACITY_TOO_SMALL"]);
+
     // A price is exact to the cent — the scale the column stores — so a third decimal is
     // refused rather than rounded into a price nobody typed.
-    await owner
+    const fraction = await owner
       .post("/listings")
       .send({ ...input, pricePerNightCents: 12_050.5 })
       .expect(400);
+
+    expect(issueCodesOf(fraction)).toEqual(["PRICE_NOT_WHOLE_CENTS"]);
+
     // A PATCH that changes nothing is a mistake on the caller's side, not a no-op.
-    await owner.patch(`/listings/${listingId}`).send({}).expect(400);
+    const nothing = await owner
+      .patch(`/listings/${listingId}`)
+      .send({})
+      .expect(400);
+
+    expect(issueCodesOf(nothing)).toEqual(["NO_FIELDS_PROVIDED"]);
   });
 
   it("stores a price at the ceiling of the contract and refuses one above it", async () => {
@@ -898,9 +1025,11 @@ describe("ListingController (e2e)", () => {
       99_999_999,
     );
 
-    await owner
+    const above = await owner
       .post("/listings")
       .send({ ...input, pricePerNightCents: 100_000_000 })
       .expect(400);
+
+    expect(issueCodesOf(above)).toEqual(["PRICE_TOO_HIGH"]);
   });
 });

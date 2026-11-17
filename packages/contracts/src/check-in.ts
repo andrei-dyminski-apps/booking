@@ -1,6 +1,7 @@
 import { tz } from "@date-fns/tz";
 import { addDays, format, parseISO, startOfDay } from "date-fns";
 import { z } from "zod";
+import { rule } from "./error-code.js";
 import { canonicalTimeZone, isTimeZone, runtimeTimeZone } from "./time-zone.js";
 
 /**
@@ -38,13 +39,23 @@ function inZone(zone: string): { in: ReturnType<typeof tz> } {
   return { in: tz(spelling) };
 }
 
+const TIME_ZONE_REQUIRED = rule(
+  "TIME_ZONE_REQUIRED",
+  "A time zone is required",
+);
+
 /** A zone a listing is saved with: checked, and rewritten to the name it is stored under. */
 export const timeZoneSchema = z
-  .string({ error: "A time zone is required" })
+  .string({ error: TIME_ZONE_REQUIRED })
   .trim()
-  .min(1, { error: "A time zone is required" })
-  .refine(isTimeZone, {
-    error: "A time zone has to be a region such as Europe/Berlin, or UTC",
+  .min(1, { error: TIME_ZONE_REQUIRED })
+  // An empty box is already answered by the length check; asking the lookup too would
+  // give one box two refusals.
+  .refine((value) => value === "" || isTimeZone(value), {
+    error: rule(
+      "TIME_ZONE_INVALID",
+      "A time zone has to be a region such as Europe/Berlin, or UTC",
+    ),
   })
   // zod runs this after a failed `refine` too, so an unknown name keeps what was typed
   // and is answered by the refusal above.
@@ -62,8 +73,15 @@ export const storedTimeZoneSchema = z.string().min(1);
 const CLOCK = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
 export const checkInTimeSchema = z
-  .string({ error: "A check-in time is required" })
-  .regex(CLOCK, { error: "A check-in time has to be written as HH:mm" });
+  .string({
+    error: rule("CHECK_IN_TIME_REQUIRED", "A check-in time is required"),
+  })
+  .regex(CLOCK, {
+    error: rule(
+      "CHECK_IN_TIME_INVALID",
+      "A check-in time has to be written as HH:mm",
+    ),
+  });
 
 /** What a rule about the moment of arrival reads off a stay. */
 export type CheckIn = { from: string; timeZone: string; checkInTime: string };

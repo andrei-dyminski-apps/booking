@@ -1,5 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import { z } from "zod";
+import { apiException } from "./api-exception";
 
 /**
  * What every keyset-paged read of this API shares: the shape a repository answers with,
@@ -112,11 +113,17 @@ export function readCursor<Sort extends string, Cursor extends { sort: Sort }>(
   const cursor = decode(raw);
 
   if (cursor === null) {
-    throw new BadRequestException("Malformed cursor");
+    throw apiException(
+      BadRequestException,
+      "CURSOR_MALFORMED",
+      "Malformed cursor",
+    );
   }
 
   if (cursor.sort !== sort) {
-    throw new BadRequestException(
+    throw apiException(
+      BadRequestException,
+      "CURSOR_ORDERING_MISMATCH",
       "This cursor was issued for a different ordering",
     );
   }

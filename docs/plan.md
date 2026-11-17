@@ -903,10 +903,21 @@ message, params?)` in `apps/api/src/common`; a global filter guarantees the fiel
       no code of its own is `UNKNOWN_ERROR` rather than a guess.
 - [ ] **Migrated slice by slice**, each one a change that lands whole: auth ✅ (its schema
       rules, `AuthService`, `RolesGuard`, and the session and admin-standing refusals every
-      service shares, `common/session-errors.ts`), then listings,
-      bookings and cancellations, payments and payouts, the rest (reviews, conversations,
-      waitlist, notifications, lookup, users). The e2e spec of a slice asserts the code
-      next to the status.
+      service shares, `common/session-errors.ts`), listings ✅ (the contract's listing,
+      check-in, date and window rules, `ListingService`, the `:id` of its paths through
+      `ParseIdPipe`, the days of a search and of an availability window worded like any other
+      day, and the two refusals of a keyset cursor in `common/paging.ts` —
+      `CURSOR_MALFORMED`, `CURSOR_ORDERING_MISMATCH`), then bookings and cancellations,
+      payments and payouts, the rest (reviews, conversations, waitlist, notifications,
+      lookup, users). Three things of that slice reach the others before they are
+      migrated, because they are shared code: `readCursor` answers the two cursor codes for
+      every paged read (stays, reviews, waitlist, conversations, notifications, lookup,
+      users, refund failures, payment events), `dayMessage` stamps `DATE_REQUIRED` and
+      `DATE_INVALID` onto the stay's `from` and `to` as well, and `ParseIdPipe` is what a
+      slice swaps its `ParseUUIDPipe` for (`INVALID_ID`) — each slice asserts these in its
+      own e2e spec when it lands. A `Listing … not found` raised outside this slice —
+      bookings, reviews, waitlist, conversations — takes `LISTING_NOT_FOUND` in the slice
+      that raises it. The e2e spec of a slice asserts the code next to the status.
 - [ ] **The web branches on a code where a status is ambiguous.** The interface decides by
       HTTP status today, which is right wherever a status has one reason (`404` is a missing
       row, `401` a dead session, `400` on a read a stale cursor) and wrong where it has

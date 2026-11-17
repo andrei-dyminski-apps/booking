@@ -6,7 +6,6 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -34,6 +33,7 @@ import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { Public } from "../auth/decorators/public.decorator";
 import { Roles } from "../auth/decorators/roles.decorator";
 import { ApiErrorDto } from "../common/dto/api-error.dto";
+import { ParseIdPipe } from "../common/parse-id.pipe";
 import { CATALOGUE_READS } from "../common/throttle";
 import { ListingService } from "./listing.service";
 import {
@@ -110,7 +110,7 @@ export class ListingController {
     description: "The listing does not exist, or has been retired",
     type: ApiErrorDto,
   })
-  findOne(@Param("id", ParseUUIDPipe) id: string): Promise<ListingDetail> {
+  findOne(@Param("id", ParseIdPipe) id: string): Promise<ListingDetail> {
     return this.listingService.findOne(id);
   }
 
@@ -130,7 +130,7 @@ export class ListingController {
     type: ApiErrorDto,
   })
   availability(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
     @Query() window: AvailabilityQueryDto,
   ): Promise<ListingAvailability> {
     return this.listingService.availability(id, window);
@@ -165,7 +165,7 @@ export class ListingController {
     type: ApiErrorDto,
   })
   update(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
     @Body() dto: UpdateListingDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<Listing> {
@@ -189,7 +189,7 @@ export class ListingController {
     type: ApiErrorDto,
   })
   remove(
-    @Param("id", ParseUUIDPipe) id: string,
+    @Param("id", ParseIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<void> {
     return this.listingService.remove(id, user);

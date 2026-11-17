@@ -38,6 +38,8 @@ export const ERROR_CODES = [
   // "expected string, received undefined").
   "VALIDATION_FAILED",
   "INVALID_INPUT",
+  // The `:id` of a path is not a UUID — one code for every resource that has one.
+  "INVALID_ID",
 
   // Session and roles.
   "AUTHENTICATION_REQUIRED",
@@ -64,6 +66,49 @@ export const ERROR_CODES = [
   "NAME_REQUIRED",
   "NAME_TOO_LONG",
   "NAME_NEEDS_LETTER",
+
+  // Paging, shared by every keyset-paged read.
+  "CURSOR_MALFORMED",
+  "CURSOR_ORDERING_MISMATCH",
+
+  // Listings.
+  "LISTING_NOT_FOUND",
+  "LISTING_NOT_OWNED",
+  "RATE_UNDER_NON_REFUNDABLE_POLICY",
+
+  // Listing schema rules. A price is the same rule on the default, a weekday and a date.
+  "TITLE_TOO_SHORT",
+  "TITLE_TOO_LONG",
+  "DESCRIPTION_TOO_SHORT",
+  "DESCRIPTION_TOO_LONG",
+  "PRICE_REQUIRED",
+  "PRICE_NOT_A_NUMBER",
+  "PRICE_NOT_POSITIVE",
+  "PRICE_TOO_HIGH",
+  "PRICE_NOT_WHOLE_CENTS",
+  "CAPACITY_REQUIRED",
+  "CAPACITY_NOT_A_WHOLE_NUMBER",
+  "CAPACITY_TOO_SMALL",
+  "CAPACITY_TOO_LARGE",
+  "DISCOUNT_OUT_OF_RANGE",
+  "TIME_ZONE_REQUIRED",
+  "TIME_ZONE_INVALID",
+  "CHECK_IN_TIME_REQUIRED",
+  "CHECK_IN_TIME_INVALID",
+  "WEEKDAY_INVALID",
+  "DATE_REQUIRED",
+  "DATE_INVALID",
+  "DATE_PRICE_IN_PAST",
+  "DATE_PRICES_TOO_MANY",
+  "DATE_PRICE_DUPLICATED",
+  "NO_FIELDS_PROVIDED",
+
+  // Listing query rules.
+  "SEARCH_DATES_INCOMPLETE",
+  "CHECK_OUT_NOT_AFTER_CHECK_IN",
+  "PRICE_RANGE_INVERTED",
+  "WINDOW_END_NOT_AFTER_START",
+  "WINDOW_TOO_WIDE",
 ] as const;
 
 export const errorCodeSchema = z.enum(ERROR_CODES);
@@ -87,6 +132,11 @@ export function toErrorCode(code: string): ErrorCode {
  * The numbers a rule already knows when it refuses — a minimum, a ceiling, a date, the
  * roles it wanted — so a client can say them in its own words instead of reading them out
  * of a sentence. A list is a list: `["ADMIN", "USER"]`, not a string to split.
+ *
+ * A count needs no unit — `minimum`/`maximum` of a title are characters, of a capacity
+ * guests, of a window nights, and the code says which. A quantity with a unit a client
+ * could mistake carries it in the name instead: `maximumCents`, `minimumBps`. Names are as
+ * permanent as codes, so a unit is written in before the first client reads one.
  */
 const errorParamValueSchema = z.union([z.string(), z.number()]);
 

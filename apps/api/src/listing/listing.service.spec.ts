@@ -1,8 +1,3 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  NotFoundException,
-} from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import {
   Role,
@@ -14,6 +9,7 @@ import {
   type ListingQuery,
   type UpdateListingInput,
 } from "@repo/contracts";
+import { refusalOf } from "../common/testing/refusal";
 import type { PublicOf } from "../common/testing/public-of.fakes";
 import { cents } from "../payment/domain/money";
 import type { AuthenticatedUser } from "../auth/auth.types";
@@ -26,6 +22,8 @@ import { ListingService } from "./listing.service";
 
 const OWNER_ID = "6d0f2c1e-1a2b-4c3d-8e5f-9a0b1c2d3e4f";
 const OTHER_OWNER_ID = "7e1a3d2f-2b3c-4d5e-9f6a-0b1c2d3e4f50";
+const LISTING_NOT_FOUND = { status: 404, code: "LISTING_NOT_FOUND" };
+const LISTING_NOT_OWNED = { status: 403, code: "LISTING_NOT_OWNED" };
 const UNKNOWN_ID = "0b6f7f6e-2f4c-4a52-9a5e-8f1f6d2c3b4a";
 
 const input: CreateListingInput = {
@@ -272,10 +270,10 @@ describe("ListingService", () => {
     const id = await listedByOwner();
 
     await expect(
-      service.update(id, { capacity: 6 }, otherOwner),
-    ).rejects.toThrow(ForbiddenException);
-    await expect(service.remove(id, otherOwner)).rejects.toThrow(
-      ForbiddenException,
+      refusalOf(service.update(id, { capacity: 6 }, otherOwner)),
+    ).resolves.toEqual(LISTING_NOT_OWNED);
+    await expect(refusalOf(service.remove(id, otherOwner))).resolves.toEqual(
+      LISTING_NOT_OWNED,
     );
     await expect(service.findOne(id)).resolves.toMatchObject({
       capacity: input.capacity,
@@ -290,7 +288,9 @@ describe("ListingService", () => {
     ).resolves.toMatchObject({ id });
 
     await service.remove(id, admin);
-    await expect(service.findOne(id)).rejects.toThrow(NotFoundException);
+    await expect(refusalOf(service.findOne(id))).resolves.toEqual(
+      LISTING_NOT_FOUND,
+    );
   });
 
   it("retires the listing instead of deleting the row a stay would point at", async () => {
@@ -311,7 +311,9 @@ describe("ListingService", () => {
       items: [],
     });
     await expect(service.findByOwner(OWNER_ID)).resolves.toHaveLength(0);
-    await expect(service.findOne(id)).rejects.toThrow(NotFoundException);
+    await expect(refusalOf(service.findOne(id))).resolves.toEqual(
+      LISTING_NOT_FOUND,
+    );
   });
 
   it("refuses to edit or retire a listing that is already retired", async () => {
@@ -319,10 +321,12 @@ describe("ListingService", () => {
 
     await service.remove(id, owner);
 
-    await expect(service.update(id, { capacity: 6 }, owner)).rejects.toThrow(
-      NotFoundException,
+    await expect(
+      refusalOf(service.update(id, { capacity: 6 }, owner)),
+    ).resolves.toEqual(LISTING_NOT_FOUND);
+    await expect(refusalOf(service.remove(id, owner))).resolves.toEqual(
+      LISTING_NOT_FOUND,
     );
-    await expect(service.remove(id, owner)).rejects.toThrow(NotFoundException);
   });
 
   it("refuses a policy or a discount that would meet the other half on the row", async () => {
@@ -330,14 +334,22 @@ describe("ListingService", () => {
 
     await service.update(id, { nonRefundableDiscountBps: 1_000 }, owner);
     await expect(
-      service.update(id, { cancellationPolicy: "NON_REFUNDABLE" }, owner),
-    ).rejects.toThrow(BadRequestException);
+      refusalOf(
+        service.update(id, { cancellationPolicy: "NON_REFUNDABLE" }, owner),
+      ),
+    ).resolves.toEqual({
+      status: 400,
+      code: "RATE_UNDER_NON_REFUNDABLE_POLICY",
+    });
 
     await service.update(id, { nonRefundableDiscountBps: null }, owner);
     await service.update(id, { cancellationPolicy: "NON_REFUNDABLE" }, owner);
     await expect(
-      service.update(id, { nonRefundableDiscountBps: 1_000 }, owner),
-    ).rejects.toThrow(/already refunds nothing/);
+      refusalOf(service.update(id, { nonRefundableDiscountBps: 1_000 }, owner)),
+    ).resolves.toEqual({
+      status: 400,
+      code: "RATE_UNDER_NON_REFUNDABLE_POLICY",
+    });
     await expect(service.findOne(id)).resolves.toMatchObject({
       cancellationPolicy: "NON_REFUNDABLE",
       nonRefundableDiscountBps: null,
@@ -349,10 +361,12 @@ describe("ListingService", () => {
 
     listingRepository.vanishingListing = true;
 
-    await expect(service.update(id, { capacity: 6 }, owner)).rejects.toThrow(
-      NotFoundException,
+    await expect(
+      refusalOf(service.update(id, { capacity: 6 }, owner)),
+    ).resolves.toEqual(LISTING_NOT_FOUND);
+    await expect(refusalOf(service.remove(id, owner))).resolves.toEqual(
+      LISTING_NOT_FOUND,
     );
-    await expect(service.remove(id, owner)).rejects.toThrow(NotFoundException);
   });
 
   it("issues a cursor while there is another page, and none on the last one", async () => {
@@ -401,8 +415,8 @@ describe("ListingService", () => {
   // mistake worth naming rather than a silent first page.
   it("refuses a cursor it did not issue", async () => {
     await expect(
-      service.findPage(query({ cursor: "not-a-cursor" })),
-    ).rejects.toThrow(BadRequestException);
+      refusalOf(service.findPage(query({ cursor: "not-a-cursor" }))),
+    ).resolves.toEqual({ status: 400, code: "CURSOR_MALFORMED" });
   });
 
   /**
@@ -418,10 +432,16 @@ describe("ListingService", () => {
     const page = await service.findPage(query({ limit: 1 }));
 
     await expect(
-      service.findPage(
-        query({ limit: 1, sort: "priceAsc", cursor: String(page.nextCursor) }),
+      refusalOf(
+        service.findPage(
+          query({
+            limit: 1,
+            sort: "priceAsc",
+            cursor: String(page.nextCursor),
+          }),
+        ),
       ),
-    ).rejects.toThrow(BadRequestException);
+    ).resolves.toEqual({ status: 400, code: "CURSOR_ORDERING_MISMATCH" });
   });
 
   it("reports the nights a listing is taken for, and hides a retired one entirely", async () => {
@@ -438,8 +458,8 @@ describe("ListingService", () => {
 
     await service.remove(id, owner);
 
-    await expect(service.availability(id, window)).rejects.toThrow(
-      NotFoundException,
+    await expect(refusalOf(service.availability(id, window))).resolves.toEqual(
+      LISTING_NOT_FOUND,
     );
   });
 
@@ -484,19 +504,19 @@ describe("ListingService", () => {
     const id = await listedByOwner();
 
     await expect(
-      service.update(id, { pricing: weekendPricing }, otherOwner),
-    ).rejects.toThrow(ForbiddenException);
+      refusalOf(service.update(id, { pricing: weekendPricing }, otherOwner)),
+    ).resolves.toEqual(LISTING_NOT_OWNED);
     await expect(service.findOne(id)).resolves.toMatchObject({
       pricing: NO_EXCEPTIONS,
     });
   });
 
-  it("throws NotFoundException for an unknown id, before any ownership check", async () => {
-    await expect(service.findOne(UNKNOWN_ID)).rejects.toThrow(
-      NotFoundException,
+  it("answers LISTING_NOT_FOUND for an unknown id, before any ownership check", async () => {
+    await expect(refusalOf(service.findOne(UNKNOWN_ID))).resolves.toEqual(
+      LISTING_NOT_FOUND,
     );
     await expect(
-      service.update(UNKNOWN_ID, { capacity: 6 }, otherOwner),
-    ).rejects.toThrow(NotFoundException);
+      refusalOf(service.update(UNKNOWN_ID, { capacity: 6 }, otherOwner)),
+    ).resolves.toEqual(LISTING_NOT_FOUND);
   });
 });

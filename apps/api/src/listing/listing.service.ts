@@ -18,10 +18,20 @@ import {
 import type { AuthenticatedUser } from "../auth/auth.types";
 import { ownsOrIsAdmin } from "../auth/ownership";
 import { BookingRepository } from "../booking/infrastructure/booking.repository";
+import { apiException } from "../common/api-exception";
 import { readCursor } from "../common/paging";
 import { decodeCursor, encodeCursor } from "./catalogue-cursor";
 import { RateUnderNonRefundablePolicyError } from "./listing.errors";
 import { ListingRepository } from "./listing.repository";
+
+/** The id stays in the sentence for the log; a client reads the code. */
+function listingNotFound(id: string): Error {
+  return apiException(
+    NotFoundException,
+    "LISTING_NOT_FOUND",
+    `Listing ${id} not found`,
+  );
+}
 
 /**
  * Which roles may reach these methods at all is decided before them, by RolesGuard on the
@@ -93,7 +103,7 @@ export class ListingService {
     const listing = await this.listingRepository.findDetailById(id);
 
     if (listing === null) {
-      throw new NotFoundException(`Listing ${id} not found`);
+      throw listingNotFound(id);
     }
 
     return listing;
@@ -118,7 +128,11 @@ export class ListingService {
       // A policy or a discount the contract passed on its own, refused beside the other
       // half already on the row — in the contract's words, as if the body had named both.
       if (error instanceof RateUnderNonRefundablePolicyError) {
-        throw new BadRequestException(RATE_UNDER_NON_REFUNDABLE_POLICY);
+        throw apiException(
+          BadRequestException,
+          "RATE_UNDER_NON_REFUNDABLE_POLICY",
+          RATE_UNDER_NON_REFUNDABLE_POLICY,
+        );
       }
 
       throw error;
@@ -126,7 +140,7 @@ export class ListingService {
 
     // Retired between the read above and this update, by its owner or an admin.
     if (updated === null) {
-      throw new NotFoundException(`Listing ${id} not found`);
+      throw listingNotFound(id);
     }
 
     return updated;
@@ -153,7 +167,7 @@ export class ListingService {
     // The race the read above cannot close: another admin, or its owner in a second tab,
     // retired the listing first.
     if (!(await this.listingRepository.softDelete(id))) {
-      throw new NotFoundException(`Listing ${id} not found`);
+      throw listingNotFound(id);
     }
   }
 
@@ -161,7 +175,7 @@ export class ListingService {
     const listing = await this.listingRepository.findById(id);
 
     if (listing === null) {
-      throw new NotFoundException(`Listing ${id} not found`);
+      throw listingNotFound(id);
     }
 
     return listing;
@@ -174,7 +188,11 @@ export class ListingService {
    */
   private assertMayManage(listing: Listing, user: AuthenticatedUser): void {
     if (!ownsOrIsAdmin(user, listing.ownerId)) {
-      throw new ForbiddenException("This listing belongs to another owner");
+      throw apiException(
+        ForbiddenException,
+        "LISTING_NOT_OWNED",
+        "This listing belongs to another owner",
+      );
     }
   }
 }

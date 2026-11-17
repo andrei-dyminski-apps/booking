@@ -1,7 +1,15 @@
+import { addDays, format, parseISO } from "date-fns";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { loginSchema, registerFormSchema, registerSchema } from "./auth.js";
 import { rule, toApiIssue, toErrorCode } from "./error-code.js";
+import {
+  RATE_UNDER_NON_REFUNDABLE_POLICY,
+  availabilityQuerySchema,
+  createListingSchema,
+  listingQuerySchema,
+  updateListingSchema,
+} from "./listing.js";
 
 function issuesOf(schema: z.ZodType, input: unknown) {
   const result = schema.safeParse(input);
@@ -141,5 +149,279 @@ describe("toErrorCode", () => {
   it("reads a code this build has no word for as unknown, not as a guess", () => {
     expect(toErrorCode("A_RULE_FROM_A_NEWER_API")).toBe("UNKNOWN_ERROR");
     expect(toErrorCode("")).toBe("UNKNOWN_ERROR");
+  });
+});
+
+describe("the listing rules", () => {
+  const listing = {
+    title: "Seaside flat",
+    description: "A bright flat two minutes from the beach.",
+    pricePerNightCents: 12_000,
+    capacity: 2,
+    nonRefundableDiscountBps: null,
+    timeZone: "UTC",
+    checkInTime: "15:00",
+  };
+
+  const codesOf = (schema: z.ZodType, input: unknown) =>
+    issuesOf(schema, input).map(({ path, code }) => ({ path, code }));
+
+  it("names the rule of each field a listing is refused on", () => {
+    expect(
+      issuesOf(createListingSchema, {
+        ...listing,
+        title: "ab",
+        description: "short",
+        capacity: 51,
+        pricePerNightCents: 0,
+        nonRefundableDiscountBps: 5_001,
+        timeZone: "Mars/Base",
+        checkInTime: "25:00",
+      }),
+    ).toEqual([
+      {
+        path: ["title"],
+        message: "A title needs at least 3 characters",
+        code: "TITLE_TOO_SHORT",
+        params: { minimum: 3 },
+      },
+      {
+        path: ["description"],
+        message: "A description needs at least 10 characters",
+        code: "DESCRIPTION_TOO_SHORT",
+        params: { minimum: 10 },
+      },
+      {
+        path: ["pricePerNightCents"],
+        message: "A price per night must be more than zero",
+        code: "PRICE_NOT_POSITIVE",
+      },
+      {
+        path: ["capacity"],
+        message: "A listing may not sleep more than 50 guests",
+        code: "CAPACITY_TOO_LARGE",
+        params: { maximum: 50 },
+      },
+      {
+        path: ["nonRefundableDiscountBps"],
+        message: "A non-refundable discount has to be between 1% and 50%",
+        code: "DISCOUNT_OUT_OF_RANGE",
+        params: { minimumBps: 100, maximumBps: 5_000 },
+      },
+      {
+        path: ["timeZone"],
+        message: "A time zone has to be a region such as Europe/Berlin, or UTC",
+        code: "TIME_ZONE_INVALID",
+      },
+      {
+        path: ["checkInTime"],
+        message: "A check-in time has to be written as HH:mm",
+        code: "CHECK_IN_TIME_INVALID",
+      },
+    ]);
+  });
+
+  it("tells a price left empty from one that is not a number, and a fraction of a cent from a ceiling", () => {
+    const priced = (pricePerNightCents: unknown) =>
+      codesOf(createListingSchema, { ...listing, pricePerNightCents });
+
+    expect(priced(undefined)).toEqual([
+      { path: ["pricePerNightCents"], code: "PRICE_REQUIRED" },
+    ]);
+    expect(priced("a lot")).toEqual([
+      { path: ["pricePerNightCents"], code: "PRICE_NOT_A_NUMBER" },
+    ]);
+    expect(priced(120.5)).toEqual([
+      { path: ["pricePerNightCents"], code: "PRICE_NOT_WHOLE_CENTS" },
+    ]);
+    expect(priced(100_000_000_000)).toEqual([
+      { path: ["pricePerNightCents"], code: "PRICE_TOO_HIGH" },
+    ]);
+  });
+
+  it("tells a capacity left empty from one that is not whole, and an empty box from a zone", () => {
+    expect(
+      codesOf(createListingSchema, { ...listing, capacity: undefined }),
+    ).toEqual([{ path: ["capacity"], code: "CAPACITY_REQUIRED" }]);
+    expect(codesOf(createListingSchema, { ...listing, capacity: 1.5 })).toEqual(
+      [{ path: ["capacity"], code: "CAPACITY_NOT_A_WHOLE_NUMBER" }],
+    );
+    expect(codesOf(createListingSchema, { ...listing, capacity: 0 })).toEqual([
+      { path: ["capacity"], code: "CAPACITY_TOO_SMALL" },
+    ]);
+    // An empty box is the length check's to refuse, and the zone lookup stays out of it.
+    expect(codesOf(createListingSchema, { ...listing, timeZone: "" })).toEqual([
+      { path: ["timeZone"], code: "TIME_ZONE_REQUIRED" },
+    ]);
+  });
+
+  it("names the ceilings of a title and a description, and a check-in time left empty", () => {
+    expect(
+      issuesOf(createListingSchema, {
+        ...listing,
+        title: "a".repeat(101),
+        description: "a".repeat(2_001),
+      }).map(({ path, code, params }) => ({ path, code, params })),
+    ).toEqual([
+      { path: ["title"], code: "TITLE_TOO_LONG", params: { maximum: 100 } },
+      {
+        path: ["description"],
+        code: "DESCRIPTION_TOO_LONG",
+        params: { maximum: 2_000 },
+      },
+    ]);
+    expect(
+      codesOf(createListingSchema, { ...listing, checkInTime: null }),
+    ).toEqual([{ path: ["checkInTime"], code: "CHECK_IN_TIME_REQUIRED" }]);
+  });
+
+  it("tells a date left empty from one that is not a day, and caps how many a listing prices", () => {
+    const dated = (date: unknown) =>
+      codesOf(createListingSchema, {
+        ...listing,
+        pricing: { weekdays: {}, dates: [{ date, priceCents: 9_000 }] },
+      });
+
+    expect(dated(undefined)).toEqual([
+      { path: ["pricing", "dates", 0, "date"], code: "DATE_REQUIRED" },
+    ]);
+    expect(dated("")).toEqual([
+      { path: ["pricing", "dates", 0, "date"], code: "DATE_REQUIRED" },
+    ]);
+    expect(dated("soon")).toEqual([
+      { path: ["pricing", "dates", 0, "date"], code: "DATE_INVALID" },
+    ]);
+
+    // One more than the contract's ceiling of 366, each on a day of its own.
+    const MAX = 366;
+    const crowded = Array.from({ length: MAX + 1 }, (_, index) => ({
+      date: format(addDays(parseISO("2999-01-01"), index), "yyyy-MM-dd"),
+      priceCents: 9_000,
+    }));
+
+    expect(
+      issuesOf(createListingSchema, {
+        ...listing,
+        pricing: { weekdays: {}, dates: crowded },
+      }).map(({ path, code, params }) => ({ path, code, params })),
+    ).toEqual([
+      {
+        path: ["pricing", "dates"],
+        code: "DATE_PRICES_TOO_MANY",
+        params: { maximum: MAX },
+      },
+    ]);
+  });
+
+  it("names the rules of the prices a listing sets on its own", () => {
+    expect(
+      issuesOf(createListingSchema, {
+        ...listing,
+        pricing: {
+          weekdays: { Fri: 15_000 },
+          dates: [
+            { date: "2999-01-01", priceCents: 9_000 },
+            { date: "2999-01-01", priceCents: 9_500 },
+            { date: "1999-01-01", priceCents: 9_500 },
+            { date: "soon", priceCents: 9_500 },
+          ],
+        },
+      }).map(({ path, code }) => ({ path, code })),
+    ).toEqual([
+      { path: ["pricing", "weekdays"], code: "WEEKDAY_INVALID" },
+      { path: ["pricing", "dates", 2, "date"], code: "DATE_PRICE_IN_PAST" },
+      { path: ["pricing", "dates", 3, "date"], code: "DATE_INVALID" },
+      { path: ["pricing", "dates"], code: "DATE_PRICE_DUPLICATED" },
+    ]);
+
+    expect(
+      issuesOf(createListingSchema, {
+        ...listing,
+        pricing: { weekdays: { Fri: 15_000 }, dates: [] },
+      })[0],
+    ).toMatchObject({ code: "WEEKDAY_INVALID", params: { keys: ["Fri"] } });
+  });
+
+  it("names the rule a policy and a rate break together, on the discount", () => {
+    expect(
+      issuesOf(createListingSchema, {
+        ...listing,
+        cancellationPolicy: "NON_REFUNDABLE",
+        nonRefundableDiscountBps: 1_000,
+      }),
+    ).toEqual([
+      {
+        path: ["nonRefundableDiscountBps"],
+        message: RATE_UNDER_NON_REFUNDABLE_POLICY,
+        code: "RATE_UNDER_NON_REFUNDABLE_POLICY",
+      },
+    ]);
+  });
+
+  it("refuses an empty update in its own code", () => {
+    expect(issuesOf(updateListingSchema, {})).toEqual([
+      {
+        path: [],
+        message: "At least one field must be provided",
+        code: "NO_FIELDS_PROVIDED",
+      },
+    ]);
+  });
+
+  it("names the rules of the catalogue query that span fields", () => {
+    expect(codesOf(listingQuerySchema, { from: "2030-01-01" })).toEqual([
+      { path: ["to"], code: "SEARCH_DATES_INCOMPLETE" },
+    ]);
+    expect(
+      codesOf(listingQuerySchema, { from: "2030-01-05", to: "2030-01-01" }),
+    ).toEqual([{ path: ["to"], code: "CHECK_OUT_NOT_AFTER_CHECK_IN" }]);
+    expect(
+      codesOf(listingQuerySchema, {
+        minPriceCents: "9000",
+        maxPriceCents: "5000",
+      }),
+    ).toEqual([{ path: ["maxPriceCents"], code: "PRICE_RANGE_INVERTED" }]);
+  });
+
+  it("names a day a search or a window could not read as the stay and the date price do", () => {
+    // The rules that compare the two days still run on a day nobody could read, so the
+    // check is that the unreadable one is named, not that it is the only issue.
+    expect(
+      codesOf(listingQuerySchema, { from: "soon", to: "2030-01-05" }),
+    ).toContainEqual({ path: ["from"], code: "DATE_INVALID" });
+    expect(
+      codesOf(listingQuerySchema, { from: "2030-01-01", to: "soon" }),
+    ).toEqual([{ path: ["to"], code: "DATE_INVALID" }]);
+    expect(
+      codesOf(availabilityQuerySchema, { from: "2030-01-01" }),
+    ).toContainEqual({ path: ["to"], code: "DATE_REQUIRED" });
+    expect(
+      codesOf(availabilityQuerySchema, {
+        from: "01/01/2030",
+        to: "2030-01-05",
+      }),
+    ).toContainEqual({ path: ["from"], code: "DATE_INVALID" });
+  });
+
+  it("names the rules of an availability window", () => {
+    expect(
+      codesOf(availabilityQuerySchema, {
+        from: "2030-01-05",
+        to: "2030-01-05",
+      }),
+    ).toEqual([{ path: ["to"], code: "WINDOW_END_NOT_AFTER_START" }]);
+    expect(
+      issuesOf(availabilityQuerySchema, {
+        from: "2030-01-01",
+        to: "2032-01-01",
+      }),
+    ).toEqual([
+      {
+        path: ["to"],
+        message: "The window may not be wider than 366 nights",
+        code: "WINDOW_TOO_WIDE",
+        params: { maximum: 366 },
+      },
+    ]);
   });
 });

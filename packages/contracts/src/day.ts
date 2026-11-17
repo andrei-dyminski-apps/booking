@@ -1,6 +1,7 @@
 import { TZDate } from "@date-fns/tz";
 import { format } from "date-fns";
 import { z } from "zod";
+import { rule } from "./error-code.js";
 
 /**
  * What a date field says when what arrived was not a calendar day — a box left empty, or
@@ -16,14 +17,17 @@ import { z } from "zod";
  * date prices are days too, and `listing.ts` cannot import from `booking.ts` — the
  * booking already imports the listing's summary.
  */
-export const dayMessage =
-  (missing: string, notADay: string) =>
-  (issue: z.core.$ZodRawIssue): string | undefined => {
-    if (issue.code === "invalid_type") return missing;
+export const dayMessage = (missing: string, notADay: string) => {
+  const required = rule("DATE_REQUIRED", missing);
+  const invalid = rule("DATE_INVALID", notADay);
+
+  return (issue: z.core.$ZodRawIssue): string | undefined => {
+    if (issue.code === "invalid_type") return required(issue);
     if (issue.code !== "invalid_format") return undefined;
 
-    return issue.input === "" ? missing : notADay;
+    return issue.input === "" ? required(issue) : invalid(issue);
   };
+};
 
 /**
  * The format a calendar day is written in, on its own, so a rule about a day can ask

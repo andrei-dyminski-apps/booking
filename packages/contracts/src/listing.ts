@@ -11,6 +11,7 @@ import {
   timeZoneSchema,
 } from "./check-in.js";
 import { dayMessage, earliestToday, isDay } from "./day.js";
+import { rule } from "./error-code.js";
 import { BASIS_POINTS, MAX_CHARGE } from "./money.js";
 import { blank, PAGING } from "./query.js";
 
@@ -60,7 +61,14 @@ export const MIN_NON_REFUNDABLE_DISCOUNT_BPS = BASIS_POINTS / 100;
 
 const percent = (bps: number): string => `${String(bps / 100)}%`;
 
-const DISCOUNT_RANGE = `A non-refundable discount has to be between ${percent(MIN_NON_REFUNDABLE_DISCOUNT_BPS)} and ${percent(MAX_NON_REFUNDABLE_DISCOUNT_BPS)}`;
+const DISCOUNT_RANGE = rule(
+  "DISCOUNT_OUT_OF_RANGE",
+  `A non-refundable discount has to be between ${percent(MIN_NON_REFUNDABLE_DISCOUNT_BPS)} and ${percent(MAX_NON_REFUNDABLE_DISCOUNT_BPS)}`,
+  {
+    minimumBps: MIN_NON_REFUNDABLE_DISCOUNT_BPS,
+    maximumBps: MAX_NON_REFUNDABLE_DISCOUNT_BPS,
+  },
+);
 
 /**
  * Why a listing under the `NON_REFUNDABLE` policy offers no non-refundable rate: its
@@ -82,10 +90,17 @@ export const RATE_UNDER_NON_REFUNDABLE_POLICY =
  */
 const MONEY = [
   z.lte(MAX_PRICE, {
-    error: `A price may not be above ${MAX_PRICE_LABEL}`,
+    error: rule(
+      "PRICE_TOO_HIGH",
+      `A price may not be above ${MAX_PRICE_LABEL}`,
+      { maximumCents: MAX_PRICE },
+    ),
   }),
   z.refine<number>(Number.isSafeInteger, {
-    error: "A price may not be finer than a cent",
+    error: rule(
+      "PRICE_NOT_WHOLE_CENTS",
+      "A price may not be finer than a cent",
+    ),
   }),
 ];
 
@@ -105,11 +120,11 @@ const MONEY = [
  * for anything else hands the issue back to the message its own rule gave it.
  */
 const numberMessage =
-  (missing: string, notANumber: string) =>
+  (missing: ReturnType<typeof rule>, notANumber: ReturnType<typeof rule>) =>
   (issue: z.core.$ZodRawIssue): string | undefined => {
     if (issue.code !== "invalid_type") return undefined;
 
-    return issue.input === undefined ? missing : notANumber;
+    return issue.input === undefined ? missing(issue) : notANumber(issue);
   };
 
 /**
@@ -121,11 +136,13 @@ const nightPrice = (subject: string) =>
   z
     .number({
       error: numberMessage(
-        `${subject} is required`,
-        `${subject} must be a number`,
+        rule("PRICE_REQUIRED", `${subject} is required`),
+        rule("PRICE_NOT_A_NUMBER", `${subject} must be a number`),
       ),
     })
-    .positive({ error: `${subject} must be more than zero` })
+    .positive({
+      error: rule("PRICE_NOT_POSITIVE", `${subject} must be more than zero`),
+    })
     .check(...MONEY)
     .brand<"Cents">();
 
@@ -142,26 +159,59 @@ export const listingSchema = z.object({
   title: z
     .string()
     .trim()
-    .min(3, { error: "A title needs at least 3 characters" })
-    .max(100, { error: "A title may not be longer than 100 characters" }),
+    .min(3, {
+      error: rule("TITLE_TOO_SHORT", "A title needs at least 3 characters", {
+        minimum: 3,
+      }),
+    })
+    .max(100, {
+      error: rule(
+        "TITLE_TOO_LONG",
+        "A title may not be longer than 100 characters",
+        { maximum: 100 },
+      ),
+    }),
   description: z
     .string()
     .trim()
-    .min(10, { error: "A description needs at least 10 characters" })
+    .min(10, {
+      error: rule(
+        "DESCRIPTION_TOO_SHORT",
+        "A description needs at least 10 characters",
+        { minimum: 10 },
+      ),
+    })
     .max(2000, {
-      error: "A description may not be longer than 2000 characters",
+      error: rule(
+        "DESCRIPTION_TOO_LONG",
+        "A description may not be longer than 2000 characters",
+        { maximum: 2000 },
+      ),
     }),
   pricePerNightCents: nightPrice("A price per night"),
   capacity: z
     .int({
       error: numberMessage(
-        "A capacity is required",
-        "A capacity must be a whole number",
+        rule("CAPACITY_REQUIRED", "A capacity is required"),
+        rule(
+          "CAPACITY_NOT_A_WHOLE_NUMBER",
+          "A capacity must be a whole number",
+        ),
       ),
     })
-    .min(1, { error: "A listing has to sleep at least one guest" })
+    .min(1, {
+      error: rule(
+        "CAPACITY_TOO_SMALL",
+        "A listing has to sleep at least one guest",
+        { minimum: 1 },
+      ),
+    })
     .max(MAX_CAPACITY, {
-      error: `A listing may not sleep more than ${String(MAX_CAPACITY)} guests`,
+      error: rule(
+        "CAPACITY_TOO_LARGE",
+        `A listing may not sleep more than ${String(MAX_CAPACITY)} guests`,
+        { maximum: MAX_CAPACITY },
+      ),
     }),
   /**
    * What a guest's cancellation refunds, and until when (`CANCELLATION_TERMS`). Every
@@ -228,7 +278,11 @@ const weekdayPricesSchema = z.strictObject(
   {
     error: (issue) =>
       issue.code === "unrecognized_keys"
-        ? `Not a day of the week: ${issue.keys.join(", ")}`
+        ? rule(
+            "WEEKDAY_INVALID",
+            `Not a day of the week: ${issue.keys.join(", ")}`,
+            { keys: issue.keys },
+          )(issue)
         : undefined,
   },
 );
@@ -263,7 +317,10 @@ const datePriceSchema = z.object({
  */
 const datePriceInputSchema = datePriceSchema.refine(
   (entry) => !isDay(entry.date) || entry.date >= earliestToday(),
-  { error: "A date price cannot be in the past", path: ["date"] },
+  {
+    error: rule("DATE_PRICE_IN_PAST", "A date price cannot be in the past"),
+    path: ["date"],
+  },
 );
 
 /**
@@ -275,7 +332,11 @@ const datePrices = <Entry extends typeof datePriceSchema>(entry: Entry) =>
   z
     .array(entry)
     .max(MAX_DATE_PRICES, {
-      error: `A listing may not price more than ${String(MAX_DATE_PRICES)} dates on their own`,
+      error: rule(
+        "DATE_PRICES_TOO_MANY",
+        `A listing may not price more than ${String(MAX_DATE_PRICES)} dates on their own`,
+        { maximum: MAX_DATE_PRICES },
+      ),
     })
     .refine(
       (entries) => {
@@ -283,7 +344,12 @@ const datePrices = <Entry extends typeof datePriceSchema>(entry: Entry) =>
 
         return new Set(days).size === days.length;
       },
-      { error: "Each date may only have one price" },
+      {
+        error: rule(
+          "DATE_PRICE_DUPLICATED",
+          "Each date may only have one price",
+        ),
+      },
     );
 
 /**
@@ -395,7 +461,10 @@ function withRateRule<
       listing.cancellationPolicy !== CancellationPolicy.NON_REFUNDABLE ||
       listing.nonRefundableDiscountBps == null,
     {
-      error: RATE_UNDER_NON_REFUNDABLE_POLICY,
+      error: rule(
+        "RATE_UNDER_NON_REFUNDABLE_POLICY",
+        RATE_UNDER_NON_REFUNDABLE_POLICY,
+      ),
       path: ["nonRefundableDiscountBps"],
     },
   );
@@ -413,7 +482,7 @@ export const updateListingSchema = withRateRule(
   listingInputFields
     .partial()
     .refine((listing) => Object.keys(listing).length > 0, {
-      error: "At least one field must be provided",
+      error: rule("NO_FIELDS_PROVIDED", "At least one field must be provided"),
     }),
 );
 
@@ -436,6 +505,15 @@ export const listingSortSchema = z.enum([
   "priceDesc",
 ]);
 
+/** A day in a query string, worded after the parameter it is read from. */
+const queryDay = (subject: string) =>
+  z.iso.date({
+    error: dayMessage(
+      `${subject} is required`,
+      `${subject} must be written as YYYY-MM-DD`,
+    ),
+  });
+
 /**
  * The catalogue query, as it arrives in the URL: `searchParams` on the frontend and a
  * query string here, so every value is a string until it is coerced. The filters live
@@ -457,8 +535,8 @@ export const listingSortSchema = z.enum([
 export const listingQuerySchema = z
   .object({
     ownerId: blank(z.uuid().optional()),
-    from: blank(z.iso.date().optional()),
-    to: blank(z.iso.date().optional()),
+    from: blank(queryDay("A check-in date").optional()),
+    to: blank(queryDay("A check-out date").optional()),
     minPriceCents: blank(
       z.coerce
         .number()
@@ -480,7 +558,10 @@ export const listingQuerySchema = z
     ...PAGING,
   })
   .refine((query) => (query.from === undefined) === (query.to === undefined), {
-    error: "Filtering by dates needs both a check-in and a check-out date",
+    error: rule(
+      "SEARCH_DATES_INCOMPLETE",
+      "Filtering by dates needs both a check-in and a check-out date",
+    ),
     path: ["to"],
   })
   .refine(
@@ -489,7 +570,10 @@ export const listingQuerySchema = z
       query.to === undefined ||
       query.from < query.to,
     {
-      error: "Check-out date must be later than check-in date",
+      error: rule(
+        "CHECK_OUT_NOT_AFTER_CHECK_IN",
+        "Check-out date must be later than check-in date",
+      ),
       path: ["to"],
     },
   )
@@ -499,7 +583,10 @@ export const listingQuerySchema = z
       query.maxPriceCents === undefined ||
       query.minPriceCents <= query.maxPriceCents,
     {
-      error: "The lowest price must not be above the highest",
+      error: rule(
+        "PRICE_RANGE_INVERTED",
+        "The lowest price must not be above the highest",
+      ),
       path: ["maxPriceCents"],
     },
   );
@@ -537,11 +624,14 @@ const nights = (from: string, to: string): number =>
 
 export const availabilityQuerySchema = z
   .object({
-    from: z.iso.date(),
-    to: z.iso.date(),
+    from: queryDay("The start of the window"),
+    to: queryDay("The end of the window"),
   })
   .refine((window) => window.from < window.to, {
-    error: "The end of the window must be later than its start",
+    error: rule(
+      "WINDOW_END_NOT_AFTER_START",
+      "The end of the window must be later than its start",
+    ),
     path: ["to"],
   })
   .refine(
@@ -549,7 +639,11 @@ export const availabilityQuerySchema = z
       window.from >= window.to ||
       nights(window.from, window.to) <= MAX_WINDOW_NIGHTS,
     {
-      error: `The window may not be wider than ${String(MAX_WINDOW_NIGHTS)} nights`,
+      error: rule(
+        "WINDOW_TOO_WIDE",
+        `The window may not be wider than ${String(MAX_WINDOW_NIGHTS)} nights`,
+        { maximum: MAX_WINDOW_NIGHTS },
+      ),
       path: ["to"],
     },
   );

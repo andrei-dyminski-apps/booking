@@ -9,6 +9,7 @@ import {
 } from "@nestjs/swagger";
 import { cleanupOpenApiDoc } from "nestjs-zod";
 import { ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE } from "../auth/cookies";
+import { ParseIdPipe } from "./parse-id.pipe";
 
 // The package exports the document's type and not its parts, so they are read off it.
 type OperationObject = NonNullable<OpenAPIObject["paths"][string]["get"]>;
@@ -137,10 +138,11 @@ const operationId = (controllerKey: string, methodKey: string): string =>
 type RouteArgument = { data?: unknown; pipes?: unknown[] };
 
 /**
- * The path parameters `ParseUUIDPipe` checks, by operation id. The document cannot tell:
- * a pipe is invisible to `@nestjs/swagger`, so it draws such an id as a bare string. Read
- * off the route-argument metadata `@Param("id", ParseUUIDPipe)` writes, so a route that
- * takes another kind of id — a provider's `evt_…` or `re_…` — is not one of them.
+ * The path parameters `ParseUUIDPipe` — or `ParseIdPipe`, its subclass — checks, by
+ * operation id. The document cannot tell: a pipe is invisible to `@nestjs/swagger`, so it
+ * draws such an id as a bare string. Read off the route-argument metadata
+ * `@Param("id", ParseUUIDPipe)` writes, so a route that takes another kind of id — a
+ * provider's `evt_…` or `re_…` — is not one of them.
  */
 function uuidPathParameters(app: INestApplication): Map<string, Set<string>> {
   const found = new Map<string, Set<string>>();
@@ -163,7 +165,10 @@ function uuidPathParameters(app: INestApplication): Map<string, Set<string>> {
             !key.startsWith(`${RouteParamtypes.PARAM}:`) ||
             typeof data !== "string" ||
             !pipes.some(
-              (pipe) => pipe === ParseUUIDPipe || pipe instanceof ParseUUIDPipe,
+              (pipe) =>
+                pipe === ParseUUIDPipe ||
+                pipe === ParseIdPipe ||
+                pipe instanceof ParseUUIDPipe,
             )
           ) {
             continue;
