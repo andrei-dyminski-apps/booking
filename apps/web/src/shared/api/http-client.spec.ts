@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { apiRequest } from "./http-client";
+import type { AnswerCache } from "./cached-answer";
+import {
+  ApiResponseError,
+  ApiUnreachableError,
+  apiRequest,
+} from "./http-client";
 import { refreshSession } from "./session-refresh";
 
 /**
@@ -222,5 +227,91 @@ describe("apiRequest", () => {
     // One refresh asked for, and no second attempt at the original request.
     expect(refreshSession).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * A cached read runs on the server only, so `window` is taken away again. Its answer comes
+ * from the call site's `"use cache"` scope as plain values, and what has to hold is that
+ * the transport reads those exactly as it reads a response it fetched itself — the errors
+ * a caller tells apart by their class included, since a class does not survive the cache.
+ */
+describe("apiRequest with a cached read", () => {
+  const ORIGIN = "http://api.test";
+
+  beforeEach(() => {
+    vi.stubGlobal("window", undefined);
+    vi.stubEnv("API_ORIGIN", ORIGIN);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const cachedRead = (cached: AnswerCache) =>
+    apiRequest({
+      method: "GET",
+      path: "/things/1",
+      schema: z.object({ id: z.number() }),
+      read: { cached },
+    });
+
+  it("asks the cache for the API's own URL and parses what it stored", async () => {
+    const fetchMock = vi.fn();
+    const cached = vi.fn<AnswerCache>().mockResolvedValue({
+      status: 200,
+      contentLength: null,
+      text: JSON.stringify({ id: 1 }),
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(cachedRead(cached)).resolves.toEqual({ id: 1 });
+    expect(cached).toHaveBeenCalledWith(`${ORIGIN}/things/1`);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("throws a stored refusal as the response error it was, code and all", async () => {
+    const cached = vi.fn<AnswerCache>().mockResolvedValue({
+      status: 404,
+      contentLength: null,
+      text: JSON.stringify({
+        statusCode: 404,
+        message: "Listing not found",
+        code: "LISTING_NOT_FOUND",
+      }),
+    });
+
+    const error: unknown = await cachedRead(cached).catch(
+      (thrown: unknown) => thrown,
+    );
+
+    expect(error).toBeInstanceOf(ApiResponseError);
+    expect(error).toMatchObject({ status: 404, code: "LISTING_NOT_FOUND" });
+  });
+
+  it("reads a cache that threw as an API that could not answer", async () => {
+    const cached = vi
+      .fn<AnswerCache>()
+      .mockRejectedValue(new Error("API responded with 503"));
+
+    await expect(cachedRead(cached)).rejects.toBeInstanceOf(
+      ApiUnreachableError,
+    );
+  });
+
+  it("hands z.void() the undefined of a stored empty answer", async () => {
+    const cached = vi
+      .fn<AnswerCache>()
+      .mockResolvedValue({ status: 204, contentLength: null, text: "" });
+
+    await expect(
+      apiRequest({
+        method: "GET",
+        path: "/things/1",
+        schema: z.void(),
+        read: { cached },
+      }),
+    ).resolves.toBeUndefined();
   });
 });

@@ -1,6 +1,7 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { SearchIcon } from "lucide-react";
-import type { User } from "@repo/contracts";
+import { Skeleton } from "@repo/ui/components/skeleton";
 import { ROUTES } from "#shared/config";
 import { ButtonLink } from "#shared/ui";
 import { AccountNotifications } from "./account-notifications";
@@ -8,6 +9,7 @@ import { MobileNav } from "./mobile-nav";
 import { SessionRecovery } from "./session-recovery";
 import { ThemeToggle } from "./theme-toggle";
 import { TimeZoneCookie } from "./time-zone-cookie";
+import { WithUser } from "./with-user";
 
 /**
  * The bar above the page. Most of the navigation moved into the sidebar beside it, so
@@ -15,16 +17,19 @@ import { TimeZoneCookie } from "./time-zone-cookie";
  * open that navigation on a narrow screen, the theme, the two calls to action a
  * stranger has, and the notification bell of somebody who is not one.
  *
- * It is handed the session instead of reading one — `AppShell` asks once for the whole
- * shell. `null` there means "no live access token", which is not the same as signed out,
+ * What names the visitor — the menu, the calls to action or the bell — is read in two
+ * islands (`WithUser`), so the bar itself is part of the prerendered shell and the session
+ * is streamed into it. `null` there means "no live access token", which is not the same as signed out,
  * hence `SessionRecovery` beside it: the one thing about a session that only the browser
  * can settle. `TimeZoneCookie` is the other thing only the browser knows: its own clock.
  */
-export const Header = ({ user }: { user: User | null }) => (
+export const Header = () => (
   <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
     <div className="flex h-14 items-center gap-2 px-4 sm:px-6">
       <div className="lg:hidden">
-        <MobileNav user={user} />
+        <Suspense fallback={<Skeleton className="size-8 rounded-lg" />}>
+          <WithUser>{(user) => <MobileNav user={user} />}</WithUser>
+        </Suspense>
       </div>
 
       <Link
@@ -33,9 +38,6 @@ export const Header = ({ user }: { user: User | null }) => (
       >
         Booking
       </Link>
-
-      <SessionRecovery signedIn={user !== null} />
-      <TimeZoneCookie signedIn={user !== null} />
 
       <div className="ml-auto flex items-center gap-2">
         {/*
@@ -48,24 +50,35 @@ export const Header = ({ user }: { user: User | null }) => (
           <span className="sr-only sm:not-sr-only">Find a stay</span>
         </ButtonLink>
 
-        {user === null && (
-          <>
-            <ButtonLink
-              href={ROUTES.login}
-              variant="ghost"
-              size="sm"
-              className="hidden sm:inline-flex"
-            >
-              Sign in
-            </ButtonLink>
-            <ButtonLink href={ROUTES.register} size="sm">
-              Sign up
-            </ButtonLink>
-          </>
-        )}
+        <Suspense fallback={<Skeleton className="h-7 w-16 rounded-lg" />}>
+          <WithUser>
+            {(user) => (
+              <>
+                <SessionRecovery signedIn={user !== null} />
+                <TimeZoneCookie signedIn={user !== null} />
 
-        {/* Only for a session: the stream behind both is the account's own. */}
-        {user !== null && <AccountNotifications />}
+                {user === null ? (
+                  <>
+                    <ButtonLink
+                      href={ROUTES.login}
+                      variant="ghost"
+                      size="sm"
+                      className="hidden sm:inline-flex"
+                    >
+                      Sign in
+                    </ButtonLink>
+                    <ButtonLink href={ROUTES.register} size="sm">
+                      Sign up
+                    </ButtonLink>
+                  </>
+                ) : (
+                  // Only for a session: the stream behind both is the account's own.
+                  <AccountNotifications />
+                )}
+              </>
+            )}
+          </WithUser>
+        </Suspense>
 
         <ThemeToggle />
       </div>

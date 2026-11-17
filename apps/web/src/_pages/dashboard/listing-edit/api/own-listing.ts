@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
+import { cacheLife, cacheTag } from "next/cache";
 import type { ListingDetail } from "@repo/contracts";
-import { listingsApi } from "#shared/api";
+import { answerOf, listingsApi } from "#shared/api";
 import { listingTag } from "#shared/config";
 import { orNotFound } from "#shared/lib";
 
@@ -27,7 +28,14 @@ export async function ownListing(
 ): Promise<ListingDetail> {
   const listing = await orNotFound(
     listingsApi.get(id, {
-      next: { revalidate: false, tags: [listingTag(id)] },
+      cached: async (url) => {
+        "use cache";
+
+        cacheLife("max");
+        cacheTag(listingTag(id));
+
+        return await answerOf(url);
+      },
     }),
   );
 

@@ -81,8 +81,8 @@ export const authApi = {
  * other status stays an error.
  *
  * It takes no `ReadOptions`, unlike every other read of this segment, and that is the
- * point rather than an omission: the session is personal, the Data Cache is keyed by URL
- * and shared between visitors, so `no-store` is the only answer a call site could give.
+ * point rather than an omission: the session is personal, a cached answer is shared
+ * between visitors, so `no-store` is the only answer a call site could give.
  * Nothing to decide is what makes the read below memoizable.
  *
  * Once per render, and it has to be said out loud because the transport gives up the

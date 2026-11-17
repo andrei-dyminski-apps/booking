@@ -4,6 +4,8 @@ const nextConfig = {
   // The instructions of this repository live in the root CLAUDE.md and .claude/rules,
   // and a second set generated next to them is a copy nobody updates.
   agentRules: false,
+  cacheComponents: true,
+  partialPrefetching: true,
 };
 
 export default nextConfig;
