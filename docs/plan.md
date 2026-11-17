@@ -980,6 +980,185 @@ What stays out: everything that touches the interface — a catalogue, a locale 
 `proxy.ts` composed with a locale middleware, formatters, `<html lang>`, the SEO of two
 languages. A listing's title and description stay their author's text.
 
+## Phase 11 — End-to-end tests of the frontend
+
+Phase 8's tests stop at the HTTP surface: the API's e2e specs prove the rules, and the
+frontend's Vitest suite deliberately covers no component (`apps/web/CLAUDE.md`, "Tests").
+So nothing yet proves that a visitor can actually _do_ anything: that the form posts what
+the contract wants, that the Server Action lands the cookie, that the page shows the state
+the API answered. Today that proof is a person clicking through the site, and the goal of
+this phase is to retire that person — a green run is the answer to "does the app still
+work", for every screen that matters, without a manual pass.
+
+It comes last because it needs screens that have stopped changing, and it is written
+against roles, labels and the visible English text — what a visitor sees, not how the page
+is produced — so it survives a rewrite of how pages are cached or rendered and is the net
+for any later one.
+
+- [ ] **Playwright, in `apps/web/e2e/`.** The runner built for this: a real Chromium, an
+      auto-waiting locator API, traces and a video of a failed run, and `storageState` to
+      sign in once per role instead of once per test. Its own `playwright.config.ts`,
+      the script `pnpm test:e2e:web` (root, through turbo) and `--ui` for writing a spec;
+      the existing `pnpm test:e2e` stays the API's. Locators by role and accessible name
+      (`getByRole`, `getByLabel`) — they double as an accessibility check, and the
+      phase 8 audit's `link-name` and contrast fixes are what keeps them honest. A
+      `data-testid` only where no role names the element, and `eslint-plugin-playwright`
+      in the config for `apps/web/e2e`.
+- [ ] **A hermetic stack, started by the config.** `webServer` brings up the built
+      frontend (`next start`, not `dev`: the same code the deployment runs, and no HMR
+      noise) and the API on ports of their own, against a database that only this suite
+      touches — `booking_e2e`, created and migrated by `globalSetup`, so it can never wipe
+      the development one that `pnpm test:e2e` already treats as disposable. Redis on its
+      own DB index for the same reason. The seed is the fixture: the three demo logins and
+      the stays dated from the day it runs are what the specs read, and a spec that writes
+      cleans up after itself or books a stay of its own rather than leaning on a row
+      another one might have taken.
+- [ ] **One suite, three targets, chosen by `E2E_TARGET`.** The specs are the same files;
+      what differs is the stack under them and which of them run. It is a portfolio
+      project, so a green run against the live deployment is worth having alongside the
+      hermetic one — but it can neither replace it nor run everything it runs.
+  - `local` (the default) is the hermetic stack above with the offline gateways. It is the
+    required check on every pull request: fast, deterministic, needs no Stripe key.
+  - `local` with real Stripe test mode: the same stack with the gateways left on Stripe
+    (`PAYMENT_GATEWAY` empty), the test keys from `.env`, and the `stripe` profile of
+    `docker-compose.yml` for `stripe listen`. Not a separate project — it is how a
+    developer checks the payment journeys against Stripe's side before trusting them
+    against the deployment.
+  - `deployed`: `E2E_BASE_URL` names the frontend (the Vercel deployment), there is no
+    `webServer` and no `globalSetup`, and only specs tagged `@deployed` run. The API,
+    PostgreSQL, Redis and Stripe are the real ones the demo runs on, so the payment is
+    paid with a test card and the webhook is Stripe's own delivery to Railway — the suite
+    signs nothing. It is selected explicitly and never by default, refuses to start
+    without `E2E_BASE_URL`, and runs from its own workflow (below), not from the pull
+    request's.
+  - What `deployed` cannot do, and so what stays out of its tag: anything that needs the
+    clock moved (`page.clock` moves the browser's time, and a hold's fifteen minutes run
+    on the server), a stay that is already over or a review of one (only the seed can
+    write them, and the seed on the deployment deletes every visitor's data), and
+    anything that arranges state by a forged webhook. Everything it does write belongs to
+    the run: a user registered as `e2e+<run id>@example.com` (an account cannot be
+    deleted, so it stays, recognizable by its address, until the next reseed), a listing
+    and a stay of its own that the run deletes or cancels at the end, and never a demo
+    account's data — blocking a user, for one, is done to the run's own user. The deployment's rate limiter and a stopped Railway
+    project are the run's problems to meet rather than to hide: it waits for
+    `/api/health` before the first spec, and a spec that is throttled is a finding about
+    the deployment.
+- [ ] **Stripe is replaced at the two seams the payment cycle already has, and not in the
+      browser's way.** The API's payment gateways are ports (phase 6), and the API e2e
+      spec already swaps them for offline ones; the stack starts with the same swap,
+      selected by one variable, so no spec depends on Stripe being reachable or on a key
+      with a secret in CI. The webhook is the other seam: a spec posts a
+      `payment_intent.succeeded` signed with the suite's own
+      `STRIPE_PAYMENT_WEBHOOK_SECRET`, which is exactly what Stripe's CLI does locally and
+      what the page's poll is waiting for. Stripe.js and its iframe are stubbed with
+      `page.route`, since an Elements iframe is not something a locator should type into
+      (its markup is Stripe's to change). That stub is the hermetic target's alone. The other
+      two targets leave Stripe.js real and pay with the test cards (`4242…`, and
+      `4000 0025 0000 3155` for 3-D Secure): that settles what used to be open here, a
+      single smoke spec against real Stripe test mode. It is the only check that Stripe's
+      side still accepts what the integration sends, and it is flaky by nature — so it is
+      the `deployed` target's and the developer's, never a required check.
+- [ ] **Helpers that make a spec read like the scenario.** A `signIn(role)` that reuses a
+      saved `storageState` (the cookie pair the BFF issues, phase 2); `book(page, {…})`
+      for the form on the listing page; `postWebhook(…)`; and an `api` fixture that talks
+      to the API directly to arrange state a spec should not click its way to — a
+      cancelled stay, an expired hold, a stay already over (only the seed can write one,
+      so those specs read the seed's three). The clock is Playwright's `page.clock`: a
+      hold's fifteen minutes and its countdown are advanced, not waited out. The one step
+      that differs between targets is `pay(page)`: on the hermetic stack it fulfils the
+      stubbed Elements and posts the signed webhook; on the other two it fills Stripe's
+      real iframe through `frameLocator` with a test card and waits for the webhook
+      Stripe itself delivers. A journey calls `pay` and reads the same on all three. The
+      `api` fixture on `deployed` talks to the public API as the run's own signed-in user
+      and nothing else — there is no database to reach and no seed to read.
+- [ ] **Journeys, most important first.** Each is a spec file, and the order is the order
+      they are written in — a stop after any of them leaves a suite that guards the most
+      valuable things first. A spec that is safe and meaningful against the live
+      deployment carries the `@deployed` tag (`test.describe("…", { tag: "@deployed" }`),
+      and the `deployed` target runs `--grep @deployed`; an untagged spec is hermetic-only.
+      Each journey below says where it lands: **[both]** is tagged, **[local]** is not,
+      and a journey with a split names the half that stays local.
+  1. **Smoke, public. [both]** `/`, the catalogue, a listing, `/login`, `/register`, a
+     404 and the `/api/health` proxy answer with no console error and no failed request —
+     the class of thing lighthouse found on the public pages in phase 8 (the 401 on a
+     stranger's refresh), now caught on every PR rather than by an audit.
+  2. **Authentication and the session. [both]** Register (the field-level refusals of the
+     contract under the right inputs), sign in, sign out; a wrong password and an unknown
+     address read the same; a protected route redirects to `/login?next=…` and comes
+     back after the sign-in, an open redirect in `next` does not; a guest is refused the
+     host's and the admin's screens; an expired access cookie is rotated by the refresh
+     without the visitor noticing, and a burned refresh token lands on the login page.
+     The expiry is a deleted cookie and the burn a sign-out from a second context, so
+     neither needs the server's clock.
+  3. **Search and catalogue. [both]** Filters, ordering and the chips write the URL and the page
+     reads it back (a link copied out of the address bar shows the same page); the
+     cursor's "next page"; an empty result; a date range that excludes a stay; the
+     canonical form of an address redirects once and not in a loop. On `deployed` it reads
+     the catalogue as visitors left it, so it asserts the shape of the URL and the page,
+     never a particular listing.
+  4. **The booking and the payment — the centrepiece. [both, but for the expiry]** Pick dates on the calendar (past
+     days and taken ones are not selectable), see the quote, create the hold, see the
+     countdown, pay, wait for the webhook, land on a confirmed stay; a declined payment
+     keeps the hold and says why; a hold that runs out turns `Expired` and the dates are
+     bookable again (**[local]** — it needs `page.clock`); **two browser contexts book the same nights at once — one is taken
+     to payment, the other gets the polite conflict**, the demo scenario of phase 9 as a
+     test that runs on every PR and on the live deployment, where it is the best proof
+     that a lock in a database that visitors share still holds.
+  5. **Cancelling and refunds. [both, but for the host's and the admin's screens]** The guest's cancellation shows the quote the policy
+     gives and, after confirming, the refunded amount; the non-refundable rate says it
+     refunds nothing before the button is pressed; the host's cancellation and the
+     admin's refund are on the screens of those roles (**[local]** — they act on the
+     seed's stays); ending a stay early.
+  6. **Hosting. [both]** Create a listing (the form's validation, the image, the weekly price
+     rules), edit it, set its cancellation policy, delete it — and the catalogue no
+     longer shows it; the host's calendar and bookings; the payouts page up to the point
+     Stripe's embedded components take over, which are stubbed like Elements.
+  7. **Messages, notifications, waitlist, reviews. [local, but for the messages]** A message from the guest reaches the
+     host's inbox and the unread badge moves; the live stream's event refreshes a page
+     that is already open; joining and leaving a waitlist; a notice appears in the bell
+     and on `/notifications`; a review is left after a stay that is over, once, and by
+     both sides. The messages and the unread badge between two users the run registered
+     are **[both]**; the waitlist, the bell and the reviews lean on the seed's rows.
+  8. **Admin. [local]** The user list and its filter, blocking a user (their next request fails
+     and they see why), the listings and payments screens, a partial refund.
+  9. **Profile and the shell. [both]** Edit the profile, change the password, the time zone
+     cookie renders a moment on the reader's clock, the mobile navigation and the
+     account panel at a phone width — a second Playwright project on a mobile viewport
+     runs the smoke and the booking journey, since the layout is where mobile breaks. The mobile project runs on `deployed` too.
+- [ ] **Accessibility as a by-product.** `@axe-core/playwright` on every page the smoke
+      and the journeys visit, failing on `serious` and `critical` violations — the checks
+      phase 8's audit did once by hand (contrast, link names), kept from regressing.
+- [ ] **CI.** A third job beside `checks` and `e2e`, with the same Postgres and Redis
+      service containers: build, `playwright install --with-deps chromium` (the browser
+      binary cached by version), run, and upload the HTML report and the traces of a
+      failure as an artifact. `retries: 1` in CI only and `trace: "on-first-retry"` — a
+      test that passes on the retry is reported as flaky rather than hidden, and a spec
+      that is flaky twice is fixed or removed, not given more retries. Sharding the suite
+      is a switch to flip when it passes ten minutes, not before.
+- [ ] **A workflow for the live deployment.** `.github/workflows/e2e-deployed.yml`, apart
+      from `ci.yml`: a nightly `schedule`, `workflow_dispatch` with the target URL as an
+      input, and a run after a production deploy if the Vercel side can trigger one. It
+      installs only Chromium, sets `E2E_TARGET=deployed` and `E2E_BASE_URL`, and runs the
+      `@deployed` specs — no Postgres, no Redis, no service containers, and no secret,
+      since everything it needs is a public page and a test card. It is never a required
+      check and never blocks a merge: the deployment can be stopped on purpose
+      (`pnpm railway:stop`), in which case the run's first step, the wait for
+      `/api/health`, fails with that said rather than as a hundred red specs. Its
+      status badge goes at the top of `README.md` beside the live-demo link.
+- [ ] **What stays out.** Component tests (`apps/web/CLAUDE.md` still says no — a browser
+      run covers a component through the page it is on), screenshot comparisons (a pixel
+      diff is the opposite of "no manual testing": it asks a person to approve every
+      change), cross-browser runs beyond Chromium and the mobile viewport, and anything
+      the API's own e2e specs already prove — the suite asserts what a visitor sees, and
+      leaves the arithmetic of a refund to the specs that own it.
+- [ ] **Documentation.** `apps/web/CLAUDE.md` "Tests" gains the browser layer and the rule
+      for what belongs in it, `README.md` the commands, the new variables and the CI job
+      (and `.env.example`, `globalEnv` in `turbo.json` — the three places the root
+      `CLAUDE.md` names; `E2E_TARGET` and `E2E_BASE_URL` are two of them), the three
+      targets and what `@deployed` may and may not do, and `.claude/rules/workflow.md` the line that a change reaching
+      a screen runs `pnpm test:e2e:web` the way one reaching the database runs
+      `pnpm test:e2e`.
+
 ## Decisions already made
 
 - **Prisma** (v7: `prisma.config.ts`, the `prisma-client` generator, the `@prisma/adapter-pg` driver adapter) — the most recognizable ORM; interactive transactions and raw migrations cover phase 4.
@@ -1012,7 +1191,7 @@ languages. A listing's title and description stay their author's text.
   before React has hydrated, and `refresh()` / `updateTag` are reachable only from there.
   The client path stays for what a round trip cannot express — a poll for a webhook — and
   phase 6 is what brings the first of those.
-- The order of the phases follows the dependencies: database → auth → roles → concurrency → catalogue → Stripe → cancellation policies → polish → deployment. The cancellation policies follow Stripe directly because they change the rules its refund machinery runs on, and they come before the error codes because they add refusals the codes would otherwise be written for twice. The catalogue comes before Stripe because the dependency runs one way only: Stripe Elements needs a booking to attach to, and a booking is created from the form on the listing page, which is the catalogue's. Nothing in the catalogue needs a payment — it is server-rendered from `searchParams`, and TanStack Query arrives with the polling of the webhook.
+- The order of the phases follows the dependencies: database → auth → roles → concurrency → catalogue → Stripe → cancellation policies → polish → deployment → error codes → frontend e2e. The frontend e2e suite comes last: it needs screens that have stopped changing, and it describes what a visitor sees rather than how the page is produced. The cancellation policies follow Stripe directly because they change the rules its refund machinery runs on, and they come before the error codes because they add refusals the codes would otherwise be written for twice. The catalogue comes before Stripe because the dependency runs one way only: Stripe Elements needs a booking to attach to, and a booking is created from the form on the listing page, which is the catalogue's. Nothing in the catalogue needs a payment — it is server-rendered from `searchParams`, and TanStack Query arrives with the polling of the webhook.
 
 ## Decisions deliberately not taken
 
