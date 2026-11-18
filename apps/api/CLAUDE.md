@@ -684,9 +684,64 @@ platform, and the host is paid their share by a transfer once the stay has begun
   `booking/domain/stuck-stay.ts`, applied by `BookingRefundService`) — the admin's screen draws
   the figure and does not apply the rule. `domain/payout.ts` applies it to the row's facts
   and adds what only the API decides: nothing leaves while a dispute is open (`mayPayOut`).
-- **A host is an Accounts v2 recipient**, opened by the first
-  `POST /payouts/account/session` under `user-<id>-account` and written only into the empty
-  `users.stripe_account_id`. Onboarding is Stripe's embedded component on the frontend.
+- **A host is an Accounts v2 recipient**, opened by `POST /payouts/account` in the country
+  the host picked (`openPayoutAccountSchema`) and written only into the empty
+  `users.stripe_account_id`; a second call answers the account already there, its country
+  unchanged. Stripe requires `identity.country` before `defaults.currency` and
+  `configuration.recipient`, fixes it at opening and onboards by it, so the country comes
+  first and `POST /payouts/account/session` is a `409` (`PAYOUT_ACCOUNT_NOT_OPENED`) until
+  then. **Which countries is Stripe's answer, not a list of ours**: `transferCountries`
+  reads the platform's own account and its country spec's `supported_transfer_countries` —
+  where Stripe lets this platform send a transfer; a country with no spec or a malformed
+  code is dropped. **An account holds its own country's currency**: `defaults.currency` is
+  the spec's `default_currency` (`PayoutCountryReading.currencies`), so a host gives the
+  local bank account they have rather than one in `CURRENCY`, which is what the industry
+  does — the transfer still goes out in the stay's currency, funded by its charge
+  (`source_transaction` wants the two to match), and Stripe converts it on its way into the
+  account. A country no spec names is refused before Stripe is asked (`no_country_spec`).
+  The list is a reading of the specs, not Stripe's own check of an account, so the two can
+  disagree: a refusal in `COUNTRY_REFUSALS` (`account_country_unsupported_currency` kept as
+  the fallback) becomes `PayoutCountryRefusedError`, a `400` `PAYOUT_COUNTRY_UNSUPPORTED`
+  rather than a `502`, and the country leaves the process's list until a restart;
+  `scripts/probe-payout-countries.ts` (`stripe:probe-countries`) compares the list with what
+  a sandbox opens, country by country, through the adapter itself (`readPayoutCountries` is
+  exported for it). For a platform in Poland the probe found two countries the list offered
+  and Stripe refused — `capability_not_available_without_other_capability`: in the US and
+  Canada `stripe_transfers` cannot be requested without `merchant` `card_payments`.
+  `MERCHANT_COUNTRIES` adds that configuration there (the account can then take cards, which
+  the platform never asks of a host, and onboarding asks for a business profile and a bank
+  account too), `closeAccount` names every configuration the account carries, which is why
+  it takes the country, and the code stays in `COUNTRY_REFUSALS` as the fallback for a
+  country not yet known. A sandbox refuses a transfer to an account whose `stripe_transfers`
+  is not active, and an Express account's onboarding cannot be finished over the API, so
+  whether a transfer reaches a cross-border host is `stripe:probe-transfer`'s, run by hand
+  after onboarding in the app — or on a sandbox account opened with `dashboard: "none"`,
+  which takes test data and the terms of service over the API (see `README.md`). Run that
+  way (2026-11-18, platform in Poland), a USD transfer reached DE, GB and CH on one
+  `recipient` configuration, converted on the way in. Read once per process, a failed read
+  kept ten seconds only, so a Stripe that is down is not asked on every render. `GET
+/payouts/account/countries` hands it to the form, and `open` refuses any other country
+  with a `400` (`PAYOUT_COUNTRY_UNSUPPORTED`, the schema's code and words for a malformed
+  one — `PAYOUT_COUNTRY_UNSUPPORTED_MESSAGE` of the contract), because an account opened
+  elsewhere would onboard and never be paid. The idempotency key is
+  `user-<id>-account-<sha256 of the body>`: Stripe refuses a key it has seen with other
+  parameters and a v2 key lives thirty days, so a key of the user alone would refuse for a
+  month a host whose first account was opened but never attached and who then picks another
+  country or renames themselves (a v2 request that failed is not stored — a retry runs it
+  again). The price is a second account when both requests reached Stripe: `open` reads the
+  column back after its write, and an account it opened that the column does not hold — a
+  racing request with another body wrote first — is closed (`closeAccount`, naming every
+  configuration it carries — `recipient`, and `merchant` beside it in the
+  `MERCHANT_COUNTRIES`); a close that fails is logged with the id for a
+  person, never answered. One opened and never attached at all (the API gave up waiting on a
+  request Stripe went on to carry out) stays at Stripe, unnamed by any row. Two requests
+  with the same body at once are one too many for the key: v2 answers with an
+  `idempotency_error` (`StripeIdempotencyError`; a v1-shaped `idempotency_key_in_use` is
+  taken too), the adapter throws `PayoutAccountOpeningInProgressError` and the caller gets a
+  `409` (`PAYOUT_ACCOUNT_BEING_OPENED`), which the form retries, as for a payment. Opening
+  an account takes Stripe over four seconds, so that call waits eight, and the frontend
+  waits twenty for this route (`timeoutMs` of `apiRequest`). Onboarding is Stripe's embedded
+  component on the frontend.
 - **`users.payouts_enabled_at` selects a payout and Stripe's answer releases it**: `payOut`
   asks `transfersEnabled` again right before the transfer, and a lapsed account is held back
   and the flag switched off. The flag is written from the account events and from
@@ -798,6 +853,14 @@ platform, and the host is paid their share by a transfer once the stay has begun
   off it — reverses the difference under `booking-<id>-reversal-<held cents>-<owed
 cents>` and lowers `paid_out_amount_cents` from exactly what it read. Two settlements of one stay queue on the lease instead of reversing the same money
   twice; `test/payout.repository.e2e-spec.ts` runs the lease against the real database.
+  **The exchange rate of a cross-border host is the host's.** A reversal is stated in the
+  transfer's currency (USD), so the platform gets back exactly what `settle` asks for and
+  `paid_out_amount_cents` stays exact; the host's account is debited in its own currency at
+  the rate of the reversal, so a moved rate and the rounding of partial reversals land on
+  their balance (the sandbox left a CHF host one centime negative). Not verified: a real
+  rate drift, a host who has already paid out (`losses_collector` is `application`, so the
+  platform likely stands behind a negative balance), and a reversal refused for an
+  insufficient balance.
 - **A refund** (`charge.refunded`) is the booking side's: it raises `refunded_amount_cents` to
   Stripe's total, tells the guest of a refund no job of this API recorded — the dashboard's
   or an admin's partial one — cancels a stay not yet

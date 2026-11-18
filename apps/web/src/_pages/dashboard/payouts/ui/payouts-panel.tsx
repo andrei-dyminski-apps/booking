@@ -9,6 +9,7 @@ import {
   type StripeConnectInstance,
 } from "@stripe/connect-js";
 import {
+  ConnectAccountManagement,
   ConnectAccountOnboarding,
   ConnectComponentsProvider,
   ConnectNotificationBanner,
@@ -26,11 +27,13 @@ const appearanceFor = (theme: string | undefined): AppearanceOptions => ({
 });
 
 /**
- * Stripe's embedded components for the caller's payout account. The instance is made in
+ * Stripe's embedded components for the caller's payout account, once it has been opened
+ * (`OpenAccountForm`) — a session is refused before that. The instance is made in
  * the browser after hydration — it injects a script and reads `window` — and asks for its
  * client secret itself, through the BFF, whenever the session it holds runs out.
  *
- * Until transfers are enabled it shows the onboarding form, and asks the API to check with
+ * Until transfers are enabled it shows the onboarding form, then the payouts and the
+ * account's details (`account_management` — a new bank account, say). Meanwhile it asks the API to check with
  * Stripe (`POST /payouts/account/refresh`) when the screen opens and when the form is left —
  * the account event may not have landed yet. An answer that the account is enabled
  * re-renders the page, whose server half reads it off the row.
@@ -111,7 +114,11 @@ export const PayoutsPanel = ({
       <div className="flex flex-col gap-6">
         <ConnectNotificationBanner />
         {enabled ? (
-          <ConnectPayouts />
+          <>
+            <ConnectPayouts />
+            {/* The bank account and the details given at onboarding, changed later. */}
+            <ConnectAccountManagement />
+          </>
         ) : (
           <ConnectAccountOnboarding
             onExit={() => {

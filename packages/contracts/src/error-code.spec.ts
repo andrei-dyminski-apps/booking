@@ -14,6 +14,7 @@ import { endStayEarlySchema } from "./early-end.js";
 import { rule, toApiIssue, toErrorCode } from "./error-code.js";
 import { waiveHostFeeSchema } from "./host-fee.js";
 import { lookupQuerySchema } from "./lookup.js";
+import { openPayoutAccountSchema } from "./payout.js";
 import { createReviewSchema } from "./review.js";
 import { userQuerySchema } from "./user.js";
 import {
@@ -606,6 +607,17 @@ describe("the set-aside and host-fee rules", () => {
     ).toMatchObject([
       { code: "WAIVE_REASON_TOO_LONG", params: { maximum: 500 } },
     ]);
+  });
+
+  it("names a payout country nobody picked and one not spelled as Stripe spells it", () => {
+    for (const country of [undefined, "pl", "POL", ""]) {
+      expect(codesOf(openPayoutAccountSchema, { country })).toEqual([
+        { path: ["country"], code: "PAYOUT_COUNTRY_UNSUPPORTED" },
+      ]);
+    }
+    expect(openPayoutAccountSchema.parse({ country: "PL" })).toEqual({
+      country: "PL",
+    });
   });
 });
 

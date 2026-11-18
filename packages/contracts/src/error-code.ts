@@ -204,10 +204,14 @@ export const ERROR_CODES = [
   "REFUND_NOT_SET_ASIDE",
   "PAYOUT_NOT_STUCK",
 
-  // Host fees and the payout account.
+  // Host fees and the payout account. A country is refused in one code whether the schema
+  // or Stripe's list of the countries the platform transfers to refused it.
   "HOST_FEE_NOT_FOUND",
   "HOST_FEE_NOT_OWED",
   "PAYOUT_ACCOUNT_UNAVAILABLE",
+  "PAYOUT_ACCOUNT_NOT_OPENED",
+  "PAYOUT_ACCOUNT_BEING_OPENED",
+  "PAYOUT_COUNTRY_UNSUPPORTED",
 
   // The providers' webhooks, which no browser calls: the code is for the logs and the
   // provider's dashboard. A delivery with no signature header, or no raw body to check one
