@@ -6,6 +6,9 @@
   "sideEffects": [
     "*.css"
   ],
+  "engines": {
+    "node": "26.x"
+  },
   "imports": {
     "#_app/*": "./src/_app/*/index.ts",
     "#_pages/*": "./src/_pages/*/index.ts",

@@ -68,7 +68,7 @@ Pay for a hold with the Stripe test card `4242 4242 4242 4242` (any future expir
 
 ## Requirements
 
-- Node.js `^24.11 || >=26` (CI and Railway run 26)
+- Node.js 26 (CI, Railway and Vercel run it too)
 - pnpm 12 — any pnpm from 10 on switches to the exact version in the `packageManager` field by itself (`npm i -g pnpm`; Node 26 no longer bundles corepack)
 - Docker (for the local PostgreSQL)
 
@@ -743,7 +743,7 @@ That removes three deployment problems rather than one. There is no `SameSite=No
 - `buildCommand` filters turbo down to `@repo/api`, which builds `@repo/contracts` on the way;
 - `watchPatterns` keeps a frontend-only push from redeploying the backend;
 - `preDeploy` runs `db:deploy` before the new instance starts — committed migrations only, never `migrate dev`;
-- the Node major is pinned by `devEngines.runtime` in the root `package.json` (`26`, the one CI runs). Railpack reads it before `engines.node`, whose range it would otherwise resolve to its lowest major; pnpm leaves it alone, since it sets no `onFail`, so a local Node 24 still installs;
+- the Node major is pinned by `devEngines.runtime` (`26`, the one CI runs) and `engines.node` (`26.x`) in the root `package.json`. Railpack reads `devEngines.runtime` first; pnpm leaves both alone, since neither sets `onFail` or `engineStrict`, so a local Node 24 installs with a warning at most;
 - `healthcheck` is `/health`, which answers `200` only once the new instance reaches Postgres and Redis, so Railway keeps the old one serving until it does;
 - the API writes its logs to stdout as JSON lines (pino):
   - only because `NODE_ENV` is `production` — anything else pretty-prints them through `pino-pretty`, a dev dependency, and fails at boot where dev dependencies were not installed;
@@ -755,7 +755,7 @@ That removes three deployment problems rather than one. There is no `SameSite=No
 
 The file exports the partial `api`, so it owns only the resources it declares: Postgres and Redis live in the same project but stay managed in the dashboard, and an apply never deletes them. A change to the file reaches Railway through the CLI rather than a push — `railway config plan`, then `railway config apply` once the plan shows only the intended changes.
 
-The API replica runs in `us-east4-eqdc4a` (Virginia), next to Vercel's default function region `iad1` (Washington, D.C.): the frontend proxies every browser call to the API, so the two are kept in neighbouring data centres. Postgres and Redis are not part of the file and have to be moved to the same Railway region in the dashboard, otherwise the API crosses an ocean on every query. The Vercel region is pinned in `apps/web/vercel.json` (`regions`), which Vercel reads only when the project's Root Directory is `apps/web`; the same setting lives in the dashboard under Settings → Functions → Function Region, and the file wins over it.
+The API replica runs in `us-east4-eqdc4a` (Virginia), next to Vercel's default function region `iad1` (Washington, D.C.): the frontend proxies every browser call to the API, so the two are kept in neighbouring data centres. Postgres and Redis are not part of the file and have to be moved to the same Railway region in the dashboard, otherwise the API crosses an ocean on every query. The Vercel Node major is pinned by `engines.node` (`26.x`) in `apps/web/package.json` — Vercel reads it from the project's Root Directory, not from the repository root — and overrides the Node.js Version setting of the dashboard. The Vercel region is pinned in `apps/web/vercel.json` (`regions`), which Vercel reads only when the project's Root Directory is `apps/web`; the same setting lives in the dashboard under Settings → Functions → Function Region, and the file wins over it.
 
 Postgres is a service in the same Railway project, and `DATABASE_URL` is set as a reference to it (`${{Postgres.DATABASE_URL}}`) rather than copied — the credentials then survive a rotation. The rest of the variables from the table above are set by hand; the JWT secrets are generated (`openssl rand -hex 32`), not taken from `.env.example`.
 
