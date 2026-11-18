@@ -8,7 +8,7 @@ Instructions for Claude Code when working in this repository.
 the packages they share in `packages/*` — `pnpm-workspace.yaml` and each `package.json`
 are the inventory.
 
-Node `^24.11 || >=26` (`engines`), 26 in CI and on Railway (`devEngines.runtime`), the package manager is **pnpm 12** (`packageManager` in the root `package.json`).
+Node 26 (`engines` and `devEngines.runtime`), the same in CI, on Railway and on Vercel (`engines` of `apps/web`), the package manager is **pnpm 12** (`packageManager` in the root `package.json`).
 
 ## Commands
 
