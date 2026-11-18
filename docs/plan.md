@@ -983,181 +983,160 @@ languages. A listing's title and description stay their author's text.
 ## Phase 11 — End-to-end tests of the frontend
 
 Phase 8's tests stop at the HTTP surface: the API's e2e specs prove the rules, and the
-frontend's Vitest suite deliberately covers no component (`apps/web/CLAUDE.md`, "Tests").
-So nothing yet proves that a visitor can actually _do_ anything: that the form posts what
-the contract wants, that the Server Action lands the cookie, that the page shows the state
-the API answered. Today that proof is a person clicking through the site, and the goal of
-this phase is to retire that person — a green run is the answer to "does the app still
-work", for every screen that matters, without a manual pass.
+frontend's Vitest suite deliberately covers no component. So nothing yet proves that a
+visitor can actually _do_ anything — that a form submits what the API accepts, that signing
+in keeps a visitor signed in, that a page shows the state the API answered. Today that proof
+is a person clicking through the site; the goal of this phase is a green run that answers
+"does the app still work" for the main things a guest, a host and an admin do with it.
 
-It comes last because it needs screens that have stopped changing, and it is written
-against roles, labels and the visible English text — what a visitor sees, not how the page
-is produced — so it survives a rewrite of how pages are cached or rendered and is the net
-for any later one.
+It comes last because it needs screens that have stopped changing, and it is written against
+what a visitor perceives — roles, labels and the visible English text — not how the page is
+produced, so it survives a rewrite of how pages are cached or rendered.
 
-- [ ] **Playwright, in `apps/web/e2e/`.** The runner built for this: a real Chromium, an
-      auto-waiting locator API, traces and a video of a failed run, and `storageState` to
-      sign in once per role instead of once per test. Its own `playwright.config.ts`,
-      the script `pnpm test:e2e:web` (root, through turbo) and `--ui` for writing a spec;
-      the existing `pnpm test:e2e` stays the API's. Locators by role and accessible name
-      (`getByRole`, `getByLabel`) — they double as an accessibility check, and the
-      phase 8 audit's `link-name` and contrast fixes are what keeps them honest. A
-      `data-testid` only where no role names the element, and `eslint-plugin-playwright`
-      in the config for `apps/web/e2e`.
-- [ ] **A hermetic stack, started by the config.** `webServer` brings up the built
-      frontend (`next start`, not `dev`: the same code the deployment runs, and no HMR
-      noise) and the API on ports of their own, against a database that only this suite
-      touches — `booking_e2e`, created and migrated by `globalSetup`, so it can never wipe
-      the development one that `pnpm test:e2e` already treats as disposable. Redis on its
-      own DB index for the same reason. The seed is the fixture: the three demo logins and
-      the stays dated from the day it runs are what the specs read, and a spec that writes
-      cleans up after itself or books a stay of its own rather than leaning on a row
-      another one might have taken.
-- [ ] **One suite, three targets, chosen by `E2E_TARGET`.** The specs are the same files;
-      what differs is the stack under them and which of them run. It is a portfolio
-      project, so a green run against the live deployment is worth having alongside the
-      hermetic one — but it can neither replace it nor run everything it runs.
-  - `local` (the default) is the hermetic stack above with the offline gateways. It is the
-    required check on every pull request: fast, deterministic, needs no Stripe key.
-  - `local` with real Stripe test mode: the same stack with the gateways left on Stripe
-    (`PAYMENT_GATEWAY` empty), the test keys from `.env`, and the `stripe` profile of
-    `docker-compose.yml` for `stripe listen`. Not a separate project — it is how a
-    developer checks the payment journeys against Stripe's side before trusting them
-    against the deployment.
-  - `deployed`: `E2E_BASE_URL` names the frontend (the Vercel deployment), there is no
-    `webServer` and no `globalSetup`, and only specs tagged `@deployed` run. The API,
-    PostgreSQL, Redis and Stripe are the real ones the demo runs on, so the payment is
-    paid with a test card and the webhook is Stripe's own delivery to Railway — the suite
-    signs nothing. It is selected explicitly and never by default, refuses to start
-    without `E2E_BASE_URL`, and runs from its own workflow (below), not from the pull
-    request's.
-  - What `deployed` cannot do, and so what stays out of its tag: anything that needs the
-    clock moved (`page.clock` moves the browser's time, and a hold's fifteen minutes run
-    on the server), a stay that is already over or a review of one (only the seed can
-    write them, and the seed on the deployment deletes every visitor's data), and
-    anything that arranges state by a forged webhook. Everything it does write belongs to
-    the run: a user registered as `e2e+<run id>@example.com` (an account cannot be
-    deleted, so it stays, recognizable by its address, until the next reseed), a listing
-    and a stay of its own that the run deletes or cancels at the end, and never a demo
-    account's data — blocking a user, for one, is done to the run's own user. The deployment's rate limiter and a stopped Railway
-    project are the run's problems to meet rather than to hide: it waits for
-    `/api/health` before the first spec, and a spec that is throttled is a finding about
-    the deployment.
-- [ ] **Stripe is replaced at the two seams the payment cycle already has, and not in the
-      browser's way.** The API's payment gateways are ports (phase 6), and the API e2e
-      spec already swaps them for offline ones; the stack starts with the same swap,
-      selected by one variable, so no spec depends on Stripe being reachable or on a key
-      with a secret in CI. The webhook is the other seam: a spec posts a
-      `payment_intent.succeeded` signed with the suite's own
-      `STRIPE_PAYMENT_WEBHOOK_SECRET`, which is exactly what Stripe's CLI does locally and
-      what the page's poll is waiting for. Stripe.js and its iframe are stubbed with
-      `page.route`, since an Elements iframe is not something a locator should type into
-      (its markup is Stripe's to change). That stub is the hermetic target's alone. The other
-      two targets leave Stripe.js real and pay with the test cards (`4242…`, and
-      `4000 0025 0000 3155` for 3-D Secure): that settles what used to be open here, a
-      single smoke spec against real Stripe test mode. It is the only check that Stripe's
-      side still accepts what the integration sends, and it is flaky by nature — so it is
-      the `deployed` target's and the developer's, never a required check.
-- [ ] **Helpers that make a spec read like the scenario.** A `signIn(role)` that reuses a
-      saved `storageState` (the cookie pair the BFF issues, phase 2); `book(page, {…})`
-      for the form on the listing page; `postWebhook(…)`; and an `api` fixture that talks
-      to the API directly to arrange state a spec should not click its way to — a
-      cancelled stay, an expired hold, a stay already over (only the seed can write one,
-      so those specs read the seed's three). The clock is Playwright's `page.clock`: a
-      hold's fifteen minutes and its countdown are advanced, not waited out. The one step
-      that differs between targets is `pay(page)`: on the hermetic stack it fulfils the
-      stubbed Elements and posts the signed webhook; on the other two it fills Stripe's
-      real iframe through `frameLocator` with a test card and waits for the webhook
-      Stripe itself delivers. A journey calls `pay` and reads the same on all three. The
-      `api` fixture on `deployed` talks to the public API as the run's own signed-in user
-      and nothing else — there is no database to reach and no seed to read.
-- [ ] **Journeys, most important first.** Each is a spec file, and the order is the order
-      they are written in — a stop after any of them leaves a suite that guards the most
-      valuable things first. A spec that is safe and meaningful against the live
-      deployment carries the `@deployed` tag (`test.describe("…", { tag: "@deployed" }`),
-      and the `deployed` target runs `--grep @deployed`; an untagged spec is hermetic-only.
-      Each journey below says where it lands: **[both]** is tagged, **[local]** is not,
-      and a journey with a split names the half that stays local.
-  1. **Smoke, public. [both]** `/`, the catalogue, a listing, `/login`, `/register`, a
-     404 and the `/api/health` proxy answer with no console error and no failed request —
-     the class of thing lighthouse found on the public pages in phase 8 (the 401 on a
-     stranger's refresh), now caught on every PR rather than by an audit.
-  2. **Authentication and the session. [both]** Register (the field-level refusals of the
-     contract under the right inputs), sign in, sign out; a wrong password and an unknown
-     address read the same; a protected route redirects to `/login?next=…` and comes
-     back after the sign-in, an open redirect in `next` does not; a guest is refused the
-     host's and the admin's screens; an expired access cookie is rotated by the refresh
-     without the visitor noticing, and a burned refresh token lands on the login page.
-     The expiry is a deleted cookie and the burn a sign-out from a second context, so
-     neither needs the server's clock.
-  3. **Search and catalogue. [both]** Filters, ordering and the chips write the URL and the page
-     reads it back (a link copied out of the address bar shows the same page); the
-     cursor's "next page"; an empty result; a date range that excludes a stay; the
-     canonical form of an address redirects once and not in a loop. On `deployed` it reads
-     the catalogue as visitors left it, so it asserts the shape of the URL and the page,
-     never a particular listing.
-  4. **The booking and the payment — the centrepiece. [both, but for the expiry]** Pick dates on the calendar (past
-     days and taken ones are not selectable), see the quote, create the hold, see the
-     countdown, pay, wait for the webhook, land on a confirmed stay; a declined payment
-     keeps the hold and says why; a hold that runs out turns `Expired` and the dates are
-     bookable again (**[local]** — it needs `page.clock`); **two browser contexts book the same nights at once — one is taken
-     to payment, the other gets the polite conflict**, the demo scenario of phase 9 as a
-     test that runs on every PR and on the live deployment, where it is the best proof
-     that a lock in a database that visitors share still holds.
-  5. **Cancelling and refunds. [both, but for the host's and the admin's screens]** The guest's cancellation shows the quote the policy
-     gives and, after confirming, the refunded amount; the non-refundable rate says it
-     refunds nothing before the button is pressed; the host's cancellation and the
-     admin's refund are on the screens of those roles (**[local]** — they act on the
-     seed's stays); ending a stay early.
-  6. **Hosting. [both]** Create a listing (the form's validation, the image, the weekly price
-     rules), edit it, set its cancellation policy, delete it — and the catalogue no
-     longer shows it; the host's calendar and bookings; the payouts page up to the point
-     Stripe's embedded components take over, which are stubbed like Elements.
-  7. **Messages, notifications, waitlist, reviews. [local, but for the messages]** A message from the guest reaches the
-     host's inbox and the unread badge moves; the live stream's event refreshes a page
-     that is already open; joining and leaving a waitlist; a notice appears in the bell
-     and on `/notifications`; a review is left after a stay that is over, once, and by
-     both sides. The messages and the unread badge between two users the run registered
-     are **[both]**; the waitlist, the bell and the reviews lean on the seed's rows.
-  8. **Admin. [local]** The user list and its filter, blocking a user (their next request fails
-     and they see why), the listings and payments screens, a partial refund.
-  9. **Profile and the shell. [both]** Edit the profile, change the password, the time zone
-     cookie renders a moment on the reader's clock, the mobile navigation and the
-     account panel at a phone width — a second Playwright project on a mobile viewport
-     runs the smoke and the booking journey, since the layout is where mobile breaks. The mobile project runs on `deployed` too.
-- [ ] **Accessibility as a by-product.** `@axe-core/playwright` on every page the smoke
-      and the journeys visit, failing on `serious` and `critical` violations — the checks
-      phase 8's audit did once by hand (contrast, link names), kept from regressing.
-- [ ] **CI.** A third job beside `checks` and `e2e`, with the same Postgres and Redis
-      service containers: build, `playwright install --with-deps chromium` (the browser
-      binary cached by version), run, and upload the HTML report and the traces of a
-      failure as an artifact. `retries: 1` in CI only and `trace: "on-first-retry"` — a
-      test that passes on the retry is reported as flaky rather than hidden, and a spec
-      that is flaky twice is fixed or removed, not given more retries. Sharding the suite
-      is a switch to flip when it passes ten minutes, not before.
-- [ ] **A workflow for the live deployment.** `.github/workflows/e2e-deployed.yml`, apart
-      from `ci.yml`: a nightly `schedule`, `workflow_dispatch` with the target URL as an
-      input, and a run after a production deploy if the Vercel side can trigger one. It
-      installs only Chromium, sets `E2E_TARGET=deployed` and `E2E_BASE_URL`, and runs the
-      `@deployed` specs — no Postgres, no Redis, no service containers, and no secret,
-      since everything it needs is a public page and a test card. It is never a required
-      check and never blocks a merge: the deployment can be stopped on purpose
-      (`pnpm railway:stop`), in which case the run's first step, the wait for
-      `/api/health`, fails with that said rather than as a hundred red specs. Its
-      status badge goes at the top of `README.md` beside the live-demo link.
-- [ ] **What stays out.** Component tests (`apps/web/CLAUDE.md` still says no — a browser
-      run covers a component through the page it is on), screenshot comparisons (a pixel
-      diff is the opposite of "no manual testing": it asks a person to approve every
-      change), cross-browser runs beyond Chromium and the mobile viewport, and anything
-      the API's own e2e specs already prove — the suite asserts what a visitor sees, and
-      leaves the arithmetic of a refund to the specs that own it.
-- [ ] **Documentation.** `apps/web/CLAUDE.md` "Tests" gains the browser layer and the rule
-      for what belongs in it, `README.md` the commands, the new variables and the CI job
-      (and `.env.example`, `globalEnv` in `turbo.json` — the three places the root
-      `CLAUDE.md` names; `E2E_TARGET` and `E2E_BASE_URL` are two of them), the three
-      targets and what `@deployed` may and may not do, and `.claude/rules/workflow.md` the line that a change reaching
-      a screen runs `pnpm test:e2e:web` the way one reaching the database runs
-      `pnpm test:e2e`.
+The suite proves the main use of the application and nothing the API's specs already prove.
+A scenario is a goal a visitor sets out to reach, walked once through the real pages when
+things go right; its edge cases are rules the API's e2e specs and the contract's Vitest
+suite prove on every pull request at a fraction of the cost. What only a browser can prove is
+that the pages, the forms, the proxy to the API and the session hold together. The scenarios,
+by priority and written as what a visitor does, are in `docs/e2e-scenarios.md`, together with
+the rules every scenario follows and the rule that every page they visit is checked for
+errors and accessibility; a tick there means written and green. This phase records the
+decisions and constraints under them.
+
+Four steps, each its own branch and pull request, in this order: the hermetic stack; the
+payment stand-in and the scenarios; real Stripe on the local stack; the live deployment.
+Every step ships only code a spec of that step runs, so a stop after any of them leaves a
+suite that works. The last two are optional: their outline is here, and their details are
+settled when they start, once 11.2 has run green.
+
+The plan records decisions and the constraints behind them. How a piece is built — commands,
+variables, names, helpers, the order of a start-up — belongs to the code and its comments,
+and the rules that outlive the phase move into `apps/web/CLAUDE.md` and `apps/api/CLAUDE.md`
+with it.
+
+Out of scope for the whole phase, besides every edge case the other suites prove: component
+tests (a browser run covers a component through its page), screenshot comparisons (a pixel
+diff asks a person to approve every change), browsers other than Chromium, and viewports
+other than desktop and one phone.
+
+### 11.1 — The hermetic stack and the CI job
+
+- [ ] **A browser suite for the frontend**, with a command of its own apart from the API's
+      e2e. It sees the application the way a visitor does, on a reader's clock that is the
+      same on every machine, and a failure leaves enough to diagnose it without a rerun.
+- [ ] **A hermetic stack that the suite starts itself.** The production builds of the
+      frontend and the API, with a database and a cache of their own that nothing else uses,
+      so a run can never wipe the development stack. Every run starts from the same clean
+      state, with the demo data and no page cached by an earlier run. The suite can be run
+      unattended, which is possible because the reset can only ever reach its own database.
+- [ ] **Stripe is off in this stack.** Nothing in a run reaches Stripe, and a deployment
+      cannot be started in that mode. The API's own e2e specs stay green on this change.
+- [ ] **Tests do not depend on each other**, by the rules in `docs/e2e-scenarios.md`: a
+      retry never meets what the first attempt left, and the demo accounts, which are
+      shared, are only signed in to. One test's traffic never gets another's refused by the
+      API's limits.
+- [ ] **Every page is checked**, by the rule in `docs/e2e-scenarios.md`.
+- [ ] **CI.** A job of its own beside the existing checks and the API's e2e: build, run, and
+      keep the report and a failure's traces.
+  - **It runs on every pull request, with no path filter**: a change to `@repo/contracts` or
+    `@repo/ui` reaches a screen without touching `apps/web`, and a required check skipped by
+    a filter stays pending forever. It is required from the day it merges. Its budget is ten
+    minutes; a run that nears it is the signal to shard, not to raise the number.
+  - **One retry in CI**, on the hermetic stack only. A test that passes on the retry is
+    reported as flaky; a test seen flaky twice is fixed or removed, not given more retries.
+  - **One worker, here and on every target later steps add**, because the tests share the
+    demo accounts.
+- [ ] **Documentation.** The command, the CI job and the rules of the suite are recorded where
+      `.claude/rules/workflow.md` already sends them, including the rule that a change
+      reaching a screen runs the browser suite. `apps/web/CLAUDE.md` records what belongs in
+      it: a scenario's main path, never an edge case.
+
+### 11.2 — The payment stand-in and the scenarios
+
+The first scenario that pays brings what money needs with it, so none of it ships before a
+spec runs it. The scenarios come in three parts, each its own pull request, so a stop between
+two leaves the finished ones standing.
+
+#### 11.2a — The payment stand-in and the arrangement of a scenario's state
+
+- [ ] **A stand-in for Stripe on the hermetic stack.** Every place a scenario's money meets
+      Stripe is replaced by something that behaves the way Stripe does from the application's
+      side: a card is accepted, the payment is confirmed, a refund is made and reported back
+      later. No scenario's result depends on Stripe being reachable, and a request that
+      still reaches Stripe fails the test instead of leaving CI. The suite does not type into
+      Stripe's own card form, whose markup is Stripe's to change. A declined card and 3-D
+      Secure are the payment's edge cases and stay out.
+- [ ] **A listing per test.** Every scenario that books has a listing of its own, so no two
+      tests compete for a night and a retry never meets the hold its failed attempt left.
+      These listings stay out of the catalogue scenario's way.
+- [ ] **A stay that has begun.** Ending a stay early and reviewing one need a stay whose
+      check-in has passed, and the seed's only one is not to be changed. So such a scenario
+      makes its own, on a listing whose time zone has already started the check-in day, and
+      pays for it through the pages.
+- [ ] **Arranging state never reaches money.** What a scenario should not click its way to —
+      above all its listing — is arranged before it starts, by the application's own means
+      and not by writing to its database, so the same arrangement works on every target. A
+      stay is always paid through the pages, so a scenario reads the same on every target.
+
+#### 11.2b — The scenarios
+
+- [ ] **The scenarios of `docs/e2e-scenarios.md`**, priorities 1 to 4, written most important
+      first; each is its own tick there. Each is marked there with where it runs once 11.3
+      and 11.4 add other targets, by the rule in that file.
+
+#### 11.2c — The phone
+
+- [ ] **A second run on a phone viewport** walks the navigation scenario and the catalogue to
+      a listing's page, the things a narrow screen changes: how a visitor gets around and what
+      they can read. The booking does not repeat on the phone, since the same code answers on
+      both. It runs on the hermetic stack alone, since the other targets serve the same code.
+
+### 11.3 — Real Stripe, on the local stack (optional)
+
+One suite, several targets. The hermetic stack is the default and the required check on every
+pull request. The second target is the same stack with Stripe's side real, running the
+scenarios marked for every target and those marked for real Stripe — how a developer checks
+the payment and payout scenarios against Stripe before trusting them against anything else.
+
+- The API runs as it does in deployment, apart from a developer's own running stack, so one
+  never hears the other's payments.
+- Stripe's confirmations reach the local API, and the suite sets that up and tears it down
+  itself.
+- A stay is paid in Stripe's own form with a test card, and the suite waits for Stripe's own
+  confirmation; a scenario reads the same as on the hermetic stack. It is the only check that
+  Stripe still accepts what the integration sends, flaky by nature, so never a required
+  check, and with no retries: a failure on Stripe's side is what the target exists to show.
+
+### 11.4 — The live deployment (optional)
+
+A green run against the live deployment is worth having in a portfolio project, but it can
+neither replace the hermetic one nor run everything it runs. The step stands on 11.3 and
+ships only once the scenarios marked for every target have run green locally.
+
+- It runs only the scenarios marked for every target, against a running deployment, and
+  prepares nothing in it that a visitor could not. It is never the default and runs apart from
+  the pull request checks — on a schedule and on demand, never blocking a merge.
+- **A scenario arranges its state there through the application's own means**, as the host
+  account the suite has on the demo: its listing is created by that host, and a stay that has
+  begun rests on a listing whose time zone has started the check-in day. What cannot be
+  arranged that way is not run there.
+- The suite has two accounts of its own on the live demo, a guest and a host, whose password
+  is a secret, not a value written in the repository: a password in the repository is one
+  anybody can sign in with and change. A taken address that refuses the secret, or a blocked
+  sign-in, fails the run — a finding about an open demo, not a hole for the suite to close.
+- **Each run leaves the demo as it found it, as far as the application allows**: the stays a
+  run made are cancelled and its listings retired after its scenarios, and the same is done
+  first for what a run that died left behind. A paid stay that has been ended, or a review,
+  cannot be taken back; both stay on a retired listing, out of the catalogue and out of the
+  next run's way.
+- The whole run is one visitor to the live rate limiter, so its pace is measured on the
+  first run and fixed from the numbers. No retries: a retry looks like a new visitor while
+  the limiter still remembers the first attempt.
+- A stopped demo ends the run with a notice and skips the scenarios; a deployment that is up
+  and answers badly fails it.
+
+The addresses, what the hosting platforms report about a deployment and the budget numbers
+are read and measured when the step is written, and recorded here then.
 
 ## Decisions already made
 
@@ -1236,5 +1215,5 @@ for any later one.
   where a shell and a cached read are shared by every visitor and the gain should be, and the
   load a cached read takes off the API. If PPR is reconsidered, measure those first, on a
   preview deployment of the branch. The numbers are in `docs/lighthouse-2026-11-17.md`,
-  `docs/lighthouse-phase-11-comparison.md`, `docs/lighthouse-phase-11-navigation.md` and
-  `docs/lighthouse-phase-11-navigation-comparison.md`.
+  `docs/lighthouse-ppr-comparison.md`, `docs/lighthouse-ppr-navigation.md` and
+  `docs/lighthouse-ppr-navigation-comparison.md`.

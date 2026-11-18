@@ -1,5 +1,7 @@
 # Phase 11: client-side navigation, signed in
 
+_"Phase 11" in this report is partial prerendering, which was dropped from the roadmap afterwards; phase 11 of `docs/plan.md` is now the end-to-end tests of the frontend._
+
 - Site: https://booking-beige-five.vercel.app (the deployment with Phase 11), demo accounts from the README
 - Date: 2026-11-17. Playwright 1.65.1, Chromium, desktop viewport 1350x900 (the sidebar is visible)
 - Each sample: a fresh browser context and a fresh login, the start page loaded, **5 s of idling** so the router can prefetch the links in view, then one click on a link. 3 samples per navigation, medians below; every run is listed at the end

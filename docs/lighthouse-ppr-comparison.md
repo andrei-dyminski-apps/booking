@@ -1,5 +1,7 @@
 # Phase 11 (partial prerendering): Lighthouse before / after
 
+_"Phase 11" in this report is partial prerendering, which was dropped from the roadmap afterwards; phase 11 of `docs/plan.md` is now the end-to-end tests of the frontend._
+
 - Site: https://booking-beige-five.vercel.app, signed in with the README demo accounts (guest / owner / admin)
 - Before: `docs/lighthouse-2026-11-17.md`, the deployment without Phase 11 (per the owner; taken 2026-11-17T18:38Z)
 - After: the deployment with Phase 11, taken 2026-11-17T20:30Z

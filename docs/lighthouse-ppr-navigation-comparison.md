@@ -1,8 +1,10 @@
 # Phase 11: client-side navigation, without vs with partial prerendering
 
+_"Phase 11" in this report is partial prerendering, which was dropped from the roadmap afterwards; phase 11 of `docs/plan.md` is now the end-to-end tests of the frontend._
+
 - Site: https://booking-beige-five.vercel.app, signed in with the README demo accounts
 - **Without Phase 11**: the production deployment after the Phase 11 revert (no `x-nextjs-prerender` header, `x-vercel-cache: MISS` right after the rollback)
-- **With Phase 11**: the earlier measurement of the deployment that had it (`docs/lighthouse-phase-11-navigation.md`)
+- **With Phase 11**: the earlier measurement of the deployment that had it (`docs/lighthouse-ppr-navigation.md`)
 - Identical method: Playwright 1.65.1 / Chromium, viewport 1350x900, a fresh context and login per sample, 5 s idle on the start page, one click, 3 samples per navigation, medians. Profiles: unthrottled, and throttled (Slow 4G: 1.6 Mbit/s, 150 ms RTT, 4x CPU)
 - Metrics from the click: **URL** = path changed, **Skeleton** = first `.animate-pulse` in `main`, **Content** = target path shown, no skeleton, DOM quiet for 400 ms (subtracted). Prefetch = router `_rsc` requests before / after the click
 - Cells read `without → with`. A change under max(40 ms, 15%) is marked ≈; "faster" means Phase 11 is faster
