@@ -1,10 +1,29 @@
+import type { PayoutCountry } from "@repo/contracts";
 import type { PaymentEvent } from "../../../payment/application/ports/payment-gateway";
 import type { Cents, Currency } from "../../../payment/domain/money";
 
 /** Hosts are paid through a connected account and a transfer into it. Whole cents, like `PaymentGateway`. */
 export abstract class PayoutGateway {
-  /** Named after the user, so a repeat within 24 hours gets the same account. */
+  /**
+   * Keyed by everything it sends, so the same request repeated within thirty days (a v2
+   * key's life) gets the same account, and a different one — another country, a new name —
+   * opens another. Throws `PayoutAccountOpeningInProgressError` while another request
+   * opens it.
+   */
   abstract createRecipientAccount(host: PayoutHost): Promise<string>;
+
+  /** An account opened for nobody: a racing request wrote another into the column first. */
+  abstract closeAccount(
+    accountId: string,
+    country: PayoutCountry,
+  ): Promise<void>;
+
+  /**
+   * The countries a host's account can be opened in: those the platform's own country
+   * transfers to, each account in its own country's currency. Asked by a request; the
+   * adapter keeps the answer for the process.
+   */
+  abstract transferCountries(): Promise<PayoutCountry[]>;
 
   abstract createAccountSession(accountId: string): Promise<string>;
 
@@ -47,6 +66,8 @@ export type PayoutHost = {
   userId: string;
   email: string;
   name: string;
+  /** Fixed by Stripe once the account is opened; onboarding asks for this country's details. */
+  country: PayoutCountry;
 };
 
 export type Payout = {
@@ -70,6 +91,36 @@ export type SentTransfer = {
   id: string;
   amount: Cents;
 };
+
+/**
+ * `createRecipientAccount` while another request opens the same account under the same key —
+ * two tabs, or a press repeated after a lost answer. The provider refuses the second until
+ * the first is answered, and a retry then gets that same account.
+ */
+export class PayoutAccountOpeningInProgressError extends Error {
+  constructor(userId: string) {
+    super(
+      `The payout account of user ${userId} is being opened by another request`,
+    );
+    this.name = "PayoutAccountOpeningInProgressError";
+  }
+}
+
+/**
+ * `createRecipientAccount` refused for the country itself — Stripe will not open an account
+ * there as this platform asks for one (a configuration it needs beside the transfers, a
+ * currency its spec names and Stripe does not take). The list the host picked from said
+ * otherwise, so the adapter drops the country from it as well.
+ */
+export class PayoutCountryRefusedError extends Error {
+  constructor(
+    readonly country: string,
+    readonly reason: string,
+  ) {
+    super(`Stripe will not open a payout account in ${country}: ${reason}`);
+    this.name = "PayoutCountryRefusedError";
+  }
+}
 
 /** A thin event carries only the account; what changed is asked of the provider afresh. */
 export type AccountEvent = Extract<PaymentEvent, { kind: "account" }>;

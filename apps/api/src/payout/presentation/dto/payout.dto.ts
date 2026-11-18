@@ -4,6 +4,8 @@ import {
   hostAccountSchema,
   hostFeeOverviewSchema,
   hostFeeQuerySchema,
+  openPayoutAccountSchema,
+  payoutCountriesSchema,
   waiveHostFeeSchema,
 } from "@repo/contracts";
 import { withExample } from "../../../common/api-example";
@@ -12,6 +14,12 @@ import { withExample } from "../../../common/api-example";
 export class HostAccountDto extends createZodDto(hostAccountSchema) {}
 
 export class AccountSessionDto extends createZodDto(accountSessionSchema) {}
+
+export class PayoutCountriesDto extends createZodDto(payoutCountriesSchema) {}
+
+export class OpenPayoutAccountDto extends createZodDto(
+  withExample(openPayoutAccountSchema, { country: "PL" }),
+) {}
 
 export class HostFeeOverviewDto extends createZodDto(hostFeeOverviewSchema) {}
 

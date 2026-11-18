@@ -88,6 +88,11 @@ type RequestOptions<T> = {
    * that aborted is the one place that knows to ignore it.
    */
   signal?: AbortSignal;
+  /**
+   * How long to wait instead of `REQUEST_TIMEOUT_MS`, for a route whose answer is known to
+   * wait on a slow call of the API's own — opening a payout account at Stripe.
+   */
+  timeoutMs?: number;
 };
 
 export async function apiRequest<T>(options: RequestOptions<T>): Promise<T> {
@@ -117,6 +122,7 @@ async function send<T>({
   body,
   read,
   signal,
+  timeoutMs = REQUEST_TIMEOUT_MS,
 }: RequestOptions<T>): Promise<Response> {
   const headers = {
     ...(await serverHeaders(read)),
@@ -130,7 +136,7 @@ async function send<T>({
       // cookie and travels by default. `include` would still work and would still be
       // describing a topology this application no longer has.
       credentials: "same-origin",
-      signal: withTimeout(signal),
+      signal: withTimeout(signal, timeoutMs),
       headers,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       ...read,
@@ -148,8 +154,11 @@ async function send<T>({
  * that never answers. Either source aborts the request with its own reason, so a timeout
  * still arrives as a `TimeoutError`.
  */
-function withTimeout(signal: AbortSignal | undefined): AbortSignal {
-  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+function withTimeout(
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
 
   if (signal === undefined) return timeout;
 

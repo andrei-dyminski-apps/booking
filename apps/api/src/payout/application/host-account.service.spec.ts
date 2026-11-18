@@ -62,22 +62,43 @@ describe("HostAccountService", () => {
     expect(payoutGateway.accounts).toEqual([]);
   });
 
-  it("opens the account on the first session and keeps it for the next", async () => {
+  it("opens no session before the account, whose country comes first", async () => {
     hostWith(null, false);
 
+    await expect(refusalOf(hostAccountService.session(host))).resolves.toEqual({
+      status: 409,
+      code: "PAYOUT_ACCOUNT_NOT_OPENED",
+    });
+    expect(payoutGateway.accounts).toEqual([]);
+  });
+
+  it("opens the account in the country picked, once, and a session for it", async () => {
+    hostWith(null, false);
+
+    await expect(hostAccountService.open(host, "PL")).resolves.toEqual({
+      status: HostAccountStatus.ONBOARDING,
+    });
+    // Stripe fixed the country at opening; another pick opens nothing and changes nothing.
+    await expect(hostAccountService.open(host, "DE")).resolves.toEqual({
+      status: HostAccountStatus.ONBOARDING,
+    });
     await expect(hostAccountService.session(host)).resolves.toEqual({
       clientSecret: `${ACCOUNT_ID}_session`,
     });
-    await hostAccountService.session(host);
 
     expect(payoutGateway.accounts).toEqual([
-      { userId: HOST_ID, email: host.email, name: "Harbour Host" },
+      {
+        userId: HOST_ID,
+        email: host.email,
+        name: "Harbour Host",
+        country: "PL",
+      },
     ]);
     expect(payoutRepository.holders.get(HOST_ID)?.accountId).toBe(ACCOUNT_ID);
   });
 
   it("answers 502 for the provider's failure and leaves the database's its own", async () => {
-    hostWith(null, false);
+    hostWith(ACCOUNT_ID, false);
     payoutGateway.refusingSessions = true;
 
     await expect(refusalOf(hostAccountService.session(host))).resolves.toEqual({
@@ -85,14 +106,119 @@ describe("HostAccountService", () => {
       code: "PAYOUT_ACCOUNT_UNAVAILABLE",
     });
 
-    payoutGateway.refusingSessions = false;
     hostWith(null, false);
     payoutRepository.brokenAttach = true;
 
-    const failure = hostAccountService.session(host);
+    const failure = hostAccountService.open(host, "PL");
 
     await expect(failure).rejects.toThrow("connection refused");
     await expect(failure).rejects.not.toBeInstanceOf(BadGatewayException);
+  });
+
+  it("answers 502 when Stripe cannot open the account, and attaches nothing", async () => {
+    hostWith(null, false);
+    payoutGateway.refusingAccounts = "outage";
+
+    await expect(
+      refusalOf(hostAccountService.open(host, "PL")),
+    ).resolves.toEqual({ status: 502, code: "PAYOUT_ACCOUNT_UNAVAILABLE" });
+    expect(payoutRepository.holders.get(HOST_ID)?.accountId).toBeNull();
+  });
+
+  it("answers 409, not 502, while another request is opening the account, and opens it on a retry", async () => {
+    hostWith(null, false);
+    payoutGateway.refusingAccounts = "inProgress";
+
+    await expect(
+      refusalOf(hostAccountService.open(host, "PL")),
+    ).resolves.toEqual({ status: 409, code: "PAYOUT_ACCOUNT_BEING_OPENED" });
+    expect(payoutRepository.holders.get(HOST_ID)?.accountId).toBeNull();
+
+    await expect(hostAccountService.open(host, "PL")).resolves.toEqual({
+      status: HostAccountStatus.ONBOARDING,
+    });
+    expect(payoutRepository.holders.get(HOST_ID)?.accountId).toBe(ACCOUNT_ID);
+  });
+
+  it("answers 400, not 502, for a country Stripe will not open an account in, and stops offering it", async () => {
+    hostWith(null, false);
+    payoutGateway.refusingAccounts = "country";
+
+    await expect(
+      refusalOf(hostAccountService.open(host, "PL")),
+    ).resolves.toEqual({ status: 400, code: "PAYOUT_COUNTRY_UNSUPPORTED" });
+    expect(payoutRepository.holders.get(HOST_ID)?.accountId).toBeNull();
+    await expect(hostAccountService.countries(host)).resolves.toEqual({
+      countries: ["DE", "GB", "US"],
+    });
+
+    // Another pick goes ahead as usual.
+    await expect(hostAccountService.open(host, "DE")).resolves.toEqual({
+      status: HostAccountStatus.ONBOARDING,
+    });
+  });
+
+  it("closes the account a racing request with another country opened, and keeps the one attached", async () => {
+    hostWith(null, false);
+    payoutGateway.openedIds = ["acct_pl", "acct_de"];
+
+    await expect(
+      Promise.all([
+        hostAccountService.open(host, "PL"),
+        hostAccountService.open(host, "DE"),
+      ]),
+    ).resolves.toEqual([
+      { status: HostAccountStatus.ONBOARDING },
+      { status: HostAccountStatus.ONBOARDING },
+    ]);
+    expect(payoutRepository.holders.get(HOST_ID)?.accountId).toBe("acct_pl");
+    expect(payoutGateway.closed).toEqual(["acct_de"]);
+    // Closing names every configuration the account carries, which depends on its country.
+    expect(payoutGateway.closedIn).toEqual(["DE"]);
+  });
+
+  it("closes nothing when a racing request with the same body is answered the same account", async () => {
+    hostWith(null, false);
+
+    await Promise.all([
+      hostAccountService.open(host, "PL"),
+      hostAccountService.open(host, "PL"),
+    ]);
+
+    expect(payoutRepository.holders.get(HOST_ID)?.accountId).toBe(ACCOUNT_ID);
+    expect(payoutGateway.closed).toEqual([]);
+  });
+
+  it("answers the host whose account is attached even when Stripe will not close the other", async () => {
+    hostWith(null, false);
+    payoutGateway.openedIds = ["acct_pl", "acct_de"];
+    payoutGateway.refusingClose = true;
+
+    await expect(
+      Promise.all([
+        hostAccountService.open(host, "PL"),
+        hostAccountService.open(host, "DE"),
+      ]),
+    ).resolves.toHaveLength(2);
+    expect(payoutRepository.holders.get(HOST_ID)?.accountId).toBe("acct_pl");
+  });
+
+  it("refuses a country Stripe's list leaves out before asking Stripe to open anything", async () => {
+    hostWith(null, false);
+
+    await expect(
+      refusalOf(hostAccountService.open(host, "BR")),
+    ).resolves.toEqual({ status: 400, code: "PAYOUT_COUNTRY_UNSUPPORTED" });
+
+    payoutGateway.transferCountriesAnswer = null;
+
+    await expect(
+      refusalOf(hostAccountService.open(host, "PL")),
+    ).resolves.toEqual({ status: 502, code: "PAYOUT_ACCOUNT_UNAVAILABLE" });
+    await expect(
+      refusalOf(hostAccountService.countries(host)),
+    ).resolves.toEqual({ status: 502, code: "PAYOUT_ACCOUNT_UNAVAILABLE" });
+    expect(payoutGateway.accounts).toEqual([]);
   });
 
   it("reads the account off the row without asking Stripe", async () => {

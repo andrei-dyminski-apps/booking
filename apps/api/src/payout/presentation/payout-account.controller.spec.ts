@@ -32,6 +32,16 @@ describe("PayoutAccountController", () => {
 
               return Promise.resolve({ status: HostAccountStatus.ENABLED });
             },
+            countries: (user: AuthenticatedUser) => {
+              askedFor.push(user.id);
+
+              return Promise.resolve({ countries: ["PL"] });
+            },
+            open: (user: AuthenticatedUser) => {
+              askedFor.push(user.id);
+
+              return Promise.resolve({ status: HostAccountStatus.ONBOARDING });
+            },
             refresh: (user: AuthenticatedUser) => {
               askedFor.push(user.id);
 
@@ -50,9 +60,15 @@ describe("PayoutAccountController", () => {
     controller = moduleRef.get(PayoutAccountController);
   });
 
-  it("answers, refreshes and opens a session for the caller's own account", async () => {
+  it("answers, lists the countries, opens, refreshes and opens a session for the caller's own account", async () => {
     await expect(controller.account(host)).resolves.toEqual({
       status: HostAccountStatus.ENABLED,
+    });
+    await expect(controller.countries(host)).resolves.toEqual({
+      countries: ["PL"],
+    });
+    await expect(controller.open({ country: "PL" }, host)).resolves.toEqual({
+      status: HostAccountStatus.ONBOARDING,
     });
     await expect(controller.refresh(host)).resolves.toEqual({
       status: HostAccountStatus.ENABLED,
@@ -60,6 +76,6 @@ describe("PayoutAccountController", () => {
     await expect(controller.session(host)).resolves.toEqual({
       clientSecret: "acct_session_secret",
     });
-    expect(askedFor).toEqual([host.id, host.id, host.id]);
+    expect(askedFor).toEqual([host.id, host.id, host.id, host.id, host.id]);
   });
 });

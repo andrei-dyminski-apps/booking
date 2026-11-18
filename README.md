@@ -227,8 +227,10 @@ of the catalogue and a listing's reviews is behind the global `JwtAuthGuard` and
 | `GET`    | `/refund-failures`                 | the refunds a guest's bank sent back, by `status` (`OPEN` or `RESOLVED`), a cursor; ADMIN only                 |
 | `POST`   | `/refund-failures/:id/resolve`     | record how the money went back outside Stripe, `204`; ADMIN only, `409` — resolved already                     |
 | `GET`    | `/payouts/account`                 | the caller's payout account as the row says it; USER only                                                      |
+| `GET`    | `/payouts/account/countries`       | the countries Stripe lets the account be opened in, kept per process; USER only                                |
+| `POST`   | `/payouts/account`                 | opens the caller's account at Stripe in the country picked, once; USER only                                    |
 | `POST`   | `/payouts/account/refresh`         | asks Stripe where an unfinished onboarding stands and writes it down; USER only                                |
-| `POST`   | `/payouts/account/session`         | a session for Stripe's embedded components, opening the account the first time; USER only                      |
+| `POST`   | `/payouts/account/session`         | a session for Stripe's embedded components; `409` before the account is opened; USER only                      |
 | `POST`   | `/payouts/webhook`                 | Stripe's thin events about hosts' accounts, into the same inbox; public                                        |
 | `GET`    | `/host-fees/mine`                  | the fees the caller owes for cancelling paid stays, what is owed, the last year's count; USER only             |
 | `GET`    | `/host-fees`                       | the same for one host, by `hostId`; ADMIN only                                                                 |
@@ -691,6 +693,19 @@ pnpm --filter @repo/api db:deploy     # apply committed migrations (production; 
 ```
 
 Prisma 7 removed the automatic steps that v6 performed: `db:migrate` no longer runs the seed script and no longer regenerates the client. After changing `schema.prisma` run `db:generate` yourself, and after recreating the database run `db:seed`.
+
+Stripe (`apps/api`, against the sandbox the root `.env` names; a live key is refused):
+
+```sh
+pnpm --filter @repo/api stripe:probe-countries   # do the payout countries offered match what Stripe opens?
+pnpm --filter @repo/api stripe:probe-transfer acct_…   # can the platform pay this connected account?
+```
+
+The payouts form offers the countries read off Stripe's country specs, and each account is opened in its country's `default_currency`, while Stripe checks an account by rules of its own. The probe opens an account in every country the platform transfers to — through the adapter, with the body a host's request sends — closes it at once, and prints each country and its currency beside the list's answer; it exits `1` when any disagree. Opening proves the account can exist, not that a transfer reaches it: that still takes onboarding finished and a transfer sent. A country the list offers and Stripe refuses is also caught at runtime — the host gets `400 PAYOUT_COUNTRY_UNSUPPORTED` and the country leaves the list until a restart.
+
+For a platform in Poland the probe found that the United States and Canada open only with `merchant` `card_payments` requested beside the transfers (`MERCHANT_COUNTRIES` in the adapter); their onboarding asks for a business profile and a bank account as well. `stripe:probe-transfer` is the check the first probe cannot make: given an account a host opened through the app and finished onboarding in by hand — the embedded form is the only way, Stripe refuses the terms of service over the API for an Express account — it takes a test charge on the platform and sends a transfer funded by it through the adapter. A sandbox refuses a transfer to an account whose `stripe_transfers` is not active, so a transfer that goes through is a real answer.
+
+The account for `stripe:probe-transfer` does not have to come from the app: in the sandbox one opened over the API with `dashboard: "none"`, test identity data, `defaults.profile.business_url` (`https://accessible.stripe.com`) and the terms-of-service attestation reaches `stripe_transfers` `active` with the same recipient-only configuration. Checked that way (2026-11-18, platform in Poland), a USD transfer reaches DE, GB and CH accounts, converted on the way in. When such a transfer is reversed the platform gets back exactly the USD amount, and the exchange-rate movement and rounding fall on the host's balance.
 
 The container keeps its data in the `db-data` volume, so `docker compose down` and `up -d` preserve the bookings. Data is lost only with `docker compose down -v` — which is also the only way to change `POSTGRES_*`, since those apply when the volume is first initialized.
 

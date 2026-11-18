@@ -263,7 +263,8 @@ is the wrong shape for a list that keeps growing.
 - **A 401 in the browser is worth one refresh and one replay**, and the transport spends
   both without the call site knowing. `retryOnUnauthorized: false` is what switches it off
   for the routes of the session itself — see "The session" below.
-- **The transport gives up after ten seconds** (`AbortSignal.timeout`) instead of holding
+- **The transport gives up after ten seconds** (`AbortSignal.timeout`, or the `timeoutMs` a
+  route known to wait on Stripe names — opening a payout account) instead of holding
   a render open for the five minutes undici allows; the abort arrives as
   `ApiUnreachableError`. The signal costs Next's per-render memoization — the Data Cache,
   which `read` decides, is untouched.
@@ -1233,8 +1234,25 @@ library. The reasons are two:
   cancel all read the deadline there, so a hold past it is offered neither anywhere.
 
 **A host's payouts are Stripe's embedded components** (`_pages/dashboard/payouts`): the
-onboarding form until the account can receive transfers, then the payouts list, with the
-notification banner above both. The Connect instance is made in an effect — it injects a
+onboarding form until the account can receive transfers, then the payouts list and the
+account's details (`ConnectAccountManagement` — a new bank account, the details onboarding
+took), with the notification banner above both. Before either, a host with no account picks
+the country it is opened in (`OpenAccountForm`, `openAccountAction` → `POST
+/payouts/account`): Stripe fixes it at opening, pays out in that country's currency, and the
+API refuses a session until then. The countries offered are Stripe's list for the platform
+(`payoutsApi.countries`, read by the server render only in that state —
+`readPayoutCountries`, which answers `null` rather than throwing, so a Stripe the API cannot
+reach costs the form and not the page; an empty list gets its own card, since a select with
+nothing in it cannot be filled — and streamed in a `Suspense` boundary, so the heading and
+the fees do not wait for it). Their names are built by the server render (`countryOptions`,
+`Intl.DisplayNames`) and handed to the form, so the browser's ICU never disagrees with the
+markup. Opening the account is the one request that waits past the transport's ten seconds
+(`timeoutMs` on `payoutsApi.open`): Stripe takes over four to open one. The action asks
+again on a `409` another request's opening answers (`PAYOUT_ACCOUNT_BEING_OPENED`,
+`model/account-refusal.ts`), once a second for long enough to outlast the eight seconds the
+API gives Stripe, and puts a country Stripe's list dropped since the render under the box,
+re-reading the list.
+The Connect instance is made in an effect — it injects a
 script and reads `window` — and fetches its own client secret through the BFF
 (`payoutsApi.session`) whenever its session runs out, so the secret is never part of a
 server render. The status the page opens on is read on the server, off the row; while

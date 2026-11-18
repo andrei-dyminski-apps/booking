@@ -45,6 +45,12 @@ in `README.md`. Both act on a live deployment: run them only when the user asks.
 `pnpm db:seed:railway` reseeds the deployed database — the seed deletes every demo table
 first — so it is run only when the user asks, too.
 
+`pnpm --filter @repo/api stripe:probe-countries` checks the payout countries the form offers
+against what Stripe opens: it opens and closes an account per country in the sandbox the
+root `.env` names (a live key is refused). `stripe:probe-transfer acct_…` takes a test charge
+and sends a transfer to a connected account. Both write to that Stripe account, so they are
+run only when the user asks.
+
 Tests:
 
 ```sh

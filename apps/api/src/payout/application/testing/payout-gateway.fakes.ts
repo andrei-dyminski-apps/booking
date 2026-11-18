@@ -6,13 +6,15 @@ import {
   subtractCents,
   type Cents,
 } from "../../../payment/domain/money";
-import type {
-  AccountEvent,
-  Caller,
-  Payout,
-  PayoutGateway,
-  PayoutHost,
-  SentTransfer,
+import {
+  PayoutAccountOpeningInProgressError,
+  PayoutCountryRefusedError,
+  type AccountEvent,
+  type Caller,
+  type Payout,
+  type PayoutGateway,
+  type PayoutHost,
+  type SentTransfer,
 } from "../ports/payout-gateway";
 import { ACCOUNT_ID, BOOKING_ID, CHARGE_ID } from "./payout-fixtures.fakes";
 
@@ -40,10 +42,76 @@ export class FakePayoutGateway implements PublicOf<PayoutGateway> {
   /** Set to have Stripe refuse every transfer, as a restricted account's would be. */
   refusingTransfers = false;
 
+  /**
+   * How Stripe answers the next account to open, and that one only: `outage` as an
+   * unreachable provider would, `inProgress` as it refuses a key another request is using,
+   * `country` as it refuses the country the list offered — dropped from the list, as the
+   * adapter drops it.
+   */
+  refusingAccounts: "outage" | "inProgress" | "country" | null = null;
+
   createRecipientAccount(host: PayoutHost): Promise<string> {
+    const refusal = this.refusingAccounts;
+
+    this.refusingAccounts = null;
+
+    if (refusal === "outage") {
+      return Promise.reject(new Error("api_connection_error"));
+    }
+
+    if (refusal === "country") {
+      this.transferCountriesAnswer =
+        this.transferCountriesAnswer?.filter((c) => c !== host.country) ?? null;
+
+      return Promise.reject(
+        new PayoutCountryRefusedError(
+          host.country,
+          "account_country_unsupported_currency",
+        ),
+      );
+    }
+
+    if (refusal === "inProgress") {
+      return Promise.reject(
+        new PayoutAccountOpeningInProgressError(host.userId),
+      );
+    }
+
     this.accounts.push(host);
 
-    return Promise.resolve(ACCOUNT_ID);
+    return Promise.resolve(this.openedIds.shift() ?? ACCOUNT_ID);
+  }
+
+  /** The ids the next accounts open under, in turn; `ACCOUNT_ID` once they run out. */
+  openedIds: string[] = [];
+
+  /** The accounts closed, in order, and the country each was opened in. */
+  readonly closed: string[] = [];
+  readonly closedIn: string[] = [];
+
+  /** Set to have Stripe refuse to close an account, as an outage would. */
+  refusingClose = false;
+
+  closeAccount(accountId: string, country: string): Promise<void> {
+    if (this.refusingClose) {
+      return Promise.reject(new Error("api_connection_error"));
+    }
+
+    this.closed.push(accountId);
+    this.closedIn.push(country);
+
+    return Promise.resolve();
+  }
+
+  /** What the platform's country spec lists; `null` has Stripe refuse the read. */
+  transferCountriesAnswer: string[] | null = ["DE", "GB", "PL", "US"];
+
+  transferCountries(): Promise<string[]> {
+    if (this.transferCountriesAnswer === null) {
+      return Promise.reject(new Error("api_connection_error"));
+    }
+
+    return Promise.resolve(this.transferCountriesAnswer);
   }
 
   /** Set to have Stripe refuse the onboarding session, as an outage would. */

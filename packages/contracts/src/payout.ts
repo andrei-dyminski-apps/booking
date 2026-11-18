@@ -9,6 +9,7 @@ import {
   shareOf,
   type Cents,
 } from "./money.js";
+import { rule } from "./error-code.js";
 import { notRefunded } from "./refund.js";
 
 /**
@@ -92,6 +93,42 @@ export const hostAccountSchema = z.object({
   status: hostAccountStatusSchema,
 });
 
+/**
+ * The refusal of a payout country, worded once: the schema's for one nobody picked or one
+ * spelled wrong, and the API's for one Stripe's list leaves out.
+ */
+export const PAYOUT_COUNTRY_UNSUPPORTED_MESSAGE =
+  "Choose a country payouts can be sent to";
+
+const countryUnsupported = rule(
+  "PAYOUT_COUNTRY_UNSUPPORTED",
+  PAYOUT_COUNTRY_UNSUPPORTED_MESSAGE,
+);
+
+/**
+ * A country as Stripe spells it, ISO 3166-1 alpha-2. Which of them a host may pick is not
+ * the contract's to list: it is Stripe's answer for the platform's own country
+ * (`GET /payouts/account/countries`), and the API refuses any other under the same code and
+ * in the same words (`PAYOUT_COUNTRY_UNSUPPORTED_MESSAGE`).
+ */
+export const payoutCountrySchema = z
+  .string({ error: countryUnsupported })
+  .regex(/^[A-Z]{2}$/, { error: countryUnsupported });
+
+/** `GET /payouts/account/countries` — where a host's payout account can be opened. */
+export const payoutCountriesSchema = z.object({
+  countries: z.array(payoutCountrySchema),
+});
+
+/**
+ * `POST /payouts/account` — opens the caller's payout account. Stripe fixes the country
+ * when the account is opened and asks for that country's details during onboarding, so it
+ * is asked for first and never changed afterwards.
+ */
+export const openPayoutAccountSchema = z.object({
+  country: payoutCountrySchema,
+});
+
 /** Short-lived, so asked for whenever the components need one rather than stored. */
 export const accountSessionSchema = z.object({
   clientSecret: z.string().min(1),
@@ -100,3 +137,6 @@ export const accountSessionSchema = z.object({
 export type HostAccountStatus = z.infer<typeof hostAccountStatusSchema>;
 export type HostAccount = z.infer<typeof hostAccountSchema>;
 export type AccountSession = z.infer<typeof accountSessionSchema>;
+export type PayoutCountry = z.infer<typeof payoutCountrySchema>;
+export type PayoutCountries = z.infer<typeof payoutCountriesSchema>;
+export type OpenPayoutAccountInput = z.infer<typeof openPayoutAccountSchema>;
