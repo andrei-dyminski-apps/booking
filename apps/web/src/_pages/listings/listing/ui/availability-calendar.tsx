@@ -71,13 +71,10 @@ export const AvailabilityCalendar = ({
       </span>
       {/*
         The third state the grid draws, and the one a swatch cannot show: a past day has
-        no fill at all, only dimmed digits — so the sample is a digit.
+        no fill at all, only plain muted digits — so the sample is a digit.
       */}
       <span className="flex items-center gap-1.5">
-        <span className="text-muted-foreground/50" aria-hidden="true">
-          01
-        </span>{" "}
-        past
+        <span aria-hidden="true">01</span> past
       </span>
     </div>
   </div>

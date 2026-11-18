@@ -46,7 +46,7 @@ export function stripeVariables(theme: string | undefined): {
         colorBackground: "#ffffff",
         colorText: "#0a0a0a",
         colorPrimary: "#171717",
-        colorDanger: "#e7000b",
+        colorDanger: "#d40009",
         borderRadius: "10px",
       };
 }
