@@ -6,7 +6,9 @@ import {
   type Page,
   type TestInfo,
 } from "@playwright/test";
-import { WEB_ORIGIN } from "./stack";
+import { arrangement, type Arrange } from "./arrange";
+import { STRIPE_STAND_IN_ORIGIN, WEB_ORIGIN } from "./stack";
+import { drainStandInProblems, routeStripeToStandIn } from "./stripe/stand-in";
 
 /**
  * A response a test provokes on purpose — the not-found page, a refusal of a role. Declared
@@ -40,7 +42,7 @@ const FAILING_IMPACTS = new Set(["serious", "critical"]);
  * errors are collected for the whole test and asserted when it ends; a page reached and
  * never `check`ed fails the test as well, so the rule cannot be forgotten in a new one.
  */
-export const test = base.extend<{ pages: Pages }>({
+export const test = base.extend<{ pages: Pages; arrange: Arrange }>({
   // An address of its own for each attempt of each test, in the header the frontend passes
   // on and the stack's API believes (`TRUST_PROXY` in `stack.ts`): the rate limiter then
   // counts every test apart, and a retry starts with none of the first attempt's requests.
@@ -60,7 +62,19 @@ export const test = base.extend<{ pages: Pages }>({
           headers: { ...route.request().headers(), "x-forwarded-for": address },
         }),
     );
+    await routeStripeToStandIn(context);
     await use(context);
+  },
+
+  arrange: async ({ playwright }, use, testInfo) => {
+    const { arrange, tearDown } = arrangement(
+      playwright.request,
+      clientAddressOf(testInfo),
+      testInfo.title,
+    );
+
+    await use(arrange);
+    await tearDown();
   },
 
   pages: [
@@ -162,6 +176,18 @@ export const test = base.extend<{ pages: Pages }>({
           expected.push(response);
         },
       });
+
+      // What the stand-in met while this test ran, the API's background calls included —
+      // drained whatever the outcome. The drain first waits for the webhook deliveries the
+      // test set going (a refund reported a moment late, a retry), so those are laid at this
+      // test's door rather than the next's; a call the API makes later still, from a job
+      // that ran on, is caught by the next drain or the global teardown.
+      for (const line of await drainStandInProblems()) {
+        problems.push({
+          what: `Stripe stand-in: ${line}`,
+          url: STRIPE_STAND_IN_ORIGIN,
+        });
+      }
 
       const unexpected = problems.filter(
         (problem) => !expected.some((response) => answers(response, problem)),

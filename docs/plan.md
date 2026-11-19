@@ -1037,6 +1037,7 @@ required check is a setting of the repository.
       unattended, which is possible because the reset can only ever reach its own database.
 - [x] **Stripe is off in this stack.** Nothing in a run reaches Stripe, and a deployment
       cannot be started in that mode. The API's own e2e specs stay green on this change.
+      11.2a replaced the mode with the stand-in, which keeps both properties.
 - [x] **Tests do not depend on each other**, by the rules in `docs/e2e-scenarios.md`: a
       retry never meets what the first attempt left, and the demo accounts, which are
       shared, are only signed in to. One test's traffic never gets another's refused by the
@@ -1065,21 +1066,25 @@ two leaves the finished ones standing.
 
 #### 11.2a — The payment stand-in and the arrangement of a scenario's state
 
-- [ ] **A stand-in for Stripe on the hermetic stack.** Every place a scenario's money meets
+Every piece ships with the scenario that runs it: booking and payment (the stand-in, a
+listing per test, the arrangement) and ending a stay early (a stay that has begun, and a
+refund reported back later). Both are ticked in `docs/e2e-scenarios.md`.
+
+- [x] **A stand-in for Stripe on the hermetic stack.** Every place a scenario's money meets
       Stripe is replaced by something that behaves the way Stripe does from the application's
       side: a card is accepted, the payment is confirmed, a refund is made and reported back
       later. No scenario's result depends on Stripe being reachable, and a request that
       still reaches Stripe fails the test instead of leaving CI. The suite does not type into
       Stripe's own card form, whose markup is Stripe's to change. A declined card and 3-D
       Secure are the payment's edge cases and stay out.
-- [ ] **A listing per test.** Every scenario that books has a listing of its own, so no two
+- [x] **A listing per test.** Every scenario that books has a listing of its own, so no two
       tests compete for a night and a retry never meets the hold its failed attempt left.
       These listings stay out of the catalogue scenario's way.
-- [ ] **A stay that has begun.** Ending a stay early and reviewing one need a stay whose
+- [x] **A stay that has begun.** Ending a stay early and reviewing one need a stay whose
       check-in has passed, and the seed's only one is not to be changed. So such a scenario
       makes its own, on a listing whose time zone has already started the check-in day, and
       pays for it through the pages.
-- [ ] **Arranging state never reaches money.** What a scenario should not click its way to —
+- [x] **Arranging state never reaches money.** What a scenario should not click its way to —
       above all its listing — is arranged before it starts, by the application's own means
       and not by writing to its database, so the same arrangement works on every target. A
       stay is always paid through the pages, so a scenario reads the same on every target.

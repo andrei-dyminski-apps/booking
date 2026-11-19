@@ -1,7 +1,8 @@
 /**
  * The hermetic stack the browser suite runs against: the production builds of both
- * applications, on a database and a Redis of their own (`compose.yml`), on ports apart from
- * the development stack's so the two run side by side.
+ * applications, on a database and a Redis of their own (`compose.yml`), with Stripe played
+ * by the suite's stand-in (`stripe/server.ts`), on ports apart from the development stack's
+ * so the two run side by side.
  *
  * Its whole environment is stated here rather than read from the root `.env`. Playwright
  * hands a server the runner's environment with these values on top, and the runner is
@@ -14,6 +15,7 @@
 
 const WEB_PORT = 3200;
 const API_PORT = 3201;
+const STRIPE_STAND_IN_PORT = 3202;
 
 /** The ports `compose.yml` publishes. */
 const POSTGRES_PORT = 5433;
@@ -21,6 +23,7 @@ const REDIS_PORT = 6380;
 
 export const WEB_ORIGIN = `http://localhost:${WEB_PORT}`;
 export const API_ORIGIN = `http://127.0.0.1:${API_PORT}`;
+export const STRIPE_STAND_IN_ORIGIN = `http://127.0.0.1:${STRIPE_STAND_IN_PORT}`;
 
 const POSTGRES = { user: "booking", password: "booking", db: "booking_e2e" };
 
@@ -53,12 +56,15 @@ const STACK_ENV: Record<string, string> = {
   // refused. A value nobody should copy — anywhere else it lets a client pick its own bucket.
   TRUST_PROXY: "1",
 
-  STRIPE_OFF: "true",
-  STRIPE_SECRET_KEY: "",
-  STRIPE_PAYMENT_WEBHOOK_SECRET: "",
+  // Stripe is played by the stand-in (`stripe/server.ts`): the API's client calls it, and it
+  // is handed the same keys and signs its deliveries with the same secret. None of them is
+  // a key of Stripe's.
+  STRIPE_STAND_IN_URL: STRIPE_STAND_IN_ORIGIN,
+  STRIPE_SECRET_KEY: "sk_test_stand_in",
+  STRIPE_PAYMENT_WEBHOOK_SECRET: "whsec_stand_in",
   STRIPE_PAYOUT_WEBHOOK_SECRET: "",
   STRIPE_SITE: "e2e",
-  STRIPE_PUBLISHABLE_KEY: "",
+  STRIPE_PUBLISHABLE_KEY: "pk_test_stand_in",
 
   // The reads a run caches go with its server, never into the next run.
   DATA_CACHE_IN_MEMORY: "true",
@@ -92,10 +98,20 @@ export const API_HEALTH_URL = `${API_ORIGIN}/health`;
 
 /**
  * The API runs its production build outside production mode, which is what lets it boot
- * with Stripe off; the frontend is in production mode as `next start` is anywhere.
+ * with a stand-in for Stripe; the frontend is in production mode as `next start` is anywhere.
  */
 export const API_ENV = { ...STACK_ENV, NODE_ENV: "development" };
 
 export const WEB_COMMAND = `mkdir -p ${SERVER_LOGS} && pnpm start > ${SERVER_LOGS}/web.log`;
 
 export const WEB_ENV = { ...STACK_ENV, NODE_ENV: "production" };
+
+/** Node strips the stand-in's types itself; it needs nothing built. */
+export const STRIPE_STAND_IN_COMMAND = `mkdir -p ${SERVER_LOGS} && node e2e/stripe/server.ts > ${SERVER_LOGS}/stripe.log`;
+
+export const STRIPE_STAND_IN_HEALTH_URL = `${STRIPE_STAND_IN_ORIGIN}/health`;
+
+export const STRIPE_STAND_IN_ENV = {
+  ...STACK_ENV,
+  STRIPE_STAND_IN_PORT: String(STRIPE_STAND_IN_PORT),
+};

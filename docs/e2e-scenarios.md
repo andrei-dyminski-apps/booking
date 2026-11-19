@@ -49,11 +49,12 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
       host, is offered to sign in, and once signed in arrives back on that listing.
       _Every target. Cheap._
 - [ ] **Catalogue and search.** Starting from the home page, a visitor filters and orders the
-      stays; the list changes, survives a reload and a shared link, and "next page"
-      continues it. _Every target. Cheap._
-- [ ] **Booking and payment.** A guest finds a listing, reads its description, price and
+      stays; the list changes, survives a reload and a shared link, "next page" continues
+      it, and a stay on it opens its listing's page. _Every target. Cheap._
+- [x] **Booking and payment.** A guest opens a listing, reads its description, price and
       availability calendar, picks dates, sees the quote, holds the stay, sees the countdown,
-      pays, and lands on a confirmed stay. The centrepiece. _Every target. Expensive._
+      pays, and lands on a confirmed stay. Finding a listing is the catalogue's scenario.
+      The centrepiece. _Every target. Expensive._
 - [ ] **My bookings.** A guest who has booked finds the stay among their bookings with its
       status and amount, and opens it. _Every target. Medium: the stay is arranged beforehand,
       and paid through the pages._
@@ -95,7 +96,7 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
       them, sees it on their waitlist page, and leaves it. _Hermetic only: the second guest
       who holds the dates is registered by the scenario, and the deployment has none.
       Medium._
-- [ ] **Ending a stay early.** The refund is stated before the guest confirms, and the stay
+- [x] **Ending a stay early.** The refund is stated before the guest confirms, and the stay
       then shows the end and the same figure. _Every target. Expensive: needs a stay that
       has begun._
 - [ ] **Reviews.** After a stay that is over, the guest reviews the listing; the review shows

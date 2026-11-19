@@ -78,7 +78,10 @@
   --muted-foreground: oklch(0.52 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.54 0.229 27.325);
+  /* Dark enough for the destructive button's text on its own 10% tint in a card's footer
+     (`bg-muted/50`): at 0.54 that pair was 4.41:1, under WCAG AA; at 0.52 it is 4.7:1.
+     `colorDanger` in apps/web's Stripe config follows. */
+  --destructive: oklch(0.52 0.229 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);

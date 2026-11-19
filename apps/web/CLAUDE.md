@@ -1682,16 +1682,43 @@ under test is the retry and locking logic, not a browser.
   pays, where a header outside the CORS safelist forces a preflight. A route does not see
   `page.request`, so a test that reads the API itself does it through the page
   (`page.evaluate` with `fetch`), where the header and the session come along.
-- **The servers' output goes to `test-results/servers/`** (`api.log`, `web.log`), not into
-  the reporter's: Playwright empties that directory before it starts them, and CI keeps it
-  as an artifact of its own when a run fails (the traces travel in the HTML report). An API
-  that never came up says why in `api.log`.
+- **The servers' output goes to `test-results/servers/`** (`api.log`, `web.log`,
+  `stripe.log`), not into the reporter's: Playwright empties that directory before it
+  starts them, and CI keeps it as an artifact of its own when a run fails (the traces travel
+  in the HTML report). An API that never came up says why in `api.log`.
 - **A CI run stops itself after six minutes** (`globalTimeout`), inside the job's ten, so a
   hang still leaves its report and logs.
 - **The reader's clock is fixed** in `playwright.config.ts` (`Pacific/Auckland`, far from
   UTC), so a moment drawn on the server's clock instead of the reader's shows up.
-- **Stripe is off in the stack** (`STRIPE_OFF`, see `apps/api/CLAUDE.md`): nothing a test
-  does can reach it.
+- **Stripe is played by a stand-in** (`e2e/stripe/`), started by the config beside the two
+  servers. The API's Stripe client is pointed at it (`STRIPE_STAND_IN_URL`, see
+  `apps/api/CLAUDE.md`), and a route of the fixture's context sends the browser's
+  `js.stripe.com` script and `api.stripe.com` calls there too: the script is Stripe.js as
+  the stand-in plays it (`stripe-js.ts`), loaded by `loadStripe` under the page's CSP, so the
+  payment form is the production one. It accepts the card, authorizes, is captured, refunds,
+  and reports each step to the API's webhook signed with its secret, a refund a moment
+  after its answer. Anything else bound for a Stripe host is aborted, which fails the test
+  as a failed request. Stripe's card boxes are not drawn and not typed into: a scenario
+  presses "Pay". It plays the main path only — a declined card and 3-D Secure are a
+  payment's edge cases — and answers a call it does not play with a `404`. Such a call, and
+  a delivery the API did not take, a request without a key and a failure of its own, is
+  kept as a problem the fixture drains after every test and `e2e/global-teardown.ts` once
+  more after the last, failing on any: a background call of the API's that no page shows
+  fails the run too, and a new call of the application's has to be taught to the stand-in
+  first. A drain waits a few seconds for the webhook deliveries still under way, so a
+  refund reported late fails the test that made it; one still undelivered then is a problem
+  of that test and is given up.
+- **State a scenario should not click its way to is arranged first** (`arrange` in
+  `e2e/fixtures.ts`, `e2e/arrange.ts`), by the application's own HTTP surface through the
+  BFF and never by writing to the database, so the arrangement works on every target.
+  `arrange.listing()` registers a host of the test's own and creates a listing for it;
+  the listing is retired when the test ends. A scenario that books has one, so no two tests
+  meet on a night and a retry never meets its failed attempt's hold. The scenario reaches
+  it by its address, never through the catalogue: a catalogue page is cached by URL, and
+  one read while an arranged listing was on offer would keep showing it to the catalogue's
+  own scenario after it was retired. A stay that has begun rests on a listing whose check-in
+  is at midnight on its today (`stay.ts`). A stay is always paid through the pages, never
+  arranged.
 - `e2e/*.spec.ts` are Playwright's, `src/**/*.spec.ts` Vitest's; neither runner picks up the
   other's files.
 

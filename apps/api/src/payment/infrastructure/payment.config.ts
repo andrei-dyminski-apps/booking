@@ -1,15 +1,15 @@
-import { randomBytes } from "node:crypto";
-
 /** Injection token, for the reason `AUTH_CONFIG` is one: the config is a plain object. */
 export const PAYMENT_CONFIG = Symbol("PAYMENT_CONFIG");
 
 export type PaymentConfig = {
   /**
-   * `STRIPE_OFF`: the browser suite's stack, where nothing may reach Stripe. The client then
-   * refuses every call inside the process (`createStripeClient`), so the API meets an
-   * unreachable provider, and no webhook can be signed.
+   * `STRIPE_STAND_IN_URL`: the browser suite's stack, where Stripe is played by a stand-in
+   * on this machine (`apps/web/e2e/stripe`). The client sends every call there instead of
+   * to Stripe (`createStripeClient`), and the stand-in signs its deliveries with the
+   * webhook secret below, so the adapters, the inbox and the handlers run as they do
+   * against Stripe. `null` everywhere else.
    */
-  off: boolean;
+  standIn: URL | null;
   secretKey: string;
   paymentWebhookSecret: string;
   /** A destination of its own in Stripe; locally `stripe listen` signs both with one secret. */
@@ -38,36 +38,25 @@ function required(name: string): string {
  * a deployment has two destinations with two secrets, and a forgotten one would otherwise
  * answer every account event `400` with nothing saying why.
  *
- * With Stripe off nothing is required and nothing is accepted: the key is never sent, and
- * the webhook secrets are drawn afresh at every boot and told to nobody. A deployment
- * refuses the mode, since a production API that quietly takes no payments is worse than
+ * A stand-in changes where the calls go and nothing else: the key and the secrets are
+ * required as they are against Stripe, and the stand-in is handed the same ones. A
+ * deployment refuses it, since a production API whose payments go nowhere is worse than
  * one that does not start.
  */
 export function loadPaymentConfig(): PaymentConfig {
   const production = process.env.NODE_ENV === "production";
+  const standIn = standInUrl();
 
-  if (stripeOff()) {
-    if (production) {
-      throw new Error(
-        "STRIPE_OFF is for the browser suite's stack — a deployment cannot run with Stripe off",
-      );
-    }
-
-    const unknowable = `whsec_off_${randomBytes(24).toString("hex")}`;
-
-    return {
-      off: true,
-      secretKey: "sk_test_off",
-      paymentWebhookSecret: unknowable,
-      payoutWebhookSecret: unknowable,
-      site: process.env.STRIPE_SITE || "off",
-    };
+  if (standIn !== null && production) {
+    throw new Error(
+      "STRIPE_STAND_IN_URL is for the browser suite's stack — a deployment cannot take its payments from a stand-in",
+    );
   }
 
   const paymentWebhookSecret = required("STRIPE_PAYMENT_WEBHOOK_SECRET");
 
   return {
-    off: false,
+    standIn,
     secretKey: required("STRIPE_SECRET_KEY"),
     paymentWebhookSecret,
     payoutWebhookSecret: production
@@ -79,12 +68,35 @@ export function loadPaymentConfig(): PaymentConfig {
   };
 }
 
-/** `true` turns Stripe off; unset, empty or `false` leaves it on; anything else is a typo. */
-function stripeOff(): boolean {
-  const value = process.env.STRIPE_OFF;
+/** The hosts a stand-in may listen on: the key goes with every call, so never off this machine. */
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1"]);
 
-  if (value === undefined || value === "" || value === "false") return false;
-  if (value === "true") return true;
+/**
+ * Unset or empty is Stripe itself; anything else has to be an origin on this machine. Only
+ * an origin: the SDK takes a host and a port, so a path or credentials would be dropped
+ * without a word.
+ */
+function standInUrl(): URL | null {
+  const value = process.env.STRIPE_STAND_IN_URL;
 
-  throw new Error(`STRIPE_OFF must be "true" or "false", not "${value}"`);
+  if (value === undefined || value === "") return null;
+
+  const url = URL.parse(value);
+
+  if (
+    url === null ||
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    !LOOPBACK_HOSTS.has(url.hostname) ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.pathname !== "/" ||
+    url.search !== "" ||
+    url.hash !== ""
+  ) {
+    throw new Error(
+      `STRIPE_STAND_IN_URL must be an http(s) origin on this machine, not "${value}"`,
+    );
+  }
+
+  return url;
 }

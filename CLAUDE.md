@@ -61,7 +61,7 @@ pnpm test:browser   # Playwright in apps/web/e2e; starts a hermetic stack of its
 
 The runners differ because the packages do: `apps/api` is CommonJS with Nest's testing module, `apps/web` is ESM and needed nothing beyond a runner. `packages/contracts` runs Vitest too, for the rules it holds that both sides apply (`nightlyPrice`, `refundQuote`, `hostShare`) and imports from its own sources. `pnpm test` covers all three through turbo.
 
-`pnpm test:browser` is the browser suite: the scenarios of `docs/e2e-scenarios.md` against a stack it starts itself (`apps/web/e2e/stack.ts`) — both production builds, a Postgres and a Redis of its own in the Compose project `booking-e2e`, recreated and seeded on every run, Stripe off. It never touches the development database and runs beside `pnpm dev`. What belongs in it is in "Browser suite" of `apps/web/CLAUDE.md`.
+`pnpm test:browser` is the browser suite: the scenarios of `docs/e2e-scenarios.md` against a stack it starts itself (`apps/web/e2e/stack.ts`) — both production builds, a Postgres and a Redis of its own in the Compose project `booking-e2e`, recreated and seeded on every run, Stripe played by a stand-in of the suite's own. It never touches the development database and runs beside `pnpm dev`. What belongs in it is in "Browser suite" of `apps/web/CLAUDE.md`.
 
 All three tasks declare `dependsOn: ["^build"]`: the specs import `@repo/contracts` schemas as values, so `dist/` has to exist. Running `pnpm --filter @repo/api test` directly skips that and fails on a fresh clone.
 

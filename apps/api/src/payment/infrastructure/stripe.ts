@@ -16,30 +16,32 @@ export const STRIPE_API_VERSION = "2026-10-28.endive";
  * frontend's ten, and a request makes up to two calls. Whatever ran the call retries
  * instead, safely, because every write goes under an idempotency key. A call nobody waits
  * on overrides both per request with `BACKGROUND_REQUEST`.
+ *
+ * With a stand-in every call goes to its address: the SDK's host replaces the base address
+ * of every API it speaks to, so a call added to either adapter later goes there too
+ * rather than to Stripe.
  */
 export function createStripeClient(config: PaymentConfig): Stripe {
   return new Stripe(config.secretKey, {
     apiVersion: STRIPE_API_VERSION,
     timeout: 4_000,
     maxNetworkRetries: 0,
-    ...(config.off ? { httpClient: STRIPE_OFF_CLIENT } : {}),
+    ...(config.standIn === null ? {} : addressOf(config.standIn)),
   });
 }
 
-/**
- * What the SDK sends through with Stripe off: nothing. Every call is refused before a socket
- * opens, and the SDK reports it as the connection error an unreachable Stripe gives — so the
- * API takes the path it takes in an outage, and a call nobody expected shows in the log
- * under its own path instead of leaving the machine. Below the adapters rather than in place
- * of them, so a call added to either one later is refused too.
- */
-const STRIPE_OFF_CLIENT: NonNullable<Stripe.StripeConfig["httpClient"]> = {
-  getClientName: () => "stripe-off",
-  makeRequest: (_host, _port, path, method) =>
-    Promise.reject(
-      new Error(`Stripe is off (STRIPE_OFF): ${method} ${path} was not sent`),
-    ),
-};
+function addressOf(
+  url: URL,
+): Pick<Stripe.StripeConfig, "host" | "port" | "protocol"> {
+  const protocol = url.protocol === "https:" ? "https" : "http";
+
+  return {
+    host: url.hostname,
+    port:
+      url.port === "" ? (protocol === "https" ? 443 : 80) : Number(url.port),
+    protocol,
+  };
+}
 
 /**
  * Per-request options for the calls a job or a webhook handler makes, where nobody waits on

@@ -3,6 +3,9 @@ import {
   API_COMMAND,
   API_ENV,
   API_HEALTH_URL,
+  STRIPE_STAND_IN_COMMAND,
+  STRIPE_STAND_IN_ENV,
+  STRIPE_STAND_IN_HEALTH_URL,
   WEB_COMMAND,
   WEB_ENV,
   WEB_ORIGIN,
@@ -12,12 +15,15 @@ const CI = process.env.CI !== undefined && process.env.CI !== "";
 
 /**
  * The browser suite: the scenarios of `docs/e2e-scenarios.md`, run against the hermetic
- * stack of `e2e/stack.ts`, which the two servers below start — the API first, after its
- * database and Redis are recreated and seeded, then the frontend. Nothing already listening
- * is reused: a server the suite did not start is one whose database it does not own.
+ * stack of `e2e/stack.ts`, which the servers below start — the stand-in for Stripe, the API
+ * after its database and Redis are recreated and seeded, then the frontend. Nothing already
+ * listening is reused: a server the suite did not start is one whose database it does not
+ * own.
  */
 export default defineConfig({
   testDir: "./e2e",
+  // The Stripe stand-in's last word: what the API did after the last test (`e2e/stripe`).
+  globalTeardown: "./e2e/global-teardown.ts",
   // The tests share the demo accounts, so they run one at a time, here and in CI.
   workers: 1,
   fullyParallel: false,
@@ -45,6 +51,13 @@ export default defineConfig({
   },
   projects: [{ name: "desktop", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
+    {
+      name: "stripe",
+      command: STRIPE_STAND_IN_COMMAND,
+      url: STRIPE_STAND_IN_HEALTH_URL,
+      env: STRIPE_STAND_IN_ENV,
+      reuseExistingServer: false,
+    },
     {
       name: "api",
       command: API_COMMAND,
