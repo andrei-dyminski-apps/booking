@@ -22,8 +22,24 @@ export function createStripeClient(config: PaymentConfig): Stripe {
     apiVersion: STRIPE_API_VERSION,
     timeout: 4_000,
     maxNetworkRetries: 0,
+    ...(config.off ? { httpClient: STRIPE_OFF_CLIENT } : {}),
   });
 }
+
+/**
+ * What the SDK sends through with Stripe off: nothing. Every call is refused before a socket
+ * opens, and the SDK reports it as the connection error an unreachable Stripe gives — so the
+ * API takes the path it takes in an outage, and a call nobody expected shows in the log
+ * under its own path instead of leaving the machine. Below the adapters rather than in place
+ * of them, so a call added to either one later is refused too.
+ */
+const STRIPE_OFF_CLIENT: NonNullable<Stripe.StripeConfig["httpClient"]> = {
+  getClientName: () => "stripe-off",
+  makeRequest: (_host, _port, path, method) =>
+    Promise.reject(
+      new Error(`Stripe is off (STRIPE_OFF): ${method} ${path} was not sent`),
+    ),
+};
 
 /**
  * Per-request options for the calls a job or a webhook handler makes, where nobody waits on

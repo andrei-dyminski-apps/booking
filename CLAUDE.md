@@ -56,15 +56,18 @@ Tests:
 ```sh
 pnpm test           # *.spec.ts next to the code: jest in apps/api, vitest in apps/web and packages/contracts
 pnpm test:e2e       # jest -c test/jest-e2e.json; needs the database, wipes tables
+pnpm test:browser   # Playwright in apps/web/e2e; starts a hermetic stack of its own in Docker
 ```
 
 The runners differ because the packages do: `apps/api` is CommonJS with Nest's testing module, `apps/web` is ESM and needed nothing beyond a runner. `packages/contracts` runs Vitest too, for the rules it holds that both sides apply (`nightlyPrice`, `refundQuote`, `hostShare`) and imports from its own sources. `pnpm test` covers all three through turbo.
+
+`pnpm test:browser` is the browser suite: the scenarios of `docs/e2e-scenarios.md` against a stack it starts itself (`apps/web/e2e/stack.ts`) — both production builds, a Postgres and a Redis of its own in the Compose project `booking-e2e`, recreated and seeded on every run, Stripe off. It never touches the development database and runs beside `pnpm dev`. What belongs in it is in "Browser suite" of `apps/web/CLAUDE.md`.
 
 All three tasks declare `dependsOn: ["^build"]`: the specs import `@repo/contracts` schemas as values, so `dist/` has to exist. Running `pnpm --filter @repo/api test` directly skips that and fails on a fresh clone.
 
 Before considering a task done: `pnpm lint` and `pnpm check-types` have to pass.
 
-CI (`.github/workflows/ci.yml`) runs the same commands — lint, check-types, test, build, and the e2e specs against Postgres and Redis service containers — on every pull request and push to `main`. A new variable the e2e specs need without a usable value in `.env.example` goes onto the `e2e` job's `env` there too.
+CI (`.github/workflows/ci.yml`) runs the same commands — lint, check-types, test, build, the e2e specs against Postgres and Redis service containers, and the browser suite in a job of its own — on every pull request and push to `main`. A new variable the e2e specs need without a usable value in `.env.example` goes onto the `e2e` job's `env` there too.
 
 Every package, `apps/api` included, inherits the shared presets from `packages/typescript-config` and `packages/eslint-config`; Prettier is configured by a single `.prettierrc` in the root and wired into ESLint through `eslint-plugin-prettier` — a mismatch with it fails `pnpm lint`. Details are in `.claude/rules/monorepo-config.md`, which loads when a config file or a shared package is touched.
 

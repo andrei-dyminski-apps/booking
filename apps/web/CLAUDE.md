@@ -1644,6 +1644,57 @@ over. The session refresh needs no `jsdom` either: `window`, `navigator.locks` a
 `localStorage` are stubbed by hand (`vi.stubGlobal`) rather than rendered, because what is
 under test is the retry and locking logic, not a browser.
 
+### Browser suite
+
+`e2e/` holds the Playwright suite (`pnpm test:browser` from the root): the scenarios of
+`docs/e2e-scenarios.md`, in Chromium, against a hermetic stack the config starts itself —
+`e2e/stack.ts` states its whole environment, `e2e/compose.yml` its database and Redis.
+
+- **A scenario's main path, never an edge case.** A test is a goal a visitor reaches when
+  things go right; a refusal, a limit, a malformed input belongs to the API's e2e specs,
+  the contract's Vitest suite or a spec here in `src/`, which prove it on every pull
+  request at a fraction of the cost. The one refusal in the list (the role gates) is there
+  because only a browser sees a page flash content it should not.
+- **Written as a visitor reads the page**: roles, labels, the visible English text
+  (`getByRole`, `getByLabel`), never a class, a test id or how the page is rendered, so a
+  rewrite of caching or rendering leaves the suite standing.
+- **Every page a test visits is checked**: `test` and `expect` come from `e2e/fixtures.ts`,
+  never from `@playwright/test`. The fixture collects console errors, uncaught exceptions,
+  failed requests and answers of `400` or more for the whole test, and fails a page reached
+  and never passed to `pages.check()` — which runs axe and fails on serious and critical
+  violations. Call it once the page's content is on the screen, not its skeleton. A
+  response the test provokes on purpose (a not-found page, a refusal) is declared first
+  with `pages.expectResponse`.
+- **Tests do not depend on each other.** The demo accounts (`e2e/demo.ts`) are only ever
+  signed in to; a test that changes an account registers its own. Each attempt of each test
+  sends an address of its own in `x-forwarded-for`, which the stack's API believes
+  (`TRUST_PROXY=1` there, and nowhere else), so the rate limiter counts every test apart and
+  a retry starts clean. One worker, since the accounts are shared.
+- **Cached reads share one bucket.** A read that goes into the Data Cache carries no
+  `x-forwarded-for` (`serverHeaders` in `shared/api/http-client.ts`), so the API counts it
+  against the frontend server's own address for the whole run — the global limit, or
+  `CATALOGUE_READS` for the catalogue. It stays far below either because each URL reaches
+  the API once per run and is answered from the cache after; a scenario that pages through
+  many distinct catalogue URLs is where to look first if a cached read starts coming back
+  `429`.
+- **The address is added by a route on the frontend's origin**, never by
+  `extraHTTPHeaders`, which the browser sends everywhere — to Stripe too, once a scenario
+  pays, where a header outside the CORS safelist forces a preflight. A route does not see
+  `page.request`, so a test that reads the API itself does it through the page
+  (`page.evaluate` with `fetch`), where the header and the session come along.
+- **The servers' output goes to `test-results/servers/`** (`api.log`, `web.log`), not into
+  the reporter's: Playwright empties that directory before it starts them, and CI keeps it
+  as an artifact of its own when a run fails (the traces travel in the HTML report). An API
+  that never came up says why in `api.log`.
+- **A CI run stops itself after six minutes** (`globalTimeout`), inside the job's ten, so a
+  hang still leaves its report and logs.
+- **The reader's clock is fixed** in `playwright.config.ts` (`Pacific/Auckland`, far from
+  UTC), so a moment drawn on the server's clock instead of the reader's shows up.
+- **Stripe is off in the stack** (`STRIPE_OFF`, see `apps/api/CLAUDE.md`): nothing a test
+  does can reach it.
+- `e2e/*.spec.ts` are Playwright's, `src/**/*.spec.ts` Vitest's; neither runner picks up the
+  other's files.
+
 ## Port
 
 The port comes from `WEB_PORT` (`next dev --port ${WEB_PORT:-3000}`). Do not write the port

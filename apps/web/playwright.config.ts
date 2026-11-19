@@ -1,0 +1,65 @@
+import { defineConfig, devices } from "@playwright/test";
+import {
+  API_COMMAND,
+  API_ENV,
+  API_HEALTH_URL,
+  WEB_COMMAND,
+  WEB_ENV,
+  WEB_ORIGIN,
+} from "./e2e/stack";
+
+const CI = process.env.CI !== undefined && process.env.CI !== "";
+
+/**
+ * The browser suite: the scenarios of `docs/e2e-scenarios.md`, run against the hermetic
+ * stack of `e2e/stack.ts`, which the two servers below start — the API first, after its
+ * database and Redis are recreated and seeded, then the frontend. Nothing already listening
+ * is reused: a server the suite did not start is one whose database it does not own.
+ */
+export default defineConfig({
+  testDir: "./e2e",
+  // The tests share the demo accounts, so they run one at a time, here and in CI.
+  workers: 1,
+  fullyParallel: false,
+  forbidOnly: CI,
+  // One retry in CI, and a test that needed it is reported as flaky. Locally a failure is
+  // what it is.
+  retries: CI ? 1 : 0,
+  // In CI the run stops itself well inside the job's ten-minute budget, the stack's start-up
+  // included: a hang then ends as a failed run with its report written, rather than as a job
+  // GitHub cancels with nothing kept.
+  globalTimeout: CI ? 6 * 60_000 : 0,
+  reporter: CI
+    ? [["github"], ["list"], ["html", { open: "never" }]]
+    : [["list"], ["html", { open: "never" }]],
+  use: {
+    baseURL: WEB_ORIGIN,
+    // The reader's clock, the same on every machine: a zone far from UTC, so a moment drawn
+    // on the server's clock instead of the reader's shows as another day for most of it.
+    locale: "en-GB",
+    timezoneId: "Pacific/Auckland",
+    // What a failure leaves behind, so it is read rather than rerun.
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+    video: "retain-on-failure",
+  },
+  projects: [{ name: "desktop", use: { ...devices["Desktop Chrome"] } }],
+  webServer: [
+    {
+      name: "api",
+      command: API_COMMAND,
+      url: API_HEALTH_URL,
+      env: API_ENV,
+      reuseExistingServer: false,
+      // Recreating the containers, pulling their images on a fresh machine, and the seed.
+      timeout: 180_000,
+    },
+    {
+      name: "web",
+      command: WEB_COMMAND,
+      url: WEB_ORIGIN,
+      env: WEB_ENV,
+      reuseExistingServer: false,
+    },
+  ],
+});

@@ -15,6 +15,8 @@ For changes in `apps/api`, additionally `pnpm test`.
 
 Run `pnpm test:e2e` yourself whenever a change can reach the database, the queue or the HTTP surface — do not hold back or ask first. The database it wipes is the local development one from `docker-compose.yml`, which holds only demo data the seed writes back (`pnpm --filter @repo/api db:seed`). This does not extend to a reset the Prisma CLI guards (see "Resetting the local dev database" in `apps/api/CLAUDE.md`), nor to any deployed database.
 
+Run `pnpm test:browser` the same way whenever a change can reach a screen — anything in `apps/web`, `@repo/ui` or `@repo/contracts`, or an API answer a page reads. It starts and wipes only a stack of its own (the Compose project `booking-e2e`), never the development one, and needs Docker.
+
 4. Code formatting is done by `pnpm lint:fix` from the root — Prettier is wired into ESLint through the `prettier/prettier` rule. `pnpm format` remains for `.md`, which ESLint does not parse. Do not align code by hand and do not argue with Prettier.
 
 ## Style

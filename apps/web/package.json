@@ -36,6 +36,7 @@
     "build": "next build",
     "start": "next start --port ${WEB_PORT:-3000}",
     "test": "vitest run",
+    "test:browser": "playwright test",
     "lint": "eslint --max-warnings 0 && steiger ./src",
     "lint:fix": "eslint --fix",
     "check-types": "next typegen && tsc --noEmit"
@@ -60,7 +61,9 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@feature-sliced/steiger-plugin": "^0.8.2",
+    "@playwright/test": "1.65.1",
     "@repo/eslint-config": "workspace:*",
     "@repo/typescript-config": "workspace:*",
     "@tailwindcss/postcss": "^4.3.5",

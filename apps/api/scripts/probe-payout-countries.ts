@@ -48,6 +48,7 @@ async function main(): Promise<void> {
 
   // The adapter as the API builds it, minus the webhook secrets nothing here reads.
   const config: PaymentConfig = {
+    off: false,
     secretKey,
     paymentWebhookSecret: "",
     payoutWebhookSecret: "",
