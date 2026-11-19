@@ -58,13 +58,13 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
 - [x] **My bookings.** A guest who has booked finds the stay among their bookings with its
       status and amount, and opens it. _Every target. Medium: the stay is arranged beforehand,
       and paid through the pages._
-- [ ] **Getting around.** A visitor reaches the pages their role uses — a guest's bookings,
+- [x] **Getting around.** A visitor reaches the pages their role uses — a guest's bookings,
       messages, notifications, waitlist and profile; a host's dashboard; the admin's
-      listings, users and payments — from the menu alone, without typing an address: the
-      sidebar on desktop, the menu sheet on a phone, where it is walked once more together
-      with the catalogue up to a listing's page. _Every target on desktop for the guest's
-      and the host's pages, hermetic only for the admin's; the phone run is hermetic only.
-      Cheap._ The desktop walk is written and green; the tick waits for the phone's (11.2c).
+      listings, users and payments — from the menu alone, without typing an address, and
+      the guest signs out from it: the sidebar on desktop, the menu sheet on a phone, where
+      it is walked once more together with the catalogue up to a listing's page. _Every
+      target on desktop for the guest's and the host's pages, hermetic only for the
+      admin's; the phone run is hermetic only. Cheap._
 
 ## Priority 2 — the main functions of each role
 

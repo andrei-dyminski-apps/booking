@@ -30,10 +30,16 @@ import { toFormErrors } from "#shared/lib";
 export const LogoutButton = ({
   variant = "outline",
   className,
+  onSignedOut,
 }: {
   /** The shell asks for a quieter one; the profile card keeps the outlined default. */
   variant?: "outline" | "ghost";
   className?: string;
+  /**
+   * Called once the session is closed, before the way home: the menu sheet closes behind
+   * it. Not on a failure, whose message has to stay on the screen it was pressed on.
+   */
+  onSignedOut?: () => void;
 }) => {
   const router = useRouter();
   const [message, setMessage] = useState<string | null>(null);
@@ -51,6 +57,7 @@ export const LogoutButton = ({
         return;
       }
 
+      onSignedOut?.();
       router.replace(ROUTES.home);
       router.refresh();
     });

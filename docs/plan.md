@@ -1094,17 +1094,19 @@ refund reported back later). Both are ticked in `docs/e2e-scenarios.md`.
 - [x] **The scenarios of `docs/e2e-scenarios.md`**, priorities 1 to 4, written most important
       first; each is its own tick there. Each is marked there with where it runs once 11.3
       and 11.4 add other targets, by the rule in that file. Payouts, which is real Stripe
-      only, waits for 11.3, and getting around, whose phone half is 11.2c's, for 11.2c.
+      only, waits for 11.3, and getting around, whose phone half is 11.2c's, waited for 11.2c.
       Two people at once are two browser contexts of one test, each with an address of its
       own; a scenario that changes an account — a host's listings, a guest someone reviews
       or blocks — uses the test's host or registers one.
 
 #### 11.2c — The phone
 
-- [ ] **A second run on a phone viewport** walks the navigation scenario and the catalogue to
+- [x] **A second run on a phone viewport** walks the navigation scenario and the catalogue to
       a listing's page, the things a narrow screen changes: how a visitor gets around and what
       they can read. The booking does not repeat on the phone, since the same code answers on
       both. It runs on the hermetic stack alone, since the other targets serve the same code.
+      Everything that leaves the menu sheet — the navigation's links, the account panel's
+      and its "Sign out" — closes it, and the guest's walk ends by signing out from the menu.
 
 ### 11.3 — Real Stripe, on the local stack (optional)
 

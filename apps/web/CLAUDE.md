@@ -1690,6 +1690,14 @@ under test is the retry and locking logic, not a browser.
   in the HTML report). An API that never came up says why in `api.log`.
 - **A CI run stops itself after six minutes** (`globalTimeout`), inside the job's ten, so a
   hang still leaves its report and logs.
+- **Two projects: `desktop` runs every scenario, `phone` (a Pixel 7) only what a narrow
+  screen changes** — the navigation and the catalogue up to a listing's page. Below `lg`
+  the shell draws its navigation in a sheet behind the menu button instead of the sidebar,
+  so a scenario that walks the menu goes through `openFromMenu`, `expectCurrentSection`,
+  `expectSignedInAs`, `checkMenu` and `signOutFromMenu` (`shell.ts`), which read the page's
+  width and take the sidebar on a wide one and the sheet on a narrow one; `sidebarLink` is
+  for a scenario that runs on the desktop alone. A new scenario joins the phone only when
+  what it proves looks different on one.
 - **The reader's clock is fixed** in `playwright.config.ts` (`Pacific/Auckland`, far from
   UTC), so a moment drawn on the server's clock instead of the reader's shows up.
 - **Stripe is played by a stand-in** (`e2e/stripe/`), started by the config beside the two
@@ -1729,10 +1737,12 @@ under test is the retry and locking logic, not a browser.
   is cached by URL, and one read while an arranged listing was on offer would keep showing
   it after it was retired. So a scenario reaches its listing by its own address, and one
   that reads the catalogue for its listings searches by a price no other listing has
-  (`randomInt` per attempt), whose first read is fresh. A write marks the cached pages
-  stale rather than emptying them, so the page served right after a change may be the one
-  before it: `expectInCatalogue` (`catalogue.ts`) reloads until the change arrives, and so
-  does a scenario reading a listing's calendar after somebody else's hold.
+  (`randomInt` per attempt, and the catalogue's own scenario in a band of prices per
+  project, since the phone runs it again in the same stack), whose first read is fresh. A
+  write marks the cached pages stale rather than emptying them, so the page served right
+  after a change may be the one before it: `expectInCatalogue` (`catalogue.ts`) reloads
+  until the change arrives, and so does a scenario reading a listing's calendar after
+  somebody else's hold.
 - **Two people at once are two browsers**: `another()` (`fixtures.ts`) opens a page in a
   fresh context with the project's options, its own address in `x-forwarded-for`, the same
   route to the Stripe stand-in and the same checks on every page — `pages.check(thatPage)`.

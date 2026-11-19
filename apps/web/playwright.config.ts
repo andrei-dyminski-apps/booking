@@ -49,7 +49,17 @@ export default defineConfig({
     screenshot: "only-on-failure",
     video: "retain-on-failure",
   },
-  projects: [{ name: "desktop", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    { name: "desktop", use: { ...devices["Desktop Chrome"] } },
+    // What a narrow screen changes, walked once more: how a visitor gets around (the sheet
+    // behind the menu button in place of the sidebar) and the catalogue up to a listing's
+    // page. The rest runs the same code on both, so it is not repeated here.
+    {
+      name: "phone",
+      use: { ...devices["Pixel 7"] },
+      testMatch: ["**/navigation.spec.ts", "**/catalogue.spec.ts"],
+    },
+  ],
   webServer: [
     {
       name: "stripe",

@@ -10,15 +10,31 @@ import { AccountLogout } from "./account-logout";
  * and the sheet on a narrow one. It carries the only two things a visitor needs from the
  * shell about themselves — who they are signed in as, and the way out.
  *
+ * Its links and its "Sign out" close the sheet behind them, as the navigation's links do:
+ * the sheet lives in the header, which a navigation keeps, so a link that only navigated —
+ * or a sign-out that only went home — would leave it open over the page it opened.
+ *
  * Nothing here is a permission. The role is a claim of a signed access token that only
  * the API can verify, and what it decides on this side is a word under a name.
  */
-export const AccountPanel = ({ user }: { user: User | null }) => {
+export const AccountPanel = ({
+  user,
+  onDone,
+}: {
+  user: User | null;
+  /**
+   * The sheet closes behind the link it opened and behind a sign-out; the sidebar has
+   * nothing to close.
+   */
+  onDone?: () => void;
+}) => {
   if (user === null) {
     return (
       <div className="flex flex-col gap-2">
-        <ButtonLink href={ROUTES.register}>Create account</ButtonLink>
-        <ButtonLink href={ROUTES.login} variant="ghost">
+        <ButtonLink href={ROUTES.register} onClick={onDone}>
+          Create account
+        </ButtonLink>
+        <ButtonLink href={ROUTES.login} variant="ghost" onClick={onDone}>
           Sign in
         </ButtonLink>
       </div>
@@ -29,6 +45,7 @@ export const AccountPanel = ({ user }: { user: User | null }) => {
     <div className="flex flex-col gap-2">
       <Link
         href={ROUTES.profile}
+        onClick={onDone}
         className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-sidebar-accent/60"
       >
         <span
@@ -45,7 +62,7 @@ export const AccountPanel = ({ user }: { user: User | null }) => {
         </span>
       </Link>
 
-      <AccountLogout variant="ghost" />
+      <AccountLogout variant="ghost" onSignedOut={onDone} />
     </div>
   );
 };
