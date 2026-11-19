@@ -5,6 +5,20 @@ import type { Page } from "@playwright/test";
 /** One more than a page of the catalogue holds, so the search runs onto a second. */
 const LISTINGS = 21;
 
+/**
+ * Where the searched prices start, in dollars, each project in a band of its own: the phone
+ * runs this scenario again in the same stack, and a price the desktop's run already
+ * searched is a catalogue address read before. The bands start above every price another
+ * scenario searches the catalogue by.
+ */
+const FIRST_PRICE = 3_000;
+const PRICE_BAND = 3_000;
+
+const usd = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+});
+
 test("a visitor filters and orders the stays, keeps the search through a reload and a link, pages on and opens a stay", async ({
   page,
   pages,
@@ -14,7 +28,7 @@ test("a visitor filters and orders the stays, keeps the search through a reload 
   // The test's own stays, a cent apart at a price no other listing has: a search for that
   // price is a catalogue address nobody else has read, so nothing cached answers it, and
   // its answer is these listings and nothing else.
-  const dollars = randomInt(500, 900);
+  const dollars = searchPrice();
   const base = dollars * 100;
   const listings = [];
 
@@ -62,7 +76,7 @@ test("a visitor filters and orders the stays, keeps the search through a reload 
     `/listings?minPrice=${String(dollars)}&maxPrice=${String(dollars)}.20`,
   );
   await expect(
-    page.getByRole("link", { name: `From $${String(dollars)}.00 a night` }),
+    page.getByRole("link", { name: `From ${usd.format(dollars)} a night` }),
   ).toBeVisible();
   await expect(stays(page)).toHaveCount(20);
   await pages.check();
@@ -102,9 +116,19 @@ test("a visitor filters and orders the stays, keeps the search through a reload 
   await expect(
     page.getByRole("heading", { level: 1, name: dearest.title }),
   ).toBeVisible();
-  await expect(page.getByText(`$${String(dollars)}.20 a night`)).toBeVisible();
+  await expect(
+    page.getByText(`${usd.format(dollars + 0.2)} a night`),
+  ).toBeVisible();
   await pages.check();
 });
+
+/** A price no other listing has, in this project's band, new on every attempt. */
+function searchPrice(): number {
+  const { config, project } = test.info();
+  const band = config.projects.findIndex((each) => each.name === project.name);
+
+  return FIRST_PRICE + band * PRICE_BAND + randomInt(PRICE_BAND);
+}
 
 /** The stays the catalogue lists, each a card in the list under the toolbar. */
 function stays(page: Page) {

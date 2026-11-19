@@ -23,9 +23,10 @@ import { UnreadConversationsDot } from "./unread-conversations-badge";
  * account panel — only the container differs, so a section added to `navigation.ts`
  * appears in both without anybody remembering to add it twice.
  *
- * Closing is a click on a link rather than a route change watched from an effect: a link
- * to the page already open navigates nowhere, and a sheet waiting for a navigation that
- * never happens would stay over it.
+ * Closing is a click on a link — the navigation's or the account panel's — or a finished
+ * sign-out, rather than a route change watched from an effect: a link to the page already
+ * open navigates nowhere, and a sheet waiting for a navigation that never happens would
+ * stay over it.
  *
  * The button carries the dot of unread threads, because the badge beside Messages is
  * behind it. It names itself by its content rather than an `aria-label`, so the count the
@@ -33,6 +34,9 @@ import { UnreadConversationsDot } from "./unread-conversations-badge";
  */
 export const MobileNav = ({ user }: { user: User | null }) => {
   const [open, setOpen] = useState(false);
+  const close = () => {
+    setOpen(false);
+  };
   const offersMessages = navigationFor(user).some(
     (item) => item.href === ROUTES.messages,
   );
@@ -53,16 +57,10 @@ export const MobileNav = ({ user }: { user: User | null }) => {
           <SheetDescription>Rooms, dates and guests.</SheetDescription>
         </SheetHeader>
 
-        <NavLinks
-          user={user}
-          className="px-3"
-          onNavigate={() => {
-            setOpen(false);
-          }}
-        />
+        <NavLinks user={user} className="px-3" onNavigate={close} />
 
         <div className="mt-auto border-t border-border p-3">
-          <AccountPanel user={user} />
+          <AccountPanel user={user} onDone={close} />
         </div>
       </SheetContent>
     </Sheet>

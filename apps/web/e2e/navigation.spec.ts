@@ -2,12 +2,18 @@ import type { Page } from "@playwright/test";
 import { DEMO, type Account } from "./demo";
 import { expect, test, type Pages } from "./fixtures";
 import { signInThroughForm } from "./session";
-import { sidebarLink } from "./shell";
+import {
+  checkMenu,
+  expectCurrentSection,
+  expectSignedInAs,
+  openFromMenu,
+  signOutFromMenu,
+} from "./shell";
 
 /** A section of the menu and the heading of the page it opens. */
 type Section = { label: string; path: string; heading: string };
 
-test("a guest reaches their pages from the menu alone", async ({
+test("a guest reaches their pages from the menu alone and signs out from it", async ({
   page,
   pages,
 }) => {
@@ -29,13 +35,24 @@ test("a guest reaches their pages from the menu alone", async ({
   ).toBeVisible();
   await pages.check();
 
-  await sidebarLink(page, "Profile").click();
+  await openFromMenu(page, "Profile");
 
   await expect(page).toHaveURL("/profile");
   await expect(
     page.getByRole("main").getByText(DEMO.guest.email, { exact: true }),
   ).toBeVisible();
   await pages.check();
+
+  // The way out is in the menu too, and leaves the visitor a stranger on the home page —
+  // whose menu, checked once here rather than before every sign-in, is a stranger's.
+  await signOutFromMenu(page);
+
+  await expect(page).toHaveURL("/");
+  await expect(
+    page.getByRole("banner").getByRole("link", { name: "Sign up" }),
+  ).toBeVisible();
+  await pages.check();
+  await checkMenu(page, pages);
 });
 
 test("a host reaches their dashboard from the menu", async ({
@@ -75,13 +92,11 @@ async function signInFromHome(
 ): Promise<void> {
   await page.goto("/");
   await pages.check(page);
-  await sidebarLink(page, "Sign in").click();
+  await openFromMenu(page, "Sign in");
   await expect(page).toHaveURL(/^[^?]*\/login/);
   await pages.check(page);
   await signInThroughForm(page, account);
-  await expect(
-    page.getByRole("link", { name: new RegExp(account.name) }),
-  ).toBeVisible();
+  await expectSignedInAs(page, pages, account.name);
   await pages.check(page);
 }
 
@@ -91,16 +106,13 @@ async function walk(
   sections: Section[],
 ): Promise<void> {
   for (const section of sections) {
-    await sidebarLink(page, section.label).click();
+    await openFromMenu(page, section.label);
 
     await expect(page).toHaveURL(section.path);
     await expect(
       page.getByRole("heading", { level: 1, name: section.heading }),
     ).toBeVisible();
-    await expect(sidebarLink(page, section.label)).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+    await expectCurrentSection(page, section.label);
     await pages.check(page);
   }
 }
