@@ -282,13 +282,16 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
   `test/payment.e2e-spec.ts` overrides the payment one with the real adapter minus its
   outgoing calls, so the signature check is the production code. A gateway speaks `Cents`,
   as Stripe does, so the adapter converts nothing.
-- **`STRIPE_OFF=true` turns Stripe off** — the browser suite's hermetic stack runs this way
-  (`apps/web/e2e/stack.ts`). The adapters stay; the Stripe client under them is given an HTTP
-  client that refuses every request before a socket opens (`createStripeClient`), so the API
-  meets Stripe as unreachable and takes its outage paths, and a call added later is refused
-  too. No key is required, and the webhook secrets are drawn at random at every boot, so no
-  delivery verifies. `loadPaymentConfig` refuses the mode with `NODE_ENV=production`, and a
-  value other than `true`/`false`, so a deployment cannot start without its payments.
+- **`STRIPE_STAND_IN_URL` sends every Stripe call to a stand-in** — the browser suite's
+  hermetic stack runs this way, against the stand-in it starts itself
+  (`apps/web/e2e/stripe/server.ts`). The adapters stay, and so do the key and the webhook
+  secrets, required as against Stripe: the client is only given the stand-in's address as
+  its host (`createStripeClient`), which the SDK puts in place of every base address it
+  knows, so a call added to either adapter later goes there too. The stand-in signs its
+  deliveries with the secret the API checks, so the inbox and the handlers run as they do
+  in deployment. `loadPaymentConfig` refuses the variable with `NODE_ENV=production`, and
+  anything but an `http(s)` origin on `localhost` or `127.0.0.1` — off this machine because
+  the key goes with every call, and with no path because the SDK would drop it unsaid.
 - **The webhooks are an inbox** (`POST /payments/webhook`, `POST /payouts/webhook`). A
   delivery is verified (the signature over the raw body — `src/common/body-parsers.ts` keeps
   the bytes for these two routes only), written to `payment_events` and answered `200` at

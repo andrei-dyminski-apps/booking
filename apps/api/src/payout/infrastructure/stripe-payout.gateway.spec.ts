@@ -12,7 +12,7 @@ import {
 } from "./stripe-payout.gateway";
 
 const config: PaymentConfig = {
-  off: false,
+  standIn: null,
   secretKey: "sk_test_spec",
   paymentWebhookSecret: "whsec_spec",
   payoutWebhookSecret: "whsec_spec",

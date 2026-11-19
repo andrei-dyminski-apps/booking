@@ -163,11 +163,12 @@ jobs:
         run: pnpm --filter @repo/web exec playwright install-deps chromium
 
       # Builds both applications, then starts the hermetic stack itself — its own database
-      # and Redis in Docker, the API, the frontend — and runs the scenarios against it.
+      # and Redis in Docker, the stand-in for Stripe, the API, the frontend — and runs the
+      # scenarios against it.
       - run: pnpm test:browser
 
       # The report on every run — it holds the traces, screenshots and videos a failure left —
-      # and the output of both servers beside it when something went wrong. `always()` and
+      # and the output of the servers beside it when something went wrong. `always()` and
       # `cancelled()`, because a job past its budget is cancelled, and that run is the one
       # whose logs matter most; the suite's own timeout (playwright.config.ts) normally ends
       # it first, with the report written.

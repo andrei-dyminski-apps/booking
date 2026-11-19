@@ -39,14 +39,14 @@ export function stripeVariables(theme: string | undefined): {
         colorBackground: "#0a0a0a",
         colorText: "#fafafa",
         colorPrimary: "#e5e5e5",
-        colorDanger: "#ff6467",
+        colorDanger: "#ff7375",
         borderRadius: "10px",
       }
     : {
         colorBackground: "#ffffff",
         colorText: "#0a0a0a",
         colorPrimary: "#171717",
-        colorDanger: "#d40009",
+        colorDanger: "#cc0000",
         borderRadius: "10px",
       };
 }

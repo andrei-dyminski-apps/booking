@@ -12,7 +12,7 @@ describe("loadPaymentConfig", () => {
       STRIPE_SITE: "spec",
     };
     delete process.env.STRIPE_PAYOUT_WEBHOOK_SECRET;
-    delete process.env.STRIPE_OFF;
+    delete process.env.STRIPE_STAND_IN_URL;
     delete process.env.NODE_ENV;
   });
 
@@ -34,44 +34,56 @@ describe("loadPaymentConfig", () => {
     expect(loadPaymentConfig().payoutWebhookSecret).toBe("whsec_payout");
   });
 
-  describe("with Stripe off", () => {
+  it("talks to Stripe itself when no stand-in is named", () => {
+    process.env.STRIPE_STAND_IN_URL = "";
+
+    expect(loadPaymentConfig().standIn).toBeNull();
+  });
+
+  describe("with a stand-in", () => {
     beforeEach(() => {
-      process.env.STRIPE_OFF = "true";
-      delete process.env.STRIPE_SECRET_KEY;
-      delete process.env.STRIPE_PAYMENT_WEBHOOK_SECRET;
+      process.env.STRIPE_STAND_IN_URL = "http://127.0.0.1:3202";
     });
 
-    it("boots without a key or a webhook secret", () => {
-      expect(loadPaymentConfig().off).toBe(true);
-    });
-
-    it("accepts no webhook that a secret from the environment would sign", () => {
-      process.env.STRIPE_PAYMENT_WEBHOOK_SECRET = "whsec_payment";
-
+    it("sends the calls to it and keeps the secrets it is given", () => {
       const config = loadPaymentConfig();
 
-      expect(config.paymentWebhookSecret).not.toBe("whsec_payment");
-      expect(config.paymentWebhookSecret).not.toBe(
-        loadPaymentConfig().paymentWebhookSecret,
+      expect(config.standIn?.href).toBe("http://127.0.0.1:3202/");
+      expect(config.paymentWebhookSecret).toBe("whsec_payment");
+    });
+
+    it("takes localhost as well as the loopback address", () => {
+      process.env.STRIPE_STAND_IN_URL = "http://localhost:3202";
+
+      expect(loadPaymentConfig().standIn?.hostname).toBe("localhost");
+    });
+
+    it("still requires the key and the webhook secret", () => {
+      delete process.env.STRIPE_PAYMENT_WEBHOOK_SECRET;
+
+      expect(() => loadPaymentConfig()).toThrow(
+        "STRIPE_PAYMENT_WEBHOOK_SECRET",
       );
     });
 
     it("refuses to boot in production", () => {
       process.env.NODE_ENV = "production";
+      process.env.STRIPE_PAYOUT_WEBHOOK_SECRET = "whsec_payout";
 
-      expect(() => loadPaymentConfig()).toThrow("STRIPE_OFF");
+      expect(() => loadPaymentConfig()).toThrow("STRIPE_STAND_IN_URL");
     });
 
-    it("refuses a value that is neither on nor off", () => {
-      process.env.STRIPE_OFF = "1";
+    it.each([
+      "https://stand-in.example.com",
+      "ftp://localhost",
+      "127.0.0.1:3202",
+      "http://127.0.0.1:3202/v1",
+      "http://127.0.0.1:3202?mode=test",
+      "http://user:secret@127.0.0.1:3202",
+    ])("refuses %s, which is not an http origin on this machine", (value) => {
+      process.env.STRIPE_STAND_IN_URL = value;
 
-      expect(() => loadPaymentConfig()).toThrow("STRIPE_OFF");
+      expect(() => loadPaymentConfig()).toThrow("STRIPE_STAND_IN_URL");
     });
-  });
-
-  it("leaves Stripe on for an explicit false", () => {
-    process.env.STRIPE_OFF = "false";
-
-    expect(loadPaymentConfig().off).toBe(false);
   });
 });
