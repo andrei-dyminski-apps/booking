@@ -1,6 +1,6 @@
 import { DEMO } from "./demo";
 import { expect, test } from "./fixtures";
-import { signInThroughForm } from "./session";
+import { signInToListing } from "./session";
 import { dayIn, holdAndPay } from "./stay";
 
 test("a guest reads a listing, holds the nights, pays and lands on a confirmed stay", async ({
@@ -12,14 +12,9 @@ test("a guest reads a listing, holds the nights, pays and lands on a confirmed s
   const from = dayIn(listing.timeZone, 14);
   const to = dayIn(listing.timeZone, 17);
 
-  await page.goto(`/login?next=/listings/${listing.id}`);
-  await pages.check();
-  await signInThroughForm(page, DEMO.guest);
+  await signInToListing(page, pages, DEMO.guest, listing);
 
   // The listing: what it is, what a night costs, and which nights are free.
-  await expect(
-    page.getByRole("heading", { level: 1, name: listing.title }),
-  ).toBeVisible();
   await expect(page.getByText("$120.00 a night")).toBeVisible();
   await expect(
     page.getByText("A quiet room the browser suite arranged"),

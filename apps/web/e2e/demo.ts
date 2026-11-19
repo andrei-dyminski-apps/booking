@@ -12,6 +12,16 @@ export const DEMO = {
     // `playwright.config.ts`) than on UTC's.
     joined: "16 Jan 2026",
   },
+  /** The host of six of the seed's listings, which their dashboard lists. */
+  host: {
+    name: "Tomas Berg",
+    email: "owner@example.com",
+  },
+  admin: {
+    name: "Nora Hale",
+    email: "admin@example.com",
+  },
 } as const;
 
-export type DemoAccount = (typeof DEMO)[keyof typeof DEMO];
+/** An account to sign in as: a demo one, whose password is `DEMO_PASSWORD`, or a test's own. */
+export type Account = { name: string; email: string; password?: string };

@@ -3,6 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 import {
   test as base,
   expect,
+  type BrowserContext,
   type Page,
   type TestInfo,
 } from "@playwright/test";
@@ -29,7 +30,16 @@ export type Pages = {
    */
   check(page?: Page): Promise<void>;
   expectResponse(response: ExpectedResponse): void;
+  /** Watches the pages of a context besides the test's own — another visitor's. */
+  watch(context: BrowserContext): void;
 };
+
+/**
+ * Another person at the same time, in a browser of their own (`docs/e2e-scenarios.md`):
+ * a page in a fresh context, with no session, its own address and the same rules for
+ * every page it opens. Closed when the test ends.
+ */
+export type Another = () => Promise<Page>;
 
 type Problem = { what: string; url: string; status?: number };
 
@@ -42,34 +52,37 @@ const FAILING_IMPACTS = new Set(["serious", "critical"]);
  * errors are collected for the whole test and asserted when it ends; a page reached and
  * never `check`ed fails the test as well, so the rule cannot be forgotten in a new one.
  */
-export const test = base.extend<{ pages: Pages; arrange: Arrange }>({
-  // An address of its own for each attempt of each test, in the header the frontend passes
-  // on and the stack's API believes (`TRUST_PROXY` in `stack.ts`): the rate limiter then
-  // counts every test apart, and a retry starts with none of the first attempt's requests.
-  //
-  // Added by a route on the frontend's origin rather than `extraHTTPHeaders`, which the
-  // browser sends to every origin: on a request elsewhere (Stripe's, once a scenario pays)
-  // a header outside the CORS safelist forces a preflight the other side may refuse, and
-  // the address is nobody else's business. A route does not see `page.request`, so a test
-  // reads the API through the page instead (`page.evaluate` with `fetch`).
+export const test = base.extend<{
+  pages: Pages;
+  arrange: Arrange;
+  another: Another;
+}>({
   context: async ({ context }, use, testInfo) => {
-    const address = clientAddressOf(testInfo);
-
-    await context.route(
-      (url) => url.origin === WEB_ORIGIN,
-      (route) =>
-        route.continue({
-          headers: { ...route.request().headers(), "x-forwarded-for": address },
-        }),
-    );
-    await routeStripeToStandIn(context);
+    await prepare(context, clientAddressOf(testInfo));
     await use(context);
+  },
+
+  another: async ({ browser, pages }, use, testInfo) => {
+    const contexts: BrowserContext[] = [];
+
+    await use(async () => {
+      // Created inside the test, so with the project's options, as the test's own is.
+      const context = await browser.newContext();
+
+      contexts.push(context);
+      await prepare(context, clientAddressOf(testInfo, contexts.length));
+      pages.watch(context);
+
+      return context.newPage();
+    });
+
+    for (const context of contexts) await context.close();
   },
 
   arrange: async ({ playwright }, use, testInfo) => {
     const { arrange, tearDown } = arrangement(
       playwright.request,
-      clientAddressOf(testInfo),
+      clientAddressOf(testInfo, "arrangement"),
       testInfo.title,
     );
 
@@ -81,10 +94,20 @@ export const test = base.extend<{ pages: Pages; arrange: Arrange }>({
     async ({ page, context }, use, testInfo) => {
       const problems: Problem[] = [];
       const expected: ExpectedResponse[] = [];
-      const visited = new Set<string>();
-      const checked = new Set<string>();
+      // Per page, not per path: a path one visitor's page passed says nothing about the
+      // same path in another visitor's browser, which renders it for somebody else.
+      const visits = new Map<
+        Page,
+        { visited: Set<string>; checked: Set<string> }
+      >();
 
       const watch = (watched: Page) => {
+        const visit = {
+          visited: new Set<string>(),
+          checked: new Set<string>(),
+        };
+
+        visits.set(watched, visit);
         watched.on("console", (message) => {
           if (message.type() !== "error") return;
 
@@ -119,7 +142,7 @@ export const test = base.extend<{ pages: Pages; arrange: Arrange }>({
         });
         watched.on("framenavigated", (frame) => {
           if (frame === watched.mainFrame() && frame.url().startsWith("http")) {
-            visited.add(pathOf(frame.url()));
+            visit.visited.add(pathOf(frame.url()));
           }
         });
       };
@@ -129,6 +152,16 @@ export const test = base.extend<{ pages: Pages; arrange: Arrange }>({
 
       await use({
         async check(checkedPage = page) {
+          const visit = visits.get(checkedPage);
+
+          // A page nobody watches has had its errors go uncollected, so passing it here would
+          // say it was checked when half the check never ran.
+          if (visit === undefined) {
+            throw new Error(
+              `${checkedPage.url()} is not watched by the fixture: open another visitor's page with another()`,
+            );
+          }
+
           // The pointer stays wherever the last click left it, and whatever lies under it on
           // the next page is drawn hovered — so the same page would read differently from
           // one run to the next. Every page is read with the pointer in the same corner.
@@ -169,11 +202,15 @@ export const test = base.extend<{ pages: Pages; arrange: Arrange }>({
               .join("\n")}`,
           ).toEqual([]);
 
-          checked.add(pathOf(checkedPage.url()));
+          visit.checked.add(pathOf(checkedPage.url()));
         },
 
         expectResponse(response) {
           expected.push(response);
+        },
+
+        watch(other) {
+          other.on("page", watch);
         },
       });
 
@@ -195,7 +232,9 @@ export const test = base.extend<{ pages: Pages; arrange: Arrange }>({
       const report = unexpected
         .map((problem) => `- ${problem.what} (${problem.url})`)
         .join("\n");
-      const unchecked = [...visited].filter((path) => !checked.has(path));
+      const unchecked = [...visits.values()].flatMap(({ visited, checked }) =>
+        [...visited].filter((path) => !checked.has(path)),
+      );
 
       if (testInfo.status !== testInfo.expectedStatus) {
         // The test failed on its own already; what else went wrong goes beside it, not over it.
@@ -242,10 +281,47 @@ function answers(response: ExpectedResponse, problem: Problem): boolean {
   );
 }
 
-/** A private address derived from the test and its attempt: stable for both, apart for each. */
-function clientAddressOf(testInfo: TestInfo): string {
+/**
+ * Prepares a context the way every page of the suite is seen.
+ *
+ * An address of its own for each attempt of each test — and for each visitor of it — in
+ * the header the frontend passes on and the stack's API believes (`TRUST_PROXY` in
+ * `stack.ts`): the rate limiter then counts every test apart, and a retry starts with none
+ * of the first attempt's requests.
+ *
+ * Added by a route on the frontend's origin rather than `extraHTTPHeaders`, which the
+ * browser sends to every origin: on a request elsewhere (Stripe's, once a scenario pays) a
+ * header outside the CORS safelist forces a preflight the other side may refuse, and the
+ * address is nobody else's business. A route does not see `page.request`, so a test reads
+ * the API through the page instead (`page.evaluate` with `fetch`).
+ */
+async function prepare(
+  context: BrowserContext,
+  address: string,
+): Promise<void> {
+  await context.route(
+    (url) => url.origin === WEB_ORIGIN,
+    (route) =>
+      route.continue({
+        headers: { ...route.request().headers(), "x-forwarded-for": address },
+      }),
+  );
+  await routeStripeToStandIn(context);
+}
+
+/**
+ * A private address derived from the test, its attempt and which of its visitors it is
+ * (`0` for the test's own page, `"arrangement"` for the state arranged before it): stable
+ * for all three, apart for each. The arrangement has one of its own because a scenario
+ * that arranges a lot — the catalogue's twenty-one listings, created and retired — would
+ * otherwise spend most of the API's per-minute limit its own pages count against.
+ */
+function clientAddressOf(
+  testInfo: TestInfo,
+  visitor: number | "arrangement" = 0,
+): string {
   const [a = 0, b = 0, c = 0] = createHash("sha256")
-    .update(`${testInfo.testId}:${testInfo.retry}`)
+    .update(`${testInfo.testId}:${String(testInfo.retry)}:${String(visitor)}`)
     .digest();
 
   return `10.${a}.${b}.${c}`;

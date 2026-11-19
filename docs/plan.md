@@ -1091,9 +1091,13 @@ refund reported back later). Both are ticked in `docs/e2e-scenarios.md`.
 
 #### 11.2b — The scenarios
 
-- [ ] **The scenarios of `docs/e2e-scenarios.md`**, priorities 1 to 4, written most important
+- [x] **The scenarios of `docs/e2e-scenarios.md`**, priorities 1 to 4, written most important
       first; each is its own tick there. Each is marked there with where it runs once 11.3
-      and 11.4 add other targets, by the rule in that file.
+      and 11.4 add other targets, by the rule in that file. Payouts, which is real Stripe
+      only, waits for 11.3, and getting around, whose phone half is 11.2c's, for 11.2c.
+      Two people at once are two browser contexts of one test, each with an address of its
+      own; a scenario that changes an account — a host's listings, a guest someone reviews
+      or blocks — uses the test's host or registers one.
 
 #### 11.2c — The phone
 

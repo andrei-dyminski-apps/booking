@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { addMilliseconds, differenceInMilliseconds, parseISO } from "date-fns";
 import { useWatch, type Control } from "react-hook-form";
 import {
@@ -53,6 +53,7 @@ export const CancellationQuote = ({
 }) => {
   const [from, to, rate] = useWatch({ control, name: ["from", "to", "rate"] });
   const moment = useHoldMoment(now);
+  const id = useId();
 
   if (!isDay(from)) return null;
 
@@ -60,8 +61,14 @@ export const CancellationQuote = ({
 
   // Named, or the lines under the dates read as a list of nobody knows what.
   return (
-    <div className="flex flex-col gap-1">
-      <h3 className="text-sm font-medium">If you cancel this stay</h3>
+    <div
+      role="group"
+      aria-labelledby={`${id}-label`}
+      className="flex flex-col gap-1"
+    >
+      <h3 className="text-sm font-medium" id={`${id}-label`}>
+        If you cancel this stay
+      </h3>
       <RefundScheduleList
         schedule={refundSchedule({
           from,
