@@ -1662,7 +1662,9 @@ under test is the retry and locking logic, not a browser.
   never from `@playwright/test`. The fixture collects console errors, uncaught exceptions,
   failed requests and answers of `400` or more for the whole test, and fails a page reached
   and never passed to `pages.check()` — which runs axe and fails on serious and critical
-  violations. Call it once the page's content is on the screen, not its skeleton. A
+  violations. Call it once the page's content is on the screen, not its skeleton, and on
+  the page that shows it — `pages.check(page)` in a helper handed one, since each page is
+  accounted for apart and a check of another visitor's says nothing of this one. A
   response the test provokes on purpose (a not-found page, a refusal) is declared first
   with `pages.expectResponse`.
 - **Tests do not depend on each other.** The demo accounts (`e2e/demo.ts`) are only ever
@@ -1710,15 +1712,32 @@ under test is the retry and locking logic, not a browser.
   of that test and is given up.
 - **State a scenario should not click its way to is arranged first** (`arrange` in
   `e2e/fixtures.ts`, `e2e/arrange.ts`), by the application's own HTTP surface through the
-  BFF and never by writing to the database, so the arrangement works on every target.
-  `arrange.listing()` registers a host of the test's own and creates a listing for it;
-  the listing is retired when the test ends. A scenario that books has one, so no two tests
-  meet on a night and a retry never meets its failed attempt's hold. The scenario reaches
-  it by its address, never through the catalogue: a catalogue page is cached by URL, and
-  one read while an arranged listing was on offer would keep showing it to the catalogue's
-  own scenario after it was retired. A stay that has begun rests on a listing whose check-in
-  is at midnight on its today (`stay.ts`). A stay is always paid through the pages, never
-  arranged.
+  BFF and never by writing to the database, so the arrangement works on every target. It
+  sends an address of its own, apart from the test's pages, so a scenario that arranges a
+  lot does not spend the API's per-minute limit its pages count against.
+  `arrange.listing()` registers a host of the test's own and creates a listing for it, and
+  `arrange.host()` hands over that host's address and password, for a scenario where the
+  host signs in too; every listing the host still has when the test ends — one made through
+  the pages included — is retired. A scenario that books has one, so no two tests meet on a
+  night and a retry never meets its failed attempt's hold; its title is new on every
+  attempt too, since the stay a failed attempt left on a demo guest's list keeps its
+  listing's title after the listing is retired. A stay that has begun rests on a
+  listing whose check-in is at midnight on its today (`begunStayListing` in `stay.ts`), and
+  a stay that is over is one of those ended early. A stay is always paid through the pages,
+  never arranged.
+- **A scenario meets the catalogue at an address nobody else has read.** A catalogue page
+  is cached by URL, and one read while an arranged listing was on offer would keep showing
+  it after it was retired. So a scenario reaches its listing by its own address, and one
+  that reads the catalogue for its listings searches by a price no other listing has
+  (`randomInt` per attempt), whose first read is fresh. A write marks the cached pages
+  stale rather than emptying them, so the page served right after a change may be the one
+  before it: `expectInCatalogue` (`catalogue.ts`) reloads until the change arrives, and so
+  does a scenario reading a listing's calendar after somebody else's hold.
+- **Two people at once are two browsers**: `another()` (`fixtures.ts`) opens a page in a
+  fresh context with the project's options, its own address in `x-forwarded-for`, the same
+  route to the Stripe stand-in and the same checks on every page — `pages.check(thatPage)`.
+  A scenario that changes an account uses one of its own — the arranged host, or one
+  `registerThroughForm` (`session.ts`) signs up — never a demo one.
 - `e2e/*.spec.ts` are Playwright's, `src/**/*.spec.ts` Vitest's; neither runner picks up the
   other's files.
 

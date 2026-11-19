@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { parseISO } from "date-fns";
 import { Loader2Icon } from "lucide-react";
 import {
@@ -96,6 +96,7 @@ export const BookingLive = ({
     clock,
     schedule,
   } = useBookingLive({ initial, now, bankAnswer });
+  const termsId = useId();
   // Whether the early-end dialog is open: it stays on the page until it closes, even once
   // the stay can no longer end early — the day turned under it onto its last night.
   const [endingEarly, setEndingEarly] = useState(false);
@@ -230,8 +231,14 @@ export const BookingLive = ({
             charged yet, and without saying so "No refund" reads as cancelling the hold
             costing money. */}
           {(pending || confirmed) && (
-            <div className="flex flex-col gap-1">
-              <h3 className="text-sm font-medium">Cancellation</h3>
+            <div
+              role="group"
+              aria-labelledby={`${termsId}-label`}
+              className="flex flex-col gap-1"
+            >
+              <h3 className="text-sm font-medium" id={`${termsId}-label`}>
+                Cancellation
+              </h3>
               {pending && (
                 <p className="text-sm text-muted-foreground">
                   Nothing has been charged yet, so cancelling the hold costs

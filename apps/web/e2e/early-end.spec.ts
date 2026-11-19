@@ -1,7 +1,7 @@
 import { DEMO } from "./demo";
 import { expect, test } from "./fixtures";
-import { signInThroughForm } from "./session";
-import { dayIn, holdAndPay, zoneWellInsideItsDay } from "./stay";
+import { signInToListing } from "./session";
+import { begunStayListing, dayIn, holdAndPay } from "./stay";
 
 test("a guest ends a stay that has begun and is refunded the nights left", async ({
   page,
@@ -10,25 +10,15 @@ test("a guest ends a stay that has begun and is refunded the nights left", async
 }) => {
   // A stay that has begun: check-in at midnight where the listing is, on its today, which
   // has come already. Paid through the pages like any other.
-  const timeZone = zoneWellInsideItsDay();
   const listing = await arrange.listing({
     pricePerNightCents: 10_000,
-    timeZone,
-    checkInTime: "00:00",
+    ...begunStayListing(),
   });
 
-  await page.goto(`/login?next=/listings/${listing.id}`);
-  await pages.check();
-  await signInThroughForm(page, DEMO.guest);
-
-  await expect(
-    page.getByRole("heading", { level: 1, name: listing.title }),
-  ).toBeVisible();
-  await pages.check();
-
+  await signInToListing(page, pages, DEMO.guest, listing);
   await holdAndPay(page, pages, {
-    from: dayIn(timeZone),
-    to: dayIn(timeZone, 3),
+    from: dayIn(listing.timeZone),
+    to: dayIn(listing.timeZone, 3),
     total: "$300.00",
   });
 

@@ -4,11 +4,13 @@ import type {
   APIResponse,
 } from "@playwright/test";
 import {
+  listingListSchema,
   listingSchema,
   type createListingSchema,
   type Listing,
 } from "@repo/contracts";
 import type { z } from "zod";
+import type { Account } from "./demo";
 import { WEB_ORIGIN } from "./stack";
 
 /**
@@ -21,10 +23,16 @@ export type Arrange = {
   /**
    * A listing of this test's own, created before the scenario starts by a host registered
    * for it, and retired when the test ends. No other test books its nights, a retry meets
-   * none of the holds its failed attempt left — the retry has a listing of its own — and
+   * none of the holds its failed attempt left — the retry has a listing of its own, under a
+   * title of its own, so a demo guest's stays from the failed attempt never match it — and
    * once retired it is out of the catalogue, where the catalogue's own scenario reads.
    */
   listing(fields?: Partial<ListingFields>): Promise<Listing>;
+  /**
+   * The test's host, to sign in as in a browser of its own: the owner of every listing
+   * `listing()` creates, and an account of the test's own for a scenario that changes one.
+   */
+  host(): Promise<Account>;
 };
 
 const HOST_PASSWORD = "e2e-host-password";
@@ -44,12 +52,20 @@ export function arrangement(
   name: string,
 ): { arrange: Arrange; tearDown: () => Promise<void> } {
   let host: APIRequestContext | null = null;
-  const listings: string[] = [];
+  // New on every attempt: an address once registered stays taken, and a demo guest keeps the
+  // stays a failed attempt booked, whose cards would otherwise carry the retry's title too.
+  const stamp = Date.now().toString(36);
+  const account: Account = {
+    name: `Host of ${name}`.slice(0, 50),
+    email: `host-${address.replaceAll(".", "-")}-${stamp}@e2e.example`,
+    password: HOST_PASSWORD,
+  };
 
   const signedInHost = async (): Promise<APIRequestContext> => {
     if (host !== null) return host;
 
-    // The test's own address, so the API's limiter counts the arrangement with its test.
+    // An address of the test's own arrangement, so the API's limiter counts it with its
+    // test and apart from the test's pages.
     const context = await request.newContext({
       baseURL: WEB_ORIGIN,
       extraHTTPHeaders: { "x-forwarded-for": address },
@@ -59,11 +75,7 @@ export function arrangement(
       await succeeded(
         "registering the test's host",
         await context.post("/api/auth/register", {
-          data: {
-            name: `Host of ${name}`.slice(0, 50),
-            email: `host-${address.replaceAll(".", "-")}-${String(Date.now())}@e2e.example`,
-            password: HOST_PASSWORD,
-          },
+          data: account,
         }),
       );
     } catch (error) {
@@ -85,7 +97,7 @@ export function arrangement(
           "creating the test's listing",
           await owner.post("/api/listings", {
             data: {
-              title: `A stay for ${name}`.slice(0, 100),
+              title: `${`A stay for ${name}`.slice(0, 89)} · ${stamp}`,
               description:
                 "A quiet room the browser suite arranged for one of its scenarios.",
               pricePerNightCents: 10_000,
@@ -96,21 +108,38 @@ export function arrangement(
         ),
       );
 
-      listings.push(listing.id);
-
       return listing;
+    },
+
+    async host() {
+      await signedInHost();
+
+      return account;
     },
   };
 
-  // Every listing is retired even when one refusal comes first, and the host's context
-  // is let go either way; the first refusal is what the test reports.
+  // Every listing the host still has is retired — the ones a scenario made through the
+  // pages too — even when one refusal comes first, and the host's context is let go either
+  // way; the first refusal is what the test reports.
   const tearDown = async () => {
     if (host === null) return;
 
     const owner = host;
     const refusals: unknown[] = [];
+    let listings: Listing[] = [];
 
-    for (const id of listings) {
+    try {
+      listings = listingListSchema.parse(
+        await succeeded(
+          "reading the test's listings",
+          await owner.get("/api/listings/mine"),
+        ),
+      );
+    } catch (error) {
+      refusals.push(error);
+    }
+
+    for (const { id } of listings) {
       try {
         await succeeded(
           "retiring the test's listing",

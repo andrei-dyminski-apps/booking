@@ -36,7 +36,7 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
 
 ## Priority 1 — the application does not work without these
 
-- [ ] **Register.** A new visitor fills in the form and lands signed in under their own name.
+- [x] **Register.** A new visitor fills in the form and lands signed in under their own name.
       _Hermetic only. Cheap._
 - [x] **Sign in and out.** A demo account signs in and sees its own name; on its profile it
       finds its details, the dates among them in the visitor's own time zone; after signing
@@ -44,18 +44,18 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
 - [x] **Protected page.** An anonymous visitor opening a page behind the session is sent to
       the sign-in page and, once signed in, arrives on the page they asked for.
       _Every target. Cheap._
-- [ ] **Browsing without an account.** A visitor who has not signed in reads a listing — its
+- [x] **Browsing without an account.** A visitor who has not signed in reads a listing — its
       description, price and availability calendar — and, wanting to book or to write to the
       host, is offered to sign in, and once signed in arrives back on that listing.
       _Every target. Cheap._
-- [ ] **Catalogue and search.** Starting from the home page, a visitor filters and orders the
+- [x] **Catalogue and search.** Starting from the home page, a visitor filters and orders the
       stays; the list changes, survives a reload and a shared link, "next page" continues
       it, and a stay on it opens its listing's page. _Every target. Cheap._
 - [x] **Booking and payment.** A guest opens a listing, reads its description, price and
       availability calendar, picks dates, sees the quote, holds the stay, sees the countdown,
       pays, and lands on a confirmed stay. Finding a listing is the catalogue's scenario.
       The centrepiece. _Every target. Expensive._
-- [ ] **My bookings.** A guest who has booked finds the stay among their bookings with its
+- [x] **My bookings.** A guest who has booked finds the stay among their bookings with its
       status and amount, and opens it. _Every target. Medium: the stay is arranged beforehand,
       and paid through the pages._
 - [ ] **Getting around.** A visitor reaches the pages their role uses — a guest's bookings,
@@ -64,64 +64,70 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
       sidebar on desktop, the menu sheet on a phone, where it is walked once more together
       with the catalogue up to a listing's page. _Every target on desktop for the guest's
       and the host's pages, hermetic only for the admin's; the phone run is hermetic only.
-      Cheap._
+      Cheap._ The desktop walk is written and green; the tick waits for the phone's (11.2c).
 
 ## Priority 2 — the main functions of each role
 
-- [ ] **Guest: choosing a rate.** On a listing that offers both, a guest sees the flexible
+- [x] **Guest: choosing a rate.** On a listing that offers both, a guest sees the flexible
       and the non-refundable rate side by side, with the cancellation terms and what each
       costs; picking one changes the quote, and the stay they book keeps that rate and its
       terms. _Every target. Medium: the listing is arranged beforehand._
-- [ ] **Guest: cancelling a paid stay.** The dialog states the refund; the stay then shows
+- [x] **Guest: cancelling a paid stay.** The dialog states the refund; the stay then shows
       the same figure, first as on its way and then as refunded. _Every target. Expensive:
       the refund is asynchronous._
-- [ ] **Host: managing listings.** A host creates a listing, edits it, deletes it; the
+- [x] **Host: managing listings.** A host creates a listing, edits it, deletes it; the
       catalogue shows each change. _Every target. Medium._
-- [ ] **Host: a guest's stay.** A guest pays for a stay on the host's listing; the host, in
+- [x] **Host: a guest's stay.** A guest pays for a stay on the host's listing; the host, in
       another browser, finds it on their calendar and among their bookings. _Every target.
       Expensive._
-- [ ] **Host: cancelling a guest's stay.** The host cancels a paid stay; the dialog states
+- [x] **Host: cancelling a guest's stay.** The host cancels a paid stay; the dialog states
       the refund and the guest's stay then shows the same figure. _Hermetic only: the
       API already proves the rules. Expensive._
-- [ ] **Messages.** A guest writes to the host from the listing page; the host, in another
+- [x] **Messages.** A guest writes to the host from the listing page; the host, in another
       browser, sees the message arrive without reloading and replies; the guest sees the
       reply. _Every target. Medium._
 
 ## Priority 3 — secondary functions
 
-- [ ] **Notifications.** A guest writes to a host; the host's bell counts the message, the
-      notifications page lists it, and marking all read clears the count. _Every target.
-      Medium._
-- [ ] **Waitlist.** A guest wanting dates that someone else holds joins the waitlist for
+- [x] **Notifications.** A guest books a host's listing; the host's bell counts the notices
+      of the hold and its payment, the notifications page lists them, and marking all read
+      clears the count. A message is not a notice — it has the unread count beside Messages,
+      which the messages scenario covers. _Every target. Expensive: the notices come of a
+      payment._
+- [x] **Waitlist.** A guest wanting dates that someone else holds joins the waitlist for
       them, sees it on their waitlist page, and leaves it. _Hermetic only: the second guest
       who holds the dates is registered by the scenario, and the deployment has none.
       Medium._
 - [x] **Ending a stay early.** The refund is stated before the guest confirms, and the stay
       then shows the end and the same figure. _Every target. Expensive: needs a stay that
       has begun._
-- [ ] **Reviews.** After a stay that is over, the guest reviews the listing; the review shows
-      on the listing and among the guest's own reviews. _Every target. Expensive: needs a
-      stay that is over, which only an early end produces._
-- [ ] **Host: reviewing a guest.** After a stay that is over, the host reviews the guest; the
+- [x] **Reviews.** After a stay that is over, the guest reviews the listing; the review shows
+      on the listing, and the stay is marked reviewed among the guest's bookings. _Every
+      target. Expensive: needs a stay that is over, which only an early end produces._
+- [x] **Host: reviewing a guest.** After a stay that is over, the host reviews the guest; the
       guest finds it, as reviews of them, from their profile, and the host finds the guest's
       reviews from the stay. _Every target. Expensive: needs a stay that is over._
-- [ ] **Role gates.** A guest opening the admin pages or the host's dashboard is turned away
-      and sees none of their content. The one scenario that is a refusal: what a browser adds
-      to the API's own check is that the page never flashes content it should not show.
+- [x] **Role gates.** A guest opening the admin pages or the edit page of a host's listing is
+      turned away and sees none of their content — every user has a dashboard of their own,
+      so a host's is reached through their listing. The one scenario that is a refusal: what
+      a browser adds to the API's own check is that the page never flashes content it should
+      not show.
       _Every target. Cheap._
 - [x] **A broken link.** A visitor who opens an address that does not exist sees a not-found
       page and gets back to the catalogue from it. _Every target. Cheap._
 
 ## Priority 4 — admin and extra screens
 
-- [ ] **Admin: blocking a user.** The admin finds a user the test registered itself through
+- [x] **Admin: blocking a user.** The admin finds a user the test registered itself through
       the users list and its filter, opens their page and blocks them, who can then no longer
       sign in. _Hermetic only. Medium._
-- [ ] **Admin: editing a listing.** The admin finds a listing in the admin's listings list,
+- [x] **Admin: editing a listing.** The admin finds a listing in the admin's listings list,
       changes it, and the catalogue shows the change. _Hermetic only. Medium._
-- [ ] **Admin: a partial refund.** The admin finds a paid stay in the payments list and
-      refunds part of it; the amounts shown follow. _Hermetic only. Expensive; the API
-      already proves the rules._
+- [x] **Admin: a partial refund.** The admin finds a paid stay through its listing — the
+      admin's list of listings, then the stays taken against it — and refunds part of it; the
+      amounts shown follow, on the admin's page and the guest's. The payments list holds
+      only what the money paths set aside, never a stay paid as it should be. _Hermetic
+      only. Expensive; the API already proves the rules._
 - [ ] **Payouts.** A host who has not set up payouts is told so on their dashboard; they open
       the payouts page, pick the country of their payout account and are handed over to
       Stripe's own onboarding; what is inside it is Stripe's, not tested. _Real Stripe only:
