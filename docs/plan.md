@@ -1021,21 +1021,27 @@ other than desktop and one phone.
 
 ### 11.1 — The hermetic stack and the CI job
 
-- [ ] **A browser suite for the frontend**, with a command of its own apart from the API's
+The step ships the three scenarios of `docs/e2e-scenarios.md` that prove the stack itself
+rather than a function of the application — signing in and out, the page behind the
+session and the broken link — so every piece of it runs in a spec, an expected not-found
+answer included. The CI tick waits for the job's first green run on GitHub, and making it a
+required check is a setting of the repository.
+
+- [x] **A browser suite for the frontend**, with a command of its own apart from the API's
       e2e. It sees the application the way a visitor does, on a reader's clock that is the
       same on every machine, and a failure leaves enough to diagnose it without a rerun.
-- [ ] **A hermetic stack that the suite starts itself.** The production builds of the
+- [x] **A hermetic stack that the suite starts itself.** The production builds of the
       frontend and the API, with a database and a cache of their own that nothing else uses,
       so a run can never wipe the development stack. Every run starts from the same clean
       state, with the demo data and no page cached by an earlier run. The suite can be run
       unattended, which is possible because the reset can only ever reach its own database.
-- [ ] **Stripe is off in this stack.** Nothing in a run reaches Stripe, and a deployment
+- [x] **Stripe is off in this stack.** Nothing in a run reaches Stripe, and a deployment
       cannot be started in that mode. The API's own e2e specs stay green on this change.
-- [ ] **Tests do not depend on each other**, by the rules in `docs/e2e-scenarios.md`: a
+- [x] **Tests do not depend on each other**, by the rules in `docs/e2e-scenarios.md`: a
       retry never meets what the first attempt left, and the demo accounts, which are
       shared, are only signed in to. One test's traffic never gets another's refused by the
       API's limits.
-- [ ] **Every page is checked**, by the rule in `docs/e2e-scenarios.md`.
+- [x] **Every page is checked**, by the rule in `docs/e2e-scenarios.md`.
 - [ ] **CI.** A job of its own beside the existing checks and the API's e2e: build, run, and
       keep the report and a failure's traces.
   - **It runs on every pull request, with no path filter**: a change to `@repo/contracts` or
@@ -1046,7 +1052,7 @@ other than desktop and one phone.
     reported as flaky; a test seen flaky twice is fixed or removed, not given more retries.
   - **One worker, here and on every target later steps add**, because the tests share the
     demo accounts.
-- [ ] **Documentation.** The command, the CI job and the rules of the suite are recorded where
+- [x] **Documentation.** The command, the CI job and the rules of the suite are recorded where
       `.claude/rules/workflow.md` already sends them, including the rule that a change
       reaching a screen runs the browser suite. `apps/web/CLAUDE.md` records what belongs in
       it: a scenario's main path, never an edge case.

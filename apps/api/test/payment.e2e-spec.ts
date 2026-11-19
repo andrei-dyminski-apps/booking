@@ -224,6 +224,7 @@ describe("Payments (e2e)", () => {
 
   beforeEach(async () => {
     const config = {
+      off: false,
       secretKey: "sk_test_e2e",
       paymentWebhookSecret,
       payoutWebhookSecret: paymentWebhookSecret,

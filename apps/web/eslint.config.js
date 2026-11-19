@@ -1,3 +1,4 @@
+import { globalIgnores } from "eslint/config";
 import { nextJsConfig } from "@repo/eslint-config/next-js";
 
 /**
@@ -7,4 +8,14 @@ import { nextJsConfig } from "@repo/eslint-config/next-js";
  * sidesteps a public API — and it also judges the shape of the tree. Duplicating half of
  * that here bought nothing but a second place for the rules to drift.
  */
-export default nextJsConfig;
+export default [
+  ...nextJsConfig,
+  {
+    // A Playwright fixture hands its value on through a callback named `use`, which the
+    // rule takes for React's hook; nothing under e2e/ is React.
+    files: ["e2e/**"],
+    rules: { "react-hooks/rules-of-hooks": "off" },
+  },
+  // What the browser suite writes: its report, and the traces and videos of a failure.
+  globalIgnores(["playwright-report/**", "test-results/**", "blob-report/**"]),
+];

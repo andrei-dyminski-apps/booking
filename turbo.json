@@ -29,6 +29,8 @@
     "STRIPE_PAYOUT_WEBHOOK_SECRET",
     "STRIPE_SITE",
     "STRIPE_PUBLISHABLE_KEY",
+    "STRIPE_OFF",
+    "DATA_CACHE_IN_MEMORY",
     "VERCEL_ENV",
     "VERCEL_PROJECT_PRODUCTION_URL"
   ],
@@ -54,6 +56,11 @@
     "test:e2e": {
       "dependsOn": ["^build"],
       "cache": false
+    },
+    "test:browser": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "passThroughEnv": ["CI", "PLAYWRIGHT_*", "DOCKER_*"]
     },
     "dev": {
       "dependsOn": ["^build"],

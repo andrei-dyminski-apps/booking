@@ -11,6 +11,7 @@
     "check-types": "pnpm turbo run check-types",
     "test": "pnpm turbo run test",
     "test:e2e": "pnpm turbo run test:e2e",
+    "test:browser": "pnpm turbo run test:browser",
     "railway": "scripts/railway-power.sh",
     "railway:stop": "scripts/railway-power.sh stop",
     "railway:start": "scripts/railway-power.sh start",

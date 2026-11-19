@@ -47,3 +47,8 @@ yarn-error.log*
 
 # A snapshot written by a redis-server started inside the repository
 dump.rdb
+
+# The browser suite's report and the traces a failure leaves (apps/web/e2e)
+playwright-report
+test-results
+blob-report

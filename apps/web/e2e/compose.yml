@@ -1,0 +1,43 @@
+# The browser suite's own database and cache, started by the suite itself
+# (`playwright.config.ts`) and never by hand. A project of its own, apart from the development
+# one in the root docker-compose.yml, so neither `docker compose down` reaches the other, and
+# on ports of their own (`e2e/stack.ts` holds the same numbers), so both run side by side.
+#
+# Nothing is kept: the data lives in memory and goes with the container, which every run
+# recreates — a run starts from an empty database whatever the last one left. Both data
+# directories are tmpfs, so neither image's VOLUME leaves an anonymous volume behind.
+name: booking-e2e
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: booking
+      POSTGRES_PASSWORD: booking
+      POSTGRES_DB: booking_e2e
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    # Over TCP, not the socket: the image initialises a fresh database through a temporary
+    # server that listens on the socket alone and is stopped before the real one starts, so
+    # a check through the socket can pass in between and hand the migrations a restart.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U booking -d booking_e2e"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  # noeviction for the reason the development Redis gives in the root docker-compose.yml.
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory-policy", "noeviction", "--save", ""]
+    ports:
+      - "6380:6379"
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 30

@@ -12,6 +12,7 @@ const PAYMENT_ID = "pi_spec";
 const KEY = "booking-1-adjustment-2";
 
 const config: PaymentConfig = {
+  off: false,
   secretKey: "sk_test_spec",
   paymentWebhookSecret: "whsec_spec",
   payoutWebhookSecret: "whsec_spec",

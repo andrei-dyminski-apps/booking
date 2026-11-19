@@ -42,12 +42,18 @@ const DEMO_PASSWORD = "password123";
  * exists to tell apart for an admin, and what a host sees only by the id. Hosting is not a
  * role: the hosts are users who own listings, and the second one books a stay of the
  * first's as well, so one account has both a Trips and a Hosting side.
+ *
+ * The guest joined at a fixed moment in the past rather than at the seed's run: one whose
+ * day is not the same in UTC as in Auckland, so the browser suite's check that "Joined" is
+ * drawn on the reader's clock fails whenever it is not, at any hour of any run. A moment
+ * in the past stays valid — the clock-bound rules are about days still ahead.
  */
 const users = {
   guest: {
     name: "Maya Lindqvist",
     email: "guest@example.com",
     role: Role.USER,
+    createdAt: new Date("2026-01-15T18:00:00Z"),
   },
   owner: { name: "Tomas Berg", email: "owner@example.com", role: Role.USER },
   admin: { name: "Nora Hale", email: "admin@example.com", role: Role.ADMIN },
@@ -63,7 +69,10 @@ const users = {
     role: Role.USER,
   },
   sam: { name: "Sam Ortega", email: "sam@example.com", role: Role.USER },
-} satisfies Record<string, { name: string; email: string; role: Role }>;
+} satisfies Record<
+  string,
+  { name: string; email: string; role: Role; createdAt?: Date }
+>;
 
 type UserKey = keyof typeof users;
 

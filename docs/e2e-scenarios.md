@@ -38,10 +38,10 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
 
 - [ ] **Register.** A new visitor fills in the form and lands signed in under their own name.
       _Hermetic only. Cheap._
-- [ ] **Sign in and out.** A demo account signs in and sees its own name; on its profile it
+- [x] **Sign in and out.** A demo account signs in and sees its own name; on its profile it
       finds its details, the dates among them in the visitor's own time zone; after signing
       out the account's pages are no longer reachable. _Every target. Cheap._
-- [ ] **Protected page.** An anonymous visitor opening a page behind the session is sent to
+- [x] **Protected page.** An anonymous visitor opening a page behind the session is sent to
       the sign-in page and, once signed in, arrives on the page they asked for.
       _Every target. Cheap._
 - [ ] **Browsing without an account.** A visitor who has not signed in reads a listing — its
@@ -108,7 +108,7 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
       and sees none of their content. The one scenario that is a refusal: what a browser adds
       to the API's own check is that the page never flashes content it should not show.
       _Every target. Cheap._
-- [ ] **A broken link.** A visitor who opens an address that does not exist sees a not-found
+- [x] **A broken link.** A visitor who opens an address that does not exist sees a not-found
       page and gets back to the catalogue from it. _Every target. Cheap._
 
 ## Priority 4 — admin and extra screens
@@ -128,7 +128,7 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
 
 ## Cross-cutting
 
-- [ ] **No errors, no accessibility violations.** Every page any scenario visits opens with
+- [x] **No errors, no accessibility violations.** Every page any scenario visits opens with
       no console error and no failed request, and passes an automated accessibility check
       that fails on serious and critical violations. A response a scenario expects — a
       not-found page, a redirect to sign-in, a refusal of a role — is declared by the test

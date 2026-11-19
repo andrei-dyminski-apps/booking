@@ -1,0 +1,11 @@
+{
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "inputs": ["$TURBO_DEFAULT$", ".env*", "!e2e/**", "!playwright.config.ts"]
+    },
+    "test:browser": {
+      "dependsOn": ["^build", "build", "@repo/api#build"]
+    }
+  }
+}

@@ -37,6 +37,7 @@ async function main(): Promise<void> {
   }
 
   const config: PaymentConfig = {
+    off: false,
     secretKey,
     paymentWebhookSecret: "",
     payoutWebhookSecret: "",
