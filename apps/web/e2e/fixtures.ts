@@ -57,6 +57,54 @@ const STRIPE_FRAMES = [
   'iframe[src^="https://connect-js.stripe.com/"]',
 ];
 
+/** How many times a page is read again because something started moving while axe read it. */
+const MAX_UNSETTLED_READS = 3;
+
+/**
+ * Lets every finite animation finish and reports whether there was any. A transition in
+ * flight is read at whatever frame it has reached: a link React keeps across a render and
+ * hands new classes (the account panel after signing out) fades between two colour pairs,
+ * and a contrast check halfway through fails a page that is fine at rest. An endless
+ * animation (a spinner) never finishes, so it is left alone.
+ */
+const settleAnimations = (page: Page): Promise<boolean> =>
+  page.evaluate(async () => {
+    const finite = document
+      .getAnimations()
+      .filter(
+        (animation) =>
+          animation.playState === "running" &&
+          animation.effect?.getComputedTiming().endTime !== Infinity,
+      );
+
+    await Promise.all(
+      finite.map((animation) => animation.finished.catch(() => undefined)),
+    );
+
+    return finite.length > 0;
+  });
+
+/**
+ * Runs axe over the page at rest. Something can start moving while axe reads it — a toast a
+ * live notice raises mid-scan fades in, and its half-transparent button fails the contrast
+ * rule — so a read during which an animation began is thrown away and taken again once it
+ * has finished.
+ */
+const analyzeAtRest = async (page: Page) => {
+  await settleAnimations(page);
+
+  for (let read = 1; ; read += 1) {
+    // One selector a call: an array is read as a path into nested frames.
+    const results = await STRIPE_FRAMES.reduce(
+      (builder, frame) => builder.exclude(frame),
+      new AxeBuilder({ page }),
+    ).analyze();
+    const moved = await settleAnimations(page);
+
+    if (!moved || read === MAX_UNSETTLED_READS) return results;
+  }
+};
+
 /**
  * The rule every scenario follows (`docs/e2e-scenarios.md`): each page a test visits opens
  * with no console error and no failed request, and passes the accessibility check. The
@@ -178,28 +226,7 @@ export const test = base.extend<{
           // one run to the next. Every page is read with the pointer in the same corner.
           await checkedPage.mouse.move(0, 0);
 
-          // A transition in flight is read at whatever frame it has reached: a link React
-          // keeps across a render and hands new classes (the account panel after signing
-          // out) fades between two colour pairs, and a contrast check halfway through fails
-          // a page that is fine at rest. So every finite animation — the pointer's leaving
-          // included — is let finish first; an endless one (a spinner) never would.
-          await checkedPage.evaluate(() =>
-            Promise.all(
-              document
-                .getAnimations()
-                .filter(
-                  (animation) =>
-                    animation.effect?.getComputedTiming().endTime !== Infinity,
-                )
-                .map((animation) => animation.finished.catch(() => undefined)),
-            ),
-          );
-
-          // One selector a call: an array is read as a path into nested frames.
-          const results = await STRIPE_FRAMES.reduce(
-            (builder, frame) => builder.exclude(frame),
-            new AxeBuilder({ page: checkedPage }),
-          ).analyze();
+          const results = await analyzeAtRest(checkedPage);
           const violations = results.violations.filter(
             (violation) =>
               violation.impact != null && FAILING_IMPACTS.has(violation.impact),

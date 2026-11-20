@@ -1043,7 +1043,7 @@ required check is a setting of the repository.
       shared, are only signed in to. One test's traffic never gets another's refused by the
       API's limits.
 - [x] **Every page is checked**, by the rule in `docs/e2e-scenarios.md`.
-- [ ] **CI.** A job of its own beside the existing checks and the API's e2e: build, run, and
+- [x] **CI.** A job of its own beside the existing checks and the API's e2e: build, run, and
       keep the report and a failure's traces.
   - **It runs on every pull request, with no path filter**: a change to `@repo/contracts` or
     `@repo/ui` reaches a screen without touching `apps/web`, and a required check skipped by
