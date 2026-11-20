@@ -1,10 +1,12 @@
-# booking
+<img src="apps/web/app/icon.svg" alt="" width="56" height="56">
+
+# StayDesk
 
 [![CI](https://github.com/andrei-dyminski-apps/booking/actions/workflows/ci.yml/badge.svg)](https://github.com/andrei-dyminski-apps/booking/actions/workflows/ci.yml)
 
-A stay-booking marketplace built as a Turborepo monorepo: a Next.js 16 frontend, a NestJS 11 API, PostgreSQL through Prisma 7, Redis behind BullMQ, and Stripe for the money. Guests hold nights and pay for them, hosts publish listings and are paid out, an admin deals with what the background jobs could not. One zod contract in `packages/contracts` is the single description of the API for both sides.
+StayDesk (the repository is `booking`) is a stay-booking marketplace built as a Turborepo monorepo: a Next.js 16 frontend, a NestJS 11 API, PostgreSQL through Prisma 7, Redis behind BullMQ, and Stripe for the money. Guests hold nights and pay for them, hosts publish listings and are paid out, an admin deals with what the background jobs could not. One zod contract in `packages/contracts` is the single description of the API for both sides.
 
-**Live demo: <https://booking-beige-five.vercel.app>** — the web on Vercel, the API with PostgreSQL and Redis on Railway. Sign in with one of the [demo logins](#try-it) and pay with a Stripe test card; the data is reset from time to time.
+**Live demo: <https://staydesk.dev>** — the web on Vercel, the API with PostgreSQL and Redis on Railway. Sign in with one of the [demo logins](#try-it) and pay with a Stripe test card; the data is reset from time to time.
 
 <img src="docs/images/double-booking.gif" alt="Two guests press &quot;Hold these dates&quot; for the same nights at the same moment: one is taken to payment, the other is told the nights are gone" width="100%">
 
@@ -56,7 +58,7 @@ The browser never talks to the API: it calls `/api` on the frontend's own origin
 
 ## Try it
 
-On the [live demo](https://booking-beige-five.vercel.app), or locally after the seed, there are demo logins, all with the password `password123`:
+On the [live demo](https://staydesk.dev), or locally after the seed, there are demo logins, all with the password `password123`:
 
 | Account             | What it is for                                            |
 | ------------------- | --------------------------------------------------------- |
@@ -788,6 +790,8 @@ The API replica runs in `us-east4-eqdc4a` (Virginia), next to Vercel's default f
 Postgres is a service in the same Railway project, and `DATABASE_URL` is set as a reference to it (`${{Postgres.DATABASE_URL}}`) rather than copied — the credentials then survive a rotation. The rest of the variables from the table above are set by hand; the JWT secrets are generated (`openssl rand -hex 32`), not taken from `.env.example`.
 
 Stripe needs one more step on each side. The webhook endpoint is registered in the Dashboard at `https://<api>/payments/webhook` for `payment_intent.amount_capturable_updated`, `payment_intent.succeeded`, `charge.refunded`, `refund.failed`, `charge.dispute.created` and `charge.dispute.closed`, and its signing secret becomes `STRIPE_PAYMENT_WEBHOOK_SECRET` on Railway beside `STRIPE_SECRET_KEY` and a `STRIPE_SITE` of the deployment's own (`production`); a second destination, "Your account" with the thin events `v2.core.account[configuration.recipient].capability_status_updated` and `v2.core.account[requirements].updated`, goes to `https://<api>/payouts/webhook` and its secret to `STRIPE_PAYOUT_WEBHOOK_SECRET`; `STRIPE_PUBLISHABLE_KEY` goes to Vercel, as a runtime variable like `API_ORIGIN`. Both destinations deliver in the API version the API pins (`STRIPE_API_VERSION` in `apps/api/src/payment/infrastructure/stripe.ts`); the API logs a warning when an event arrives in another.
+
+The site lives at `staydesk.dev`, a domain of the Vercel project with `www.staydesk.dev` redirecting to it. `.dev` is on the browsers' HSTS preload list as a whole, so the domain answers over HTTPS only, from the first visit; Vercel issues the certificate. Nothing in the code names the domain: `SITE_ORIGIN` is set to `https://staydesk.dev` on Vercel — the canonical links, the shared links and the JSON-LD are built on it — and `WEB_ORIGIN` on Railway, for `/docs`. The session cookie, the BFF and Stripe's `return_url` all follow the host the page is open on, so a preview on `*.vercel.app` keeps working beside it.
 
 On the Vercel side `API_ORIGIN` is a runtime variable of the frontend — it is read on the server, never inlined into the bundle, so a changed API address is a redeploy without a rebuild. `TRUST_PROXY` on the Railway side has to account for the extra `X-Forwarded-For` entry the frontend server's own request produces, or the rate limiter buckets every visitor together.
 

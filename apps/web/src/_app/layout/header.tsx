@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { SearchIcon } from "lucide-react";
 import type { User } from "@repo/contracts";
-import { ROUTES } from "#shared/config";
+import { ROUTES, SITE_NAME } from "#shared/config";
 import { ButtonLink } from "#shared/ui";
 import { AccountNotifications } from "./account-notifications";
+import { BrandMark } from "./brand-mark";
 import { MobileNav } from "./mobile-nav";
 import { SessionRecovery } from "./session-recovery";
 import { ThemeToggle } from "./theme-toggle";
@@ -29,9 +30,10 @@ export const Header = ({ user }: { user: User | null }) => (
 
       <Link
         href={ROUTES.home}
-        className="font-semibold tracking-tight lg:hidden"
+        className="flex items-center gap-2 font-semibold tracking-tight lg:hidden"
       >
-        Booking
+        <BrandMark className="size-7" />
+        {SITE_NAME}
       </Link>
 
       <SessionRecovery signedIn={user !== null} />

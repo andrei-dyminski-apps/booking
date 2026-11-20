@@ -1,11 +1,16 @@
 import type { Metadata } from "next";
-import { NONCE_HEADER, SITE_NAME, siteOrigin, siteUrl } from "#shared/config";
+import {
+  NONCE_HEADER,
+  SITE_DESCRIPTION,
+  SITE_LOGO,
+  SITE_NAME,
+  siteOrigin,
+  siteUrl,
+} from "#shared/config";
 import { JsonLd } from "#shared/ui";
 import { Providers } from "../providers";
 import { AppShell } from "./app-shell";
 import "../styles/globals.css";
-
-const DESCRIPTION = "A booking demo built on a shared zod contract";
 
 /**
  * What every page inherits: the base every relative URL of a page's metadata is resolved
@@ -15,17 +20,21 @@ const DESCRIPTION = "A booking demo built on a shared zod contract";
  *
  * The shared link names the site and says what it is, so a page with no `openGraph` of
  * its own is still shared as something rather than as a bare address; a page that has one
- * replaces this whole.
+ * replaces this whole. The picture it is shared with is not here: `app/opengraph-image.png`
+ * and `app/twitter-image.png` are file conventions, which Next puts on every page beneath
+ * them and ranks above any page's `openGraph` — the listings have no photos of their own
+ * yet, so the brand card is the one picture there is. The icons are file conventions too
+ * (`favicon.ico`, `icon.svg`, `apple-icon.png`).
  */
 export const generateMetadata = (): Metadata => ({
   metadataBase: new URL(siteOrigin()),
   title: { default: SITE_NAME, template: `%s · ${SITE_NAME}` },
-  description: DESCRIPTION,
+  description: SITE_DESCRIPTION,
   openGraph: {
     siteName: SITE_NAME,
     type: "website",
     title: SITE_NAME,
-    description: DESCRIPTION,
+    description: SITE_DESCRIPTION,
   },
 });
 
@@ -39,12 +48,13 @@ const siteJsonLd = () => [
     "@id": siteUrl("/#organization"),
     name: SITE_NAME,
     url: siteUrl("/"),
+    logo: siteUrl(SITE_LOGO),
   },
   {
     "@type": "WebSite",
     "@id": siteUrl("/#website"),
     name: SITE_NAME,
-    description: DESCRIPTION,
+    description: SITE_DESCRIPTION,
     url: siteUrl("/"),
     publisher: { "@id": siteUrl("/#organization") },
   },

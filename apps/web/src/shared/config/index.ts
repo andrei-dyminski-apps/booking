@@ -9,7 +9,13 @@ export {
 export { HTTP_STATUS } from "./http-status";
 export { NONCE_HEADER } from "./nonce";
 export { REQUEST_TIMEOUT_MS } from "./request-timeout";
-export { SITE_NAME, siteOrigin, siteUrl } from "./site";
+export {
+  SITE_DESCRIPTION,
+  SITE_LOGO,
+  SITE_NAME,
+  siteOrigin,
+  siteUrl,
+} from "./site";
 export { stripePublishableKey, stripeVariables } from "./stripe";
 export { TIME_ZONE_COOKIE, TIME_ZONE_COOKIE_MAX_AGE } from "./time-zone";
 export {

@@ -12,7 +12,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@repo/ui/components/sheet";
-import { ROUTES } from "#shared/config";
+import { ROUTES, SITE_NAME } from "#shared/config";
 import { AccountPanel } from "./account-panel";
 import { navigationFor } from "./navigation";
 import { NavLinks } from "./nav-links";
@@ -53,7 +53,7 @@ export const MobileNav = ({ user }: { user: User | null }) => {
 
       <SheetContent side="left" className="w-68">
         <SheetHeader>
-          <SheetTitle>Booking</SheetTitle>
+          <SheetTitle>{SITE_NAME}</SheetTitle>
           <SheetDescription>Rooms, dates and guests.</SheetDescription>
         </SheetHeader>
 

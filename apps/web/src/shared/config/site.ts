@@ -1,5 +1,16 @@
 /** What the site calls itself: the tab's title, the shared link's name and the publisher's. */
-export const SITE_NAME = "Booking";
+export const SITE_NAME = "StayDesk";
+
+/** What the site says it is: the description a result shows and the shared link carries. */
+export const SITE_DESCRIPTION =
+  "Find a stay, book the nights and pay for them; hosts list rooms and get paid out. A demo built on one shared zod contract.";
+
+/**
+ * The square logo a document names the site by — the `Organization` of the JSON-LD and the
+ * web app manifest. A file of `public/`, not one of the `app/icon` conventions, whose
+ * address Next suffixes with a hash a document could not state ahead of time.
+ */
+export const SITE_LOGO = "/icon-512.png";
 
 /**
  * A configured address as an origin, or `null` when it cannot be one. A bare host is read

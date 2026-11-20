@@ -1010,7 +1010,19 @@ penalises, and that drift is what a shared schema exists to prevent.
   read as `https`, and a value that is not an address is passed over like an empty one —
   the root layout's `metadataBase` is built on it on every request, and a `new URL` that
   threw there would take every page down.
-- **The title is the page's, set into the layout's template** (`%s · Booking`). A page's
+- **The site is named once** (`SITE_NAME`, `SITE_DESCRIPTION` and `SITE_LOGO` in
+  `shared/config/site.ts`): the title template, the shared link, the JSON-LD's
+  `Organization` and `WebSite`, the manifest and the shell's own wordmark all read it.
+- **The pictures are file conventions of `app/`**: `favicon.ico`, `icon.svg`,
+  `apple-icon.png`, and `opengraph-image.png` and `twitter-image.png` with their `.alt.txt`
+  beside them. Next puts them on every page beneath and ranks them above any page's
+  `openGraph`, so the listings, which have no photos yet, are shared with the brand card.
+  The manifest (`app/manifest.ts` over `_app/seo`) and the `Organization`'s `logo` name the
+  PNGs of `public/` instead — an `app/icon` file is served under a hashed address a
+  document cannot state. The logo in the shell is `BrandMark` (`_app/layout/brand-mark.tsx`),
+  the same drawing in the theme's tokens; the files are that drawing in fixed colours, and
+  a change to one is a change to all of them.
+- **The title is the page's, set into the layout's template** (`%s · StayDesk`). A page's
   `openGraph` replaces the layout's whole rather than merging into it, so a page that sets
   one names `siteName` and `type` again; a page that sets none is shared under the site's
   own title and description.
