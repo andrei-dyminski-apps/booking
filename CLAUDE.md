@@ -4,7 +4,7 @@ Instructions for Claude Code when working in this repository.
 
 ## What this project is
 
-`booking` is a monorepo on Turborepo + pnpm workspaces. Two applications in `apps/*` and
+`booking` is a monorepo on Turborepo + pnpm workspaces; the product it builds is StayDesk, deployed at `https://staydesk.dev`. Two applications in `apps/*` and
 the packages they share in `packages/*` — `pnpm-workspace.yaml` and each `package.json`
 are the inventory.
 

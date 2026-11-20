@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { User } from "@repo/contracts";
-import { ROUTES } from "#shared/config";
+import { ROUTES, SITE_NAME } from "#shared/config";
 
 /**
  * The quiet end of every page: what this is, and the links a visitor might want from it.
@@ -14,7 +14,7 @@ import { ROUTES } from "#shared/config";
 export const SiteFooter = ({ user }: { user: User | null }) => (
   <footer className="border-t border-border">
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-2 px-4 py-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
-      <p>Booking — a demo built on one shared zod contract.</p>
+      <p>{SITE_NAME} — a demo built on one shared zod contract.</p>
       <nav className="flex items-center gap-4">
         <Link href={ROUTES.catalogue} className="hover:text-foreground">
           Stays

@@ -133,7 +133,7 @@ async function openMenu(page: Page): Promise<Locator> {
   // Named by its content, which a dot of unread threads adds to.
   await page.getByRole("button", { name: /^Open the menu/ }).click();
 
-  const sheet = page.getByRole("dialog", { name: "Booking" });
+  const sheet = page.getByRole("dialog", { name: "StayDesk" });
 
   await expect(sheet).toBeVisible();
 
