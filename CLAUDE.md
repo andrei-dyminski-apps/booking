@@ -45,6 +45,11 @@ in `README.md`. Both act on a live deployment: run them only when the user asks.
 `pnpm db:seed:railway` reseeds the deployed database — the seed deletes every demo table
 first — so it is run only when the user asks, too.
 
+The payout countries are a snapshot in the repository (`payout-countries.snapshot.ts`,
+generated — never edited by hand), rewritten by `pnpm --filter @repo/api stripe:sync-countries`,
+which only reads Stripe, and proposed weekly as a pull request by
+`.github/workflows/payout-countries.yml`.
+
 `pnpm --filter @repo/api stripe:probe-countries` checks the payout countries the form offers
 against what Stripe opens: it opens and closes an account per country in the sandbox the
 root `.env` names (a live key is refused). `stripe:probe-transfer acct_…` takes a test charge

@@ -1,0 +1,97 @@
+name: Payout countries
+
+# The API offers hosts the countries of a snapshot in the repository rather than reading
+# Stripe's country specs, a list Stripe can take twenty seconds to send. Once a week this
+# reads the specs again and, when the snapshot is out of date, proposes the new one as a
+# pull request: merging it is the decision to offer the countries it adds.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: payout-countries
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+  BRANCH: payout-countries-sync
+
+jobs:
+  sync:
+    name: sync the payout countries with stripe
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # A pull request or a push made with the workflow's own token starts no workflow, so
+      # CI would not run on the proposal; a token in PAYOUT_COUNTRIES_PR_TOKEN (contents and
+      # pull requests, read and write) makes one that does. Without it the proposal is still
+      # opened, and CI runs once the branch is updated by hand.
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.PAYOUT_COUNTRIES_PR_TOKEN || github.token }}
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The script imports the contract's schemas, which resolve to its build.
+      - run: pnpm turbo run build --filter=@repo/contracts
+
+      # Read-only: a restricted key allowed to read the account and the country specs is
+      # enough. The specs are the same in test and live mode; the platform's country is the
+      # account's, so the key belongs to the account production runs on, or one in its country.
+      - run: pnpm --filter @repo/api stripe:sync-countries
+        env:
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_COUNTRIES_KEY }}
+
+      - name: Propose the new snapshot
+        env:
+          GH_TOKEN: ${{ secrets.PAYOUT_COUNTRIES_PR_TOKEN || github.token }}
+        run: |
+          bot_email="41898282+github-actions[bot]@users.noreply.github.com"
+          open_pr="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
+          others=0
+          if [ -n "$open_pr" ]; then
+            others="$(gh pr view "$open_pr" --json commits \
+              --jq "[.commits[].authors[].email | select(. != \"$bot_email\")] | length")"
+          fi
+
+          # Main's snapshot is Stripe's again — a sync merged by hand since — so an open
+          # proposal only offers changes main has settled; one of the bot's alone is closed.
+          if git diff --quiet; then
+            echo "The snapshot is up to date."
+            if [ -n "$open_pr" ] && [ "$others" = "0" ]; then
+              gh pr close "$open_pr" --delete-branch \
+                --comment "Main's snapshot matches Stripe's country specs again; nothing left to propose."
+            fi
+            exit 0
+          fi
+
+          # The branch is rebuilt from main on every run, so a commit a person pushed onto an
+          # open proposal — an entry in EXCLUDED_PAYOUT_COUNTRIES — would be overwritten.
+          # Such a proposal is left alone, for the person to rerun the sync on it.
+          if [ "$others" != "0" ]; then
+            echo "::warning::Pull request #$open_pr carries commits of a person; not overwriting it. Run stripe:sync-countries on its branch."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "$bot_email"
+          git switch -c "$BRANCH"
+          git commit -am "1) sync payout countries with stripe's country specs"
+          git push --force origin "$BRANCH"
+
+          if [ -z "$open_pr" ]; then
+            gh pr create --base main --head "$BRANCH" \
+              --title "Sync payout countries with Stripe" \
+              --body "Stripe's country specs no longer match \`payout-countries.snapshot.ts\`. Merging offers hosts the countries added and stops offering the ones removed; a country not to offer goes into \`EXCLUDED_PAYOUT_COUNTRIES\` in \`payout-countries.reading.ts\` instead."
+          fi

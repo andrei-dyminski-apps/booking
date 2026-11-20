@@ -16,6 +16,7 @@ import { hasCode, issueCodesOf } from "./api-error";
 import { resetDatabase } from "./database";
 import { resetQueue } from "./queue";
 import { credentialsFor, signInAs, type Agent } from "./session";
+import { waitUntil } from "./wait-until";
 
 /**
  * The payout account's routes over HTTP, against the real database: the global pipe
@@ -142,14 +143,17 @@ describe("PayoutAccountController (e2e)", () => {
       host.post("/payouts/account").send({ country: "DE" }).expect(200),
     ]);
 
-    const attached = await attachedAccount();
-    const opened = gateway.accounts.length;
-
     // Either the second request saw the first's account and opened none, or both reached
-    // Stripe and the one that lost the column closed its own.
+    // Stripe and the one that lost the column queued a `close-account` job for its own,
+    // which the worker runs after the answer.
+    await waitUntil(() =>
+      Promise.resolve(gateway.accounts.length - gateway.closed.length === 1),
+    );
+
+    const attached = await attachedAccount();
+
     expect(attached).not.toBeNull();
     expect(gateway.closed).not.toContain(attached);
-    expect(opened - gateway.closed.length).toBe(1);
   });
 
   it("answers an admin 403: an admin hosts nothing", async () => {

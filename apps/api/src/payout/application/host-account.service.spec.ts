@@ -172,9 +172,11 @@ describe("HostAccountService", () => {
       { status: HostAccountStatus.ONBOARDING },
     ]);
     expect(payoutRepository.holders.get(HOST_ID)?.accountId).toBe("acct_pl");
-    expect(payoutGateway.closed).toEqual(["acct_de"]);
-    // Closing names every configuration the account carries, which depends on its country.
-    expect(payoutGateway.closedIn).toEqual(["DE"]);
+    // Queued rather than closed in the request, which Stripe's two calls would outlast.
+    expect(payoutJobs.accountCloses).toEqual([
+      { accountId: "acct_de", userId: HOST_ID, attached: "acct_pl" },
+    ]);
+    expect(payoutGateway.closed).toEqual([]);
   });
 
   it("closes nothing when a racing request with the same body is answered the same account", async () => {
@@ -186,21 +188,27 @@ describe("HostAccountService", () => {
     ]);
 
     expect(payoutRepository.holders.get(HOST_ID)?.accountId).toBe(ACCOUNT_ID);
-    expect(payoutGateway.closed).toEqual([]);
+    expect(payoutJobs.accountCloses).toEqual([]);
   });
 
-  it("answers the host whose account is attached even when Stripe will not close the other", async () => {
-    hostWith(null, false);
-    payoutGateway.openedIds = ["acct_pl", "acct_de"];
+  it("closes a queued account through Stripe, and fails the job for the queue to retry when Stripe will not", async () => {
+    await hostAccountService.closeAccount({
+      accountId: "acct_de",
+      userId: HOST_ID,
+      attached: "acct_pl",
+    });
+
+    expect(payoutGateway.closed).toEqual(["acct_de"]);
+
     payoutGateway.refusingClose = true;
 
     await expect(
-      Promise.all([
-        hostAccountService.open(host, "PL"),
-        hostAccountService.open(host, "DE"),
-      ]),
-    ).resolves.toHaveLength(2);
-    expect(payoutRepository.holders.get(HOST_ID)?.accountId).toBe("acct_pl");
+      hostAccountService.closeAccount({
+        accountId: "acct_pl",
+        userId: HOST_ID,
+        attached: "acct_de",
+      }),
+    ).rejects.toThrow("api_connection_error");
   });
 
   it("refuses a country Stripe's list leaves out before asking Stripe to open anything", async () => {

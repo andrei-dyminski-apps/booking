@@ -13,15 +13,12 @@ export abstract class PayoutGateway {
   abstract createRecipientAccount(host: PayoutHost): Promise<string>;
 
   /** An account opened for nobody: a racing request wrote another into the column first. */
-  abstract closeAccount(
-    accountId: string,
-    country: PayoutCountry,
-  ): Promise<void>;
+  abstract closeAccount(accountId: string): Promise<void>;
 
   /**
    * The countries a host's account can be opened in: those the platform's own country
-   * transfers to, each account in its own country's currency. Asked by a request; the
-   * adapter keeps the answer for the process.
+   * transfers to, each account in its own country's currency. The Stripe adapter answers
+   * from a snapshot in the repository, without asking Stripe.
    */
   abstract transferCountries(): Promise<PayoutCountry[]>;
 
