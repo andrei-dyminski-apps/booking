@@ -16,3 +16,7 @@ allowBuilds:
   "@parcel/watcher": true
   # Install-time telemetry of swagger-ui-dist, nothing the app needs.
   "@scarf/scarf": false
+  # The Stripe CLI the browser suite's real-Stripe target listens with: its binary comes in
+  # the platform package of optionalDependencies, and the script only downloads it from
+  # GitHub when that package is missing.
+  "@stripe/cli": false

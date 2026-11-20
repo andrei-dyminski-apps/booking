@@ -2,6 +2,7 @@ import { tz } from "@date-fns/tz";
 import { addDays, format, getHours, parseISO } from "date-fns";
 import type { Page } from "@playwright/test";
 import { expect, type Pages } from "./fixtures";
+import { providerWait, TARGET } from "./target";
 
 /** A day `offset` days from today on the clock of `timeZone`, as the contract writes days. */
 export function dayIn(timeZone: string, offset = 0): string {
@@ -62,7 +63,8 @@ export async function pickDates(
 /**
  * On the listing's page: picks the dates, holds the stay and pays for it through the payment
  * form, landing on the confirmed stay. The money goes through the pages, as on every target;
- * on the hermetic stack the card is the stand-in's.
+ * on the hermetic stack the card is the stand-in's, against Stripe a test card typed into
+ * Stripe's own form.
  */
 export async function holdAndPay(
   page: Page,
@@ -89,18 +91,40 @@ export async function holdAndPayPicked(
   const pay = page.getByRole("button", { name: `Pay ${total}` });
 
   await expect(pay).toBeVisible();
+  if (TARGET === "stripe") await typeTestCard(page);
   await pages.check(page);
 
   await pay.click();
 
   // Confirmed by the provider's news, not by the browser's word: the page waits for it. Two
   // webhooks through the API's queue, then the page's next poll, every two seconds — longer
-  // than `expect`'s default leaves room for on a slow runner.
+  // than `expect`'s default leaves room for on a slow runner, and longer still when the
+  // webhooks come from Stripe through `stripe listen`.
   await expect(page.getByText("Paid and confirmed.")).toBeVisible({
-    timeout: 15_000,
+    timeout: providerWait(15_000),
   });
   await expect(page.getByText("Confirmed", { exact: true })).toBeVisible();
   await pages.check(page);
+}
+
+/**
+ * Stripe's card form, in the frame Stripe draws it in: the test card it authorizes straight
+ * away (README, "Payments"), any future expiry and code, and a billing country — Stripe
+ * guesses one from where the browser is, which a machine may not tell it — whose postcode
+ * box is the one it asks for. Stripe draws a second, hidden frame under the same title for
+ * its own use. A declined card and 3-D Secure are the payment's edge cases and stay out.
+ */
+async function typeTestCard(page: Page): Promise<void> {
+  const form = page
+    .getByTitle("Secure payment input frame")
+    .filter({ visible: true })
+    .contentFrame();
+
+  await form.getByLabel("Card number").fill("4242 4242 4242 4242");
+  await form.getByLabel("Expiry date").fill("12 / 34");
+  await form.getByLabel("Security code").fill("123");
+  await form.getByLabel("Country/Territory").selectOption("United States");
+  await form.getByLabel("ZIP code").fill("10001");
 }
 
 /**

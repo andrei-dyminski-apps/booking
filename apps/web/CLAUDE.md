@@ -1239,10 +1239,10 @@ account's details (`ConnectAccountManagement` — a new bank account, the detail
 took), with the notification banner above both. Before either, a host with no account picks
 the country it is opened in (`OpenAccountForm`, `openAccountAction` → `POST
 /payouts/account`): Stripe fixes it at opening, pays out in that country's currency, and the
-API refuses a session until then. The countries offered are Stripe's list for the platform
-(`payoutsApi.countries`, read by the server render only in that state —
-`readPayoutCountries`, which answers `null` rather than throwing, so a Stripe the API cannot
-reach costs the form and not the page; an empty list gets its own card, since a select with
+API refuses a session until then. The countries offered are the API's snapshot of Stripe's
+list for the platform (`payoutsApi.countries`, read by the server render only in that state
+— `readPayoutCountries`, which answers `null` rather than throwing, so an API that cannot
+answer costs the form and not the page; an empty list gets its own card, since a select with
 nothing in it cannot be filled — and streamed in a `Suspense` boundary, so the heading and
 the fees do not wait for it). Their names are built by the server render (`countryOptions`,
 `Intl.DisplayNames`) and handed to the form, so the browser's ICU never disagrees with the
@@ -1250,7 +1250,7 @@ markup. Opening the account is the one request that waits past the transport's t
 (`timeoutMs` on `payoutsApi.open`): Stripe takes over four to open one. The action asks
 again on a `409` another request's opening answers (`PAYOUT_ACCOUNT_BEING_OPENED`,
 `model/account-refusal.ts`), once a second for long enough to outlast the eight seconds the
-API gives Stripe, and puts a country Stripe's list dropped since the render under the box,
+API gives Stripe, and puts a country Stripe refused since the render under the box,
 re-reading the list.
 The Connect instance is made in an effect — it injects a
 script and reads `window` — and fetches its own client secret through the BFF
@@ -1718,6 +1718,28 @@ under test is the retry and locking logic, not a browser.
   first. A drain waits a few seconds for the webhook deliveries still under way, so a
   refund reported late fails the test that made it; one still undelivered then is a problem
   of that test and is given up.
+- **Two targets, picked by `E2E_TARGET`** (`e2e/target.ts`): the hermetic stack, the
+  default and the CI check, and `stripe` (`pnpm test:browser:stripe`), the same stack with
+  Stripe's side real. Where a scenario runs is a tag on its `test`, mirroring its mark in
+  `docs/e2e-scenarios.md`: `EVERY_TARGET` (`@every-target`), `REAL_STRIPE_ONLY`
+  (`@real-stripe-only`), or none for the hermetic stack alone — the safe default for a new
+  one. Against Stripe only the tagged scenarios run, on the desktop alone, with no retries;
+  the stand-in, its route and its drain are left out (`TARGET === "hermetic"` in
+  `fixtures.ts`), and `stack.ts` takes the two Stripe keys from the root `.env` — test keys
+  only — starts two `stripe listen` processes of the Stripe CLI (a dev dependency, run on
+  the host since the API listens on 127.0.0.1), hands the API the secret the CLI keeps for
+  the key, runs it with `NODE_ENV=production` and gives it a `STRIPE_SITE` new on every run.
+  Production mode boots `PlatformCountryCheck`, so the sandbox of `.env` has to be a platform
+  in `PAYOUT_PLATFORM_COUNTRY`; another one stops the API at start (`servers/api.log` says
+  why).
+  A stay is paid by typing the test card into Stripe's own form (`typeTestCard` in
+  `stay.ts`); the frames Stripe draws its forms in are left out of the accessibility check
+  (`STRIPE_FRAMES` in `fixtures.ts`), since their markup is Stripe's. A wait on Stripe's
+  news — a payment confirmed, a refund recorded — goes through `providerWait` (`target.ts`),
+  three times the hermetic one there, and a test gets two minutes rather than Playwright's
+  thirty seconds (`timeout` in `playwright.config.ts`), or it would be cut off before its
+  own waits ran out. The target writes to
+  the sandbox, so it is run on purpose and never in CI.
 - **State a scenario should not click its way to is arranged first** (`arrange` in
   `e2e/fixtures.ts`, `e2e/arrange.ts`), by the application's own HTTP surface through the
   BFF and never by writing to the database, so the arrangement works on every target. It
