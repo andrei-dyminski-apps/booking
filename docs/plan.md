@@ -1184,6 +1184,53 @@ ships only once the scenarios marked for every target have run green locally.
 The addresses, what the hosting platforms report about a deployment and the budget numbers
 are read and measured when the step is written, and recorded here then.
 
+## Phase 12 — Deleting an account
+
+Today an account can only be blocked, by an admin (phase 3): the row stays, and so does
+everything that points at it. That was the right answer to "an admin removes a user", and it
+leaves the other question open — a person asking for their own account to be gone. Privacy law
+expects that to be possible (the GDPR's right to erasure; the app stores have required it in
+apps since 2022), and the bookkeeping expects the opposite: payments, refunds, payouts and the
+fees withheld from them are records a marketplace has to keep. The industry's answer reconciles
+the two, and it is the one this phase follows: **deleting an account erases the person, not the
+history** — what identifies them is scrubbed, the rows the money and the other party's history
+rest on stay and point at an anonymous account.
+
+It is not a tool for the test suites. The hermetic stack and the API's e2e specs start from a
+fresh database every run, and the run against the live deployment (11.4) uses two accounts of
+its own and cleans up stays and listings, not users.
+
+- [ ] **The person deletes their own account, never an admin.** `DELETE /users/me`, with the
+      password typed again: a stolen session alone must not be able to erase an account. An
+      admin still has the block for an account that has to stop; the last admin cannot delete
+      theirs.
+- [ ] **Refused while something is still open**, each refusal with its code (phase 10): a stay
+      held, confirmed and not yet over, as a guest or as a host; a host fee still owed; money
+      still owed to the host or a payout on its way; a refund not yet settled; an open dispute.
+      The person is told what to finish first. Checked under the same locks the money paths
+      take, so a booking cannot land between the check and the erasure.
+- [ ] **Anonymized in one transaction.** `users.deleted_at` is stamped; the name becomes a
+      placeholder, the address a unique one that cannot receive mail (which frees the real
+      one for a new registration), the password hash one nothing matches. Refresh tokens,
+      notifications and waitlist entries are deleted; listings are retired the way
+      `DELETE /listings/:id` retires them. Bookings, payments, refunds, host fees, payouts,
+      reviews and messages stay, and read as written by "Deleted user" — a review or a thread
+      belongs to the other party's history too. Sign-in, refresh and `/auth/me` treat a deleted
+      account as one that does not exist.
+- [ ] **What cannot be erased is said so.** The Stripe connected account is not closed by the
+      application (see 11.3); its id stays on the anonymized row, which is what Stripe's own
+      records are reconciled against. The structured logs keep request ids, not names.
+- [ ] **Web:** "Delete account" at the end of `/profile`, with what will happen, the password
+      and a confirmation; a refusal names what is still open and links to it. After the
+      erasure the session is cleared and the visitor lands on the home page with a notice.
+- [ ] **Specs:** e2e — every refusal; an erasure keeps the bookings, the payments and the
+      reviews, scrubs the user, frees the address and ends every session; a booking racing the
+      erasure does not survive it half-way. The browser suite: a guest with nothing open deletes
+      their account and can no longer sign in.
+
+Out of scope: exporting a person's data (the GDPR's right of access) and a grace period that
+lets a deletion be undone — both are their own change if they are ever wanted.
+
 ## Decisions already made
 
 - **Prisma** (v7: `prisma.config.ts`, the `prisma-client` generator, the `@prisma/adapter-pg` driver adapter) — the most recognizable ORM; interactive transactions and raw migrations cover phase 4.
@@ -1216,7 +1263,7 @@ are read and measured when the step is written, and recorded here then.
   before React has hydrated, and `refresh()` / `updateTag` are reachable only from there.
   The client path stays for what a round trip cannot express — a poll for a webhook — and
   phase 6 is what brings the first of those.
-- The order of the phases follows the dependencies: database → auth → roles → concurrency → catalogue → Stripe → cancellation policies → polish → deployment → error codes → frontend e2e. The frontend e2e suite comes last: it needs screens that have stopped changing, and it describes what a visitor sees rather than how the page is produced. The cancellation policies follow Stripe directly because they change the rules its refund machinery runs on, and they come before the error codes because they add refusals the codes would otherwise be written for twice. The catalogue comes before Stripe because the dependency runs one way only: Stripe Elements needs a booking to attach to, and a booking is created from the form on the listing page, which is the catalogue's. Nothing in the catalogue needs a payment — it is server-rendered from `searchParams`, and TanStack Query arrives with the polling of the webhook.
+- The order of the phases follows the dependencies: database → auth → roles → concurrency → catalogue → Stripe → cancellation policies → polish → deployment → error codes → frontend e2e → account deletion. The frontend e2e suite comes after the features it covers: it needs screens that have stopped changing, and it describes what a visitor sees rather than how the page is produced. Account deletion comes after it because its refusals are written in the codes of phase 10 and its erasure has to know every money path that can still be open. The cancellation policies follow Stripe directly because they change the rules its refund machinery runs on, and they come before the error codes because they add refusals the codes would otherwise be written for twice. The catalogue comes before Stripe because the dependency runs one way only: Stripe Elements needs a booking to attach to, and a booking is created from the form on the listing page, which is the catalogue's. Nothing in the catalogue needs a payment — it is server-rendered from `searchParams`, and TanStack Query arrives with the polling of the webhook.
 
 ## Decisions deliberately not taken
 
