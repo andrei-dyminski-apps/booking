@@ -17,6 +17,7 @@ import {
 } from "./infrastructure/host-payout.queue";
 import { HostFeeRepository } from "./infrastructure/host-fee.repository";
 import { PayoutRepository } from "./infrastructure/payout.repository";
+import { PlatformCountryCheck } from "./infrastructure/platform-country.check";
 import { StripePayoutGateway } from "./infrastructure/stripe-payout.gateway";
 import { HostFeeController } from "./presentation/host-fee.controller";
 import { PayoutAccountController } from "./presentation/payout-account.controller";
@@ -48,6 +49,7 @@ import { StuckPayoutController } from "./presentation/stuck-payout.controller";
     { provide: PayoutGateway, useClass: StripePayoutGateway },
     { provide: PayoutJobs, useClass: HostPayoutQueue },
     HostPayoutProcessor,
+    PlatformCountryCheck,
   ],
 })
 export class PayoutModule {}

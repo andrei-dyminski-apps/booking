@@ -1,10 +1,17 @@
 import type { PublicOf } from "../../../common/testing/public-of.fakes";
-import type { PayoutJobs } from "../ports/payout-jobs";
+import type { AccountClose, PayoutJobs } from "../ports/payout-jobs";
 
 /** What was queued, for whom and when; the queue itself is `host-payout.queue.ts`'s. */
 export class FakePayoutJobs implements PublicOf<PayoutJobs> {
   readonly scheduled: { bookingId: string; runAt: Date }[] = [];
   readonly hosts: string[] = [];
+  readonly accountCloses: AccountClose[] = [];
+
+  scheduleAccountClose(close: AccountClose): Promise<void> {
+    this.accountCloses.push(close);
+
+    return Promise.resolve();
+  }
 
   schedulePayoutsOf(hostId: string): Promise<void> {
     this.hosts.push(hostId);

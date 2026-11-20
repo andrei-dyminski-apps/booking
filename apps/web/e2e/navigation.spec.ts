@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { DEMO, type Account } from "./demo";
 import { expect, test, type Pages } from "./fixtures";
+import { EVERY_TARGET } from "./target";
 import { signInThroughForm } from "./session";
 import {
   checkMenu,
@@ -13,63 +14,65 @@ import {
 /** A section of the menu and the heading of the page it opens. */
 type Section = { label: string; path: string; heading: string };
 
-test("a guest reaches their pages from the menu alone and signs out from it", async ({
-  page,
-  pages,
-}) => {
-  await signInFromHome(page, pages, DEMO.guest);
+test(
+  "a guest reaches their pages from the menu alone and signs out from it",
+  { tag: EVERY_TARGET },
+  async ({ page, pages }) => {
+    await signInFromHome(page, pages, DEMO.guest);
 
-  await walk(page, pages, [
-    { label: "Bookings", path: "/bookings", heading: "Your trips" },
-    { label: "Messages", path: "/messages", heading: "Messages" },
-    { label: "Waitlist", path: "/waitlist", heading: "Your waitlist" },
-  ]);
+    await walk(page, pages, [
+      { label: "Bookings", path: "/bookings", heading: "Your trips" },
+      { label: "Messages", path: "/messages", heading: "Messages" },
+      { label: "Waitlist", path: "/waitlist", heading: "Your waitlist" },
+    ]);
 
-  // The notices are behind the bell in the header rather than in the menu.
-  await page.getByRole("button", { name: /^Notifications/ }).click();
-  await page.getByRole("link", { name: "See all notifications" }).click();
+    // The notices are behind the bell in the header rather than in the menu.
+    await page.getByRole("button", { name: /^Notifications/ }).click();
+    await page.getByRole("link", { name: "See all notifications" }).click();
 
-  await expect(page).toHaveURL("/notifications");
-  await expect(
-    page.getByRole("heading", { level: 1, name: "Notifications" }),
-  ).toBeVisible();
-  await pages.check();
+    await expect(page).toHaveURL("/notifications");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Notifications" }),
+    ).toBeVisible();
+    await pages.check();
 
-  await openFromMenu(page, "Profile");
+    await openFromMenu(page, "Profile");
 
-  await expect(page).toHaveURL("/profile");
-  await expect(
-    page.getByRole("main").getByText(DEMO.guest.email, { exact: true }),
-  ).toBeVisible();
-  await pages.check();
+    await expect(page).toHaveURL("/profile");
+    await expect(
+      page.getByRole("main").getByText(DEMO.guest.email, { exact: true }),
+    ).toBeVisible();
+    await pages.check();
 
-  // The way out is in the menu too, and leaves the visitor a stranger on the home page —
-  // whose menu, checked once here rather than before every sign-in, is a stranger's.
-  await signOutFromMenu(page);
+    // The way out is in the menu too, and leaves the visitor a stranger on the home page —
+    // whose menu, checked once here rather than before every sign-in, is a stranger's.
+    await signOutFromMenu(page);
 
-  await expect(page).toHaveURL("/");
-  await expect(
-    page.getByRole("banner").getByRole("link", { name: "Sign up" }),
-  ).toBeVisible();
-  await pages.check();
-  await checkMenu(page, pages);
-});
+    await expect(page).toHaveURL("/");
+    await expect(
+      page.getByRole("banner").getByRole("link", { name: "Sign up" }),
+    ).toBeVisible();
+    await pages.check();
+    await checkMenu(page, pages);
+  },
+);
 
-test("a host reaches their dashboard from the menu", async ({
-  page,
-  pages,
-}) => {
-  await signInFromHome(page, pages, DEMO.host);
+test(
+  "a host reaches their dashboard from the menu",
+  { tag: EVERY_TARGET },
+  async ({ page, pages }) => {
+    await signInFromHome(page, pages, DEMO.host);
 
-  await walk(page, pages, [
-    { label: "Dashboard", path: "/dashboard", heading: "Dashboard" },
-  ]);
+    await walk(page, pages, [
+      { label: "Dashboard", path: "/dashboard", heading: "Dashboard" },
+    ]);
 
-  // The listings the host has on offer.
-  await expect(
-    page.getByRole("main").getByText("Loft above the harbour"),
-  ).toBeVisible();
-});
+    // The listings the host has on offer.
+    await expect(
+      page.getByRole("main").getByText("Loft above the harbour"),
+    ).toBeVisible();
+  },
+);
 
 test("the admin reaches the listings, users and payments from the menu", async ({
   page,

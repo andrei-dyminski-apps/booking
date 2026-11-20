@@ -24,7 +24,11 @@ import {
   type AccountEvent,
   type Caller,
 } from "./ports/payout-gateway";
-import { PayoutJobs } from "./ports/payout-jobs";
+import {
+  describeClose,
+  PayoutJobs,
+  type AccountClose,
+} from "./ports/payout-jobs";
 import { apiException } from "../../common/api-exception";
 import { sessionNotFound } from "../../common/session-errors";
 
@@ -57,7 +61,10 @@ export class HostAccountService {
     return statusOf(await this.holderOf(user));
   }
 
-  /** Stripe's list for the platform's country, which `open` holds a pick to. */
+  /**
+   * The snapshot of Stripe's list for the platform's country, read from the repository
+   * rather than from Stripe, which `open` holds a pick to.
+   */
   async countries(user: AuthenticatedUser): Promise<PayoutCountries> {
     return {
       countries: await this.askProvider(user, COUNTRIES_UNREADABLE, () =>
@@ -108,8 +115,8 @@ export class HostAccountService {
   /**
    * Opens the caller's account in the country they picked, written only into the empty
    * column. An account opened already is answered as it stands, its country unchanged —
-   * Stripe fixes it at opening. A country Stripe's list leaves out, or one Stripe refuses
-   * to open an account in although the list offered it, is a `400`, a second
+   * Stripe fixes it at opening. A country the snapshot leaves out, or one Stripe refuses
+   * to open an account in although the snapshot offered it, is a `400`, a second
    * request while the first is at Stripe a `409`; only the provider's failures are a `502`,
    * and the database's stay the `500` they are.
    */
@@ -137,7 +144,7 @@ export class HostAccountService {
     );
 
     await this.payoutRepository.attachAccount(user.id, opened);
-    await this.closeUnattached(user.id, opened, country);
+    await this.closeUnattached(user.id, opened);
 
     // Whichever account the column holds — this one, or one a racing request wrote first —
     // was opened a moment ago, and only Stripe's later answer enables it.
@@ -148,29 +155,31 @@ export class HostAccountService {
    * A racing request with another body — another country, another name, so another key —
    * opened an account of its own and wrote it first; this one belongs to nobody and is
    * closed. The same body replays the same account, which the column holds and is kept.
-   * A close that fails costs the host nothing, so it is logged for a person rather than
-   * answered.
+   * The close is a job (`closeAccount`), not part of the answer: it costs the host nothing,
+   * and two calls to Stripe behind an opening would outlast the frontend's wait for this
+   * route — a host whose account is attached would be shown an error. Queueing it is not
+   * awaited either: with Redis down the queue waits for the reconnect rather than failing.
    */
-  private async closeUnattached(
-    userId: string,
-    opened: string,
-    country: PayoutCountry,
-  ): Promise<void> {
+  private async closeUnattached(userId: string, opened: string): Promise<void> {
     const attached =
       (await this.payoutRepository.findHolder(userId))?.accountId ?? null;
 
     if (attached === opened) return;
 
-    try {
-      await this.payoutGateway.closeAccount(opened, country);
-      this.logger.log(
-        `Closed account ${opened} of user ${userId}, who holds ${attached ?? "none"}`,
-      );
-    } catch (error) {
+    const close = { accountId: opened, userId, attached };
+
+    this.logger.log(`Closing ${describeClose(close)}`);
+    void this.payoutJobs.scheduleAccountClose(close).catch((error: unknown) => {
       this.logger.error(
-        `Could not close account ${opened} of user ${userId}, who holds ${attached ?? "none"} — close it in the Dashboard: ${String(error)}`,
+        `Could not queue the close of ${describeClose(close)} — close it in the Dashboard: ${String(error)}`,
       );
-    }
+    });
+  }
+
+  /** The job behind `closeUnattached`: a failure is the queue's to retry and to log. */
+  async closeAccount(close: AccountClose): Promise<void> {
+    await this.payoutGateway.closeAccount(close.accountId);
+    this.logger.log(`Closed ${describeClose(close)}`);
   }
 
   /** A host with no account yet is a `409`: the country comes first (`open`). */

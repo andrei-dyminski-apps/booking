@@ -30,6 +30,8 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
   the suite has there) or what it proves the hermetic run proves already; **real Stripe
   only** is the local stack with Stripe's side real, because what the scenario proves is
   that Stripe accepts what the application sends.
+- **In the suite** the mark is a tag on the test: `@every-target`, `@real-stripe-only`, or
+  none for hermetic only (`apps/web/e2e/target.ts`).
 - **Cost** — a note for planning the work, not for reading the goal: **cheap** is plain pages
   and forms; **medium** needs a second browser context or state arranged beforehand;
   **expensive** needs the payment or a queue.
@@ -128,7 +130,7 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
       amounts shown follow, on the admin's page and the guest's. The payments list holds
       only what the money paths set aside, never a stay paid as it should be. _Hermetic
       only. Expensive; the API already proves the rules._
-- [ ] **Payouts.** A host who has not set up payouts is told so on their dashboard; they open
+- [x] **Payouts.** A host who has not set up payouts is told so on their dashboard; they open
       the payouts page, pick the country of their payout account and are handed over to
       Stripe's own onboarding; what is inside it is Stripe's, not tested. _Real Stripe only:
       the account is opened with Stripe. Cheap._

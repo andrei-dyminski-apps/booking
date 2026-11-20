@@ -10,6 +10,7 @@ import {
 import { arrangement, type Arrange } from "./arrange";
 import { STRIPE_STAND_IN_ORIGIN, WEB_ORIGIN } from "./stack";
 import { drainStandInProblems, routeStripeToStandIn } from "./stripe/stand-in";
+import { TARGET } from "./target";
 
 /**
  * A response a test provokes on purpose — the not-found page, a refusal of a role. Declared
@@ -45,6 +46,16 @@ type Problem = { what: string; url: string; status?: number };
 
 /** Every rule axe runs; a violation fails the page at these impacts only. */
 const FAILING_IMPACTS = new Set(["serious", "critical"]);
+
+/**
+ * The frames Stripe draws its own forms in — the card boxes, the payout onboarding — on the
+ * real-Stripe target. Their markup is Stripe's, not this application's to fix, so the check
+ * reads the page around them; the stand-in draws none.
+ */
+const STRIPE_FRAMES = [
+  'iframe[src^="https://js.stripe.com/"]',
+  'iframe[src^="https://connect-js.stripe.com/"]',
+];
 
 /**
  * The rule every scenario follows (`docs/e2e-scenarios.md`): each page a test visits opens
@@ -184,7 +195,11 @@ export const test = base.extend<{
             ),
           );
 
-          const results = await new AxeBuilder({ page: checkedPage }).analyze();
+          // One selector a call: an array is read as a path into nested frames.
+          const results = await STRIPE_FRAMES.reduce(
+            (builder, frame) => builder.exclude(frame),
+            new AxeBuilder({ page: checkedPage }),
+          ).analyze();
           const violations = results.violations.filter(
             (violation) =>
               violation.impact != null && FAILING_IMPACTS.has(violation.impact),
@@ -218,8 +233,12 @@ export const test = base.extend<{
       // drained whatever the outcome. The drain first waits for the webhook deliveries the
       // test set going (a refund reported a moment late, a retry), so those are laid at this
       // test's door rather than the next's; a call the API makes later still, from a job
-      // that ran on, is caught by the next drain or the global teardown.
-      for (const line of await drainStandInProblems()) {
+      // that ran on, is caught by the next drain or the global teardown. Against Stripe
+      // there is no stand-in to ask.
+      const standInProblems =
+        TARGET === "hermetic" ? await drainStandInProblems() : [];
+
+      for (const line of standInProblems) {
         problems.push({
           what: `Stripe stand-in: ${line}`,
           url: STRIPE_STAND_IN_ORIGIN,
@@ -294,6 +313,9 @@ function answers(response: ExpectedResponse, problem: Problem): boolean {
  * header outside the CORS safelist forces a preflight the other side may refuse, and the
  * address is nobody else's business. A route does not see `page.request`, so a test reads
  * the API through the page instead (`page.evaluate` with `fetch`).
+ *
+ * On the hermetic stack whatever the page sends to Stripe goes to the stand-in; against
+ * Stripe it goes to Stripe.
  */
 async function prepare(
   context: BrowserContext,
@@ -306,7 +328,7 @@ async function prepare(
         headers: { ...route.request().headers(), "x-forwarded-for": address },
       }),
   );
-  await routeStripeToStandIn(context);
+  if (TARGET === "hermetic") await routeStripeToStandIn(context);
 }
 
 /**

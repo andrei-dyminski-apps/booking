@@ -4,20 +4,32 @@ import type { PaymentConfig } from "../src/payment/infrastructure/payment.config
 import { createStripeClient } from "../src/payment/infrastructure/stripe";
 import { PayoutCountryRefusedError } from "../src/payout/application/ports/payout-gateway";
 import {
+  EXCLUDED_PAYOUT_COUNTRIES,
   readPayoutCountries,
-  StripePayoutGateway,
-} from "../src/payout/infrastructure/stripe-payout.gateway";
+} from "../src/payout/infrastructure/payout-countries.reading";
+import {
+  PAYOUT_COUNTRY_CURRENCIES,
+  PAYOUT_PLATFORM_COUNTRY,
+} from "../src/payout/infrastructure/payout-countries.snapshot";
+import { StripePayoutGateway } from "../src/payout/infrastructure/stripe-payout.gateway";
 
 /**
- * Compares the countries the payouts form offers with the ones Stripe actually opens an
- * account in, against the sandbox `STRIPE_SECRET_KEY` names. The list is a reading of the
- * country specs (`readPayoutCountries`), each account in its spec's `default_currency`, and
- * Stripe checks an account by rules of its own, so the two can disagree either way: a
- * country offered that Stripe refuses, or one left out that it would open.
+ * Compares the countries the payouts form offers — the snapshot, `payout-countries.snapshot.ts`
+ * — with the ones Stripe actually opens an account in, against the sandbox
+ * `STRIPE_SECRET_KEY` names. The snapshot is a reading of the country specs, each account in
+ * the currency it holds for the country, and Stripe checks an account by rules of its own, so the two
+ * can disagree either way: a country offered that Stripe refuses, or one left out that it
+ * would open. A snapshot that no longer matches the specs is reported first: that is
+ * `stripe:sync-countries`' to fix.
  *
  * Every country the platform transfers to is opened through the adapter itself — the very
- * body and key a host's request sends — and the account closed at once. Opening proves the
- * account can exist, not that a transfer reaches it: that takes onboarding finished and a
+ * body and key a host's request sends — and the account closed at once. The adapter asks
+ * once more with `merchant` where Stripe wants it and `MERCHANT_COUNTRIES` did not know
+ * (`learntMerchantCountries`); a host never sees that, so the probe reports such a country
+ * apart (`NEEDS MERCHANT`) and fails the run, rather than counting the second try as the
+ * list being right. A country with no spec, or one in `EXCLUDED_PAYOUT_COUNTRIES`, is not
+ * asked about: the snapshot leaves it out by design, so nothing Stripe answers could make
+ * the list wrong. Opening proves the account can exist, not that a transfer reaches it: that takes onboarding finished and a
  * transfer sent, by hand. A test key only: a live one would open real accounts.
  */
 
@@ -25,11 +37,18 @@ const CONCURRENCY = 4;
 
 type Outcome = {
   country: string;
-  /** The spec's `default_currency` the account is opened in; `null` with no spec. */
+  /**
+   * The currency the account is opened in: the snapshot's for a country it holds, as a host's
+   * request sends it, the spec's `default_currency` for one it leaves out; `null` with neither.
+   */
   currency: string | null;
   offered: boolean;
   /** `null` when Stripe could not be asked — a timeout, a dropped connection. */
   opened: boolean | null;
+  /** Why the country was not asked about at all; `null` when it was. */
+  skipped: string | null;
+  /** Opened only once asked again with `merchant`, which `MERCHANT_COUNTRIES` does not list. */
+  needsMerchant: boolean;
   detail: string;
 };
 
@@ -55,9 +74,40 @@ async function main(): Promise<void> {
     site: "probe",
   };
   const stripe = createStripeClient(config);
-  const gateway = new StripePayoutGateway(config, stripe);
   const reading = await readPayoutCountries(stripe);
-  const offered = new Set<string>(reading.offered);
+  // Every country with a spec, so one the snapshot leaves out is asked about too — but a
+  // country the snapshot holds in its own currency, the body a host's request sends, even
+  // where the spec's `default_currency` has moved since.
+  const currencies: Record<string, string> = {
+    ...Object.fromEntries(reading.currencies),
+    ...PAYOUT_COUNTRY_CURRENCIES,
+  };
+  const gateway = new StripePayoutGateway(config, stripe, currencies);
+  const offered = new Set<string>(Object.keys(PAYOUT_COUNTRY_CURRENCIES));
+
+  if (reading.platformCountry !== PAYOUT_PLATFORM_COUNTRY) {
+    throw new Error(
+      `The snapshot was read for a platform in ${PAYOUT_PLATFORM_COUNTRY}, this key's is in ${reading.platformCountry}`,
+    );
+  }
+
+  // Each country beside its currency: a spec whose `default_currency` moved leaves the set
+  // of countries as it was and the snapshot opening accounts in the old one.
+  const specPairs = reading.offered.map(
+    (country) => `${country}:${reading.currencies.get(country) ?? ""}`,
+  );
+  const snapshotPairs = Object.entries(PAYOUT_COUNTRY_CURRENCIES).map(
+    ([country, currency]) => `${country}:${currency}`,
+  );
+
+  const snapshotStale = specPairs.join() !== snapshotPairs.join();
+
+  if (snapshotStale) {
+    console.log(
+      "The snapshot differs from Stripe's country specs — run `stripe:sync-countries`.",
+    );
+    process.exitCode = 1;
+  }
   // One run's accounts share a user id of their own, so a rerun is never answered with an
   // account this one closed.
   const userId = `probe-${randomUUID()}`;
@@ -66,20 +116,33 @@ async function main(): Promise<void> {
     `Platform country ${reading.platformCountry}: ${String(reading.transferCountries.length)} transfer countries, ${String(offered.size)} offered. Probing…`,
   );
 
-  const outcomes = await eachLimited(
+  const probes = await eachLimited(
     reading.transferCountries,
     CONCURRENCY,
-    async (country): Promise<Outcome> => {
-      const probe = await openAndClose(gateway, userId, country);
+    async (country) => {
+      const currency = currencies[country] ?? null;
+      const skipped =
+        currency === null
+          ? "no country spec"
+          : (EXCLUDED_PAYOUT_COUNTRIES.get(country) ?? null);
 
       return {
         country,
-        currency: reading.currencies.get(country) ?? null,
+        currency,
         offered: offered.has(country),
-        ...probe,
+        skipped,
+        ...(skipped === null
+          ? await openAndClose(gateway, userId, country)
+          : { opened: null, detail: skipped }),
       };
     },
   );
+  // Read once every country has been asked: the adapter learns as the probes run.
+  const learnt = new Set(gateway.learntMerchantCountries());
+  const outcomes = probes.map((probe): Outcome => ({
+    ...probe,
+    needsMerchant: probe.opened === true && learnt.has(probe.country),
+  }));
 
   for (const outcome of outcomes) {
     console.log(
@@ -87,24 +150,41 @@ async function main(): Promise<void> {
         outcome.country,
         outcome.currency ?? "-",
         outcome.offered ? "offered" : "left out",
-        outcome.opened === null
-          ? "UNKNOWN"
-          : outcome.opened
-            ? "opens"
-            : "refused",
+        outcome.skipped !== null
+          ? "not asked"
+          : outcome.opened === null
+            ? "UNKNOWN"
+            : outcome.opened
+              ? "opens"
+              : "refused",
         verdictOf(outcome),
-        outcome.detail,
+        outcome.needsMerchant
+          ? `add ${outcome.country} to MERCHANT_COUNTRIES ${outcome.detail}`.trim()
+          : outcome.detail,
       ].join("\t"),
     );
   }
 
   const wrong = outcomes.filter((outcome) => verdictOf(outcome) !== "ok");
+  const toAdd = outcomes
+    .filter((outcome) => outcome.needsMerchant)
+    .map((outcome) => outcome.country);
+
+  if (toAdd.length > 0) {
+    console.log(
+      `\nStripe opens a recipient account only with merchant card payments in ${toAdd.join(", ")} — add them to MERCHANT_COUNTRIES in stripe-payout.gateway.ts.`,
+    );
+  }
 
   if (wrong.length > 0) {
     console.log(
-      `\n${String(wrong.length)} of ${String(outcomes.length)} countries disagree with the list or could not be probed.`,
+      `\n${String(wrong.length)} of ${String(outcomes.length)} countries disagree with the list, open only with merchant or could not be probed.`,
     );
     process.exitCode = 1;
+  } else if (snapshotStale) {
+    console.log(
+      `\nAll ${String(outcomes.length)} countries agree with the list, but the snapshot is out of date — run \`stripe:sync-countries\`.`,
+    );
   } else {
     console.log(
       `\nAll ${String(outcomes.length)} countries agree with the list.`,
@@ -148,7 +228,7 @@ async function openAndClose(
   }
 
   try {
-    await gateway.closeAccount(accountId, country);
+    await gateway.closeAccount(accountId);
 
     return { opened: true, detail: "" };
   } catch (error) {
@@ -159,12 +239,24 @@ async function openAndClose(
   }
 }
 
-/** `ok` when Stripe agrees with the list; otherwise which way it disagrees. */
-function verdictOf({ offered, opened }: Outcome): string {
+/**
+ * `ok` when Stripe agrees with the list as it stands, or when the country was not asked
+ * about and the list leaves it out; otherwise which way it disagrees, or that the country
+ * opened only on the adapter's second try.
+ */
+function verdictOf({
+  offered,
+  opened,
+  skipped,
+  needsMerchant,
+}: Outcome): string {
+  if (skipped !== null) return offered ? "OFFERED BUT SKIPPED" : "ok";
   if (opened === null) return "UNPROBED";
-  if (offered === opened) return "ok";
+  if (offered !== opened) {
+    return offered ? "OFFERED BUT REFUSED" : "LEFT OUT BUT OPENS";
+  }
 
-  return offered ? "OFFERED BUT REFUSED" : "LEFT OUT BUT OPENS";
+  return needsMerchant ? "NEEDS MERCHANT" : "ok";
 }
 
 /** `run` over `items`, at most `limit` at a time, the answers in the order of the items. */

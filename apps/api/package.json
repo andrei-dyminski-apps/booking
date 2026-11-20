@@ -26,6 +26,7 @@
     "db:studio": "prisma studio",
     "stripe:probe-countries": "node --env-file-if-exists=../../.env -r ts-node/register scripts/probe-payout-countries.ts",
     "stripe:probe-transfer": "node --env-file-if-exists=../../.env -r ts-node/register scripts/probe-payout-transfer.ts",
+    "stripe:sync-countries": "node --env-file-if-exists=../../.env -r ts-node/register scripts/sync-payout-countries.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

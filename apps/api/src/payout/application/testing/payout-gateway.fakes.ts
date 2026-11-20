@@ -85,20 +85,18 @@ export class FakePayoutGateway implements PublicOf<PayoutGateway> {
   /** The ids the next accounts open under, in turn; `ACCOUNT_ID` once they run out. */
   openedIds: string[] = [];
 
-  /** The accounts closed, in order, and the country each was opened in. */
+  /** The accounts closed, in order. */
   readonly closed: string[] = [];
-  readonly closedIn: string[] = [];
 
   /** Set to have Stripe refuse to close an account, as an outage would. */
   refusingClose = false;
 
-  closeAccount(accountId: string, country: string): Promise<void> {
+  closeAccount(accountId: string): Promise<void> {
     if (this.refusingClose) {
       return Promise.reject(new Error("api_connection_error"));
     }
 
     this.closed.push(accountId);
-    this.closedIn.push(country);
 
     return Promise.resolve();
   }

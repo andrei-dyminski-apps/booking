@@ -608,7 +608,20 @@ rules (HTTP, the webhooks, the BullMQ jobs) and two external worlds (Postgres, S
   and two SDK retries, since nobody waits on them. A new gateway method takes one or the
   other by who calls it; one called from both sides — `transfersEnabled`, asked by the
   payouts screen's refresh and by the payout job and the account events — is told which by
-  its caller (`Caller` in `ports/payout-gateway.ts`).
+  its caller (`Caller` in `ports/payout-gateway.ts`). **The payout countries are never read
+  at runtime.** The country specs are a list of over half a megabyte that a sandbox once
+  took twenty seconds to answer after hours without a read (2026-11-19, and 21 s again on
+  the first sync); Stripe sends it uncompressed whatever `Accept-Encoding` asks for and
+  leaves no field of a spec out, so its size is not ours to shrink. So the list is a
+  snapshot in the repository (`payout-countries.snapshot.ts`: the platform's country and
+  each offered country's currency), written by `scripts/sync-payout-countries.ts`
+  (`stripe:sync-countries`, `COUNTRIES_REQUEST` — thirty seconds, two retries — since only a
+  script waits on it) and proposed once a week as a pull request by
+  `.github/workflows/payout-countries.yml`. Merging that pull request is the decision to
+  offer a country; one Stripe transfers to that the platform does not want goes into
+  `EXCLUDED_PAYOUT_COUNTRIES` (`payout-countries.reading.ts`) and is never proposed again.
+  The file is generated in Prettier's spelling and is not edited by hand. Nothing in a
+  request, a spec or the browser suite reaches Stripe for the countries.
 - **A refund the bank sent back** (`refund.failed`) is kept in `refund_failures` — keyed by
   the refund's id, its stay a relation with `onDelete: SetNull`, because the record of money
   still owed to a guest must not go with whatever deletes a booking row — today only the
@@ -700,37 +713,56 @@ platform, and the host is paid their share by a transfer once the stay has begun
   unchanged. Stripe requires `identity.country` before `defaults.currency` and
   `configuration.recipient`, fixes it at opening and onboards by it, so the country comes
   first and `POST /payouts/account/session` is a `409` (`PAYOUT_ACCOUNT_NOT_OPENED`) until
-  then. **Which countries is Stripe's answer, not a list of ours**: `transferCountries`
-  reads the platform's own account and its country spec's `supported_transfer_countries` —
-  where Stripe lets this platform send a transfer; a country with no spec or a malformed
-  code is dropped. **An account holds its own country's currency**: `defaults.currency` is
-  the spec's `default_currency` (`PayoutCountryReading.currencies`), so a host gives the
+  then. **Which countries is Stripe's answer, taken as a snapshot**: `transferCountries`
+  answers the countries of `payout-countries.snapshot.ts`, which the sync reads off the
+  platform's own account and its country spec's `supported_transfer_countries` — where
+  Stripe lets this platform send a transfer; a country with no spec, a malformed code or one
+  in `EXCLUDED_PAYOUT_COUNTRIES` is dropped. The snapshot is the platform's country's: the
+  key production runs on has to belong to an account in `PAYOUT_PLATFORM_COUNTRY`: a
+  deployment (`NODE_ENV=production`) reads its own account once at boot and refuses to start
+  in another country (`PlatformCountryCheck`, `retrieveCurrent` — one small read, not the
+  specs; a Stripe it cannot reach then is only a warning), and the probe refuses a sandbox
+  in another one. The spec is a filter in its own right, not only the source of a
+  currency: the transfer countries of a platform in Poland include IS, MC and SM, which
+  have none, and a sandbox refused `stripe_transfers` in IS with an error carrying no
+  `code` (2026-11-19) — while Stripe infers `defaults.currency` from the country when none
+  is sent (the spec's own for DE, GB, CH and US). **An account holds its own country's currency**: `defaults.currency` is
+  the spec's `default_currency` (the snapshot's `PAYOUT_COUNTRY_CURRENCIES`), so a host gives the
   local bank account they have rather than one in `CURRENCY`, which is what the industry
   does — the transfer still goes out in the stay's currency, funded by its charge
   (`source_transaction` wants the two to match), and Stripe converts it on its way into the
-  account. A country no spec names is refused before Stripe is asked (`no_country_spec`).
-  The list is a reading of the specs, not Stripe's own check of an account, so the two can
+  account. A country the snapshot does not hold is refused before Stripe is asked
+  (`not_in_snapshot`). The list is a reading of the specs, not Stripe's own check of an account, so the two can
   disagree: a refusal in `COUNTRY_REFUSALS` (`account_country_unsupported_currency` kept as
   the fallback) becomes `PayoutCountryRefusedError`, a `400` `PAYOUT_COUNTRY_UNSUPPORTED`
   rather than a `502`, and the country leaves the process's list until a restart;
-  `scripts/probe-payout-countries.ts` (`stripe:probe-countries`) compares the list with what
-  a sandbox opens, country by country, through the adapter itself (`readPayoutCountries` is
-  exported for it). For a platform in Poland the probe found two countries the list offered
+  `scripts/probe-payout-countries.ts` (`stripe:probe-countries`) compares the snapshot with
+  what a sandbox opens, country by country, through the adapter itself — given every
+  spec's currency through `PAYOUT_COUNTRIES`, the optional table the adapter otherwise takes
+  from the snapshot, so a country the snapshot leaves out is asked about too, all but one
+  with no spec or in `EXCLUDED_PAYOUT_COUNTRIES`, which it leaves out by design — and reports
+  a snapshot the specs no longer match. For a platform in Poland the probe found two countries the list offered
   and Stripe refused — `capability_not_available_without_other_capability`: in the US and
   Canada `stripe_transfers` cannot be requested without `merchant` `card_payments`.
   `MERCHANT_COUNTRIES` adds that configuration there (the account can then take cards, which
   the platform never asks of a host, and onboarding asks for a business profile and a bank
-  account too), `closeAccount` names every configuration the account carries, which is why
-  it takes the country, and the code stays in `COUNTRY_REFUSALS` as the fallback for a
-  country not yet known. A sandbox refuses a transfer to an account whose `stripe_transfers`
+  account too). The country specs say nothing of it, so a country missing from the list is
+  learnt from the refusal itself: `openAccountAsStripeAllows` asks once more with
+  `merchant` (another body, so another key), keeps the country for the process and warns in
+  the log to add it to `MERCHANT_COUNTRIES` — the host never sees the refusal, and the list
+  only spares those countries the refused request. The probe reads what was learnt
+  (`learntMerchantCountries`) and reports such a country as `NEEDS MERCHANT`, failing the
+  run, rather than counting the second try as the list being right. Refused again with `merchant` asked for,
+  the code counts as the country refused (`COUNTRY_REFUSALS`). `closeAccount` reads which
+  configurations the account carries from Stripe and names all of them, since a learnt
+  `merchant` is not the country's to tell. A sandbox refuses a transfer to an account whose `stripe_transfers`
   is not active, and an Express account's onboarding cannot be finished over the API, so
   whether a transfer reaches a cross-border host is `stripe:probe-transfer`'s, run by hand
   after onboarding in the app — or on a sandbox account opened with `dashboard: "none"`,
   which takes test data and the terms of service over the API (see `README.md`). Run that
   way (2026-11-18, platform in Poland), a USD transfer reached DE, GB and CH on one
-  `recipient` configuration, converted on the way in. Read once per process, a failed read
-  kept ten seconds only, so a Stripe that is down is not asked on every render. `GET
-/payouts/account/countries` hands it to the form, and `open` refuses any other country
+  `recipient` configuration, converted on the way in. `GET
+/payouts/account/countries` hands the list to the form, and `open` refuses any other country
   with a `400` (`PAYOUT_COUNTRY_UNSUPPORTED`, the schema's code and words for a malformed
   one — `PAYOUT_COUNTRY_UNSUPPORTED_MESSAGE` of the contract), because an account opened
   elsewhere would onboard and never be paid. The idempotency key is
@@ -740,10 +772,13 @@ platform, and the host is paid their share by a transfer once the stay has begun
   country or renames themselves (a v2 request that failed is not stored — a retry runs it
   again). The price is a second account when both requests reached Stripe: `open` reads the
   column back after its write, and an account it opened that the column does not hold — a
-  racing request with another body wrote first — is closed (`closeAccount`, naming every
-  configuration it carries — `recipient`, and `merchant` beside it in the
-  `MERCHANT_COUNTRIES`); a close that fails is logged with the id for a
-  person, never answered. One opened and never attached at all (the API gave up waiting on a
+  racing request with another body wrote first — is closed by a `close-account` job on the
+  `host-payout` queue (`HostAccountService.closeAccount` → `closeAccount`, naming every
+  configuration Stripe says it carries, an account closed already left alone), not inside
+  the request: two more calls to Stripe behind an opening would outlast the frontend's
+  twenty seconds and show an error to a host whose account is attached. The job retries six
+  times; one that gives up, or a close that could not be queued, is logged with the id for
+  a person to close in the Dashboard. One opened and never attached at all (the API gave up waiting on a
   request Stripe went on to carry out) stays at Stripe, unnamed by any row. Two requests
   with the same body at once are one too many for the key: v2 answers with an
   `idempotency_error` (`StripeIdempotencyError`; a v1-shaped `idempotency_key_in_use` is

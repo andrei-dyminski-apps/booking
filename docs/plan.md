@@ -1115,14 +1115,43 @@ pull request. The second target is the same stack with Stripe's side real, runni
 scenarios marked for every target and those marked for real Stripe — how a developer checks
 the payment and payout scenarios against Stripe before trusting them against anything else.
 
-- The API runs as it does in deployment, apart from a developer's own running stack, so one
-  never hears the other's payments.
-- Stripe's confirmations reach the local API, and the suite sets that up and tears it down
-  itself.
-- A stay is paid in Stripe's own form with a test card, and the suite waits for Stripe's own
-  confirmation; a scenario reads the same as on the hermetic stack. It is the only check that
-  Stripe still accepts what the integration sends, flaky by nature, so never a required
-  check, and with no retries: a failure on Stripe's side is what the target exists to show.
+Payouts, the scenario of `docs/e2e-scenarios.md` that only real Stripe can answer, ships
+with the target and is ticked there.
+
+- [x] **The API runs as it does in deployment, apart from a developer's own running stack, so
+      one never hears the other's payments.** The production build in production mode on
+      the hermetic stack's own database, Redis and ports, under a site name new on every
+      run: the sandbox is shared, both stacks hear every event of it, and each leaves a
+      payment of another site alone — an earlier run's included, whose database is gone.
+      The Stripe keys are the one thing the target reads from the developer's environment,
+      and a live key stops the run before anything starts.
+- [x] **Stripe's confirmations reach the local API, and the suite sets that up and tears it
+      down itself.** Two `stripe listen` processes, one per webhook route as on a
+      developer's machine, started before the API and stopped with the run; the API is
+      handed the secret the CLI keeps for the key. The CLI is a dev dependency run on the
+      host rather than the container the development stack uses: the suite's API listens on
+      127.0.0.1, which a container cannot reach.
+- [x] **A stay is paid in Stripe's own form with a test card, and the suite waits for Stripe's
+      own confirmation; a scenario reads the same as on the hermetic stack.** Only the step
+      that types the card differs. What Stripe draws in its frames is Stripe's markup and is
+      left out of the accessibility check, on this target the only place it is drawn. It is
+      the only check that Stripe still accepts what the integration sends, flaky by nature,
+      so never a required check, never in CI, and with no retries: a failure on Stripe's
+      side is what the target exists to show.
+- [x] **Where a scenario runs is written on it**, as the mark of `docs/e2e-scenarios.md`: a
+      scenario for every target or for real Stripe only says so, and one that says nothing
+      is the hermetic stack's alone, so a new scenario reaches no other target by accident.
+      The phone runs on the hermetic stack alone.
+- **What the first runs showed.** All twenty tests of the target green on the first full
+  run after the fix below (2.6 minutes, 2026-11-19), every delivery of both listeners
+  taken. The one failure before it was Stripe's: the payout countries are read from a list
+  of country specs over half a megabyte, whose first read after a while took Stripe twenty seconds against the API's four
+  a call, so the payouts page offered no form until a reload (the next reads took under a
+  second). It was the read a host's first visit to that page made on a fresh API process;
+  the API now reads no country at all: the list is a snapshot in the repository
+  (`payout-countries.snapshot.ts`), rewritten by `stripe:sync-countries` and proposed weekly
+  as a pull request by `.github/workflows/payout-countries.yml`.
+  Each run leaves a connected account in the sandbox, which the application cannot close.
 
 ### 11.4 — The live deployment (optional)
 

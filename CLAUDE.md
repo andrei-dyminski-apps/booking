@@ -45,6 +45,11 @@ in `README.md`. Both act on a live deployment: run them only when the user asks.
 `pnpm db:seed:railway` reseeds the deployed database — the seed deletes every demo table
 first — so it is run only when the user asks, too.
 
+The payout countries are a snapshot in the repository (`payout-countries.snapshot.ts`,
+generated — never edited by hand), rewritten by `pnpm --filter @repo/api stripe:sync-countries`,
+which only reads Stripe, and proposed weekly as a pull request by
+`.github/workflows/payout-countries.yml`.
+
 `pnpm --filter @repo/api stripe:probe-countries` checks the payout countries the form offers
 against what Stripe opens: it opens and closes an account per country in the sandbox the
 root `.env` names (a live key is refused). `stripe:probe-transfer acct_…` takes a test charge
@@ -57,11 +62,14 @@ Tests:
 pnpm test           # *.spec.ts next to the code: jest in apps/api, vitest in apps/web and packages/contracts
 pnpm test:e2e       # jest -c test/jest-e2e.json; needs the database, wipes tables
 pnpm test:browser   # Playwright in apps/web/e2e; starts a hermetic stack of its own in Docker
+pnpm test:browser:stripe   # the same suite with Stripe's side real, against the sandbox of .env
 ```
 
 The runners differ because the packages do: `apps/api` is CommonJS with Nest's testing module, `apps/web` is ESM and needed nothing beyond a runner. `packages/contracts` runs Vitest too, for the rules it holds that both sides apply (`nightlyPrice`, `refundQuote`, `hostShare`) and imports from its own sources. `pnpm test` covers all three through turbo.
 
 `pnpm test:browser` is the browser suite: the scenarios of `docs/e2e-scenarios.md` against a stack it starts itself (`apps/web/e2e/stack.ts`) — both production builds, a Postgres and a Redis of its own in the Compose project `booking-e2e`, recreated and seeded on every run, Stripe played by a stand-in of the suite's own. It never touches the development database and runs beside `pnpm dev`. What belongs in it is in "Browser suite" of `apps/web/CLAUDE.md`.
+
+`pnpm test:browser:stripe` is that suite on its second target: the same stack with Stripe's side real — the sandbox the root `.env` names (a live key is refused), its events brought back by `stripe listen` the suite starts itself — running the scenarios tagged `@every-target` and `@real-stripe-only`. The API runs in production mode there, so that sandbox has to be in `PAYOUT_PLATFORM_COUNTRY` or the API refuses to start (`PlatformCountryCheck`). It writes to that Stripe account (payments, refunds, a connected account per run), so like the probes it is run only when the user asks, and never in CI.
 
 All three tasks declare `dependsOn: ["^build"]`: the specs import `@repo/contracts` schemas as values, so `dist/` has to exist. Running `pnpm --filter @repo/api test` directly skips that and fails on a fresh clone.
 
