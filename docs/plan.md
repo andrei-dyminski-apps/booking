@@ -1316,6 +1316,136 @@ the erasure: should the connected account stop taking transfers meanwhile, the p
 the share back and switches the flag off, nobody can finish onboarding again, and no admin is
 told — the share waits until Stripe's news switches the account back on.
 
+## Phase 13 — Email, sent and received
+
+Everything the application tells a person today is a row in `notifications` and an event on
+their channel (phase 8): it reaches them only while they are signed in and looking. A booking
+confirmed while the host is away, a refund that bounced, a payout sent — the person learns of
+it the next time they open the site. Email is what every marketplace adds next, and it is the
+dependency of the next phase: a password cannot be reset, nor a change of it announced, without
+a way to reach the person outside a session.
+
+The product's own domain (`staydesk.dev`) is what makes it possible at no cost: a sending
+provider's free tier covers a demo's volume, and the DNS records that let mailboxes trust the
+mail are free to write.
+
+- [ ] **A port for the mail, like the one for the payments.** `MailGateway` (an abstract class,
+      its own DI token, as `PaymentGateway` is) with two adapters: the provider's HTTP API in
+      production, and SMTP to a **Mailpit** container locally — added to `docker-compose.yml`,
+      its web view the place a developer reads what the application sent. The production
+      adapter talks HTTPS rather than SMTP: Railway's lower plans block outbound SMTP, and the
+      HTTP API is where the provider's idempotency key and its webhooks live.
+- [ ] **The provider: Resend**, unless the figures read at the start of the phase say otherwise
+      — its free tier (about 3,000 messages a month, 100 a day at the time of writing), a
+      domain of our own on it, an `Idempotency-Key` per send, signed webhooks (Svix) for what
+      happens to a message, and receiving on the same account (below). The sending address is
+      on a subdomain (`mail.staydesk.dev` or the like) so the root keeps its own MX for a
+      human inbox; SPF, DKIM and DMARC (`p=none` first, tightened once the reports are clean)
+      are written to the zone. New variables — the key, the webhook secret, the sender, the
+      SMTP address for Mailpit — go into `.env.example`, `globalEnv` and the README's table.
+- [ ] **Sent from a queue, never from the request.** A BullMQ queue `mail` with retries and
+      backoff, the same reason `notify` never throws: what an email announces has already been
+      committed. The job's id is the idempotency key handed to the provider, so a retry after
+      a lost answer does not send twice. A hard failure after the last retry is logged with the
+      request id, never with the address.
+- [ ] **An address is confirmed before anything but a confirmation is sent to it.**
+      Registration accepts any address today, and mail to addresses nobody owns is what a
+      provider suspends a sender for. `users.email_verified_at`; a link with a single-use token
+      (its SHA-256 stored, as a refresh token's is; a day to live) is sent on registration and
+      can be asked for again from `/profile`. An unconfirmed account works as before — the
+      demo logins at `example.com`, which can receive nothing, stay unconfirmed for good and
+      are never written to. An erased account (phase 12) is never written to either.
+- [ ] **What is emailed.** The notices that matter while the person is away, as a copy of the
+      row `notify` writes, never instead of it: a stay requested, confirmed or cancelled, a
+      refund sent or failed, a payout sent or failed, a host fee, a dispute, a free night on a
+      waitlist. A review, a message — not by default (below). Each email is the notice's own
+      wording from `@repo/contracts` with a link to the page the bell links to, text and HTML
+      from one template, English like the interface. The person can switch the copies off per
+      group on `/profile`; the account mails of phase 14 cannot be switched off.
+- [ ] **A message in a thread is emailed only if it stays unread.** A message per email would
+      flood a lively thread, so a delayed job (a few minutes) checks the message's unread state
+      and sends one email for everything still unread in that thread.
+- [ ] **What happens to a message comes back.** The provider's webhook (`POST /webhooks/mail`,
+      raw body, signature checked, written to an inbox table before it is acted on — the Stripe
+      webhook's pattern) records a hard bounce or a complaint: the address is marked
+      undeliverable (`users.email_undeliverable_at`) and nothing but an account mail is sent to
+      it again until the person confirms it anew.
+- [ ] **Received: a reply to a message email lands in the thread.** The message email's
+      `Reply-To` is an address on the receiving subdomain that names the thread and the
+      recipient with a signed token (`reply+<token>@…`); the provider's `email.received`
+      webhook hands over the id, the body is fetched through its API, the quoted history and
+      the signature are cut off, and what is left is posted to the thread as that person —
+      through `ConversationService`, so a closed thread (phase 12) or a blocked account refuses
+      it like any other message. The token, not the `From` header, decides who wrote it: a
+      `From` is trivially forged. A reply that cannot be placed is dropped with a log line.
+- [ ] **A human inbox on the domain**, `support@staydesk.dev`, is not built: it is the
+      provider's (or the DNS host's) forwarding to a personal mailbox, configured and written
+      down in the README, no code.
+- [ ] **The test suites never reach the provider.** The API's e2e specs run against a fake
+      `MailGateway` that keeps what was sent; the hermetic browser stack gets a Mailpit of its
+      own in `booking-e2e`, and a scenario reads the confirmation link from Mailpit's API —
+      registration, the link, the confirmed badge. The real-Stripe and live targets (11.3,
+      11.4) send nothing new: the suite's accounts there stay unconfirmed.
+
+Out of scope: marketing mail and newsletters (and with them `List-Unsubscribe` one-click, which
+the large mailbox providers require of bulk senders, not of transactional mail), attachments,
+and a template builder — the templates are code.
+
+To settle at the start of the phase, and write down here with the date: the provider's free
+tier as it then stands, sending and receiving both; whether the DNS of `staydesk.dev` is where
+the MX of the receiving subdomain can be written; Railway's SMTP policy for the plan the API
+runs on.
+
+## Phase 14 — Changing the password, and resetting a forgotten one
+
+A password is set at registration and never again: there is no way to change it, and an account
+whose password is forgotten is lost. Both depend on phase 13 — a reset is a link sent by email,
+and a change is announced by one, so a stolen session that changes the password is noticed by
+its owner.
+
+- [ ] **Changing it while signed in.** `PUT /users/me/password` with the current password and
+      the new one, the new one under `registerSchema`'s policy (a contract schema of its own in
+      `@repo/contracts`), the current one refused with the `403` `PASSWORD_INCORRECT` of phase
+      12 — not the login's `401`, which the browser would spend on a refresh. The ceiling of ten
+      a minute the login and the erasure have. The new password equal to the old is refused
+      with its own code.
+- [ ] **Every other session ends.** In one transaction: the new hash, and every refresh-token
+      family of the account revoked but the caller's, which is rotated so the session that made
+      the change stays signed in. An access token of another session lives out
+      `JWT_ACCESS_TTL`, as a blocked account's does (phase 3) — `JwtStrategy` reads no database,
+      and that is the same trade made knowingly.
+- [ ] **Announced by email** to a confirmed address, always — an account mail, not a copy that
+      can be switched off: "your password was changed", with the time, and what to do if it was
+      not you (reset it).
+- [ ] **Resetting a forgotten one.** `POST /auth/password/forgot` with an address always
+      answers `202` with the same body, whether the account exists or not, so the form tells
+      nobody which addresses are registered; it is throttled per address and per client. An
+      account that exists, is neither blocked nor erased, gets a link with a single-use token
+      (SHA-256 stored, an hour to live, a newer request voiding the older one).
+      `POST /auth/password/reset` with the token and the new password sets the hash, revokes
+      every refresh token, marks the address confirmed — the link proved it is theirs — and
+      signs the person in. An unconfirmed address may receive a reset: proving it is the point.
+- [ ] **The demo logins cannot be changed.** Their password is published in the README; one
+      visitor changing it locks every other visitor out until the next reseed. The seed marks
+      its accounts (a column, not a guess from the address), the change is refused for them with
+      its own code and a reset is never sent — `example.com` cannot receive one anyway. The same
+      mark is the answer to a visitor erasing a demo account (phase 12), which today only the
+      reseed undoes, and phase 14 applies it there too.
+- [ ] **Web:** a "Password" section on `/profile` (the current password, the new one, its
+      confirmation; a Server Action, the error codes of phase 10 under the fields), "Forgot your
+      password?" on `/login`, and `/forgot-password` and `/reset-password?token=…` — the latter
+      checking the token before drawing the form, so an expired link says so instead of failing
+      on submit.
+- [ ] **Specs:** unit — the policy, the refusals; e2e — a change ends the other sessions and
+      keeps the caller's, a wrong current password and a demo account are refused, a reset
+      answers the same for an unknown address, a token works once and not after its hour, a
+      reset ends every session; the browser suite — a change from `/profile`, and a forgotten
+      password reset through the link Mailpit received, then a sign-in with the new one.
+
+Out of scope: two-factor authentication and passkeys — their own phase, if ever — and changing
+the email address, which needs the confirmation of phase 13 for the new address and a notice to
+the old one, and is a step of its own.
+
 ## Decisions already made
 
 - **Prisma** (v7: `prisma.config.ts`, the `prisma-client` generator, the `@prisma/adapter-pg` driver adapter) — the most recognizable ORM; interactive transactions and raw migrations cover phase 4.
@@ -1348,7 +1478,7 @@ told — the share waits until Stripe's news switches the account back on.
   before React has hydrated, and `refresh()` / `updateTag` are reachable only from there.
   The client path stays for what a round trip cannot express — a poll for a webhook — and
   phase 6 is what brings the first of those.
-- The order of the phases follows the dependencies: database → auth → roles → concurrency → catalogue → Stripe → cancellation policies → polish → deployment → error codes → frontend e2e → account deletion. The frontend e2e suite comes after the features it covers: it needs screens that have stopped changing, and it describes what a visitor sees rather than how the page is produced. Account deletion comes after it because its refusals are written in the codes of phase 10 and its erasure has to know every money path that can still be open. The cancellation policies follow Stripe directly because they change the rules its refund machinery runs on, and they come before the error codes because they add refusals the codes would otherwise be written for twice. The catalogue comes before Stripe because the dependency runs one way only: Stripe Elements needs a booking to attach to, and a booking is created from the form on the listing page, which is the catalogue's. Nothing in the catalogue needs a payment — it is server-rendered from `searchParams`, and TanStack Query arrives with the polling of the webhook.
+- The order of the phases follows the dependencies: database → auth → roles → concurrency → catalogue → Stripe → cancellation policies → polish → deployment → error codes → frontend e2e → account deletion → email → password change. The frontend e2e suite comes after the features it covers: it needs screens that have stopped changing, and it describes what a visitor sees rather than how the page is produced. Account deletion comes after it because its refusals are written in the codes of phase 10 and its erasure has to know every money path that can still be open. Email follows the erasure, which decides who is never written to, and the password change follows email, because a reset is a link sent by mail and a change has to be announced by one. The cancellation policies follow Stripe directly because they change the rules its refund machinery runs on, and they come before the error codes because they add refusals the codes would otherwise be written for twice. The catalogue comes before Stripe because the dependency runs one way only: Stripe Elements needs a booking to attach to, and a booking is created from the form on the listing page, which is the catalogue's. Nothing in the catalogue needs a payment — it is server-rendered from `searchParams`, and TanStack Query arrives with the polling of the webhook.
 
 ## Decisions deliberately not taken
 
