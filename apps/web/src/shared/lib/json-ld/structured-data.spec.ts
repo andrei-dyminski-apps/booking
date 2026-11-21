@@ -33,15 +33,15 @@ describe("serializeJsonLd", () => {
     expect(
       JSON.parse(
         serializeJsonLd([
-          { "@type": "Organization", name: "Booking" },
-          { "@type": "WebSite", name: "Booking" },
+          { "@type": "Organization", name: "StayDesk" },
+          { "@type": "WebSite", name: "StayDesk" },
         ]),
       ),
     ).toEqual({
       "@context": "https://schema.org",
       "@graph": [
-        { "@type": "Organization", name: "Booking" },
-        { "@type": "WebSite", name: "Booking" },
+        { "@type": "Organization", name: "StayDesk" },
+        { "@type": "WebSite", name: "StayDesk" },
       ],
     });
   });

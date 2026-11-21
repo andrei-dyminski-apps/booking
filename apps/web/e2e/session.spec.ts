@@ -1,4 +1,4 @@
-import { DEMO } from "./demo";
+import { GUEST } from "./demo";
 import { expect, test } from "./fixtures";
 import { EVERY_TARGET } from "./target";
 import { signInThroughForm } from "./session";
@@ -7,7 +7,7 @@ test(
   "a demo account signs in, finds its details and signs out",
   { tag: EVERY_TARGET },
   async ({ page, pages }) => {
-    const guest = DEMO.guest;
+    const guest = GUEST;
 
     await page.goto("/login");
     await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
@@ -57,7 +57,7 @@ test(
     await expect(page).toHaveURL("/login?next=%2Fbookings");
     await pages.check();
 
-    await signInThroughForm(page, DEMO.guest);
+    await signInThroughForm(page, GUEST);
 
     await expect(page).toHaveURL("/bookings");
     await expect(

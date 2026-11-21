@@ -1,4 +1,4 @@
-import { DEMO } from "./demo";
+import { GUEST } from "./demo";
 import { expect, test } from "./fixtures";
 import { EVERY_TARGET } from "./target";
 import { signInToListing } from "./session";
@@ -15,14 +15,16 @@ test(
   "after a stay that is over, the guest reviews the listing and the review shows on it",
   { tag: EVERY_TARGET },
   async ({ page, pages, arrange }) => {
-    const comment = "Quiet, warm, and the host left bread for the morning.";
+    // New on every attempt: the suite's guest on the deployment keeps every earlier run's
+    // reviews.
+    const comment = `Quiet, warm, and the host left bread for the morning (${Date.now().toString(36)}).`;
     const listing = await arrange.listing({
       pricePerNightCents: 10_000,
       ...begunStayListing(),
     });
 
     // A stay is over only once it has ended: one that has begun, ended early.
-    await signInToListing(page, pages, DEMO.guest, listing);
+    await signInToListing(page, pages, GUEST, listing);
     await holdAndPay(page, pages, {
       from: dayIn(listing.timeZone),
       to: dayIn(listing.timeZone, 3),

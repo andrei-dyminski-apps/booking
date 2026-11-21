@@ -106,7 +106,7 @@ describe("listingJsonLd", () => {
       {
         "@type": "ListItem",
         position: 1,
-        name: "Booking",
+        name: "StayDesk",
         item: "https://stays.example.com/",
       },
       {

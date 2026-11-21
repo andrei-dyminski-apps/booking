@@ -1,7 +1,7 @@
 import { randomInt } from "node:crypto";
-import { expectInCatalogue } from "./catalogue";
+import { expectInCatalogue, livePrice } from "./catalogue";
 import { expect, test } from "./fixtures";
-import { EVERY_TARGET } from "./target";
+import { EVERY_TARGET, TARGET } from "./target";
 import { signInThroughForm } from "./session";
 import { sidebarLink } from "./shell";
 
@@ -11,8 +11,10 @@ test(
   async ({ page, pages, arrange }) => {
     const host = await arrange.host();
     // A price no other listing has, so the catalogue's search for it is the host's listing
-    // alone, at an address nothing else has read.
-    const dollars = randomInt(1_000, 2_000);
+    // alone, at an address nothing else has read — on the deployment, where visitors list
+    // stays of their own and earlier runs' pages are still cached, the run's own (`livePrice`).
+    const dollars =
+      TARGET === "live" ? livePrice("hostListing") : randomInt(1_000, 2_000);
     const search = `/listings?minPrice=${String(dollars)}&maxPrice=${String(dollars)}`;
     const title = `Boathouse at $${String(dollars)}`;
     const renamed = `Boathouse with a new roof at $${String(dollars)}`;
@@ -21,10 +23,21 @@ test(
     await pages.check();
     await signInThroughForm(page, host);
 
+    // The host is the test's own on the local stacks and starts with nothing. On the
+    // deployment it is the suite's own, whose listings an earlier test's clean-up may have
+    // failed to retire: there the scenario answers for its own listing alone.
+    const fresh = TARGET !== "live";
+    const editLink = (named: string) =>
+      page
+        .getByRole("main")
+        .getByRole("listitem")
+        .filter({ has: page.getByText(named, { exact: true }) })
+        .getByRole("link", { name: "Edit", exact: true });
+
     await expect(
       page.getByRole("heading", { level: 1, name: "Dashboard" }),
     ).toBeVisible();
-    await expect(page.getByText("No listings yet")).toBeVisible();
+    if (fresh) await expect(page.getByText("No listings yet")).toBeVisible();
     await pages.check();
 
     // Created.
@@ -50,7 +63,7 @@ test(
 
     // Edited.
     await sidebarLink(page, "Dashboard").click();
-    await page.getByRole("link", { name: "Edit", exact: true }).click();
+    await editLink(title).click();
     await expect(page).toHaveURL(/\/dashboard\/listings\/[0-9a-f-]{36}$/);
     await expect(page.getByLabel("Title", { exact: true })).toHaveValue(title);
     await pages.check();
@@ -66,7 +79,7 @@ test(
 
     // Deleted.
     await sidebarLink(page, "Dashboard").click();
-    await page.getByRole("link", { name: "Edit", exact: true }).click();
+    await editLink(renamed).click();
     await expect(page.getByLabel("Title", { exact: true })).toHaveValue(
       renamed,
     );
@@ -83,7 +96,8 @@ test(
     await dialog.getByRole("button", { name: "Delete permanently" }).click();
 
     await expect(page).toHaveURL("/dashboard");
-    await expect(page.getByText("No listings yet")).toBeVisible();
+    await expect(page.getByText(renamed, { exact: true })).toBeHidden();
+    if (fresh) await expect(page.getByText("No listings yet")).toBeVisible();
     await pages.check();
 
     await expectInCatalogue(page, pages, search, null);

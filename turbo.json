@@ -32,6 +32,7 @@
     "STRIPE_STAND_IN_URL",
     "DATA_CACHE_IN_MEMORY",
     "E2E_TARGET",
+    "E2E_LIVE_PASSWORD",
     "VERCEL_ENV",
     "VERCEL_PROJECT_PRODUCTION_URL"
   ],
@@ -62,6 +63,11 @@
       "dependsOn": ["^build"],
       "cache": false,
       "passThroughEnv": ["CI", "PLAYWRIGHT_*", "DOCKER_*"]
+    },
+    "test:browser:live": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "passThroughEnv": ["CI", "GITHUB_ACTIONS", "PLAYWRIGHT_*"]
     },
     "dev": {
       "dependsOn": ["^build"],

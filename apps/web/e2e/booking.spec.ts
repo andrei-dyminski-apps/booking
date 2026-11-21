@@ -1,4 +1,4 @@
-import { DEMO } from "./demo";
+import { GUEST } from "./demo";
 import { expect, test } from "./fixtures";
 import { EVERY_TARGET } from "./target";
 import { signInToListing } from "./session";
@@ -12,7 +12,7 @@ test(
     const from = dayIn(listing.timeZone, 14);
     const to = dayIn(listing.timeZone, 17);
 
-    await signInToListing(page, pages, DEMO.guest, listing);
+    await signInToListing(page, pages, GUEST, listing);
 
     // The listing: what it is, what a night costs, and which nights are free.
     await expect(page.getByText("$120.00 a night")).toBeVisible();

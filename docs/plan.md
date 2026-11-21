@@ -1159,30 +1159,66 @@ A green run against the live deployment is worth having in a portfolio project, 
 neither replace the hermetic one nor run everything it runs. The step stands on 11.3 and
 ships only once the scenarios marked for every target have run green locally.
 
-- It runs only the scenarios marked for every target, against a running deployment, and
-  prepares nothing in it that a visitor could not. It is never the default and runs apart from
-  the pull request checks — on a schedule and on demand, never blocking a merge.
-- **A scenario arranges its state there through the application's own means**, as the host
-  account the suite has on the demo: its listing is created by that host, and a stay that has
-  begun rests on a listing whose time zone has started the check-in day. What cannot be
-  arranged that way is not run there.
-- The suite has two accounts of its own on the live demo, a guest and a host, whose password
-  is a secret, not a value written in the repository: a password in the repository is one
-  anybody can sign in with and change. A taken address that refuses the secret, or a blocked
-  sign-in, fails the run — a finding about an open demo, not a hole for the suite to close.
-- **Each run leaves the demo as it found it, as far as the application allows**: the stays a
-  run made are cancelled and its listings retired after its scenarios, and the same is done
-  first for what a run that died left behind. A paid stay that has been ended, or a review,
-  cannot be taken back; both stay on a retired listing, out of the catalogue and out of the
-  next run's way.
-- The whole run is one visitor to the live rate limiter, so its pace is measured on the
-  first run and fixed from the numbers. No retries: a retry looks like a new visitor while
-  the limiter still remembers the first attempt.
-- A stopped demo ends the run with a notice and skips the scenarios; a deployment that is up
-  and answers badly fails it.
+- [x] It runs only the scenarios marked for every target, against a running deployment, and
+      prepares nothing in it that a visitor could not. It is never the default and runs apart
+      from the pull request checks — on a schedule and on demand, never blocking a merge.
+      `pnpm test:browser:live` (`E2E_TARGET=live`), and `.github/workflows/live.yml` every
+      morning and by hand; nothing is started or built but the contract the suite imports.
+- [x] **A scenario arranges its state there through the application's own means**, as the
+      host account the suite has on the demo: its listing is created by that host, and a stay
+      that has begun rests on a listing whose time zone has started the check-in day. What
+      cannot be arranged that way is not run there. The host's dashboard of the navigation
+      scenario now reads a listing the test arranged rather than the demo host's.
+- [x] The suite has two accounts of its own on the live demo, a guest and a host, whose
+      password is a secret, not a value written in the repository: a password in the
+      repository is one anybody can sign in with and change. A taken address that refuses
+      the secret, or a blocked sign-in, fails the run — a finding about an open demo, not a
+      hole for the suite to close. `E2E_LIVE_PASSWORD` (the root `.env`, a repository
+      secret); the global setup signs in to both and registers one the demo does not have
+      yet. A scenario that changes the guest's account (the host's review of a guest) is the
+      suite's guest there, and a text it finds on the suite's accounts is new on every
+      attempt, since they keep every earlier run's history.
+- [x] **Each run leaves the demo as it found it, as far as the application allows**: the stays
+      a run made are cancelled and its listings retired after its scenarios, and the same is
+      done first for what a run that died left behind. A paid stay that has been ended, or a
+      review, cannot be taken back; both stay on a retired listing, out of the catalogue and
+      out of the next run's way. The guest cancels — a host's cancellation would cost the
+      suite's host a fee.
+- [x] The whole run is one visitor to the live rate limiter, so its pace is measured on the
+      first run and fixed from the numbers. No retries: a retry looks like a new visitor
+      while the limiter still remembers the first attempt.
+- [x] A stopped demo ends the run with a notice and skips the scenarios; a deployment that is
+      up and answers badly fails it.
 
-The addresses, what the hosting platforms report about a deployment and the budget numbers
-are read and measured when the step is written, and recorded here then.
+What was read and measured when the step was written (2026-11-20):
+
+- **The addresses.** The frontend is `https://booking-beige-five.vercel.app` (`LIVE_ORIGIN`
+  in `apps/web/e2e/live.ts`); the suite talks to nothing else, the API being behind its BFF.
+- **What the platforms report.** A running demo answers `GET /api/health` with `200`. An
+  address Railway's edge has no deployment for answers `404` with `x-railway-fallback: true`
+  and `{"message":"Application not found"}`, which the BFF passes on with the API's other
+  headers — read off an unknown `*.up.railway.app`, the answer a stopped service's address
+  gives once `railway down` has removed its deployment; that case is the notice. Not yet
+  seen on this demo stopped by `pnpm railway:stop`. Vercel writes `x-forwarded-for` itself,
+  so every request of a run, the arrangements' included, is one address to the limiter.
+- **The budget.** All nineteen scenarios in five minutes of tests. No route's budget came
+  near its ceiling: at most eleven of the 120 requests a minute a route allows (the limiter
+  counts each route apart) were spent in any window the answers reported, page renders
+  included. The sign-ins are what binds — two or
+  three a scenario against ten a minute — so a run takes a slot for each (eight a minute,
+  `pace.ts`), before the press so the wait never runs out an `expect`, and spent about a
+  minute and a half waiting for them. The pace lives in a file: a failed test restarts the
+  worker, and the global setup and teardown sign in from processes of their own. It is one
+  file for the machine that outlives the run, since the limiter remembers the address: a
+  run started right after another still meets that run's sign-ins. A test starting while fewer than forty requests are left waits for the window,
+  which no run has needed. A test gets three minutes, the run forty in CI.
+- **What the first runs found.** A wait for a sign-in slot inside the request it held ran out
+  the `expect` after the press — hence the slot before it. The host's bell started at the
+  notices of every earlier run, the clean-up's cancellations among them, so the scenario now
+  reads it after marking those read and counts this listing's notices alone. And the
+  listing page's `<title>`, which Next streams after the content (`generateMetadata`), came
+  late enough on the deployment for the accessibility check to read the page without one:
+  the check now waits for the title, up to five seconds.
 
 ## Phase 12 — Deleting an account
 

@@ -1,4 +1,4 @@
-import { DEMO } from "./demo";
+import { GUEST } from "./demo";
 import { expect, test } from "./fixtures";
 import { EVERY_TARGET } from "./target";
 import { signInThroughForm, signInToListing } from "./session";
@@ -8,8 +8,11 @@ test(
   { tag: EVERY_TARGET },
   async ({ page, pages, arrange, another }) => {
     const listing = await arrange.listing();
-    const question = "Is there somewhere to leave a bicycle overnight?";
-    const answer = "Yes — the shed by the gate, the code is on the door.";
+    // New on every attempt: the suite's accounts on the deployment keep every earlier
+    // run's threads.
+    const stamp = Date.now().toString(36);
+    const question = `Is there somewhere to leave a bicycle overnight? (${stamp})`;
+    const answer = `Yes — the shed by the gate, the code is on the door (${stamp}).`;
 
     // The host has their messages open before anything is written.
     const hostPage = await another();
@@ -22,7 +25,7 @@ test(
     ).toBeVisible();
     await pages.check(hostPage);
 
-    await signInToListing(page, pages, DEMO.guest, listing);
+    await signInToListing(page, pages, GUEST, listing);
     await page.getByLabel("Your question", { exact: true }).fill(question);
     await page.getByRole("button", { name: "Send to the host" }).click();
 
@@ -41,7 +44,7 @@ test(
     await expect(thread).toBeVisible();
     await expect(thread.getByText("New", { exact: true })).toBeVisible();
     await expect(thread).toContainText(question);
-    await expect(thread).toContainText(`With ${DEMO.guest.name}`);
+    await expect(thread).toContainText(`With ${GUEST.name}`);
     await pages.check(hostPage);
 
     await thread.getByRole("link", { name: listing.title }).click();

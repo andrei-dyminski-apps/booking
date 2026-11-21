@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { BuildingIcon } from "lucide-react";
 import type { User } from "@repo/contracts";
-import { ROUTES } from "#shared/config";
+import { ROUTES, SITE_NAME } from "#shared/config";
 import { AccountPanel } from "./account-panel";
+import { BrandMark } from "./brand-mark";
 import { NavLinks } from "./nav-links";
 
 /**
@@ -20,13 +20,8 @@ export const Sidebar = ({ user }: { user: User | null }) => (
       href={ROUTES.home}
       className="flex items-center gap-2 rounded-lg px-2 py-1 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
     >
-      <span
-        aria-hidden
-        className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground"
-      >
-        <BuildingIcon className="size-4" />
-      </span>
-      <span className="font-semibold tracking-tight">Booking</span>
+      <BrandMark />
+      <span className="font-semibold tracking-tight">{SITE_NAME}</span>
     </Link>
 
     <NavLinks user={user} className="flex-1" />
