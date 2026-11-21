@@ -1,12 +1,17 @@
 import type { Page } from "@playwright/test";
 import { expect, type Pages } from "./fixtures";
-import { DEMO_PASSWORD, type Account } from "./demo";
+import { DEMO_PASSWORD, GUEST, type Account } from "./demo";
+import { signInSlot } from "./pace";
+import { TARGET } from "./target";
 
 /** Signs in through the form on the page that is open — `/login` or where a gate sent the visitor. */
 export async function signInThroughForm(
   page: Page,
   account: Account,
 ): Promise<void> {
+  // On the deployment the slot is taken before the press, not inside it: the wait for one
+  // can be most of a minute, which no `expect` after the press would sit through.
+  if (TARGET === "live") await signInSlot();
   await page.getByLabel("Email", { exact: true }).fill(account.email);
   await page
     .getByLabel("Password", { exact: true })
@@ -89,4 +94,26 @@ export async function fillRegistration(
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Repeat password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Create account" }).click();
+}
+
+/**
+ * A guest of the test's own, for a scenario that changes the guest's account, signed in on
+ * their profile: one `registerThroughForm` signs up on the local stacks, and on the
+ * deployment — where an account can never be deleted — the suite's own guest there.
+ */
+export async function ownGuest(
+  page: Page,
+  pages: Pages,
+  name: string,
+): Promise<Account> {
+  if (TARGET !== "live") return registerThroughForm(page, pages, name);
+
+  await page.goto("/login");
+  await pages.check(page);
+  await signInThroughForm(page, GUEST);
+
+  await expect(page).toHaveURL("/profile");
+  await pages.check(page);
+
+  return GUEST;
 }

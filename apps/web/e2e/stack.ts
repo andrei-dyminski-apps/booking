@@ -1,3 +1,4 @@
+import { LIVE_ORIGIN } from "./live";
 import { TARGET } from "./target";
 
 /**
@@ -27,7 +28,14 @@ const STRIPE_STAND_IN_PORT = 3202;
 const POSTGRES_PORT = 5433;
 const REDIS_PORT = 6380;
 
-export const WEB_ORIGIN = `http://localhost:${WEB_PORT}`;
+/** The stack's frontend, where `next start` listens. */
+export const LOCAL_WEB_ORIGIN = `http://localhost:${WEB_PORT}`;
+
+/**
+ * Where the suite opens its pages and arranges its state: the stack's frontend, or on the
+ * live target (`target.ts`) the deployment's, where no stack is started at all.
+ */
+export const WEB_ORIGIN = TARGET === "live" ? LIVE_ORIGIN : LOCAL_WEB_ORIGIN;
 export const API_ORIGIN = `http://127.0.0.1:${API_PORT}`;
 export const STRIPE_STAND_IN_ORIGIN = `http://127.0.0.1:${STRIPE_STAND_IN_PORT}`;
 
@@ -91,9 +99,9 @@ const STACK_ENV: Record<string, string> = {
   API_PORT: String(API_PORT),
   API_HOST: "127.0.0.1",
   PORT: "",
-  WEB_ORIGIN,
+  WEB_ORIGIN: LOCAL_WEB_ORIGIN,
   API_ORIGIN,
-  SITE_ORIGIN: WEB_ORIGIN,
+  SITE_ORIGIN: LOCAL_WEB_ORIGIN,
 
   POSTGRES_USER: POSTGRES.user,
   POSTGRES_PASSWORD: POSTGRES.password,

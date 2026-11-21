@@ -1,6 +1,6 @@
-import { DEMO } from "./demo";
+import { GUEST } from "./demo";
 import { expect, test } from "./fixtures";
-import { EVERY_TARGET } from "./target";
+import { EVERY_TARGET, TARGET } from "./target";
 import { signInThroughForm, signInToListing } from "./session";
 import { dayIn, holdAndPay } from "./stay";
 
@@ -22,11 +22,30 @@ test(
     await expect(
       hostPage.getByRole("heading", { level: 1, name: "Notifications" }),
     ).toBeVisible();
-    await expect(bell).toHaveAccessibleName("Notifications");
+
+    // On the deployment the host is the suite's own, with the notices of every earlier run —
+    // the stays its clean-up cancelled among them — so the count starts from none unread.
+    // A notice of an earlier scenario — a payment's, the setup sweep's cancellations — may
+    // still reach the host meanwhile and bring the button back, so it is pressed again
+    // until it is gone; and for the same reason the bell is held there to this stay's two
+    // at least, and only this listing's rows of the feed are counted.
+    const live = TARGET === "live";
+    const earlier = hostPage
+      .getByRole("main")
+      .getByRole("button", { name: "Mark all as read" });
+
+    if (live) {
+      await expect(async () => {
+        if (await earlier.isVisible()) await earlier.click({ timeout: 5_000 });
+        await expect(earlier).toBeHidden({ timeout: 5_000 });
+      }).toPass({ timeout: 30_000 });
+    } else {
+      await expect(bell).toHaveAccessibleName("Notifications");
+    }
     await pages.check(hostPage);
 
     // A hold on the listing, then its payment: a notice to the host for each.
-    await signInToListing(page, pages, DEMO.guest, listing);
+    await signInToListing(page, pages, GUEST, listing);
     await holdAndPay(page, pages, {
       from: dayIn(listing.timeZone, 40),
       to: dayIn(listing.timeZone, 41),
@@ -34,9 +53,16 @@ test(
     });
 
     // Without a reload, on the bell and in the list.
-    await expect(bell).toHaveAccessibleName("Notifications, 2 unread");
+    await expect(bell).toHaveAccessibleName(
+      live
+        ? /^Notifications, (?:[2-9]|[1-9]\d+) unread$/
+        : "Notifications, 2 unread",
+    );
 
-    const feed = hostPage.getByRole("main").getByRole("listitem");
+    // Every notice the host has on the local stacks, where the host is the test's own; this
+    // listing's alone on the deployment.
+    const notices = hostPage.getByRole("main").getByRole("listitem");
+    const feed = live ? notices.filter({ hasText: listing.title }) : notices;
 
     await expect(
       feed.filter({ hasText: "New booking request (unread)" }),
@@ -48,7 +74,7 @@ test(
 
     await hostPage.getByRole("button", { name: "Mark all as read" }).click();
 
-    await expect(bell).toHaveAccessibleName("Notifications");
+    if (!live) await expect(bell).toHaveAccessibleName("Notifications");
     await expect(feed.filter({ hasText: "(unread)" })).toHaveCount(0);
     await expect(feed).toHaveCount(2);
     await pages.check(hostPage);

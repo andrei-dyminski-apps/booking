@@ -1,4 +1,4 @@
-import { DEMO } from "./demo";
+import { GUEST } from "./demo";
 import { expect, test } from "./fixtures";
 import { EVERY_TARGET } from "./target";
 import { signInToListing } from "./session";
@@ -14,7 +14,7 @@ test(
       nonRefundableDiscountBps: 1_000,
     });
 
-    await signInToListing(page, pages, DEMO.guest, listing);
+    await signInToListing(page, pages, GUEST, listing);
 
     await pickDates(page, {
       from: dayIn(listing.timeZone, 30),

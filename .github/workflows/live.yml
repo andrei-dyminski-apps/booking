@@ -1,0 +1,72 @@
+name: Live demo
+
+# The browser suite against the live deployment (phase 11.4 of docs/plan.md): the scenarios
+# marked for every target, as the suite's own two accounts there, at the pace the demo's
+# rate limiter allows. Apart from the pull request checks — on a schedule and on demand,
+# never blocking a merge. A stopped demo ends the run with a notice and every scenario
+# skipped; a demo that is up and answers badly fails it.
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run at a time: two would be two visitors sharing one bucket of the rate limiter, and
+# each would sweep up the other's stays.
+concurrency:
+  group: live-demo
+
+env:
+  TURBO_TELEMETRY_DISABLED: 1
+
+jobs:
+  live:
+    name: browser suite against the live demo
+    runs-on: ubuntu-latest
+    # The suite stops itself first (globalTimeout in apps/web/playwright.config.ts), with its
+    # report written.
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Read the Playwright version
+        id: playwright
+        run: echo "version=$(pnpm --filter @repo/web exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        id: browsers
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - if: steps.browsers.outputs.cache-hit != 'true'
+        run: pnpm --filter @repo/web exec playwright install --with-deps chromium
+      - if: steps.browsers.outputs.cache-hit == 'true'
+        run: pnpm --filter @repo/web exec playwright install-deps chromium
+
+      # Builds only what the suite imports (the contract); the deployment is the application.
+      - run: pnpm test:browser:live
+        env:
+          E2E_LIVE_PASSWORD: ${{ secrets.E2E_LIVE_PASSWORD }}
+
+      # What a failure left: its screenshot and video, where the password shows as dots. No
+      # HTML report and no trace, which spell it out (apps/web/playwright.config.ts), and no
+      # error context, whose snapshot of the page reads every field's value: the artifacts
+      # of a public repository are anyone's to download, and GitHub masks secrets in the log
+      # alone.
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results-live
+          path: |
+            apps/web/test-results/
+            !apps/web/test-results/**/error-context.md
+          if-no-files-found: ignore
+          retention-days: 14

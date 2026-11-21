@@ -63,6 +63,7 @@ pnpm test           # *.spec.ts next to the code: jest in apps/api, vitest in ap
 pnpm test:e2e       # jest -c test/jest-e2e.json; needs the database, wipes tables
 pnpm test:browser   # Playwright in apps/web/e2e; starts a hermetic stack of its own in Docker
 pnpm test:browser:stripe   # the same suite with Stripe's side real, against the sandbox of .env
+pnpm test:browser:live     # the scenarios tagged @every-target, against the live demo
 ```
 
 The runners differ because the packages do: `apps/api` is CommonJS with Nest's testing module, `apps/web` is ESM and needed nothing beyond a runner. `packages/contracts` runs Vitest too, for the rules it holds that both sides apply (`nightlyPrice`, `refundQuote`, `hostShare`) and imports from its own sources. `pnpm test` covers all three through turbo.
@@ -71,7 +72,9 @@ The runners differ because the packages do: `apps/api` is CommonJS with Nest's t
 
 `pnpm test:browser:stripe` is that suite on its second target: the same stack with Stripe's side real — the sandbox the root `.env` names (a live key is refused), its events brought back by `stripe listen` the suite starts itself — running the scenarios tagged `@every-target` and `@real-stripe-only`. The API runs in production mode there, so that sandbox has to be in `PAYOUT_PLATFORM_COUNTRY` or the API refuses to start (`PlatformCountryCheck`). It writes to that Stripe account (payments, refunds, a connected account per run), so like the probes it is run only when the user asks, and never in CI.
 
-All three tasks declare `dependsOn: ["^build"]`: the specs import `@repo/contracts` schemas as values, so `dist/` has to exist. Running `pnpm --filter @repo/api test` directly skips that and fails on a fresh clone.
+`pnpm test:browser:live` is its third target: the scenarios tagged `@every-target` against the live demo, as the suite's own guest and host there (`apps/web/e2e/live.ts`, password `E2E_LIVE_PASSWORD`), at the pace the demo's rate limiter allows, cleaning up its stays and listings before and after. `.github/workflows/live.yml` runs it on a schedule and on demand, never as a pull request check. It writes to the live demo, so locally it is run only when the user asks.
+
+Every test task declares `dependsOn: ["^build"]`: the specs import `@repo/contracts` schemas as values, so `dist/` has to exist. Running `pnpm --filter @repo/api test` directly skips that and fails on a fresh clone.
 
 Before considering a task done: `pnpm lint` and `pnpm check-types` have to pass.
 
@@ -87,7 +90,7 @@ The shape of requests and responses is described by zod schemas in `packages/con
 
 The single source is the `.env` **in the repository root** (`cp .env.example .env`). There are no per-app `.env` files in `apps/*` and none should be created.
 
-The root scripts start turbo through `node --env-file-if-exists=.env`, so the variables are visible to both tasks. A new variable has to be added in three places: `.env.example`, `globalEnv` in `turbo.json`, the table in `README.md`. Otherwise turbo will not account for it in the cache hash, and the ESLint rule `turbo/no-undeclared-env-vars` will report it.
+The root scripts start turbo through `node --env-file-if-exists=.env`, so the variables are visible to both tasks. A new variable has to be added in three places: `.env.example`, `globalEnv` in `turbo.json`, the table in `README.md`. Otherwise turbo will not account for it in the cache hash, and the ESLint rule `turbo/no-undeclared-env-vars` will report it. Two kinds are not configuration and go into none of the three: a variable the CI runner sets itself (`CI`, `GITHUB_ACTIONS`), which goes into the task's `passThroughEnv`, and one a process writes for the processes it starts (the live target's `E2E_LIVE_STOPPED`, `E2E_LIVE_GUEST_JOINED` and `E2E_LIVE_READY`, handed from the browser suite's global setup to its workers and its teardown).
 
 `.env` is in `.gitignore` — do not commit it and do not read its contents without being asked.
 

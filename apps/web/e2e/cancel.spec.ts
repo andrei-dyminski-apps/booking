@@ -1,4 +1,4 @@
-import { DEMO } from "./demo";
+import { GUEST } from "./demo";
 import { expect, test } from "./fixtures";
 import { EVERY_TARGET, providerWait } from "./target";
 import { signInToListing } from "./session";
@@ -14,7 +14,7 @@ test(
       cancellationPolicy: "FLEXIBLE",
     });
 
-    await signInToListing(page, pages, DEMO.guest, listing);
+    await signInToListing(page, pages, GUEST, listing);
     await holdAndPay(page, pages, {
       from: dayIn(listing.timeZone, 30),
       to: dayIn(listing.timeZone, 32),
