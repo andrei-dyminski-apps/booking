@@ -245,8 +245,9 @@ of the catalogue and a listing's reviews is behind the global `JwtAuthGuard` and
 | `POST`   | `/conversations`                   | a guest's message about a listing: opens the thread or continues it; USER only                                 |
 | `GET`    | `/conversations/:id`               | one thread as the caller's side reads it; `404` for anybody but its two sides                                  |
 | `GET`    | `/conversations/:id/messages`      | one page of the thread, the newest message first, a cursor                                                     |
-| `POST`   | `/conversations/:id/messages`      | a reply from either side; a retired listing does not close the thread                                          |
+| `POST`   | `/conversations/:id/messages`      | a reply from either side; a retired listing does not close the thread, a deleted account does (`409`)          |
 | `POST`   | `/conversations/:id/read`          | the caller's side has seen the thread up to `upTo`, the newest message shown; `204`                            |
+| `DELETE` | `/users/me`                        | erase the caller's own account with the password typed again, `204`; `403` — wrong password, `409` — open      |
 | `GET`    | `/users`                           | one page of accounts: role, status, name and address filters, a cursor; ADMIN only                             |
 | `GET`    | `/users/:id`                       | one account with its stay and listing counts; ADMIN only                                                       |
 | `PATCH`  | `/users/:id`                       | block or unblock; ADMIN only, `403` on an admin's account                                                      |
@@ -581,6 +582,7 @@ The guard is membership of a set, not a hierarchy: an ADMIN does not pass an `@R
 | read guest reviews      | their own             | of guests who booked   | all               |
 | remove a review         | —                     | —                      | any               |
 | manage users            | —                     | —                      | any but their own |
+| delete an account       | their own             | their own              | their own         |
 
 Reading and writing are separate rules over the same row: an owner sees the stays booked against their listing and cannot cancel one out from under a guest. `GET /bookings` narrows by the caller inside the `where` rather than through a query parameter that could widen it — `side` only picks which of a user's two scopes it is — so the query cannot return a row the caller may not see.
 
@@ -588,7 +590,9 @@ Whether a refusal is a `403` or a `404` follows from what the caller could have 
 
 Registration always writes a `USER` — the only safe default for a public endpoint, and the whole of what a guest or a host needs. The API changes no role: an `ADMIN` account is made outside it — the seed sets it for the demo admin, anything else is a write to `users.role` in the database. Such a write reaches a signed-in session only at its next refresh, within `JWT_ACCESS_TTL`: the access token carries the role it was issued with, and nothing reads the row per request. So a route that moves money or cannot be undone does not take the token's word — waiving a host fee and blocking an account read the caller's row and answer `403` once it is no longer an active admin's.
 
-An admin manages accounts instead of deleting them. **Blocking** stamps `users.blocked_at` and deletes every refresh token of the account in the same transaction, so no session can be refreshed; login answers `403` once the password is right, `/auth/me` answers `401`, and the access token left in a browser lapses within `JWT_ACCESS_TTL`. A delete was left out on purpose: bookings cascade from a user and listings restrict, so it would either erase somebody's stay history or be refused for any owner who ever listed. Only a `USER` account can be blocked — an admin's cannot, the caller's own included, so no admin can shut another out.
+An admin manages accounts instead of deleting them. **Blocking** stamps `users.blocked_at` and deletes every refresh token of the account in the same transaction, so no session can be refreshed; login answers `403` once the password is right, `/auth/me` answers `401`, and the access token left in a browser lapses within `JWT_ACCESS_TTL`. Only a `USER` account can be blocked — an admin's cannot, the caller's own included, so no admin can shut another out.
+
+**Deleting an account** is its owner's alone, from the end of `/profile`, with the password typed again (`DELETE /users/me`). It erases the person, not the history: the name becomes "Deleted user", the address one at `.invalid` that receives no mail (the real one is free to register again), the password one nothing matches; every session, notification and waitlist entry goes, and the listings are retired. The stays, payments, refunds, payouts, fees, reviews and threads stay — they are the other party's history and the money's record too — and read as written by "Deleted user"; a thread with a deleted account stays to read and takes no new message. The Stripe connected account is not closed by the application; its id stays on the row. It is refused (`409`) while something is still open — a stay held or not yet over, an open dispute, a refund not settled, a host's share no payout account can receive, or a host fee still owed — the refusal naming every one, and for the site's last admin. A share a payout can still reach holds nothing back: it is paid to the connected account after the erasure.
 
 The admin's screens are `/admin` (every listing on offer, each editable and retirable through the owner's own form) and `/admin/users` (the accounts, filtered in the URL like the stays). Each account has a page of its own, `/admin/users/[id]`, where a user's account is blocked, with links to its stays and its listings.
 

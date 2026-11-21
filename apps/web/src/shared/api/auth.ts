@@ -3,6 +3,7 @@ import { z } from "zod";
 import { notFound, redirect } from "next/navigation";
 import {
   userSchema,
+  type DeleteAccountInput,
   type LoginInput,
   type RegisterInput,
   type Role,
@@ -32,6 +33,10 @@ import { mirrorSessionCookies } from "./session-cookies";
  * - `refresh` is the same case and is not here at all: the transport has to spend it in
  *   the middle of somebody else's request (`refreshSession` in `session-refresh.ts`).
  * - `me` needs only the access cookie, which both sides have.
+ * - `deleteAccount` needs only the access cookie too, and ends the session like a logout:
+ *   it runs from the Server Action of the profile page, and the API's cleared pair is
+ *   mirrored into this origin's jar the way `login` mirrors an issued one. The refresh
+ *   tokens it cannot see from there are deleted by the API, every family at once.
  */
 export const authApi = {
   register: (input: RegisterInput): Promise<User> =>
@@ -63,6 +68,15 @@ export const authApi = {
       path: "/auth/logout",
       schema: z.void(),
       retryOnUnauthorized: false,
+    }),
+
+  deleteAccount: (input: DeleteAccountInput): Promise<void> =>
+    apiRequest({
+      method: "DELETE",
+      path: "/users/me",
+      schema: z.void(),
+      body: input,
+      onResponse: mirrorSessionCookies,
     }),
 
   me: (read: ReadOptions): Promise<User> =>

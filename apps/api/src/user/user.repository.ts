@@ -47,8 +47,9 @@ export class AdminAccountError extends Error {
 
 /**
  * What `update` throws when the account behind the caller's token is no longer an active
- * admin: its role or its block was written in the database after the token was issued, and
- * `JwtStrategy` reads no database, so the token still claims `ADMIN`.
+ * admin: its role or its block was written in the database after the token was issued, or
+ * its owner erased it, and `JwtStrategy` reads no database, so the token still claims
+ * `ADMIN`.
  */
 export class CallerNotAdminError extends Error {
   constructor(callerId: string) {
@@ -68,6 +69,7 @@ const MANAGED_USER = {
   role: true,
   createdAt: true,
   blockedAt: true,
+  deletedAt: true,
 } satisfies Prisma.UserSelect;
 
 type ManagedUserRow = Prisma.UserGetPayload<{ select: typeof MANAGED_USER }>;
@@ -109,9 +111,15 @@ export class UserRepository {
     }
   }
 
-  /** The only read that carries the hash; everything else leaves on the contract shape. */
+  /**
+   * The reads that carry the hash; everything else leaves on the contract shape. An erased
+   * account is not found: its address is a placeholder by then, and the read says so on
+   * its own rather than trusting nobody to type one.
+   */
   async findByEmail(email: string): Promise<UserCredentials | null> {
-    const row = await this.prismaService.user.findUnique({ where: { email } });
+    const row = await this.prismaService.user.findFirst({
+      where: { email, deletedAt: null },
+    });
 
     if (row === null) return null;
 
@@ -123,13 +131,28 @@ export class UserRepository {
   }
 
   /**
+   * The hash of the account behind a session, for a password typed again to confirm
+   * something that cannot be undone (`DELETE /users/me`); `null` where `findActiveById`
+   * finds no session.
+   */
+  async findPasswordHashById(id: string): Promise<string | null> {
+    const row = await this.prismaService.user.findFirst({
+      where: { id, blockedAt: null, deletedAt: null },
+      select: { passwordHash: true },
+    });
+
+    return row?.passwordHash ?? null;
+  }
+
+  /**
    * The account behind a session, or `null` when there is none to be behind one — the row
-   * is gone, or an admin blocked it. `/auth/me` reads through this, so a blocked user's
-   * shell turns signed-out at the next render rather than when their access token lapses.
+   * is gone, its owner erased it, or an admin blocked it. `/auth/me` reads through this, so
+   * a blocked user's shell turns signed-out at the next render rather than when their
+   * access token lapses.
    */
   async findActiveById(id: string): Promise<User | null> {
     const row = await this.prismaService.user.findFirst({
-      where: { id, blockedAt: null },
+      where: { id, blockedAt: null, deletedAt: null },
     });
 
     return row === null ? null : toUser(row);
@@ -208,8 +231,8 @@ export class UserRepository {
    *
    * The caller's row is read first, in the same transaction: the role in the token is the
    * row's as it was at issue, and a block cannot be undone for the sessions it deletes, so
-   * an admin demoted or blocked since by a write outside the API gets no change through
-   * (`CallerNotAdminError`).
+   * an admin demoted or blocked since by a write outside the API, or one who erased their
+   * own account since, gets no change through (`CallerNotAdminError`).
    *
    * Only a `USER`'s row is written, and the role is part of the write's `where` rather than
    * a read before it, so a promotion committed meanwhile cannot slip between the check and
@@ -217,7 +240,8 @@ export class UserRepository {
    * sees the role it was written against; one that matched nothing — an admin's row, a
    * block already in place, no row at all — is told apart by that read. The refresh tokens
    * are deleted only after it, so an admin's sessions are never touched. `null` is a row
-   * that does not exist.
+   * that does not exist, or one its owner erased: there is no account left to block, and
+   * the `deleted_at` in the write's `where` keeps a block from stamping it.
    */
   async update(
     callerId: string,
@@ -227,17 +251,21 @@ export class UserRepository {
     return this.prismaService.$transaction(async (tx) => {
       const caller = await tx.user.findUnique({
         where: { id: callerId },
-        select: { role: true, blockedAt: true },
+        select: { role: true, blockedAt: true, deletedAt: true },
       });
 
-      if (caller?.role !== Role.ADMIN || caller.blockedAt !== null) {
+      if (
+        caller?.role !== Role.ADMIN ||
+        caller.blockedAt !== null ||
+        caller.deletedAt !== null
+      ) {
         throw new CallerNotAdminError(callerId);
       }
 
       await tx.user.updateMany({
         where: change.blocked
-          ? { id, role: Role.USER, blockedAt: null }
-          : { id, role: Role.USER },
+          ? { id, role: Role.USER, blockedAt: null, deletedAt: null }
+          : { id, role: Role.USER, deletedAt: null },
         data: { blockedAt: change.blocked ? new Date() : null },
       });
 
@@ -246,7 +274,7 @@ export class UserRepository {
         select: MANAGED_USER,
       });
 
-      if (row === null) return null;
+      if (row === null || row.deletedAt !== null) return null;
 
       if (row.role === Role.ADMIN) throw new AdminAccountError(id);
 
@@ -280,12 +308,26 @@ function userFilters(query: UserQuery): Prisma.UserWhereInput {
       query.email === undefined
         ? undefined
         : { contains: escapeLike(query.email) },
-    ...(query.status === undefined
-      ? {}
-      : {
-          blockedAt: query.status === UserStatus.BLOCKED ? { not: null } : null,
-        }),
+    ...statusFilter(query.status),
   };
+}
+
+/**
+ * The status of an account, as a `where`. An erased account is neither of the other two —
+ * nobody signs in to it and nobody can reopen it — so `ACTIVE` leaves it out as `BLOCKED`
+ * does. The switch is exhaustive, so a fourth status stops compiling here.
+ */
+function statusFilter(status: UserQuery["status"]): Prisma.UserWhereInput {
+  switch (status) {
+    case undefined:
+      return {};
+    case UserStatus.ACTIVE:
+      return { blockedAt: null, deletedAt: null };
+    case UserStatus.BLOCKED:
+      return { blockedAt: { not: null }, deletedAt: null };
+    case UserStatus.DELETED:
+      return { deletedAt: { not: null } };
+  }
 }
 
 /**
@@ -330,10 +372,11 @@ export function toUser(
   };
 }
 
-/** The same row as an admin is shown it — the session's shape plus when it was blocked. */
+/** The same row as an admin is shown it — the session's shape plus when it was blocked or erased. */
 function toManagedUser(row: ManagedUserRow): ManagedUser {
   return {
     ...toUser(row),
     blockedAt: row.blockedAt?.toISOString() ?? null,
+    deletedAt: row.deletedAt?.toISOString() ?? null,
   };
 }

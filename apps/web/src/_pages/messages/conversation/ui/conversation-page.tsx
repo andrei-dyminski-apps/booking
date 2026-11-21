@@ -152,10 +152,22 @@ export const ConversationPage = async ({
         </>
       )}
 
-      <SendMessageForm
-        conversationId={id}
-        earlier={query.cursor !== undefined}
-      />
+      {/* A deleted account closes the thread: the API refuses a message to it, so no box
+          is drawn that could only reach that refusal. */}
+      {conversation.closed ? (
+        <p
+          role="status"
+          className="rounded-lg border bg-muted px-4 py-3 text-sm text-muted-foreground"
+        >
+          This conversation is closed: the other side deleted their account. It
+          stays here to read, and no new message can be sent.
+        </p>
+      ) : (
+        <SendMessageForm
+          conversationId={id}
+          earlier={query.cursor !== undefined}
+        />
+      )}
     </div>
   );
 };

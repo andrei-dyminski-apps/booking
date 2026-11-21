@@ -44,8 +44,9 @@ export class OwnListingError extends Error {
 }
 
 /**
- * The account behind the token is gone: nothing checks that row beforehand, because
- * `JwtStrategy` reads no database. The same case `BookingRepository` names for a stay.
+ * The account behind the token is gone or its owner erased it: `JwtStrategy` reads no
+ * database, so `start` reads the row under a lock of its own. The same case
+ * `BookingRepository` names for a stay.
  */
 export class GuestNotFoundError extends Error {
   constructor(guestId: string) {
@@ -55,13 +56,26 @@ export class GuestNotFoundError extends Error {
 }
 
 /**
- * The thread a message is being written to is gone — it went with its guest's account
- * between the read that authorized the write and the write itself.
+ * The thread a message is being written to is gone between the read that authorized the
+ * write and the write itself. Nothing in the API deletes a thread — erasing an account keeps
+ * it, closed (`ConversationClosedError`) — so only a cleanup around the API gets here.
  */
 export class ConversationNotFoundError extends Error {
   constructor(conversationId: string) {
     super(`Conversation ${conversationId} not found`);
     this.name = "ConversationNotFoundError";
+  }
+}
+
+/**
+ * One of the thread's two people erased their account. The thread stays — it is the other
+ * side's history too — but it takes no new message: nobody is left to read one, or to have
+ * written it.
+ */
+export class ConversationClosedError extends Error {
+  constructor(conversationId: string) {
+    super(`Conversation ${conversationId} is closed`);
+    this.name = "ConversationClosedError";
   }
 }
 
@@ -78,15 +92,20 @@ export type ConversationParticipants = {
 /**
  * What every read of a thread selects beside its own columns: the title of the listing —
  * not narrowed by `deleted_at`, because a thread outlives the offer exactly as a stay does
- * — and the names of its two people. Names only: neither side's address is the other's to
- * read, and `toConversation` copies the fields by name so nothing else selected here can
- * leak out. The newest message is not among them: it is a column of the thread
+ * — and the names of its two people, with whether either erased their account, which
+ * closes the thread. No address: neither side's is the other's to read, and
+ * `toConversation` copies the fields by name so nothing else selected here can leak out. The newest message is not among them: it is a column of the thread
  * (`last_message_*`), because a relation read with `take: 1` over a page of threads loads
  * every message of every one of them.
  */
 const CONVERSATION_INCLUDE = {
-  listing: { select: { title: true, owner: { select: { name: true } } } },
-  guest: { select: { name: true } },
+  listing: {
+    select: {
+      title: true,
+      owner: { select: { name: true, deletedAt: true } },
+    },
+  },
+  guest: { select: { name: true, deletedAt: true } },
 } satisfies Prisma.ConversationInclude;
 
 /**
@@ -99,8 +118,8 @@ export type AppendedMessage = {
 };
 
 type ConversationRowWithSummary = ConversationRow & {
-  listing: { title: string; owner: { name: string } };
-  guest: { name: string };
+  listing: { title: string; owner: { name: string; deletedAt: Date | null } };
+  guest: { name: string; deletedAt: Date | null };
 };
 
 /**
@@ -215,7 +234,26 @@ export class ConversationRepository {
    * writes into the same thread rather than failing on the key.
    *
    * The listing is read inside the transaction, narrowed by `STILL_OFFERED` — a thread may
-   * outlive its listing but cannot begin after it.
+   * outlive its listing but cannot begin after it — and only once its row is locked `FOR
+   * SHARE`: a retirement (`DELETE /listings/:id`) or its owner's erasure, which locks it `FOR
+   * UPDATE`, either commits first and the read sees the listing gone, or waits for this
+   * thread to commit. Read without the lock, the listing could be retired between the read
+   * and the insert, whose foreign key only asks that the row exist. The same read answers
+   * for the host: an erasure retires every listing of the account in its own transaction,
+   * under the lock this one holds, so a listing still offered here has a host who is not
+   * erased and cannot be until this commits — which is why the host's row is never locked
+   * here (`partiesLive` of `appendIn`). It must not be: the host's erasure holds that row
+   * `FOR UPDATE` while it waits for this listing, and a lock on it taken under the
+   * listing's would close the cycle.
+   *
+   * The guest's row is read next, `FOR KEY SHARE` — the lock the insert's foreign key takes
+   * anyway — and refused when erased: an access token outlives the erasure, and a thread it
+   * opened would be a new conversation started by nobody. The erasure locks the row `FOR
+   * UPDATE`, so a first message either commits before it or waits and is refused. It comes
+   * after the refusal of one's own listing, as in a hold: an account's erasure locks its row
+   * first and its listings second, and a thread about its own listing would lock them the
+   * other way round. The listing first and the guest second is the order a hold and a
+   * waitlist entry lock the same two rows in, so none of them can wait on another in a cycle.
    */
   async start(
     guestId: string,
@@ -223,6 +261,10 @@ export class ConversationRepository {
   ): Promise<AppendedMessage & { conversation: Conversation }> {
     try {
       return await this.prismaService.$transaction(async (tx) => {
+        await tx.$queryRaw`
+          SELECT id FROM listings WHERE id = ${input.listingId}::uuid FOR SHARE
+        `;
+
         const listing = await tx.listing.findFirst({
           where: { id: input.listingId, ...STILL_OFFERED },
           select: { ownerId: true },
@@ -235,6 +277,14 @@ export class ConversationRepository {
         if (listing.ownerId === guestId) {
           throw new OwnListingError(input.listingId);
         }
+
+        const guest = await tx.$queryRaw<{ id: string }[]>`
+          SELECT id FROM users
+          WHERE id = ${guestId}::uuid AND deleted_at IS NULL
+          FOR KEY SHARE
+        `;
+
+        if (guest.length === 0) throw new GuestNotFoundError(guestId);
 
         // The message below writes all three `last_message_*` under the lock, inside this
         // transaction, before anybody else can read the row; what the upsert writes there
@@ -265,6 +315,7 @@ export class ConversationRepository {
           id,
           ConversationSide.GUEST,
           input.body,
+          { partiesLive: true },
         );
 
         const row = await tx.conversation.findUniqueOrThrow({
@@ -279,7 +330,7 @@ export class ConversationRepository {
         };
       });
     } catch (error) {
-      // The listing was read a moment ago, so the one key left to give way is the guest's.
+      // Both rows were read a moment ago; kept for a guest's row deleted around the API.
       if (isPrismaError(error, PrismaErrorCode.ForeignKeyViolation)) {
         throw new GuestNotFoundError(guestId);
       }
@@ -389,13 +440,22 @@ export class ConversationRepository {
  *
  * The two people of the thread are read by the same query as its newest moment — the host
  * through the listing, as everywhere else — so whoever counts after the message has them
- * without asking again.
+ * without asking again. Their rows are then read `FOR KEY SHARE`, and a thread one of them
+ * erased their account from is refused (`ConversationClosedError`): the erasure locks its
+ * row `FOR UPDATE`, so a message either commits before it or waits and finds the thread
+ * closed. A reply holds no lock the erasure takes — neither the thread nor the listing — so
+ * the two never wait on each other in a cycle.
+ *
+ * `partiesLive` is `start`'s: it has locked the listing and the guest's row and read both
+ * people live under those locks already, and must not lock the host's row under the
+ * listing's lock, since the host's erasure takes the two the other way round.
  */
 async function appendIn(
   tx: Prisma.TransactionClient,
   conversationId: string,
   sender: ConversationSide,
   body: string,
+  { partiesLive = false }: { partiesLive?: boolean } = {},
 ): Promise<{ message: Message; participants: ConversationParticipants }> {
   const locked = await tx.$queryRaw<LockedConversation[]>`
     SELECT id FROM conversations WHERE id = ${conversationId}::uuid FOR UPDATE
@@ -414,6 +474,18 @@ async function appendIn(
         listing: { select: { ownerId: true } },
       },
     });
+  if (!partiesLive) {
+    const parties = await tx.$queryRaw<LockedParty[]>`
+      SELECT deleted_at FROM users
+      WHERE id IN (${guestId}::uuid, ${listing.ownerId}::uuid)
+      FOR KEY SHARE
+    `;
+
+    if (parties.some((party) => party.deleted_at !== null)) {
+      throw new ConversationClosedError(conversationId);
+    }
+  }
+
   const at = max([new Date(), addMilliseconds(lastMessageAt, 1)]);
 
   const row = await tx.message.create({
@@ -438,6 +510,9 @@ async function appendIn(
 
 /** One row of the `FOR UPDATE` read — raw SQL, so the column keeps its stored name. */
 type LockedConversation = { id: string };
+
+/** One of the thread's two people, read under a key-share lock — raw SQL, stored names. */
+type LockedParty = { deleted_at: Date | null };
 
 /**
  * The most recently written-to thread first, the id behind it — the pair the index on
@@ -553,6 +628,8 @@ function toConversation(
       createdAt: row.lastMessageAt.toISOString(),
     },
     unread: readAt === null || readAt < row.lastMessageAt,
+    closed:
+      row.guest.deletedAt !== null || row.listing.owner.deletedAt !== null,
     createdAt: row.createdAt.toISOString(),
   };
 }

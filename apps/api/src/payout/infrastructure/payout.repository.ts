@@ -9,6 +9,7 @@ import {
 } from "../../booking/infrastructure/booking-lease";
 import {
   bookingExists,
+  lockHostFees,
   owedFeesWhere,
   payoutOwed,
   stuckPayout,
@@ -55,10 +56,13 @@ const SETTLED_STAY_INCLUDE = {
 export class PayoutRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
-  /** `null` for a user who is gone — the token outlived the row. */
+  /**
+   * `null` for a user who is gone or erased their account — the token outlived the row, or
+   * the person: an erased account opens no account at Stripe, and holds none it could act on.
+   */
   async findHolder(userId: string): Promise<PayoutAccountHolder | null> {
-    const user = await this.prismaService.user.findUnique({
-      where: { id: userId },
+    const user = await this.prismaService.user.findFirst({
+      where: { id: userId, deletedAt: null },
       select: {
         email: true,
         name: true,
@@ -77,9 +81,13 @@ export class PayoutRepository {
         };
   }
 
+  /**
+   * Written only into an empty column of an account still there: one erased while Stripe
+   * opened the account is left alone, and `HostAccountService` closes what it opened.
+   */
   async attachAccount(userId: string, accountId: string): Promise<void> {
     await this.prismaService.user.updateMany({
-      where: { id: userId, stripeAccountId: null },
+      where: { id: userId, stripeAccountId: null, deletedAt: null },
       data: { stripeAccountId: accountId },
     });
   }
@@ -87,6 +95,11 @@ export class PayoutRepository {
   /**
    * `null` for an account this API never opened. `switched` only for the write that changed
    * the flag, so of two runs with the same news one acts on it.
+   *
+   * An erased account's row is switched like any other: the erasure keeps
+   * `stripe_account_id` and the flag, and a share still owed to the host is paid out after
+   * it, so Stripe's news about the account — transfers off, and on again — is still what
+   * holds those payouts back or releases them.
    */
   async setPayoutsEnabled(
     accountId: string,
@@ -447,19 +460,6 @@ async function readStay(
   });
 
   return row === null ? null : toSettledStay(row);
-}
-
-/**
- * One host's fees, one writer at a time: a reservation keeping some back, a settlement or a
- * released reservation handing some back, an admin's waiver. Taken in each transaction that
- * moves `withheld_cents` or changes which fees are owed, before it does — and before it
- * writes a `bookings` row, so the lock and the row lock are always taken in that order.
- */
-export async function lockHostFees(
-  tx: Prisma.TransactionClient,
-  hostId: string,
-): Promise<void> {
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`host-fees:${hostId}`}, 0))`;
 }
 
 /** A fee the host still owes and how much of it, oldest first — the order a payout keeps back in. */

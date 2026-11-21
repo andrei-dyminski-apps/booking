@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -25,6 +26,7 @@ import { RealtimeService } from "../realtime/realtime.service";
 import { unreadFieldsOf } from "../unread/unread.types";
 import {
   type AppendedMessage,
+  ConversationClosedError,
   ConversationNotFoundError,
   ConversationRepository,
   GuestNotFoundError,
@@ -181,7 +183,9 @@ export class ConversationService {
 
   /**
    * Either side may write, and a retired listing does not close the thread: whatever the
-   * two of them still have to settle about a stay outlives the offer.
+   * two of them still have to settle about a stay outlives the offer. An erased account
+   * does — nobody is left on that side to read a message or to have written one — and the
+   * thread stays readable as it was (`closed`).
    */
   async send(
     id: string,
@@ -195,8 +199,11 @@ export class ConversationService {
     try {
       appended = await this.conversationRepository.append(id, side, input.body);
     } catch (error) {
-      // The thread went with its guest's account after `sideOf` read it.
+      // The thread is gone since `sideOf` read it: nothing in the API deletes one, so only a
+      // cleanup around it (the seed, the test reset) can get here.
       if (error instanceof ConversationNotFoundError) throw notFound(id);
+
+      if (error instanceof ConversationClosedError) throw closed();
 
       throw error;
     }
@@ -268,6 +275,14 @@ export class ConversationService {
 
     throw notFound(id);
   }
+}
+
+function closed(): HttpException {
+  return apiException(
+    ConflictException,
+    "CONVERSATION_CLOSED",
+    "This conversation is closed: the other side deleted their account",
+  );
 }
 
 function notFound(id: string): HttpException {

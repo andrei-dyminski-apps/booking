@@ -21,7 +21,11 @@ import { apiException } from "../common/api-exception";
 import { readCursor } from "../common/paging";
 import { decodeCursor, encodeCursor } from "./catalogue-cursor";
 import { listingNotFound } from "./listing-not-found";
-import { RateUnderNonRefundablePolicyError } from "./listing.errors";
+import {
+  OwnerNotFoundError,
+  RateUnderNonRefundablePolicyError,
+} from "./listing.errors";
+import { sessionNotFound } from "../common/session-errors";
 import { ListingRepository } from "./listing.repository";
 
 /**
@@ -100,8 +104,15 @@ export class ListingService {
     return listing;
   }
 
-  create(ownerId: string, input: CreateListingInput): Promise<Listing> {
-    return this.listingRepository.create(ownerId, input);
+  /** An account erased since its token was signed is an ended session, as at `/auth/me`. */
+  async create(ownerId: string, input: CreateListingInput): Promise<Listing> {
+    try {
+      return await this.listingRepository.create(ownerId, input);
+    } catch (error) {
+      if (error instanceof OwnerNotFoundError) throw sessionNotFound();
+
+      throw error;
+    }
   }
 
   async update(

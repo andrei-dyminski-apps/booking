@@ -55,6 +55,7 @@ class FakeUserRepository implements PublicOf<UserRepository> {
       // One second apart and in insertion order, so `newest` is the reverse of it.
       createdAt: new Date(Date.UTC(2026, 7, 20, 12, 0, index)).toISOString(),
       blockedAt: null,
+      deletedAt: null,
       ...over,
     };
 
@@ -70,6 +71,10 @@ class FakeUserRepository implements PublicOf<UserRepository> {
 
   findByEmail(): Promise<UserCredentials | null> {
     return Promise.reject(new Error("UserService does not sign anybody in"));
+  }
+
+  findPasswordHashById(): Promise<string | null> {
+    return Promise.reject(new Error("UserService confirms no passwords"));
   }
 
   // AuthService's read of a session. Nothing here calls it.
@@ -133,7 +138,9 @@ class FakeUserRepository implements PublicOf<UserRepository> {
 
     const row = this.rows.find((candidate) => candidate.id === id);
 
-    if (row === undefined) return Promise.resolve(null);
+    if (row === undefined || row.deletedAt !== null) {
+      return Promise.resolve(null);
+    }
 
     if (row.role === Role.ADMIN) {
       return Promise.reject(new AdminAccountError(id));

@@ -237,6 +237,18 @@ export {
 export { Role } from "./enums.js";
 
 export {
+  ACCOUNT_OPEN_MATTERS,
+  DELETED_USER_NAME,
+  OPEN_MATTER_MESSAGES,
+  deleteAccountSchema,
+  openMatterSchema,
+  openMattersParamsSchema,
+  type DeleteAccountInput,
+  type OpenMatter,
+  type OpenMattersParams,
+} from "./account.js";
+
+export {
   managedUserSchema,
   managedUserListSchema,
   managedUserDetailSchema,

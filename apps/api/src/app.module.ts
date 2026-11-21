@@ -4,6 +4,7 @@ import { APP_FILTER, APP_GUARD, APP_PIPE } from "@nestjs/core";
 import { ThrottlerGuard, ThrottlerModule, minutes } from "@nestjs/throttler";
 import { LoggerModule } from "nestjs-pino";
 import { ZodValidationPipe } from "nestjs-zod";
+import { AccountModule } from "./account/account.module";
 import { ApiErrorFilter } from "./common/api-error.filter";
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
@@ -45,6 +46,7 @@ import { WaitlistModule } from "./waitlist/waitlist.module";
     BullModule.forRootAsync({
       useFactory: () => ({ connection: { url: requireRedisUrl() } }),
     }),
+    AccountModule,
     AuthModule,
     BookingModule,
     ConversationModule,

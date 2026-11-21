@@ -67,7 +67,10 @@ const TAGS: [name: string, description: string][] = [
   ["Events", "The live stream that tells a browser something changed"],
   ["Payouts", "A host's Stripe account, where their share is sent"],
   ["Host fees", "What a host owes for cancelling a paid stay"],
-  ["Users", "Admin: the accounts, and blocking one"],
+  [
+    "Users",
+    "Deleting one's own account; admin: the accounts, and blocking one",
+  ],
   ["Lookups", "Admin: the people and listings a filter can be narrowed to"],
   ["Refund failures", "Admin: refunds a guest's bank sent back"],
   ["Payment events", "Admin: provider events the inbox set aside"],

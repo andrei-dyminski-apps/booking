@@ -48,10 +48,12 @@ export class NotificationService {
    */
   async notify(userId: string, content: NotificationContent): Promise<void> {
     try {
-      const { notification, count } = await this.notificationRepository.create(
-        userId,
-        content,
-      );
+      const created = await this.notificationRepository.create(userId, content);
+
+      // Nobody to tell: the account is gone or erased, and nothing was stored.
+      if (created === null) return;
+
+      const { notification, count } = created;
 
       await this.realtimeService.publish(userId, {
         type: "notification.created",

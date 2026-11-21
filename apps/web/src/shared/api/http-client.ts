@@ -5,6 +5,7 @@ import {
   toErrorCode,
   type ApiErrorIssue,
   type ErrorCode,
+  type ErrorParams,
 } from "@repo/contracts";
 import {
   apiOrigin,
@@ -34,6 +35,8 @@ export class ApiUnreachableError extends Error {
  * so a branch on it is exhaustive over the list. It is `UNKNOWN_ERROR` for a code this build
  * has no word for (an API newer than the site) and for an answer outside the error
  * contract, which has none — either way the status and `message` are what is left to read.
+ * `params` is what the rule knew when it refused — what is still open on an account, say —
+ * as untrusted as the rest of the body: a caller parses the shape it expects.
  */
 export class ApiResponseError extends Error {
   constructor(
@@ -41,6 +44,7 @@ export class ApiResponseError extends Error {
     message: string,
     readonly issues: readonly ApiErrorIssue[] = [],
     readonly code: ErrorCode = "UNKNOWN_ERROR",
+    readonly params: ErrorParams = {},
   ) {
     super(message);
     this.name = "ApiResponseError";
@@ -317,6 +321,7 @@ async function toResponseError(response: Response): Promise<ApiResponseError> {
     parsed.data.message,
     parsed.data.errors ?? [],
     toErrorCode(parsed.data.code),
+    parsed.data.params ?? {},
   );
 }
 

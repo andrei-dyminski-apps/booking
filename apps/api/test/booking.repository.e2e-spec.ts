@@ -16,19 +16,18 @@ import { inDays } from "./dates";
 import { resetQueue } from "./queue";
 
 /**
- * Two adapter-specific error shapes this layer has to keep reading correctly, and both are
- * a nested, undocumented path one Prisma upgrade away from falling through to a 500 —
- * hence a spec against the real database rather than trust in the parse:
+ * What the HTTP tests cannot provoke on demand, called directly against the real database:
  *
- *  - a foreign key violation on the guest key (`23503` → which key, read out of the
- *    constraint the driver names);
  *  - an `EXCLUDE` constraint violation (`23P01`) when two overlapping active stays race
- *    past the in-transaction overlap check.
+ *    past the in-transaction overlap check — an adapter-specific error shape, a nested,
+ *    undocumented path one Prisma upgrade away from falling through to a 500;
+ *  - a guest the token names and the table no longer holds as an account — gone, or
+ *    erased — refused by the locked read of the guest's row before any insert. Neither
+ *    foreign key reaches the insert any more: a missing listing is refused by the `FOR
+ *    UPDATE` read, a missing guest by that one, and the translation of `23503` stays in
+ *    `create` only as a backstop for a row deleted around the API.
  *
- * The unit spec cannot reach either: it fakes the repository, so no driver error is ever
- * translated. The HTTP tests reach the guest key (delete the account behind a valid token)
- * but not the listing key — a missing listing is now refused by the `FOR UPDATE` read
- * before any insert. Called directly, these are ordinary arguments.
+ * The unit spec cannot reach either: it fakes the repository.
  */
 describe("BookingRepository foreign keys (e2e)", () => {
   let app: INestApplication<App>;
@@ -143,11 +142,20 @@ describe("BookingRepository foreign keys (e2e)", () => {
     }
   });
 
-  // The other key, from the other side: nothing checks the guest before the insert, because
-  // the token names it and JwtStrategy reads no database.
-  it("names the guest when its key is the one that gave way", async () => {
+  // The token names the guest and JwtStrategy reads no database, so the locked read of the
+  // guest's row is what finds an account that is not there to take a hold.
+  it("refuses a guest whose account is gone or erased", async () => {
     await expect(
       bookingRepository.create(randomUUID(), { listingId, ...dates }),
+    ).rejects.toThrow(GuestNotFoundError);
+
+    await prismaService.user.update({
+      where: { id: guestId },
+      data: { deletedAt: new Date() },
+    });
+
+    await expect(
+      bookingRepository.create(guestId, { listingId, ...dates }),
     ).rejects.toThrow(GuestNotFoundError);
   });
 

@@ -28,8 +28,8 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
 
 - **Runs on** — **every target** is the hermetic stack, real Stripe on the local stack and
   the live deployment; **hermetic only** is the hermetic stack alone, because what the
-  scenario needs cannot exist on the deployment (an account registered there can never be
-  deleted, the admin is not the suite's to use, a second guest is not among the two accounts
+  scenario needs cannot exist on the deployment (an account registered there leaves its row
+  behind even once deleted, the admin is not the suite's to use, a second guest is not among the two accounts
   the suite has there) or what it proves the hermetic run proves already; **real Stripe
   only** is the local stack with Stripe's side real, because what the scenario proves is
   that Stripe accepts what the application sends.
@@ -120,6 +120,11 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
       _Every target. Cheap._
 - [x] **A broken link.** A visitor who opens an address that does not exist sees a not-found
       page and gets back to the catalogue from it. _Every target. Cheap._
+- [x] **Deleting an account.** A member with nothing open deletes their account from the end
+      of their profile, typing the password to confirm; they land signed out on the home page,
+      told it worked, and the address and password no longer sign in. _Hermetic only: the
+      account is registered by the scenario, and a deleted one still leaves its row behind on
+      the deployment. Cheap._
 
 ## Priority 4 — admin and extra screens
 
