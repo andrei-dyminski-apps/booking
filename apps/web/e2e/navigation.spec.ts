@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
-import { DEMO, type Account } from "./demo";
+import { DEMO, GUEST, type Account } from "./demo";
 import { expect, test, type Pages } from "./fixtures";
-import { EVERY_TARGET } from "./target";
+import { EVERY_TARGET, TARGET } from "./target";
 import { signInThroughForm } from "./session";
 import {
   checkMenu,
@@ -18,7 +18,7 @@ test(
   "a guest reaches their pages from the menu alone and signs out from it",
   { tag: EVERY_TARGET },
   async ({ page, pages }) => {
-    await signInFromHome(page, pages, DEMO.guest);
+    await signInFromHome(page, pages, GUEST);
 
     await walk(page, pages, [
       { label: "Bookings", path: "/bookings", heading: "Your trips" },
@@ -40,7 +40,7 @@ test(
 
     await expect(page).toHaveURL("/profile");
     await expect(
-      page.getByRole("main").getByText(DEMO.guest.email, { exact: true }),
+      page.getByRole("main").getByText(GUEST.email, { exact: true }),
     ).toBeVisible();
     await pages.check();
 
@@ -60,17 +60,25 @@ test(
 test(
   "a host reaches their dashboard from the menu",
   { tag: EVERY_TARGET },
-  async ({ page, pages }) => {
-    await signInFromHome(page, pages, DEMO.host);
+  async ({ page, pages, arrange }) => {
+    // The demo host with a listing of the seed's, but on the deployment, where the demo
+    // host's listings are its visitors', the suite's own host with a listing of its own.
+    let host: Account = DEMO.host;
+    let listed = "Loft above the harbour";
+
+    if (TARGET === "live") {
+      listed = (await arrange.listing()).title;
+      host = await arrange.host();
+    }
+
+    await signInFromHome(page, pages, host);
 
     await walk(page, pages, [
       { label: "Dashboard", path: "/dashboard", heading: "Dashboard" },
     ]);
 
     // The listings the host has on offer.
-    await expect(
-      page.getByRole("main").getByText("Loft above the harbour"),
-    ).toBeVisible();
+    await expect(page.getByRole("main").getByText(listed)).toBeVisible();
   },
 );
 

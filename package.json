@@ -13,6 +13,7 @@
     "test:e2e": "pnpm turbo run test:e2e",
     "test:browser": "pnpm turbo run test:browser",
     "test:browser:stripe": "E2E_TARGET=stripe pnpm turbo run test:browser",
+    "test:browser:live": "E2E_TARGET=live pnpm turbo run test:browser:live",
     "railway": "scripts/railway-power.sh",
     "railway:stop": "scripts/railway-power.sh stop",
     "railway:start": "scripts/railway-power.sh start",

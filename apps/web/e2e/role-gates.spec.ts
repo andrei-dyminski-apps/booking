@@ -1,4 +1,4 @@
-import { DEMO } from "./demo";
+import { DEMO, GUEST } from "./demo";
 import { expect, test } from "./fixtures";
 import { EVERY_TARGET } from "./target";
 import { signInThroughForm } from "./session";
@@ -14,7 +14,7 @@ test(
 
     await page.goto("/login");
     await pages.check();
-    await signInThroughForm(page, DEMO.guest);
+    await signInThroughForm(page, GUEST);
     await expect(page).toHaveURL("/profile");
     await pages.check();
 

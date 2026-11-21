@@ -16,7 +16,10 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
 - **The demo accounts are only signed in to.** They are shared, so a scenario never changes
   one, and what it compares — a count of notices, of unread messages — is compared with what
   it was before the scenario's own step, never with a fixed number. A scenario that registers
-  or blocks an account uses one it registered itself, new on every attempt.
+  or blocks an account uses one it registered itself, new on every attempt. On the live
+  deployment, where an account can never be deleted, the demo accounts are its visitors'
+  and none is registered: a scenario there is the suite's own guest and host, and what it
+  compares is new on every attempt, since those two keep every earlier run's history.
 - **Two people at once are two browsers**, each signed in as a different user.
 - **Money goes through the pages.** State a scenario should not click its way to is
   arranged beforehand; a payment never is.
