@@ -11,3 +11,15 @@ export class RateUnderNonRefundablePolicyError extends Error {
     this.name = "RateUnderNonRefundablePolicyError";
   }
 }
+
+/**
+ * The account behind the token is gone or erased: `JwtStrategy` reads no database, so an
+ * access token outlives an erasure by up to `JWT_ACCESS_TTL`, and a listing it published
+ * would be an offer nobody stands behind. Read under a lock the erasure has to wait for.
+ */
+export class OwnerNotFoundError extends Error {
+  constructor(ownerId: string) {
+    super(`User ${ownerId} not found`);
+    this.name = "OwnerNotFoundError";
+  }
+}

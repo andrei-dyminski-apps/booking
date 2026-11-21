@@ -213,9 +213,10 @@ export class BookingService {
         );
       }
 
-      // The guest is gone: nothing checks that row beforehand, because the token names it
-      // and JwtStrategy reads no database. A signed token whose row is gone is an ended
-      // session, so this is the 401 of `/auth/me` and not a 404 about the listing.
+      // The guest is gone or erased: the token names the row and JwtStrategy reads no
+      // database, so only the locked read in `create` finds out. A signed token whose
+      // account is gone is an ended session, so this is the 401 of `/auth/me` and not a 404
+      // about the listing.
       if (error instanceof GuestNotFoundError) {
         throw sessionNotFound();
       }

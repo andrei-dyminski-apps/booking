@@ -13,6 +13,7 @@ import {
 } from "./../src/booking/infrastructure/booking-lease";
 import { BookingCancellationRepository } from "./../src/booking/infrastructure/booking-cancellation.repository";
 import { BookingRefundRepository } from "./../src/booking/infrastructure/booking-refund.repository";
+import { lockHostFees } from "./../src/booking/infrastructure/booking-where";
 import { checkInData } from "./../src/booking/infrastructure/stay-rows";
 import { cents } from "./../src/payment/domain/money";
 import {
@@ -20,10 +21,7 @@ import {
   WaivingAccountNotAdminError,
 } from "./../src/payout/domain/payout.errors";
 import { HostFeeRepository } from "./../src/payout/infrastructure/host-fee.repository";
-import {
-  lockHostFees,
-  PayoutRepository,
-} from "./../src/payout/infrastructure/payout.repository";
+import { PayoutRepository } from "./../src/payout/infrastructure/payout.repository";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import { resetDatabase } from "./database";
 import { inDays } from "./dates";

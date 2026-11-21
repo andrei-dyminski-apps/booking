@@ -21,11 +21,11 @@ export class ListingNotFoundError extends Error {
 }
 
 /**
- * The other row an insert can fail on, and the one nothing checks beforehand: the guest is
- * whoever the access token names, and `JwtStrategy` reads no database, so an account
- * deleted mid-session keeps minting valid requests for as long as `JWT_ACCESS_TTL`. That
- * is an ended session rather than a missing listing — the service answers it the way
- * `/auth/me` answers a token whose row is gone.
+ * The guest is whoever the access token names, and `JwtStrategy` reads no database, so an
+ * account erased mid-session keeps minting valid requests for as long as `JWT_ACCESS_TTL`.
+ * `create` reads the row under a lock and refuses one erased or gone. That is an ended
+ * session rather than a missing listing — the service answers it the way `/auth/me`
+ * answers a token whose row is gone.
  */
 export class GuestNotFoundError extends Error {
   constructor(guestId: string) {

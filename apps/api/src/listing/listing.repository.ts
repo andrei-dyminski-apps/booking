@@ -25,7 +25,10 @@ import {
   PrismaErrorCode,
 } from "../prisma/prisma.errors";
 import { PrismaService } from "../prisma/prisma.service";
-import { RateUnderNonRefundablePolicyError } from "./listing.errors";
+import {
+  OwnerNotFoundError,
+  RateUnderNonRefundablePolicyError,
+} from "./listing.errors";
 import { toPricing } from "./listing-pricing";
 import type { CatalogueCursor } from "./catalogue-cursor";
 
@@ -134,19 +137,36 @@ export class ListingRepository {
         };
   }
 
-  /** One statement, nested writes included, so a listing never exists without its prices. */
+  /**
+   * One insert, nested writes included, so a listing never exists without its prices.
+   *
+   * The owner's row is read `FOR KEY SHARE` first — the lock the foreign key takes anyway —
+   * and refused when erased (`OwnerNotFoundError`): the erasure locks the row `FOR UPDATE`
+   * and then retires the account's listings, so a listing either lands before it and is
+   * retired with the rest, or waits for it and is refused.
+   */
   async create(ownerId: string, input: CreateListingInput): Promise<Listing> {
     const { pricing, ...fields } = input;
 
-    const row = await this.prismaService.listing.create({
-      data: {
-        ...fields,
-        ownerId,
-        ...(pricing === undefined ? {} : pricingRows(pricing)),
-      },
-    });
+    return this.prismaService.$transaction(async (tx) => {
+      const owner = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM users
+        WHERE id = ${ownerId}::uuid AND deleted_at IS NULL
+        FOR KEY SHARE
+      `;
 
-    return toListing(row);
+      if (owner.length === 0) throw new OwnerNotFoundError(ownerId);
+
+      const row = await tx.listing.create({
+        data: {
+          ...fields,
+          ownerId,
+          ...(pricing === undefined ? {} : pricingRows(pricing)),
+        },
+      });
+
+      return toListing(row);
+    });
   }
 
   /**

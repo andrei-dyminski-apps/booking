@@ -28,6 +28,8 @@ import { UserModule } from "../user/user.module";
     RefreshTokenRepository,
     JwtStrategy,
   ],
-  exports: [AuthService],
+  // The cookie attributes go out with the module, so the account's erasure clears the
+  // session's cookies the way logout does.
+  exports: [AuthService, AUTH_CONFIG],
 })
 export class AuthModule {}

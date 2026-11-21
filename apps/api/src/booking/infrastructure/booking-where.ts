@@ -135,6 +135,21 @@ export function payoutOwed(
 }
 
 /**
+ * One host's fees, one writer at a time: a reservation keeping some back, a settlement or a
+ * released reservation handing some back, an admin's waiver, an account's erasure reading
+ * whether any is still owed. Taken in each transaction that moves `withheld_cents` or changes
+ * which fees are owed, before it does — and before it writes a `bookings` row, so the lock and
+ * the row lock are always taken in that order. Here beside `owedFeesWhere` rather than in the
+ * payout module, because the erasure of an account takes it too and nothing imports that one.
+ */
+export async function lockHostFees(
+  tx: Prisma.TransactionClient,
+  hostId: string,
+): Promise<void> {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`host-fees:${hostId}`}, 0))`;
+}
+
+/**
  * Whether the stay is there at all — what tells a refused retry's `409` from its `404`, in
  * both modules that retry something set aside on a stay.
  */

@@ -63,8 +63,8 @@ export async function pickDates(
 /**
  * On the listing's page: picks the dates, holds the stay and pays for it through the payment
  * form, landing on the confirmed stay. The money goes through the pages, as on every target;
- * on the hermetic stack the card is the stand-in's, against Stripe a test card typed into
- * Stripe's own form.
+ * on the hermetic stack the card is the stand-in's, against Stripe — local or deployed — a
+ * test card typed into Stripe's own form.
  */
 export async function holdAndPay(
   page: Page,
@@ -91,7 +91,7 @@ export async function holdAndPayPicked(
   const pay = page.getByRole("button", { name: `Pay ${total}` });
 
   await expect(pay).toBeVisible();
-  if (TARGET === "stripe") await typeTestCard(page);
+  if (TARGET !== "hermetic") await typeTestCard(page);
   await pages.check(page);
 
   await pay.click();

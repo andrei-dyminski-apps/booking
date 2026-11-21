@@ -1,4 +1,4 @@
-import { DEMO } from "./demo";
+import { GUEST } from "./demo";
 import { expect, test } from "./fixtures";
 import { EVERY_TARGET } from "./target";
 import { signInThroughForm } from "./session";
@@ -44,7 +44,7 @@ test(
     );
     await pages.check();
 
-    await signInThroughForm(page, DEMO.guest);
+    await signInThroughForm(page, GUEST);
 
     // Back on the listing, now with the form to book it and the box to ask its host.
     await expect(page).toHaveURL(`/listings/${listing.id}`);

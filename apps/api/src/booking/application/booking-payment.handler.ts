@@ -240,8 +240,8 @@ export class BookingPaymentHandler
       await this.bookingRefundRepository.findPaymentTarget(bookingId);
 
     // A booking this database does not hold: another database's on a shared test account
-    // that took this site's name, or a local one wiped since. There is no account deletion
-    // to have taken it, so the payment is not this API's to give back.
+    // that took this site's name, or a local one wiped since. Erasing an account keeps its
+    // bookings, so no erasure took it, and the payment is not this API's to give back.
     if (target === null) {
       this.logger.warn(
         `Payment ${paymentId} names booking ${bookingId}, which this database does not hold; ignored`,

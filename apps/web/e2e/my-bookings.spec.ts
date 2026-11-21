@@ -1,4 +1,4 @@
-import { DEMO } from "./demo";
+import { GUEST } from "./demo";
 import { expect, test } from "./fixtures";
 import { EVERY_TARGET } from "./target";
 import { signInToListing } from "./session";
@@ -14,7 +14,7 @@ test(
     const to = dayIn(listing.timeZone, 23);
 
     // The stay, paid through the pages like every other.
-    await signInToListing(page, pages, DEMO.guest, listing);
+    await signInToListing(page, pages, GUEST, listing);
     await holdAndPay(page, pages, { from, to, total: "$270.00" });
 
     await page.goto("/");

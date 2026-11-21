@@ -1159,30 +1159,66 @@ A green run against the live deployment is worth having in a portfolio project, 
 neither replace the hermetic one nor run everything it runs. The step stands on 11.3 and
 ships only once the scenarios marked for every target have run green locally.
 
-- It runs only the scenarios marked for every target, against a running deployment, and
-  prepares nothing in it that a visitor could not. It is never the default and runs apart from
-  the pull request checks — on a schedule and on demand, never blocking a merge.
-- **A scenario arranges its state there through the application's own means**, as the host
-  account the suite has on the demo: its listing is created by that host, and a stay that has
-  begun rests on a listing whose time zone has started the check-in day. What cannot be
-  arranged that way is not run there.
-- The suite has two accounts of its own on the live demo, a guest and a host, whose password
-  is a secret, not a value written in the repository: a password in the repository is one
-  anybody can sign in with and change. A taken address that refuses the secret, or a blocked
-  sign-in, fails the run — a finding about an open demo, not a hole for the suite to close.
-- **Each run leaves the demo as it found it, as far as the application allows**: the stays a
-  run made are cancelled and its listings retired after its scenarios, and the same is done
-  first for what a run that died left behind. A paid stay that has been ended, or a review,
-  cannot be taken back; both stay on a retired listing, out of the catalogue and out of the
-  next run's way.
-- The whole run is one visitor to the live rate limiter, so its pace is measured on the
-  first run and fixed from the numbers. No retries: a retry looks like a new visitor while
-  the limiter still remembers the first attempt.
-- A stopped demo ends the run with a notice and skips the scenarios; a deployment that is up
-  and answers badly fails it.
+- [x] It runs only the scenarios marked for every target, against a running deployment, and
+      prepares nothing in it that a visitor could not. It is never the default and runs apart
+      from the pull request checks — on a schedule and on demand, never blocking a merge.
+      `pnpm test:browser:live` (`E2E_TARGET=live`), and `.github/workflows/live.yml` every
+      morning and by hand; nothing is started or built but the contract the suite imports.
+- [x] **A scenario arranges its state there through the application's own means**, as the
+      host account the suite has on the demo: its listing is created by that host, and a stay
+      that has begun rests on a listing whose time zone has started the check-in day. What
+      cannot be arranged that way is not run there. The host's dashboard of the navigation
+      scenario now reads a listing the test arranged rather than the demo host's.
+- [x] The suite has two accounts of its own on the live demo, a guest and a host, whose
+      password is a secret, not a value written in the repository: a password in the
+      repository is one anybody can sign in with and change. A taken address that refuses
+      the secret, or a blocked sign-in, fails the run — a finding about an open demo, not a
+      hole for the suite to close. `E2E_LIVE_PASSWORD` (the root `.env`, a repository
+      secret); the global setup signs in to both and registers one the demo does not have
+      yet. A scenario that changes the guest's account (the host's review of a guest) is the
+      suite's guest there, and a text it finds on the suite's accounts is new on every
+      attempt, since they keep every earlier run's history.
+- [x] **Each run leaves the demo as it found it, as far as the application allows**: the stays
+      a run made are cancelled and its listings retired after its scenarios, and the same is
+      done first for what a run that died left behind. A paid stay that has been ended, or a
+      review, cannot be taken back; both stay on a retired listing, out of the catalogue and
+      out of the next run's way. The guest cancels — a host's cancellation would cost the
+      suite's host a fee.
+- [x] The whole run is one visitor to the live rate limiter, so its pace is measured on the
+      first run and fixed from the numbers. No retries: a retry looks like a new visitor
+      while the limiter still remembers the first attempt.
+- [x] A stopped demo ends the run with a notice and skips the scenarios; a deployment that is
+      up and answers badly fails it.
 
-The addresses, what the hosting platforms report about a deployment and the budget numbers
-are read and measured when the step is written, and recorded here then.
+What was read and measured when the step was written (2026-11-20):
+
+- **The addresses.** The frontend is `https://booking-beige-five.vercel.app` (`LIVE_ORIGIN`
+  in `apps/web/e2e/live.ts`); the suite talks to nothing else, the API being behind its BFF.
+- **What the platforms report.** A running demo answers `GET /api/health` with `200`. An
+  address Railway's edge has no deployment for answers `404` with `x-railway-fallback: true`
+  and `{"message":"Application not found"}`, which the BFF passes on with the API's other
+  headers — read off an unknown `*.up.railway.app`, the answer a stopped service's address
+  gives once `railway down` has removed its deployment; that case is the notice. Not yet
+  seen on this demo stopped by `pnpm railway:stop`. Vercel writes `x-forwarded-for` itself,
+  so every request of a run, the arrangements' included, is one address to the limiter.
+- **The budget.** All nineteen scenarios in five minutes of tests. No route's budget came
+  near its ceiling: at most eleven of the 120 requests a minute a route allows (the limiter
+  counts each route apart) were spent in any window the answers reported, page renders
+  included. The sign-ins are what binds — two or
+  three a scenario against ten a minute — so a run takes a slot for each (eight a minute,
+  `pace.ts`), before the press so the wait never runs out an `expect`, and spent about a
+  minute and a half waiting for them. The pace lives in a file: a failed test restarts the
+  worker, and the global setup and teardown sign in from processes of their own. It is one
+  file for the machine that outlives the run, since the limiter remembers the address: a
+  run started right after another still meets that run's sign-ins. A test starting while fewer than forty requests are left waits for the window,
+  which no run has needed. A test gets three minutes, the run forty in CI.
+- **What the first runs found.** A wait for a sign-in slot inside the request it held ran out
+  the `expect` after the press — hence the slot before it. The host's bell started at the
+  notices of every earlier run, the clean-up's cancellations among them, so the scenario now
+  reads it after marking those read and counts this listing's notices alone. And the
+  listing page's `<title>`, which Next streams after the content (`generateMetadata`), came
+  late enough on the deployment for the accessibility check to read the page without one:
+  the check now waits for the title, up to five seconds.
 
 ## Phase 12 — Deleting an account
 
@@ -1200,36 +1236,85 @@ It is not a tool for the test suites. The hermetic stack and the API's e2e specs
 fresh database every run, and the run against the live deployment (11.4) uses two accounts of
 its own and cleans up stays and listings, not users.
 
-- [ ] **The person deletes their own account, never an admin.** `DELETE /users/me`, with the
+- [x] **The person deletes their own account, never an admin.** `DELETE /users/me`, with the
       password typed again: a stolen session alone must not be able to erase an account. An
       admin still has the block for an account that has to stop; the last admin cannot delete
       theirs.
-- [ ] **Refused while something is still open**, each refusal with its code (phase 10): a stay
+- [x] **Refused while something is still open**, each refusal with its code (phase 10): a stay
       held, confirmed and not yet over, as a guest or as a host; a host fee still owed; money
-      still owed to the host or a payout on its way; a refund not yet settled; an open dispute.
+      owed to the host that no payout can reach once nobody can sign in; a refund not yet
+      settled; an open dispute.
       The person is told what to finish first. Checked under the same locks the money paths
       take, so a booking cannot land between the check and the erasure.
-- [ ] **Anonymized in one transaction.** `users.deleted_at` is stamped; the name becomes a
+- [x] **Anonymized in one transaction.** `users.deleted_at` is stamped; the name becomes a
       placeholder, the address a unique one that cannot receive mail (which frees the real
       one for a new registration), the password hash one nothing matches. Refresh tokens,
       notifications and waitlist entries are deleted; listings are retired the way
       `DELETE /listings/:id` retires them. Bookings, payments, refunds, host fees, payouts,
       reviews and messages stay, and read as written by "Deleted user" — a review or a thread
-      belongs to the other party's history too. Sign-in, refresh and `/auth/me` treat a deleted
+      belongs to the other party's history too; a thread with a deleted account stays to read
+      and takes no new message. Sign-in, refresh and `/auth/me` treat a deleted
       account as one that does not exist.
-- [ ] **What cannot be erased is said so.** The Stripe connected account is not closed by the
+- [x] **What cannot be erased is said so.** The Stripe connected account is not closed by the
       application (see 11.3); its id stays on the anonymized row, which is what Stripe's own
-      records are reconciled against. The structured logs keep request ids, not names.
-- [ ] **Web:** "Delete account" at the end of `/profile`, with what will happen, the password
+      records are reconciled against, and a host's share still owed is paid to it after the
+      erasure. The structured logs keep request ids, not names.
+- [x] **Web:** "Delete account" at the end of `/profile`, with what will happen, the password
       and a confirmation; a refusal names what is still open and links to it. After the
       erasure the session is cleared and the visitor lands on the home page with a notice.
-- [ ] **Specs:** e2e — every refusal; an erasure keeps the bookings, the payments and the
+- [x] **Specs:** e2e — every refusal; an erasure keeps the bookings, the payments and the
       reviews, scrubs the user, frees the address and ends every session; a booking racing the
       erasure does not survive it half-way. The browser suite: a guest with nothing open deletes
       their account and can no longer sign in.
 
 Out of scope: exporting a person's data (the GDPR's right of access) and a grace period that
 lets a deletion be undone — both are their own change if they are ever wanted.
+
+As built: every matter still open has its code (`ACCOUNT_OPEN_MATTERS`), and a refusal answers
+with the first one open while `params.open` lists them all, so the page names everything to
+finish at once rather than one per attempt; `params.asGuest` and `params.asHost` say which side
+of the account's stays holds each, so its link opens the right tab of the stays page. A wrong password is a `403` `PASSWORD_INCORRECT`,
+not the login's `401`, which the browser would spend on a refresh. The locks are the host's
+fee lock, the account's row and its listings, in that order; a hold, a new listing and a
+waitlist entry and a new thread read the account's row under a lock of their own and refuse
+an erased one — a new thread after locking its listing and refusing one's own, so a host's
+erasure that retires it cannot slip between the read of the listing and the insert, and
+without locking the host's row, which their erasure holds while it waits for the listing —
+and a payout account is not opened for one, so an access token that outlives
+the erasure cannot open anything new. An erased admin's token still claims `ADMIN` until it
+runs out, so the routes that read the caller's row again — a fee's waiver, an admin's refund,
+a block — take an erased admin for one gone. A thread with an erased account is closed
+(`closed`, a `409` `CONVERSATION_CLOSED` for a message): nobody is left on that side to read a
+reply, and the page draws a notice where the reply box was. A notice is never written
+to an erased account afterwards — a review of a finished stay of theirs included — since it
+would keep a copy of what the erasure deleted. The admin's list shows an erased account under
+the status "Deleted", which nobody can block. A registration refuses any `.invalid` address:
+an account's id is public (the catalogue names owners), and one holding its placeholder first
+would fail the erasure on the unique key for good. A stay ended early counts as over, whatever
+its moved check-out says, its refund open until sent. A host's share still owed does not hold
+the erasure while a payout can reach it, which is what marketplaces do with money they owe
+rather than are owed — a share of a stay a guest cancelled months ahead would otherwise keep
+the account for months: the erasure keeps `payouts_enabled_at`, the sweep pays the share when
+it comes due, and Stripe's news about the account goes on switching the flag. What is refused
+is a share nothing could pay — owed while the host's payouts are off, or set aside after
+failing — since nobody can sign in to set them up any more; giving such a share up is not
+offered, because money a platform owes and cannot pay is not its to keep. A refund owed to the
+guest of a stay the account hosted holds the host back for nothing but the share it leaves:
+the refund goes back without them, and a stuck refund would otherwise keep a host waiting on
+an admin. A refund the account awaits as a guest, or one its bank sent back, does hold it, and
+the refusal says the money is on its way rather than asking for something the guest cannot do. The listings the erasure retired leave the
+frontend's cache the way a retired one does — their own reads and the catalogue — read
+before the erasure, since the API answers it with nothing.
+
+Known gap: a refund the bank sends back after the erasure (`refund.failed` arrives days after
+the refund left, and nothing open stopped the erasure meanwhile) still lands in
+`refund_failures` for an admin to resolve, but the guest it is owed to has no name or address
+left on the row. The admin goes by the stay and the payment, and the card's issuer is the
+remaining way to reach them; holding the erasure until every refund of the account is past its
+bounce window would be the fix, and is not built. The same goes for a host's share paid after
+the erasure: should the connected account stop taking transfers meanwhile, the payout run holds
+the share back and switches the flag off, nobody can finish onboarding again, and no admin is
+told — the share waits until Stripe's news switches the account back on.
 
 ## Decisions already made
 

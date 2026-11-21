@@ -5,6 +5,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
+import { DELETED_USER_NAME } from "@repo/contracts";
 import { ReviewSummary } from "#entities/review";
 import { LogoutButton } from "#features/logout";
 import { requireUser } from "#shared/api";
@@ -12,6 +13,7 @@ import { ROUTES } from "#shared/config";
 import { formatDate, readerTimeZone } from "#shared/lib";
 import { ButtonLink } from "#shared/ui";
 import { readReviewSummaryOf } from "../api/read-review-summary-of";
+import { DeleteAccountDialog } from "./delete-account-dialog";
 
 export const ProfilePage = async () => {
   const user = await requireUser(ROUTES.profile);
@@ -64,6 +66,29 @@ export const ProfilePage = async () => {
         )}
 
         <LogoutButton />
+
+        {/* At the end, under everything that can be undone. What it erases and what it
+            keeps is said before the dialog is opened, not only inside it. */}
+        <section
+          aria-labelledby="delete-account-heading"
+          className="flex flex-col gap-3 border-t pt-6"
+        >
+          <h2 id="delete-account-heading" className="text-sm font-medium">
+            Delete account
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Your name, email address and password are erased, every session ends
+            and your listings come off the catalogue. The stays you took or
+            hosted, their payments and their reviews stay on record under
+            &ldquo;{DELETED_USER_NAME}&rdquo; — they are the other side&rsquo;s
+            history too. A payout account opened with Stripe is not closed here:
+            it stays with Stripe, which keeps its own records, and your share of
+            a stay still owed is paid out to it after the deletion. While a
+            stay, a dispute, a refund or a fee is still open, or a share is owed
+            that no payout account can receive, the account cannot be deleted.
+          </p>
+          <DeleteAccountDialog />
+        </section>
       </CardContent>
     </Card>
   );

@@ -26,9 +26,14 @@ export class RefreshTokenRepository {
     });
   }
 
+  /**
+   * `null` for a token of an erased account as for one nobody issued: the erasure deletes
+   * the account's tokens, so a row still here was written by a login that read the account
+   * a moment before it was erased — a session of an account that no longer exists.
+   */
   async findByHash(tokenHash: string): Promise<StoredRefreshToken | null> {
-    const row = await this.prismaService.refreshToken.findUnique({
-      where: { tokenHash },
+    const row = await this.prismaService.refreshToken.findFirst({
+      where: { tokenHash, user: { deletedAt: null } },
       include: { user: true },
     });
 

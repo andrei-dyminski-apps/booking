@@ -56,6 +56,16 @@ export const ERROR_CODES = [
   "REFRESH_TOKEN_UNKNOWN",
   "REFRESH_TOKEN_REUSED",
 
+  // Deleting one's own account: the password typed again, the last admin, and what is
+  // still open on the account (`ACCOUNT_OPEN_MATTERS`, in the order a refusal names them).
+  "PASSWORD_INCORRECT",
+  "LAST_ADMIN_CANNOT_DELETE",
+  "ACCOUNT_HAS_OPEN_STAY",
+  "ACCOUNT_HAS_OPEN_DISPUTE",
+  "ACCOUNT_AWAITS_REFUND",
+  "ACCOUNT_AWAITS_PAYOUT",
+  "ACCOUNT_OWES_HOST_FEE",
+
   // Auth schema rules.
   "EMAIL_INVALID",
   "EMAIL_TOO_LONG",
@@ -177,6 +187,7 @@ export const ERROR_CODES = [
 
   // Conversations.
   "CONVERSATION_NOT_FOUND",
+  "CONVERSATION_CLOSED",
   "CANNOT_WRITE_TO_YOURSELF",
   "MESSAGE_REQUIRED",
   "MESSAGE_TOO_LONG",

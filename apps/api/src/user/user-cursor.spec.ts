@@ -9,6 +9,7 @@ const user: ManagedUser = {
   role: Role.USER,
   createdAt: "2026-08-20T12:00:00.000Z",
   blockedAt: null,
+  deletedAt: null,
 };
 
 /** A cursor of this resource, spelled by hand — with the resource tag the envelope adds. */

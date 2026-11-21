@@ -8,6 +8,8 @@ import {
   type TestInfo,
 } from "@playwright/test";
 import { arrangement, type Arrange } from "./arrange";
+import { LIVE_STOPPED_NOTICE, liveStopped } from "./live";
+import { budgetSlot, noteAnswer, paceReport, startTestPace } from "./pace";
 import { STRIPE_STAND_IN_ORIGIN, WEB_ORIGIN } from "./stack";
 import { drainStandInProblems, routeStripeToStandIn } from "./stripe/stand-in";
 import { TARGET } from "./target";
@@ -84,6 +86,25 @@ const settleAnimations = (page: Page): Promise<boolean> =>
     return finite.length > 0;
   });
 
+/** How long a page's title may trail its content before the check reads the page without one. */
+const TITLE_WAIT_MS = 5_000;
+
+/**
+ * Waits for the document's title. Next streams the metadata a page builds with
+ * `generateMetadata` (a listing's) after the content, so the content can be on the screen
+ * before the `<title>` is — on a slow deployment for long enough for axe to read the page
+ * without one. A page that never gets one is still read, and fails `document-title`.
+ */
+const titleStreamedIn = (page: Page) =>
+  page
+    .waitForFunction(() => document.title !== "", null, {
+      timeout: TITLE_WAIT_MS,
+    })
+    .then(
+      () => undefined,
+      () => undefined,
+    );
+
 /**
  * Runs axe over the page at rest. Something can start moving while axe reads it — a toast a
  * live notice raises mid-scan fades in, and its half-transparent button fails the contrast
@@ -138,9 +159,12 @@ export const test = base.extend<{
     for (const context of contexts) await context.close();
   },
 
-  arrange: async ({ playwright }, use, testInfo) => {
+  arrange: async ({ playwright, browser }, use, testInfo) => {
+    skipWhenStopped(testInfo);
+
     const { arrange, tearDown } = arrangement(
       playwright.request,
+      browser,
       clientAddressOf(testInfo, "arrangement"),
       testInfo.title,
     );
@@ -151,6 +175,12 @@ export const test = base.extend<{
 
   pages: [
     async ({ page, context }, use, testInfo) => {
+      skipWhenStopped(testInfo);
+      if (TARGET === "live") {
+        startTestPace();
+        await budgetSlot();
+      }
+
       const problems: Problem[] = [];
       const expected: ExpectedResponse[] = [];
       // Per page, not per path: a path one visitor's page passed says nothing about the
@@ -225,6 +255,7 @@ export const test = base.extend<{
           // the next page is drawn hovered — so the same page would read differently from
           // one run to the next. Every page is read with the pointer in the same corner.
           await checkedPage.mouse.move(0, 0);
+          await titleStreamedIn(checkedPage);
 
           const results = await analyzeAtRest(checkedPage);
           const violations = results.violations.filter(
@@ -282,6 +313,11 @@ export const test = base.extend<{
         [...visited].filter((path) => !checked.has(path)),
       );
 
+      // How close the run comes to the deployment's rate limiter, test by test — the numbers
+      // its pace was fixed from (`pace.ts`).
+      if (TARGET === "live")
+        console.log(`[pace] ${testInfo.title}: ${paceReport()}`);
+
       if (testInfo.status !== testInfo.expectedStatus) {
         // The test failed on its own already; what else went wrong goes beside it, not over it.
         if (report !== "") {
@@ -299,6 +335,11 @@ export const test = base.extend<{
 });
 
 export { expect };
+
+/** A stopped demo skips every scenario of the live target, with the setup's notice. */
+function skipWhenStopped(testInfo: TestInfo): void {
+  testInfo.skip(TARGET === "live" && liveStopped(), LIVE_STOPPED_NOTICE);
+}
 
 function pathOf(url: string): string {
   return new URL(url).pathname;
@@ -343,11 +384,23 @@ function answers(response: ExpectedResponse, problem: Problem): boolean {
  *
  * On the hermetic stack whatever the page sends to Stripe goes to the stand-in; against
  * Stripe it goes to Stripe.
+ *
+ * On the deployment there is no address to pick — Vercel writes the header itself, and the
+ * whole run is one visitor — so nothing is routed; every answer of the BFF is read instead
+ * for what its route has left of the limiter's budget (`pace.ts`).
  */
 async function prepare(
   context: BrowserContext,
   address: string,
 ): Promise<void> {
+  if (TARGET === "live") {
+    context.on("response", (response) => {
+      if (new URL(response.url()).origin === WEB_ORIGIN) noteAnswer(response);
+    });
+
+    return;
+  }
+
   await context.route(
     (url) => url.origin === WEB_ORIGIN,
     (route) =>

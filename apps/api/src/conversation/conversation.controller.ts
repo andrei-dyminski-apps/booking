@@ -10,6 +10,7 @@ import {
 } from "@nestjs/common";
 import {
   ApiBadRequestResponse,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNoContentResponse,
@@ -134,6 +135,11 @@ export class ConversationController {
   @Roles(Role.USER)
   @ApiCreatedResponse({ type: MessageDto })
   @ApiNotFoundResponse(NOT_A_SIDE)
+  @ApiConflictResponse({
+    description:
+      "The conversation is closed: one of its two people deleted their account",
+    type: ApiErrorDto,
+  })
   send(
     @Param("id", ParseIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,

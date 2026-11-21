@@ -81,15 +81,16 @@ export class BookingAdjustmentRepository {
    * The caller's account as it is now, read before anything about the stay. The role in the
    * token is not trusted for it, for the reason `HostFeeRepository.waive` gives: a write to
    * `users` outside the API changes it, and the token keeps its claim until the next refresh.
-   * No lock, unlike the waiver's: no route deletes an account the row would name.
+   * No lock, unlike the waiver's: no route deletes an account the row would name. An account
+   * its owner erased is gone, as a missing row is — the token outlives the erasure.
    */
   async adminStanding(userId: string): Promise<AdminStanding> {
     const user = await this.prismaService.user.findUnique({
       where: { id: userId },
-      select: { role: true, blockedAt: true },
+      select: { role: true, blockedAt: true, deletedAt: true },
     });
 
-    if (user === null) return "GONE";
+    if (user === null || user.deletedAt !== null) return "GONE";
 
     return user.role === Role.ADMIN && user.blockedAt === null
       ? "ACTIVE"

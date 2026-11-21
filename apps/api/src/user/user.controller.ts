@@ -33,10 +33,9 @@ import { UserService } from "./user.service";
  * class as well as the handler, and a route added here later is closed to everybody else
  * without anyone having to remember it.
  *
- * There is no `DELETE`. A user's bookings cascade and their listings restrict, so a delete
- * would either take somebody's stay history with it or be refused for any owner who ever
- * listed anything — blocking is the reversible answer to "this account must stop", and the
- * rows it leaves behind are the record of what the account did.
+ * There is no `DELETE /users/:id`. Blocking is the admin's answer to "this account must
+ * stop": reversible, and the rows it leaves behind are the record of what the account did.
+ * Erasing an account is its owner's alone (`DELETE /users/me`, `AccountController`).
  */
 @ApiTags("Users")
 @Controller("users")

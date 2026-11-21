@@ -257,7 +257,7 @@ is the wrong shape for a list that keeps growing.
   `x-forwarded-for` the proxy forwards is never written for them. Without it the API sees
   every visitor arriving from this server's single address and buckets them together —
   which would turn the limit of 10 a minute on `/auth/login` into a limit for the whole
-  site, and the API-wide 120 into a ceiling on page views. `serverHeaders` passes the
+  site, and the 120 a route allows into a ceiling on page views. `serverHeaders` passes the
   header on rather than inventing it: what the platform in front of this server states is
   the truth, and an absent header means there is nothing in front to state it.
 - **A 401 in the browser is worth one refresh and one replay**, and the transport spends
@@ -355,7 +355,9 @@ is the wrong shape for a list that keeps growing.
 - The error body is part of the contract too (`apiErrorSchema`): do not read
   `message`/`errors` out of an `unknown` body by hand.
   `ApiResponseError.code` (an `ErrorCode`, `UNKNOWN_ERROR` for a code this build has no word for
-  or an answer outside the contract) and each issue's `code`/`params` carry the rule that
+  or an answer outside the contract), its `params` (what the rule knew — parsed by whoever
+  reads them, as untrusted as the rest of the body: `openMattersParamsSchema` for what keeps
+  an account from being deleted) and each issue's `code`/`params` carry the rule that
   refused, for a client that words it itself; the interface still shows `message`, which is
   the English fallback. Where one status has several reasons, the code decides, not the
   status: a slice keeps its checks in `model/*-refusal.ts` as one-liners over
@@ -522,6 +524,29 @@ their refresh token, and only the browser can turn an expired session into a liv
   URL of the page it sits on — never receives it. An action would clear the cookies of a
   family nobody revoked, and a stolen token would outlive the "Sign out" by a week. So the
   logout is a browser call through the BFF, followed by `router.refresh()`.
+- **Deleting the account ends the session from a Server Action**
+  (`_pages/profile/api/delete-account-action.ts`), unlike a logout: the API needs only the
+  access token, which a page's action carries, and deletes every refresh token itself, so
+  nothing scoped to `/api/auth` has to be handed over. `authApi.deleteAccount` mirrors the
+  cleared pair into this origin's jar the way `login` mirrors an issued one. The erasure
+  retires the account's listings, so the action reads them first (`GET /listings/mine`, a
+  `USER`'s alone) and afterwards does what `deleteListingAction` does for each —
+  `updateTag(listingTag(id))` — and `revalidateTag(CATALOGUE_TAG, "max")` once: a listing's
+  read is cached with no lifetime, and nothing else would ever refresh it. An account with
+  no listing on offer revalidates nothing — neither cache holds anything of it. The action then
+  redirects to `ROUTES.accountDeleted` — the home page with `?account=deleted`, whose notice
+  is the one thing left to tell a visitor with no session (`ACCOUNT_DELETED_PARAM`; anybody
+  may type it, and all it does is repeat a sentence). The dialog sits at the end of
+  `/profile`, under a paragraph saying what is erased and what stays; it asks for the
+  password, a wrong one lands under its box (`PASSWORD_INCORRECT`, a `403` — not a `401`,
+  which the transport would spend on a refresh), and a refusal for something still open
+  lists every matter of `params.open` in the contract's words (`OPEN_MATTER_MESSAGES`) with a
+  link to where it is put right (`openMatterLinks` in `model/open-matter-links.ts`): the
+  payouts page for a host's share or fee, "Trips" for a refund owed (only ever the guest's),
+  and for a stay or a dispute the tab of the stays page the refusal says holds it
+  (`params.asGuest` → "Trips", `params.asHost` → "Hosting"), both when both do. A thread with a deleted account is drawn closed
+  (`conversation.closed`): its messages stay, and a notice takes the reply box's place — the
+  API refuses a message to it (`CONVERSATION_CLOSED`).
 - **The login form's inputs stay controlled** even though the action reads the request
   rather than the state. React resets an uncontrolled form once an action settles, which
   would wipe what the visitor typed at the moment the message explaining it appears. The
@@ -636,7 +661,9 @@ this side decided.
   was handed would be one more value to distrust. An admin's account page — the viewer's own
   included — carries no controls and no activity: the API refuses to block an admin, a
   control that could only reach that `403` is not worth drawing, and an admin neither books
-  nor lists.
+  nor lists. A deleted account's page draws a "Deleted" badge and when, and no access card —
+  there is nothing left to block, and the API answers a block of it `404`; the users list
+  filters such accounts under the status "Deleted", which "Active" and "Blocked" leave out.
 - **One link is current in the navigation**, the deepest one containing the path —
   `/admin` contains `/admin/users` as surely as the users link does.
 - **Ownership of a row is read, not guessed** (`_pages/dashboard/listing-edit/api/own-listing.ts`).
@@ -805,7 +832,8 @@ nothing else, so they stay a plain `action={submit}` with nothing to validate. A
 the dialog that cancels a stay was one and is not any more: it carries a reason, required
 of the host and optional for the guest and an admin, so it is `useActionForm` over
 `cancelFormSchema` (`features/cancel-booking/ui/cancel-stay-dialog.tsx`), the contract's
-body. Neither are the `GET` forms of the filter dialogs, which navigate rather than
+body. So is the dialog that deletes an account, over `deleteAccountSchema`: the password
+is its box. Neither are the `GET` forms of the filter dialogs, which navigate rather than
 mutate; those are the next section.
 
 ## Search, filters and the URL
@@ -1010,7 +1038,19 @@ penalises, and that drift is what a shared schema exists to prevent.
   read as `https`, and a value that is not an address is passed over like an empty one —
   the root layout's `metadataBase` is built on it on every request, and a `new URL` that
   threw there would take every page down.
-- **The title is the page's, set into the layout's template** (`%s · Booking`). A page's
+- **The site is named once** (`SITE_NAME`, `SITE_DESCRIPTION` and `SITE_LOGO` in
+  `shared/config/site.ts`): the title template, the shared link, the JSON-LD's
+  `Organization` and `WebSite`, the manifest and the shell's own wordmark all read it.
+- **The pictures are file conventions of `app/`**: `favicon.ico`, `icon.svg`,
+  `apple-icon.png`, and `opengraph-image.png` and `twitter-image.png` with their `.alt.txt`
+  beside them. Next puts them on every page beneath and ranks them above any page's
+  `openGraph`, so the listings, which have no photos yet, are shared with the brand card.
+  The manifest (`app/manifest.ts` over `_app/seo`) and the `Organization`'s `logo` name the
+  PNGs of `public/` instead — an `app/icon` file is served under a hashed address a
+  document cannot state. The logo in the shell is `BrandMark` (`_app/layout/brand-mark.tsx`),
+  the same drawing in the theme's tokens; the files are that drawing in fixed colours, and
+  a change to one is a change to all of them.
+- **The title is the page's, set into the layout's template** (`%s · StayDesk`). A page's
   `openGraph` replaces the layout's whole rather than merging into it, so a page that sets
   one names `siteName` and `type` again; a page that sets none is shared under the site's
   own title and description.
@@ -1365,8 +1405,9 @@ A mutation nobody can undo — deleting a row, revoking access, anything the API
 with a `DELETE` — asks first, in an `AlertDialog` from `@repo/ui`
 (`features/delete-listing/ui/delete-listing-button.tsx`,
 `features/delete-review/ui/delete-review-button.tsx`,
-`features/cancel-booking/ui/cancel-stay-dialog.tsx` and
-`_pages/admin/user/ui/block-button.tsx`). Not a second button that takes the place of
+`features/cancel-booking/ui/cancel-stay-dialog.tsx`,
+`_pages/admin/user/ui/block-button.tsx` and
+`_pages/profile/ui/delete-account-dialog.tsx`, which asks for the password as well). Not a second button that takes the place of
 the first: a modal takes the focus and refuses a click outside itself, which is what stops
 the confirmation being hit by the hand that was already moving.
 
@@ -1689,7 +1730,8 @@ under test is the retry and locking logic, not a browser.
   starts them, and CI keeps it as an artifact of its own when a run fails (the traces travel
   in the HTML report). An API that never came up says why in `api.log`.
 - **A CI run stops itself after six minutes** (`globalTimeout`), inside the job's ten, so a
-  hang still leaves its report and logs.
+  hang still leaves its report and logs — a live run after forty, inside its workflow's
+  fifty.
 - **Two projects: `desktop` runs every scenario, `phone` (a Pixel 7) only what a narrow
   screen changes** — the navigation and the catalogue up to a listing's page. Below `lg`
   the shell draws its navigation in a sheet behind the menu button instead of the sidebar,
@@ -1718,9 +1760,9 @@ under test is the retry and locking logic, not a browser.
   first. A drain waits a few seconds for the webhook deliveries still under way, so a
   refund reported late fails the test that made it; one still undelivered then is a problem
   of that test and is given up.
-- **Two targets, picked by `E2E_TARGET`** (`e2e/target.ts`): the hermetic stack, the
-  default and the CI check, and `stripe` (`pnpm test:browser:stripe`), the same stack with
-  Stripe's side real. Where a scenario runs is a tag on its `test`, mirroring its mark in
+- **Three targets, picked by `E2E_TARGET`** (`e2e/target.ts`): the hermetic stack, the
+  default and the CI check, `stripe` (`pnpm test:browser:stripe`), the same stack with
+  Stripe's side real, and `live` (`pnpm test:browser:live`), the deployment — below. Where a scenario runs is a tag on its `test`, mirroring its mark in
   `docs/e2e-scenarios.md`: `EVERY_TARGET` (`@every-target`), `REAL_STRIPE_ONLY`
   (`@real-stripe-only`), or none for the hermetic stack alone — the safe default for a new
   one. Against Stripe only the tagged scenarios run, on the desktop alone, with no retries;
@@ -1740,12 +1782,54 @@ under test is the retry and locking logic, not a browser.
   thirty seconds (`timeout` in `playwright.config.ts`), or it would be cut off before its
   own waits ran out. The target writes to
   the sandbox, so it is run on purpose and never in CI.
+- **The live target runs the `EVERY_TARGET` scenarios against the deployment**
+  (`e2e/live.ts`), on the desktop, with no retries, starting nothing: `WEB_ORIGIN`
+  (`stack.ts`) is the deployment's origin there, and a test gets three minutes. A scenario
+  signs in as `GUEST` (`demo.ts`) — the demo guest on the local stacks, the suite's own
+  guest on the deployment, whose demo accounts belong to its visitors — and its arranged
+  host is the suite's own host there (`arrange.ts`); `ownGuest` (`session.ts`) is the
+  guest of a scenario that changes the guest's account, registered locally and the
+  suite's guest there, where an account registered for a scenario would leave its row
+  behind even once deleted. Both accounts sign in with
+  `E2E_LIVE_PASSWORD`. A scenario that needs anything else — a demo account it changes, the
+  admin, a second guest, an account registered for it — stays untagged. The global setup
+  (`live-setup.ts`) asks `/api/health`: a `404` Railway's edge marks `x-railway-fallback`
+  is a stopped demo, and every scenario is skipped with a notice; any other failure fails
+  the run. It then signs in to both accounts — registering one the demo does not have yet,
+  and failing on an address that refuses the password or an account that is blocked —
+  reads the day the guest joined, and sweeps what a run that died left behind; the
+  teardown (`live-teardown.ts`) sweeps after the run (`sweep` in `live-demo.ts`: the
+  guest's stays that can still be cancelled are cancelled, the host's listings retired),
+  and does nothing after a setup that threw (`E2E_LIVE_READY`, set when it went through).
+  A listing is retired there through the delete button of its edit screen, in a browser
+  signed in with the host's session (`retireThroughPages`), the per-test teardown's
+  included: that action marks the listing's cached page stale, a `DELETE` through the BFF
+  does not, and on the deployment a page cached with no lifetime would outlive the run and
+  keep offering the retired stay.
+  The whole run is one visitor to the rate limiter, since Vercel writes `x-forwarded-for`
+  itself: `prepare` in `fixtures.ts` routes nothing there, and the run keeps a pace
+  instead (`pace.ts`) — every sign-in, through a page (`signInThroughForm`), an
+  arrangement or the global setup, first takes one of eight slots a minute, before the
+  press rather than inside it so the wait never runs out an `expect`, and a test that
+  starts while a route's budget is low waits for that route's window to turn. The limiter
+  counts each route apart, so what a route has left is read off every answer of the BFF —
+  the pages', the arrangements' and the global setup's; what a server render asks the API
+  (`/auth/me`) never reaches the browser and goes unwatched. The pace is kept in a file,
+  since a failed test restarts the worker and the setup and teardown are processes of their
+  own — one file for the machine that outlives the run, since the limiter remembers the
+  address and a run started right after another still meets its sign-ins. Nothing a live
+  run keeps holds the password: no trace and no HTML report there (`playwright.config.ts`),
+  and the workflow uploads the screenshots and videos without the error context. A text a
+  scenario finds by on the suite's accounts is new on every attempt, since they keep every
+  earlier run's stays, threads and reviews. It runs from `.github/workflows/live.yml`, on a
+  schedule and on demand, never as a pull request check.
 - **State a scenario should not click its way to is arranged first** (`arrange` in
   `e2e/fixtures.ts`, `e2e/arrange.ts`), by the application's own HTTP surface through the
   BFF and never by writing to the database, so the arrangement works on every target. It
   sends an address of its own, apart from the test's pages, so a scenario that arranges a
   lot does not spend the API's per-minute limit its pages count against.
-  `arrange.listing()` registers a host of the test's own and creates a listing for it, and
+  `arrange.listing()` registers a host of the test's own (on the deployment, signs in to
+  the suite's host) and creates a listing for it, and
   `arrange.host()` hands over that host's address and password, for a scenario where the
   host signs in too; every listing the host still has when the test ends — one made through
   the pages included — is retired. A scenario that books has one, so no two tests meet on a
@@ -1760,7 +1844,11 @@ under test is the retry and locking logic, not a browser.
   it after it was retired. So a scenario reaches its listing by its own address, and one
   that reads the catalogue for its listings searches by a price no other listing has
   (`randomInt` per attempt, and the catalogue's own scenario in a band of prices per
-  project, since the phone runs it again in the same stack), whose first read is fresh. A
+  project, since the phone runs it again in the same stack), whose first read is fresh. On
+  the deployment the cached pages outlive the run and visitors list stays of their own, so
+  there a scenario that searches by price searches by the minute its attempt started,
+  counted round a band of whole prices of its own far above what a visitor asks
+  (`livePrice` and `LIVE_PRICE_BANDS` in `catalogue.ts`). A
   write marks the cached pages stale rather than emptying them, so the page served right
   after a change may be the one before it: `expectInCatalogue` (`catalogue.ts`) reloads
   until the change arrives, and so does a scenario reading a listing's calendar after

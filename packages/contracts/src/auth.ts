@@ -38,6 +38,20 @@ const emailSchema = z
   .toLowerCase();
 
 /**
+ * An address a new account may take: `emailSchema`, outside the reserved `.invalid` domain
+ * (RFC 2606), which receives no mail anywhere. That domain is what an erased account's
+ * address becomes (`deleted-<id>@deleted.invalid`, unique by the id), and a registration
+ * holding it first would make that erasure fail on the unique key — for good, since the id
+ * is the account's for life. Checked after `toLowerCase`, so no spelling of it slips past.
+ * Login keeps `emailSchema`: no account can be signed in to there, and saying so takes the
+ * same `401` as any address nobody registered.
+ */
+const registrableEmailSchema = emailSchema.refine(
+  (email) => !email.endsWith(".invalid"),
+  { error: emailFormat },
+);
+
+/**
  * The lower bound is the only rule worth enforcing — a composition rule ("one digit,
  * one capital") narrows the search space instead of widening it. The upper bound guards
  * the hashing itself: argon2 has no input limit, so without it a request could ask the
@@ -103,7 +117,7 @@ export const userSchema = z.object({
 
 export const registerSchema = z.object({
   name: nameSchema,
-  email: emailSchema,
+  email: registrableEmailSchema,
   password: passwordSchema,
 });
 

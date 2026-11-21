@@ -277,8 +277,8 @@ model Review {
   createdAt DateTime   @default(now()) @map("created_at")
 
   /// Cascade: a review is about a stay and means nothing without it. Bookings are never
-  /// deleted by the API — cancelling keeps the row — so what reaches this is a guest's
-  /// account going with their bookings, and the test and seed cleanups.
+  /// deleted by the API — cancelling keeps the row, and erasing an account keeps the user's
+  /// row and everything under it — so what reaches this is the test and seed cleanups.
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   /// One review of each kind per stay. It is also what the two lists join through — a
@@ -351,8 +351,9 @@ model Listing {
   /// would have to delete listings that bookings restrict, so it would promise an account
   /// deletion the database refuses to perform. Removing an owner therefore lets go of the
   /// listings first. Nothing in the API reaches that path any more — retiring is what
-  /// `DELETE /listings/:id` does — so what the constraint guards now is the hard delete
-  /// of the seed, the test cleanup and whatever account deletion turns out to be.
+  /// `DELETE /listings/:id` does, and erasing an account keeps the row and retires its
+  /// listings — so what the constraint guards now is the hard delete of the seed and the
+  /// test cleanup.
   owner         User            @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   bookings      Booking[]
   conversations Conversation[]
@@ -451,9 +452,19 @@ model User {
   /// and blocking deletes every refresh token they hold in the same transaction — what is
   /// left is an access token, which runs out within `JWT_ACCESS_TTL` because `JwtStrategy`
   /// reads no database. A moment rather than a flag, because when it happened is the first
-  /// thing whoever reopens the account asks. Blocking is what the API offers instead of
-  /// deleting a user: the rows are kept, and so is everything that points at them.
+  /// thing whoever reopens the account asks. Blocking is an admin's answer to an account
+  /// that has to stop; deleting one is its owner's (`deleted_at` below).
   blockedAt DateTime? @map("blocked_at")
+
+  /// When the person erased their own account (`DELETE /users/me`). The row is not deleted:
+  /// the stays, the money and the other party's history point at it, and the cascades and
+  /// restricts of this model would either take that history down or refuse the delete. What
+  /// identifies the person is scrubbed in the same transaction instead — the name becomes
+  /// `DELETED_USER_NAME`, the address one at `.invalid` that nobody receives mail at and that
+  /// frees the real one, the hash one nothing matches — and sign-in, refresh and `/auth/me`
+  /// treat the account as gone. `stripe_account_id` stays: it is what the provider's own
+  /// records are reconciled against.
+  deletedAt DateTime? @map("deleted_at")
 
   /// The Stripe connected account the user is paid out to as a host (an Accounts v2
   /// recipient), opened the first time they open the payouts screen and never replaced.
@@ -682,8 +693,8 @@ model WaitlistEntry {
 /// `payload` is the event as the gateway read it (`PaymentEvent`), parsed back against a
 /// schema on the way out, not the provider's raw body.
 ///
-/// No relation to a booking: an event can name a booking whose guest has since deleted
-/// their account, and the record of the money outlives that row.
+/// No relation to a booking: an event can name a booking another database holds (a shared
+/// test account), and the record of the money outlives any row it names.
 model PaymentEvent {
   id          String    @id
   type        String
@@ -728,9 +739,9 @@ model RefundFailure {
   resolution  String?
 
   /// SetNull, not Cascade: money still owed to a guest must not vanish with whatever deletes
-  /// a booking row — today only the cleanups, since there is no account deletion, and a
-  /// guest's bookings would go with their account if one came — so the row outlives the stay
-  /// and keeps `payment_id`. A `null` already means no row names the payment any more; a
+  /// a booking row — today only the cleanups, since erasing an account keeps the user's row
+  /// and its bookings (and is refused while one of these is unresolved) — so the row outlives
+  /// the stay and keeps `payment_id`. A `null` already means no row names the payment any more; a
   /// failure written while its stay is being deleted fails on the key, and the event's retry
   /// finds no stay and writes `null`.
   booking Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)

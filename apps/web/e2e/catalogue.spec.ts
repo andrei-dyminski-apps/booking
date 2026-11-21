@@ -1,6 +1,7 @@
 import { randomInt } from "node:crypto";
+import { livePrice } from "./catalogue";
 import { expect, test } from "./fixtures";
-import { EVERY_TARGET } from "./target";
+import { EVERY_TARGET, TARGET } from "./target";
 import type { Page } from "@playwright/test";
 
 /** One more than a page of the catalogue holds, so the search runs onto a second. */
@@ -122,8 +123,15 @@ test(
   },
 );
 
-/** A price no other listing has, in this project's band, new on every attempt. */
+/**
+ * A price no other listing has, in this project's band, new on every attempt. On the
+ * deployment, where the cached pages outlive the run and an earlier run's page would answer
+ * a price it searched with its retired listings under the same titles, the catalogue's band
+ * of the run's prices (`livePrice`).
+ */
 function searchPrice(): number {
+  if (TARGET === "live") return livePrice("catalogue");
+
   const { config, project } = test.info();
   const band = config.projects.findIndex((each) => each.name === project.name);
 

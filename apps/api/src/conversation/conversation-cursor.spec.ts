@@ -25,6 +25,7 @@ const conversation: Conversation = {
     createdAt: "2026-08-20T12:00:00.000Z",
   },
   unread: true,
+  closed: false,
   createdAt: "2026-08-19T12:00:00.000Z",
 };
 

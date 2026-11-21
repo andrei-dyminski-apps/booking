@@ -8,6 +8,17 @@ import {
 import { filtersHref } from "../lib/search-params";
 
 /**
+ * What the home page is told by the address an erased account lands on: the one notice a
+ * visitor with no session left can still be shown. A query rather than a cookie, so the
+ * page says it on the server with no script; anybody may type it, and all it does is
+ * repeat a sentence.
+ */
+export const ACCOUNT_DELETED_PARAM = {
+  key: "account",
+  value: "deleted",
+} as const;
+
+/**
  * Every path of this application in one place: the proxy guards them, the pages link to
  * them and the forms redirect to them, so a renamed route is a compile error rather than
  * a dead link somewhere in the markup.
@@ -20,6 +31,7 @@ import { filtersHref } from "../lib/search-params";
  */
 export const ROUTES = {
   home: "/",
+  accountDeleted: `/?${ACCOUNT_DELETED_PARAM.key}=${ACCOUNT_DELETED_PARAM.value}`,
   login: "/login",
   register: "/register",
   profile: "/profile",

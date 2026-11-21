@@ -1,6 +1,6 @@
 import { expect, test } from "./fixtures";
 import { EVERY_TARGET } from "./target";
-import { openListing, registerThroughForm, signInThroughForm } from "./session";
+import { openListing, ownGuest, signInThroughForm } from "./session";
 import { sidebarLink } from "./shell";
 import {
   begunStayListing,
@@ -14,15 +14,16 @@ test(
   "after a stay that is over, the host reviews the guest, finds it among the guest's reviews, and the guest finds it from their profile",
   { tag: EVERY_TARGET },
   async ({ page, pages, arrange, another }) => {
-    const comment =
-      "Left the place as they found it, and the keys on the hook.";
+    // New on every attempt: on the deployment the guest is the suite's own, whose reviews
+    // keep every earlier run's.
+    const comment = `Left the place as they found it, and the keys on the hook (${Date.now().toString(36)}).`;
     const listing = await arrange.listing({
       pricePerNightCents: 10_000,
       ...begunStayListing(),
     });
 
     // The guest is the test's own: a review of them changes their account.
-    const guest = await registerThroughForm(page, pages, "Ola Brennan");
+    const guest = await ownGuest(page, pages, "Ola Brennan");
 
     await openListing(page, pages, listing);
     await holdAndPay(page, pages, {

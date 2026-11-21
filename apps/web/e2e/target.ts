@@ -9,8 +9,11 @@
  *   target and for real Stripe only. How a developer checks the payment and payout paths
  *   against Stripe; never in CI and never retried, since a failure on Stripe's side is what
  *   it exists to show.
+ * - `live`: the live deployment (`live.ts`), running the scenarios marked for every target
+ *   as the suite's own two accounts there, at the pace its rate limiter allows (`pace.ts`).
+ *   On a schedule and on demand, apart from the pull request checks, and never retried.
  */
-export type Target = "hermetic" | "stripe";
+export type Target = "hermetic" | "stripe" | "live";
 
 export const TARGET: Target = targetOf(process.env.E2E_TARGET);
 
@@ -23,11 +26,11 @@ export const REAL_STRIPE_ONLY = "@real-stripe-only";
 /**
  * A wait on Stripe's news — a payment confirmed, a refund recorded — on this target. The
  * stand-in reports a step a moment after its answer; Stripe's events come back through
- * `stripe listen` and the API's queue, and the page sees them at its next poll, which on a
- * cold sandbox has taken several times as long.
+ * `stripe listen` (or, deployed, its webhook endpoints) and the API's queue, and the page
+ * sees them at its next poll, which on a cold sandbox has taken several times as long.
  */
 export function providerWait(hermeticMs: number): number {
-  return TARGET === "stripe" ? hermeticMs * 3 : hermeticMs;
+  return TARGET === "hermetic" ? hermeticMs : hermeticMs * 3;
 }
 
 // An untagged scenario is the hermetic stack's alone, so one written without a thought for
@@ -38,9 +41,9 @@ function targetOf(value: string | undefined): Target {
     return "hermetic";
   }
 
-  if (value === "stripe") return "stripe";
+  if (value === "stripe" || value === "live") return value;
 
   throw new Error(
-    `E2E_TARGET is "hermetic" (the default) or "stripe", not "${value}"`,
+    `E2E_TARGET is "hermetic" (the default), "stripe" or "live", not "${value}"`,
   );
 }
