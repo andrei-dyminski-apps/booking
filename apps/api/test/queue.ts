@@ -5,6 +5,8 @@ import type { App } from "supertest/types";
 import { BOOKING_EXPIRY_QUEUE } from "./../src/booking/infrastructure/booking-expiry.queue";
 import { PAYMENT_EVENT_QUEUE } from "./../src/payment/infrastructure/payment-event.queue";
 import { HOST_PAYOUT_QUEUE } from "./../src/payout/infrastructure/host-payout.queue";
+import { MailOutboxRelay } from "../src/mail/infrastructure/mail-outbox.relay";
+import { MailProcessor } from "../src/mail/infrastructure/mail.processor";
 
 /**
  * The e2e specs share one Redis as they share one database. A booking's hold-expiry job is
@@ -14,6 +16,15 @@ import { HOST_PAYOUT_QUEUE } from "./../src/payout/infrastructure/host-payout.qu
  */
 export async function resetQueue(app: INestApplication<App>): Promise<void> {
   await bookingExpiryQueue(app).obliterate({ force: true });
+  const { worker } = app.get(MailProcessor);
+  await worker.pause();
+  try {
+    // The database has been reset. Let any handoff already in flight settle.
+    await app.get(MailOutboxRelay).sweep();
+    await app.get<Queue>(getQueueToken("mail")).obliterate();
+  } finally {
+    await worker.resume();
+  }
   // A confirmed stay schedules its host's payout days ahead; those pile up the same way.
   await app
     .get<Queue>(getQueueToken(HOST_PAYOUT_QUEUE))

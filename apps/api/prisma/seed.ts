@@ -428,6 +428,7 @@ async function main(): Promise<void> {
   await prisma.conversation.deleteMany();
   await prisma.listing.deleteMany();
   await prisma.user.deleteMany();
+  await prisma.mailOutbox.deleteMany();
 
   // One hash for every account: argon2 is deliberately slow, and the demo password is the same.
   const passwordHash = await argon2.hash(DEMO_PASSWORD, {

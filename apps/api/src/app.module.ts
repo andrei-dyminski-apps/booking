@@ -1,3 +1,4 @@
+import { MailModule } from "./mail/mail.module";
 import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
 import { APP_FILTER, APP_GUARD, APP_PIPE } from "@nestjs/core";
@@ -52,6 +53,7 @@ import { WaitlistModule } from "./waitlist/waitlist.module";
     ConversationModule,
     EventsModule,
     HealthModule,
+    MailModule,
     ListingModule,
     LookupModule,
     NotificationModule,

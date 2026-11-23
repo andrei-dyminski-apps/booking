@@ -86,6 +86,8 @@ Every package, `apps/api` included, inherits the shared presets from `packages/t
 
 The shape of requests and responses is described by zod schemas in `packages/contracts` — that is the single source of truth. One schema yields validation in Nest (`nestjs-zod`), types for both sides and form validation in the browser. When the data format changes, change the schema rather than the two sides separately: `pnpm check-types` immediately shows what fell out of sync.
 
+Local email goes to the Compose Mailpit inbox. The production API sends through Resend over HTTPS and records its signed webhooks for background processing. Mail environment settings, including the encryption key for pending delivery requests, DNS and recovery for suppressed addresses are in the root README.
+
 ## Environment variables
 
 The single source is the `.env` **in the repository root** (`cp .env.example .env`). There are no per-app `.env` files in `apps/*` and none should be created.

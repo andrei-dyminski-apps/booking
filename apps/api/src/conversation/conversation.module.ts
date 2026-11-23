@@ -8,6 +8,7 @@ import { ConversationService } from "./conversation.service";
 @Module({
   imports: [PrismaModule, RealtimeModule],
   controllers: [ConversationController],
+  exports: [ConversationService],
   providers: [ConversationService, ConversationRepository],
 })
 export class ConversationModule {}

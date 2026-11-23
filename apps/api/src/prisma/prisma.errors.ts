@@ -4,12 +4,13 @@ import { Prisma } from "../generated/prisma/client";
 /**
  * The codes a read-then-write can lose its race to. Prisma exports no enum of its own —
  * `PrismaClientKnownRequestError.code` is a bare `string`, and the documentation compares
- * it against a literal — so the three this repository reacts to are named here, next to
+ * it against a literal — so the codes this repository reacts to are named here, next to
  * the helper that reads them.
  */
 export const PrismaErrorCode = {
   UniqueViolation: "P2002",
   ForeignKeyViolation: "P2003",
+  RawQueryFailed: "P2010",
   RecordNotFound: "P2025",
 } as const;
 
@@ -97,6 +98,15 @@ export function isExclusionViolation(error: unknown): boolean {
   return (
     sqlStatePathSchema.safeParse(error.meta).data?.driverAdapterError.cause
       .code === EXCLUSION_VIOLATION_SQLSTATE
+  );
+}
+
+/** A raw NOWAIT query could not acquire its row lock. */
+export function isLockUnavailable(error: unknown): boolean {
+  return (
+    isPrismaError(error, PrismaErrorCode.RawQueryFailed) &&
+    sqlStatePathSchema.safeParse(error.meta).data?.driverAdapterError.cause
+      .code === "55P03"
   );
 }
 

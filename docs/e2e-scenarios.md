@@ -41,7 +41,7 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
 
 ## Priority 1 — the application does not work without these
 
-- [x] **Register.** A new visitor fills in the form and lands signed in under their own name.
+- [x] **Register.** A new visitor fills in the form and lands signed in under their own name, follows the confirmation link from Mailpit, and sees “Email confirmed” on their profile.
       _Hermetic only. Cheap._
 - [x] **Sign in and out.** A demo account signs in and sees its own name; on its profile it
       finds its details, the dates among them in the visitor's own time zone; after signing

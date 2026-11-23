@@ -15,6 +15,8 @@ import { PrismaService } from "../prisma/prisma.service";
 import { countUnreadOfOne } from "../unread/unread.repository";
 import type { UnreadCounts } from "../unread/unread.types";
 import type { NotificationCursor } from "./notification-cursor";
+import { groupOf } from "../mail/domain/mail-policy";
+import { recordMailTask } from "../mail/infrastructure/mail-outbox.repository";
 
 /**
  * Every query over `notifications`. Each one is scoped to the recipient by a `userId` in
@@ -60,6 +62,13 @@ export class NotificationRepository {
           data: { userId, type: content.type, data: content.data },
         }),
       );
+      if (groupOf(notification.type)) {
+        await recordMailTask(tx, {
+          kind: "notice",
+          id: notification.id,
+          userId,
+        });
+      }
 
       return { notification, count: await countUnreadOfOne(tx, userId) };
     });

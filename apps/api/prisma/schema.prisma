@@ -437,6 +437,72 @@ enum Role {
   ADMIN
 }
 
+model MailEvent {
+  id               String    @id
+  kind             String
+  emailId          String    @map("email_id")
+  recipientIds     String[]  @default([]) @map("recipient_ids") @db.Uuid
+  lookupRecipients Boolean   @default(false) @map("lookup_recipients")
+  replyTokenHash   String?   @map("reply_token_hash")
+  createdAt        DateTime  @map("created_at")
+  processedAt      DateTime? @map("processed_at")
+  failedAt         DateTime? @map("failed_at")
+  lastError        String?   @map("last_error")
+  availableAt      DateTime  @default(now()) @map("available_at")
+  attempts       Int       @default(0)
+
+  @@index([processedAt, failedAt, availableAt])
+  @@map("mail_events")
+}
+
+model MailConfirmation {
+  hash              String    @id
+  userId            String    @map("user_id") @db.Uuid
+  expiresAt         DateTime  @map("expires_at")
+  recoveryCheckedAt DateTime? @map("recovery_checked_at")
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("mail_confirmations")
+}
+
+model MailOutbox {
+  id                 String    @id @db.Uuid
+  kind               String
+  /// Recording a digest for the other participant must avoid acquiring their user lock.
+  userId             String    @map("user_id") @db.Uuid
+  requestId          String?   @map("request_id")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  availableAt        DateTime  @default(now()) @map("available_at")
+  startedAt          DateTime? @map("started_at")
+  digestSnapshot     Json?     @map("digest_snapshot")
+  deliverySnapshot   String?   @map("delivery_snapshot")
+  deliveryRound      Int       @default(0) @map("delivery_round")
+  /// Provider calls in flight or whose acceptance is unknown.
+  sendAttempts       Int       @default(0) @map("send_attempts")
+  processingFailures Int       @default(0) @map("processing_failures")
+  failedAt           DateTime? @map("failed_at")
+  lastError          String?   @map("last_error")
+
+  @@index([failedAt, availableAt, id])
+  @@index([userId])
+  @@map("mail_outbox")
+}
+
+model MailReplyToken {
+  hash      String    @id
+  userId    String    @map("user_id") @db.Uuid
+  messageId String    @map("message_id") @db.Uuid
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message   Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([messageId])
+  @@map("mail_reply_tokens")
+}
+
 model User {
   id           String   @id @default(uuid()) @db.Uuid
   /// What the person goes by, as they typed it at registration — not unique, never a key.
@@ -447,6 +513,15 @@ model User {
   role         Role     @default(USER)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
+
+  emailVerifiedAt       DateTime? @map("email_verified_at")
+  emailUndeliverableAt  DateTime? @map("email_undeliverable_at")
+  emailDeliveryRestoredAt DateTime? @map("email_delivery_restored_at")
+  confirmationHash      String?   @unique @map("confirmation_hash")
+  confirmationExpiresAt DateTime? @map("confirmation_expires_at")
+  mutedMailGroups       String[]  @default(["stays", "payments", "waitlist", "messages"]) @map("muted_mail_groups")
+  mailConfirmations     MailConfirmation[]
+  mailReplyTokens       MailReplyToken[]
 
   /// When an admin shut the account. A blocked user cannot sign in or refresh a session,
   /// and blocking deletes every refresh token they hold in the same transaction — what is
@@ -571,6 +646,7 @@ model Conversation {
 /// two people are fixed by the conversation, so the side is the whole of what a row has to
 /// say about who wrote it.
 model Message {
+  inboundEmailId String?          @unique @map("inbound_email_id")
   id             String           @id @default(uuid()) @db.Uuid
   conversationId String           @map("conversation_id") @db.Uuid
   sender         ConversationSide
@@ -578,6 +654,7 @@ model Message {
   createdAt      DateTime         @default(now()) @map("created_at")
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  mailReplyTokens MailReplyToken[]
 
   /// A thread is read from its end, a page at a time: the newest first, `id` behind it.
   @@index([conversationId, createdAt(sort: Desc), id(sort: Desc)])

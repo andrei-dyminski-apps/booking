@@ -23,7 +23,7 @@ The domain model (grown phase by phase):
 
 The default of the repository stays a modular monolith, now with the
 `module → controller → service → repository → Prisma` layering described in
-`apps/api/CLAUDE.md`. One departure from it is planned, and only one.
+`apps/api/CLAUDE.md`. The payment modules and transactional mail use ports and adapters.
 
 **Everywhere: a repository between the service and Prisma — done.** No service imports the
 generated client or the row types any more (the mappers live in the repository), so a unit
@@ -31,8 +31,8 @@ test fakes a repository instead of a query builder. It is a rule now rather than
 judgement call: `auth`, `booking` and `listing` all have one, and so does the next module.
 Cheap, and it is the step the market means when it asks for "clean architecture".
 
-**In `booking` only: ports and adapters — done in phase 6.** With the payment cycle in,
-that module is the one that earned the full
+**Ports and adapters for the payment cycle — done in phase 6.** With the payment cycle in,
+`booking` introduced the full
 `domain / application / infrastructure / presentation` split:
 
 ```
@@ -59,7 +59,7 @@ admin's stuck list only send it — so the cut costs no shared file. The refund 
 `@repo/contracts` (`refundQuote`) rather than `domain/`, because the booking page states
 it to the guest before the API applies it — the reason `nightlyPrice` lives there.
 
-What justifies it there and nowhere else:
+What justifies it for the payment cycle:
 
 - **Rules that are pure functions**: which status transition is legal, what a cancellation
   refunds 48 h before check-in, what a stay costs. They belong in `domain/`, where they are
@@ -1329,13 +1329,18 @@ The product's own domain (`staydesk.dev`) is what makes it possible at no cost: 
 provider's free tier covers a demo's volume, and the DNS records that let mailboxes trust the
 mail are free to write.
 
-- [ ] **A port for the mail, like the one for the payments.** `MailGateway` (an abstract class,
+The mail module follows the payment modules' directory layout. `MailGateway` sits under
+`application/ports/`. A Postgres outbox keeps outgoing mail until processing finishes
+and a relay restores missing BullMQ jobs. The Postgres inbox handles Resend events
+independently of the outgoing queue.
+
+- [x] **A port for the mail, like the one for the payments.** `MailGateway` (an abstract class,
       its own DI token, as `PaymentGateway` is) with two adapters: the provider's HTTP API in
       production, and SMTP to a **Mailpit** container locally — added to `docker-compose.yml`,
       its web view the place a developer reads what the application sent. The production
       adapter talks HTTPS rather than SMTP: Railway's lower plans block outbound SMTP, and the
       HTTP API is where the provider's idempotency key and its webhooks live.
-- [ ] **The provider: Resend**, unless the figures read at the start of the phase say otherwise
+- [x] **The provider: Resend**, unless the figures read at the start of the phase say otherwise
       — its free tier (about 3,000 messages a month, 100 a day at the time of writing), a
       domain of our own on it, an `Idempotency-Key` per send, signed webhooks (Svix) for what
       happens to a message, and receiving on the same account (below). The sending address is
@@ -1343,45 +1348,69 @@ mail are free to write.
       human inbox; SPF, DKIM and DMARC (`p=none` first, tightened once the reports are clean)
       are written to the zone. New variables — the key, the webhook secret, the sender, the
       SMTP address for Mailpit — go into `.env.example`, `globalEnv` and the README's table.
-- [ ] **Sent from a queue, never from the request.** A BullMQ queue `mail` with retries and
+- [x] **Sent from a queue, never from the request.** A BullMQ queue `mail` with retries and
       backoff, the same reason `notify` never throws: what an email announces has already been
-      committed. The job's id is the idempotency key handed to the provider, so a retry after
-      a lost answer does not send twice. A hard failure after the last retry is logged with the
-      request id, never with the address.
-- [ ] **An address is confirmed before anything but a confirmation is sent to it.**
+      committed. The transaction that writes an account, notice or message also records
+      its mail task. The relay retries the handoff, revives failed jobs whose outbox row still
+      exists and recreates unfinished jobs if Redis loses them. The task has a stable provider
+      idempotency key across queue jobs. A retry after a lost answer uses the original
+      encrypted payload within Resend's 24-hour idempotency window. A quota refusal defers
+      the task in Postgres until the quota resets. A request
+      rate refusal defers it until Resend's retry deadline without using a delivery retry.
+      Postgres limits delivery to six attempts across all queue jobs for the task.
+      Permanent provider refusals, unreadable payloads, expired retry windows and exhausted
+      retries are set aside in Postgres.
+      Ready confirmations are processed ahead of notification copies and digests. A hard
+      failure after the last retry is logged with the request id.
+- [x] **An address is confirmed before anything but a confirmation is sent to it.**
       Registration accepts any address today, and mail to addresses nobody owns is what a
       provider suspends a sender for. `users.email_verified_at`; a link with a single-use token
       (its SHA-256 stored, as a refresh token's is; a day to live) is sent on registration and
-      can be asked for again from `/profile`. An unconfirmed account works as before — the
+      can be asked for again from `/profile`. Earlier links remain valid until expiry or
+      until any link confirms the address. An unconfirmed account works as before — the
       demo logins at `example.com`, which can receive nothing, stay unconfirmed for good and
-      are never written to. An erased account (phase 12) is never written to either.
-- [ ] **What is emailed.** The notices that matter while the person is away, as a copy of the
+      are never written to. The worker locks the account while checking eligibility and
+      recording the start of a delivery. Provider calls run outside database transactions.
+- [x] **What is emailed.** The notices that matter while the person is away, as a copy of the
       row `notify` writes, never instead of it: a stay requested, confirmed or cancelled, a
       refund sent or failed, a payout sent or failed, a host fee, a dispute, a free night on a
-      waitlist. A review, a message — not by default (below). Each email is the notice's own
+      waitlist. Reviews stay in the notification feed. Each email is the notice's own
       wording from `@repo/contracts` with a link to the page the bell links to, text and HTML
-      from one template, English like the interface. The person can switch the copies off per
-      group on `/profile`; the account mails of phase 14 cannot be switched off.
-- [ ] **A message in a thread is emailed only if it stays unread.** A message per email would
-      flood a lively thread, so a delayed job (a few minutes) checks the message's unread state
-      and sends one email for everything still unread in that thread.
-- [ ] **What happens to a message comes back.** The provider's webhook (`POST /webhooks/mail`,
+      from one template, English like the interface. Diagnostic errors for stuck refunds
+      and payouts stay in the admin dashboard. All four groups start disabled for both
+      existing and new accounts. The person can enable or disable each group on `/profile`.
+      Account mail such as address confirmation is independent of these settings.
+- [x] **A message in a thread is emailed only if it stays unread.** A message per email would
+      flood a lively thread, so the first ready unread message's job sends a digest. Under
+      the conversation lock, the worker reads the latest incoming message and unread count,
+      freezes the digest and coalesces the unsent jobs it covers. An email reply preserves
+      newer unread messages and cannot advance the read marker past older unread messages
+      omitted from the preview. A closed thread's digest has no reply address.
+- [x] **What happens to a message comes back.** The provider's webhook (`POST /webhooks/mail`,
       raw body, signature checked, written to an inbox table before it is acted on — the Stripe
-      webhook's pattern) records a hard bounce or a complaint: the address is marked
-      undeliverable (`users.email_undeliverable_at`) and nothing but an account mail is sent to
-      it again until the person confirms it anew.
-- [ ] **Received: a reply to a message email lands in the thread.** The message email's
-      `Reply-To` is an address on the receiving subdomain that names the thread and the
-      recipient with a signed token (`reply+<token>@…`); the provider's `email.received`
-      webhook hands over the id, the body is fetched through its API, the quoted history and
-      the signature are cut off, and what is left is posted to the thread as that person —
-      through `ConversationService`, so a closed thread (phase 12) or a blocked account refuses
-      it like any other message. The token, not the `From` header, decides who wrote it: a
-      `From` is trivially forged. A reply that cannot be placed is dropped with a log line.
-- [ ] **A human inbox on the domain**, `support@staydesk.dev`, is not built: it is the
+      webhook's pattern) records a hard bounce, a complaint or a suppression. An inbox sweep
+      claims and retries pending events independently of provider redelivery. It sets aside
+      permanent provider refusals and caps processing retries. A suppressed
+      address is marked undeliverable (`users.email_undeliverable_at`). Support resolves the
+      provider suppression before the person can request a fresh link and confirm it anew.
+      Only a confirmation backed by a fresh provider check can supersede earlier suppression
+      events.
+- [x] **Received: a reply to a message email lands in the thread.** The message email's
+      `Reply-To` carries a token (`reply+<token>@…`) bound to the recipient and thread.
+      StayDesk stores its hash and accepts replies received by Resend within seven days.
+      The webhook inbox records only the hash for reply routing. The worker checks
+      expiry against the event time and checks revocation when posting the message.
+      Blocking, suppression and reconfirmation revoke issued tokens. The provider's
+      `email.received` webhook hands over the id. The worker fetches the body and headers
+      through the API, drops automatic responses and strips quoted history and signatures.
+      It posts the reply as that person through `ConversationService`, which refuses
+      replies to closed threads and messages from blocked accounts. The token authenticates
+      the author because the sender header is forgeable. Replies that cannot be placed are
+      logged and dropped.
+- [x] **A human inbox on the domain**, `support@staydesk.dev`, is not built: it is the
       provider's (or the DNS host's) forwarding to a personal mailbox, configured and written
       down in the README, no code.
-- [ ] **The test suites never reach the provider.** The API's e2e specs run against a fake
+- [x] **The test suites never reach the provider.** The API's e2e specs run against a fake
       `MailGateway` that keeps what was sent; the hermetic browser stack gets a Mailpit of its
       own in `booking-e2e`, and a scenario reads the confirmation link from Mailpit's API —
       registration, the link, the confirmed badge. The real-Stripe and live targets (11.3,
@@ -1391,10 +1420,7 @@ Out of scope: marketing mail and newsletters (and with them `List-Unsubscribe` o
 the large mailbox providers require of bulk senders, not of transactional mail), attachments,
 and a template builder — the templates are code.
 
-To settle at the start of the phase, and write down here with the date: the provider's free
-tier as it then stands, sending and receiving both; whether the DNS of `staydesk.dev` is where
-the MX of the receiving subdomain can be written; Railway's SMTP policy for the plan the API
-runs on.
+Checked on 2026-11-22: Resend's [free transactional quota](https://resend.com/docs/knowledge-base/account-quotas-and-limits) is 100 per UTC day and 3,000 per month, shared by sent and received emails. Vercel DNS serves the zone and supports the receiving subdomain's MX. The linked Railway workspace uses Hobby, where [outbound SMTP is disabled](https://docs.railway.com/networking/outbound-networking). The Resend adapter, webhook and Mailpit path are implemented. Resend verified sending and receiving on `mail.staydesk.dev` in Ireland. The Railway API has its mail variables configured, and Resend shows all four [mail webhook subscriptions](../README.md#transactional-email) enabled. The production endpoint will accept these events once phase 13 is deployed. ImprovMX Free forwards the support alias. Its delivery log confirms that Gmail accepted the test message.
 
 ## Phase 14 — Changing the password, and resetting a forgotten one
 

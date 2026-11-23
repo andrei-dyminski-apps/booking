@@ -5,6 +5,11 @@
 # the app will fail to connect. Only the host side of a mapping is a variable — the port
 # inside the container is what the image listens on and is not ours to move.
 services:
+  mailpit:
+    image: axllent/mailpit:v1.34.0
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
   db:
     image: postgres:17-alpine
     restart: unless-stopped

@@ -118,6 +118,32 @@ describe("ConversationController (e2e)", () => {
     });
   });
 
+  it("refuses to open or continue a thread with a blocked guest's stale session", async () => {
+    const started = await start(guest, "Original message");
+    const otherListing = await otherOwner
+      .post("/listings")
+      .send(listingInput)
+      .expect(201);
+    const { id: guestId } = await guest
+      .get("/auth/me")
+      .expect(200)
+      .then(({ body }) => body as { id: string });
+    await admin.patch(`/users/${guestId}`).send({ blocked: true }).expect(200);
+
+    for (const id of [listingId, (otherListing.body as { id: string }).id]) {
+      const response = await guest
+        .post("/conversations")
+        .send({ listingId: id, body: "Message after block" })
+        .expect(401);
+      expect(response.body).toMatchObject({ code: "SESSION_NOT_FOUND" });
+    }
+
+    expect(await threads(owner)).toMatchObject([
+      { id: started.id, lastMessage: { body: "Original message" } },
+    ]);
+    expect(await threads(otherOwner)).toHaveLength(0);
+  });
+
   it("names both people of a thread and gives neither the other's address", async () => {
     const started = await start(guest);
     const names = {

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import {
   Card,
   CardContent,
@@ -8,12 +9,13 @@ import {
 import { DELETED_USER_NAME } from "@repo/contracts";
 import { ReviewSummary } from "#entities/review";
 import { LogoutButton } from "#features/logout";
-import { requireUser } from "#shared/api";
+import { mailApi, requireUser } from "#shared/api";
 import { ROUTES } from "#shared/config";
 import { formatDate, readerTimeZone } from "#shared/lib";
 import { ButtonLink } from "#shared/ui";
 import { readReviewSummaryOf } from "../api/read-review-summary-of";
 import { DeleteAccountDialog } from "./delete-account-dialog";
+import { EmailSettings } from "./email-settings";
 
 export const ProfilePage = async () => {
   const user = await requireUser(ROUTES.profile);
@@ -65,6 +67,9 @@ export const ProfilePage = async () => {
           </ButtonLink>
         )}
 
+        <Suspense fallback={null}>
+          <ProfileEmailSettings />
+        </Suspense>
         <LogoutButton />
 
         {/* At the end, under everything that can be undone. What it erases and what it
@@ -93,3 +98,20 @@ export const ProfilePage = async () => {
     </Card>
   );
 };
+
+async function ProfileEmailSettings() {
+  const settings = await mailApi.settings().catch(() => null);
+  if (settings) return <EmailSettings settings={settings} />;
+
+  return (
+    <section
+      aria-labelledby="email-heading"
+      className="grid gap-3 border-t pt-5"
+    >
+      <h2 id="email-heading" className="font-medium">
+        Email notifications
+      </h2>
+      <p className="text-sm">Email settings are temporarily unavailable.</p>
+    </section>
+  );
+}

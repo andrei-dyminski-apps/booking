@@ -20,6 +20,7 @@ import {
   violatedConstraint,
 } from "../prisma/prisma.errors";
 import { PrismaService } from "../prisma/prisma.service";
+import { recordConfirmation } from "../mail/infrastructure/mail-outbox.repository";
 import type { UserCursor } from "./user-cursor";
 
 /**
@@ -96,7 +97,11 @@ export class UserRepository {
     passwordHash: string;
   }): Promise<User> {
     try {
-      return toUser(await this.prismaService.user.create({ data: input }));
+      return await this.prismaService.$transaction(async (tx) => {
+        const user = await tx.user.create({ data: input });
+        await recordConfirmation(tx, user.id);
+        return toUser(user);
+      });
     } catch (error) {
       // The unique index decides, not a preceding SELECT: two simultaneous registrations
       // of the same address would both pass such a check.
@@ -280,6 +285,10 @@ export class UserRepository {
 
       if (change.blocked) {
         await tx.refreshToken.deleteMany({ where: { userId: id } });
+        await tx.mailReplyToken.updateMany({
+          where: { userId: id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
       }
 
       return toManagedUser(row);

@@ -626,6 +626,12 @@ All settings live in a single `.env` in the repository root — there are no per
 | `API_PORT`                      | Nest port (`apps/api`)                                                       | `3001`                                                  |
 | `API_HOST`                      | the interface Nest listens on                                                | `0.0.0.0`                                               |
 | `API_ORIGIN`                    | API address the Next.js server forwards to (server-side only)                | required, no fallback                                   |
+| `MAIL_SMTP_URL`                 | Local Mailpit SMTP URL. Unset on Railway.                                    | `smtp://localhost:1025`                                 |
+| `MAIL_FROM`                     | Sender address on the domain verified by Resend                              | `staydesk@mail.staydesk.dev`                            |
+| `MAIL_REPLY_DOMAIN`             | Domain configured to receive thread replies                                  | `mail.staydesk.dev`                                     |
+| `MAIL_SNAPSHOT_SECRET`           | Stable secret that encrypts pending delivery requests                        | `JWT_REFRESH_SECRET`                                    |
+| `RESEND_API_KEY`                | Resend API key with send, inbound read and suppression read access           | production secret                                       |
+| `RESEND_WEBHOOK_SECRET`         | Signing secret for the mail webhook endpoint                                 | production secret                                       |
 | `WEB_ORIGIN`                    | origin(s) for CORS in Nest, several — comma-separated                        | `http://localhost:3000`                                 |
 | `SITE_ORIGIN`                   | the frontend's public address: canonical links, `og:url`, JSON-LD            | `VERCEL_PROJECT_PRODUCTION_URL`, else `localhost`       |
 | `POSTGRES_USER`                 | user inside the Postgres container                                           | `booking`                                               |
@@ -769,6 +775,22 @@ pnpm add -w <pkg>                     # repository-wide tooling
 ```
 
 Internal packages are wired in as `"@repo/ui": "workspace:*"`.
+
+## Transactional email
+
+Open Mailpit at `http://localhost:8025` after starting Compose. A registered address receives a one-day confirmation link. Requesting a second link keeps the first valid until it expires. Confirming any valid link consumes all outstanding links for that account. Demo addresses at example.com stay unconfirmed. Booking, payment, waitlist and unread conversation emails are off by default. Each group can be enabled in the profile.
+
+The production sending and receiving domain is `mail.staydesk.dev`, verified in Resend (Ireland). To recreate its setup, copy the region-specific SPF, DKIM, return-path MX and receiving MX records shown by Resend into the Vercel DNS zone. Start DMARC at `_dmarc.mail.staydesk.dev` with `v=DMARC1; p=none` and check verification in Resend. Register the API's `/webhooks/mail` for `email.bounced`, `email.complained`, `email.suppressed` and `email.received`. Set the mail variables above on the API and use the public site as its `WEB_ORIGIN`. Email links use `SITE_ORIGIN` when valid, then the first valid `WEB_ORIGIN`. The Resend adapter requires one of these origins at startup.
+
+When delivery is paused, support checks the reason in Resend. Once the underlying issue is resolved and the mailbox owner requests delivery again, support removes the address from Resend's suppression list. The user can then request a new confirmation from their profile. StayDesk resumes transactional copies after the user follows the new link.
+
+Pending email requests are encrypted in Postgres. A retry after an uncertain provider response uses the original payload and idempotency key for up to 24 hours from the first recorded send attempt. Set a dedicated `MAIL_SNAPSHOT_SECRET` before enabling mail to keep pending requests readable across JWT secret rotations. The worker sets aside unreadable payloads, expired retry windows and deliveries that exhaust their send attempts, retaining the stored request and failure reason in Postgres. A Resend quota refusal holds the task until the daily or monthly UTC reset. A request rate refusal uses Resend's retry delay. Ready confirmations take priority over notification copies and digests. A digest whose previous sends were all refused is rebuilt after the reset, with a fresh reply address if the conversation is still unread.
+
+The mail worker sets aside permanent provider failures such as a rejected API key. Other processing failures have a budget of 24 across queue jobs, with at most six send attempts. The webhook inbox also sets aside permanent provider failures and stops after 24 processing attempts. Inspect `failed_at` and `last_error` in `mail_outbox` or `mail_events` when the logs report a set-aside ID. Emails about stuck payouts and refunds link to the admin dashboard for diagnostic details.
+
+Conversation digests accept email replies for seven days. Blocking an account, pausing its email delivery or reconfirming its address revokes existing reply addresses. Automatic responses are ignored.
+
+[ImprovMX Free](https://improvmx.com/pricing/) forwards `support@staydesk.dev` to the owner's mailbox. The Vercel DNS zone publishes `mx1.improvmx.com` (priority 10) and `mx2.improvmx.com` (priority 20) at the apex, with SPF `v=spf1 include:spf.improvmx.com ~all`. Manage the destination and check delivery logs in ImprovMX.
 
 ## Deployment
 

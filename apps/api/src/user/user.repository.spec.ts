@@ -43,7 +43,14 @@ describe("UserRepository", () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         UserRepository,
-        { provide: PrismaService, useValue: { user: { create } } },
+        {
+          provide: PrismaService,
+          useValue: {
+            $transaction: (
+              write: (tx: { user: { create: jest.Mock } }) => unknown,
+            ) => write({ user: { create } }),
+          },
+        },
       ],
     }).compile();
 

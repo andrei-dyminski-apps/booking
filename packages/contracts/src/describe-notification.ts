@@ -1,0 +1,335 @@
+import { Canceller, StayParty } from "./booking.js";
+import { HOST_CANCELLATIONS_WINDOW_DAYS } from "./host-fee.js";
+import { NotificationType, type NotificationContent } from "./notification.js";
+import { ReviewKind } from "./review.js";
+import type { Cents, Currency } from "./money.js";
+import { parseISO } from "date-fns";
+import { tz } from "@date-fns/tz";
+
+export const notificationRoutes = {
+  bookings: "/bookings",
+  payouts: "/dashboard/payouts",
+  adminPayments: "/admin/payments",
+  booking: (id: string) => "/bookings/" + encodeURIComponent(id),
+  listing: (id: string) => "/listings/" + encodeURIComponent(id),
+  adminUser: (id: string) => "/admin/users/" + encodeURIComponent(id),
+  guestReviews: (id: string) =>
+    "/guests/" + encodeURIComponent(id) + "/reviews",
+} as const;
+function setAsideHref(list: string, filter: Record<string, string>) {
+  return (
+    notificationRoutes.adminPayments +
+    "?" +
+    new URLSearchParams({
+      ...(list === "events" ? {} : { list }),
+      ...filter,
+    }).toString()
+  );
+}
+const dates = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+  timeZone: "UTC",
+});
+function formatDay(day: string) {
+  return dates.format(parseISO(day, { in: tz("UTC") }));
+}
+function formatMoney(amount: Cents, currency: Currency) {
+  const formatter = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency,
+  });
+  return formatter.format(
+    amount / 10 ** (formatter.resolvedOptions().maximumFractionDigits ?? 2),
+  );
+}
+function countOf(count: number, noun: string) {
+  return String(count) + " " + noun + (count === 1 ? "" : "s");
+}
+/** A notification as a person reads it: what happened, the detail, and where to look. */
+export type NotificationText = {
+  title: string;
+  detail: string;
+  href: string;
+};
+
+/** Shared wording and deep links for the bell, the feed, live toasts and email. */
+export function describeNotification(
+  notification: NotificationContent,
+): NotificationText {
+  switch (notification.type) {
+    case NotificationType.BOOKING_REQUESTED: {
+      const { data } = notification;
+
+      return {
+        title: "New booking request",
+        detail: `${data.listingTitle} · ${stayDates(data)}`,
+        href: listingStays(data.listingId),
+      };
+    }
+    case NotificationType.BOOKING_CANCELLED: {
+      const { data } = notification;
+      const asGuest = data.recipient === StayParty.GUEST;
+
+      return {
+        title: cancelledTitle(asGuest, data.cancelledBy),
+        detail: [
+          data.listingTitle,
+          stayDates(data),
+          ...(data.refundCents === null
+            ? []
+            : [cancellationRefund(data.refundCents, data.currency, asGuest)]),
+          ...(data.reason === null ? [] : [`“${data.reason}”`]),
+        ].join(" · "),
+        // The guest to the stay's own page, as a confirmation does: the line above is cut to
+        // one row, and the page is where who cancelled and why are said in full.
+        href: asGuest
+          ? notificationRoutes.booking(data.bookingId)
+          : listingStays(data.listingId),
+      };
+    }
+    case NotificationType.BOOKING_EXPIRED: {
+      const { data } = notification;
+      const asGuest = data.recipient === StayParty.GUEST;
+
+      return {
+        title: asGuest
+          ? "Your booking request lapsed"
+          : "A booking request lapsed",
+        detail: `${data.listingTitle} · ${stayDates(data)}`,
+        href: asGuest
+          ? notificationRoutes.bookings
+          : listingStays(data.listingId),
+      };
+    }
+    case NotificationType.BOOKING_CONFIRMED: {
+      const { data } = notification;
+      const asGuest = data.recipient === StayParty.GUEST;
+
+      return {
+        title: asGuest ? "Your stay is confirmed" : "A stay was paid for",
+        detail: `${data.listingTitle} · ${stayDates(data)}`,
+        href: asGuest
+          ? notificationRoutes.booking(data.bookingId)
+          : listingStays(data.listingId),
+      };
+    }
+    case NotificationType.STAY_ENDED_EARLY: {
+      const { data } = notification;
+      const asGuest = data.recipient === StayParty.GUEST;
+
+      return {
+        title: endedEarlyTitle(asGuest, data.endedBy),
+        detail: [
+          data.listingTitle,
+          `now ${stayDates({ from: data.from, to: data.checkOut })}`,
+          ...(data.refundCents === null
+            ? []
+            : [cancellationRefund(data.refundCents, data.currency, asGuest)]),
+        ].join(" · "),
+        href: asGuest
+          ? notificationRoutes.booking(data.bookingId)
+          : listingStays(data.listingId),
+      };
+    }
+    case NotificationType.PAYMENT_REFUNDED: {
+      const { data } = notification;
+
+      return {
+        title: "Your payment was refunded",
+        detail: `${formatMoney(data.amountCents, data.currency)} · ${data.listingTitle}`,
+        href: notificationRoutes.booking(data.bookingId),
+      };
+    }
+    case NotificationType.PAYMENT_DISPUTED: {
+      const { data } = notification;
+
+      return {
+        title: "A payment was disputed",
+        detail: `${data.listingTitle} · ${stayDates(data)} · the payout waits for the outcome`,
+        href: notificationRoutes.booking(data.bookingId),
+      };
+    }
+    case NotificationType.PAYOUT_SENT: {
+      const { data } = notification;
+
+      return {
+        title: "You were paid for a stay",
+        detail: [
+          formatMoney(data.amountCents, data.currency),
+          ...(data.withheldCents > 0
+            ? [
+                `${formatMoney(data.withheldCents, data.currency)} kept back for cancellation fees`,
+              ]
+            : []),
+          data.listingTitle,
+          stayDates(data),
+        ].join(" · "),
+        href: notificationRoutes.payouts,
+      };
+    }
+    case NotificationType.HOST_CANCELLATION_FEE: {
+      const { data } = notification;
+
+      return {
+        title: "Your cancellation costs a fee",
+        detail: `${formatMoney(data.amountCents, data.currency)} · kept back from your next payouts · ${data.listingTitle} · ${stayDates(data)}`,
+        href: notificationRoutes.payouts,
+      };
+    }
+    // The four below are told to every admin: money that waits for a person. Each leads to
+    // the tab of the admin's payments screen that lists it, filtered down to the row it is
+    // about, where it is acted on — the stay is one link further, from the row.
+    case NotificationType.REFUND_FAILED: {
+      const { data } = notification;
+
+      return {
+        title: "A refund did not reach the guest",
+        detail: `${formatMoney(data.amountCents, data.currency)} · ${data.reason ?? "no reason given"} · ${data.refundId}`,
+        href: setAsideHref("bounced", { refundId: data.refundId }),
+      };
+    }
+    case NotificationType.PAYMENT_EVENT_FAILED: {
+      const { data } = notification;
+
+      return {
+        title: "A payment event was set aside",
+        detail: `${data.eventType} · ${data.eventId} · ${data.error}`,
+        href: setAsideHref("events", { eventId: data.eventId }),
+      };
+    }
+    case NotificationType.CANCELLATION_REFUND_FAILED: {
+      const { data } = notification;
+
+      return {
+        title: "A refund owed to a guest is stuck",
+        detail: data.error,
+        href: setAsideHref("stuck-refunds", { bookingId: data.bookingId }),
+      };
+    }
+    case NotificationType.PAYOUT_FAILED: {
+      const { data } = notification;
+
+      return {
+        title: "A host's payout is stuck",
+        detail: data.error,
+        href: setAsideHref("stuck-payouts", { bookingId: data.bookingId }),
+      };
+    }
+    case NotificationType.PAYOUT_SHORTFALL: {
+      const { data } = notification;
+
+      return {
+        title: "A host was paid less than their payout reserved",
+        detail: `${formatMoney(data.sentCents, data.currency)} sent of ${formatMoney(data.reservedCents, data.currency)} · the rest has to be sent outside the payout`,
+        href: notificationRoutes.booking(data.bookingId),
+      };
+    }
+    case NotificationType.HOST_CANCELLATIONS_THRESHOLD: {
+      const { data } = notification;
+
+      return {
+        title: "A host keeps cancelling stays",
+        detail: `${data.hostName} · ${countOf(data.cancellations, "paid stay")} cancelled in the last ${countOf(HOST_CANCELLATIONS_WINDOW_DAYS, "day")}`,
+        href: notificationRoutes.adminUser(data.hostId),
+      };
+    }
+    case NotificationType.REVIEW_RECEIVED: {
+      const { data } = notification;
+      const ofListing = data.kind === ReviewKind.LISTING;
+
+      return {
+        title: ofListing
+          ? "A guest reviewed your listing"
+          : "A host reviewed you",
+        detail: `${String(data.rating)} of 5 stars · ${data.listingTitle}`,
+        href: ofListing
+          ? notificationRoutes.listing(data.listingId)
+          : notificationRoutes.guestReviews(data.guestId),
+      };
+    }
+    case NotificationType.WAITLIST_AVAILABLE: {
+      const { data } = notification;
+
+      return {
+        title: "Nights you waited for are free",
+        detail: `${data.listingTitle} · ${stayDates(data)} · first to book takes them`,
+        href: notificationRoutes.listing(data.listingId),
+      };
+    }
+    default: {
+      const unknown: never = notification;
+
+      throw new Error(`Unknown notification ${JSON.stringify(unknown)}`);
+    }
+  }
+}
+
+function stayDates({ from, to }: { from: string; to: string }): string {
+  return `${formatDay(from)} – ${formatDay(to)}`;
+}
+
+/**
+ * The host's side of the stays screen narrowed to one listing — the link a host's card
+ * offers there too. The side has to be named: the guest's is the default, and a host's
+ * own listing names nothing among their trips.
+ */
+function listingStays(listingId: string): string {
+  return (
+    notificationRoutes.bookings +
+    "?" +
+    new URLSearchParams({ side: StayParty.HOST, listingId }).toString()
+  );
+}
+
+/**
+ * What a cancellation gives back, from the side of whoever reads it. Owed rather than sent:
+ * a job sends it after the notice is written, so neither side is told it has gone back.
+ */
+function cancellationRefund(
+  refundCents: Cents,
+  currency: Currency,
+  asGuest: boolean,
+): string {
+  if (refundCents === 0) return "no refund";
+
+  const amount = formatMoney(refundCents, currency);
+
+  return asGuest
+    ? `${amount} coming back to you`
+    : `${amount} going back to the guest`;
+}
+
+/** Who ended the stay early, as the side told about it reads it — the guest or an admin. */
+function endedEarlyTitle(asGuest: boolean, endedBy: Canceller): string {
+  if (endedBy === Canceller.ADMIN) {
+    return asGuest
+      ? "Your stay was ended early by the site"
+      : "A stay was ended early by the site";
+  }
+
+  return asGuest ? "Your stay was ended early" : "Your guest is leaving early";
+}
+
+/** Who took the stay away, as the side told about it reads it. */
+function cancelledTitle(
+  asGuest: boolean,
+  cancelledBy: Canceller | null,
+): string {
+  if (cancelledBy === Canceller.HOST && asGuest) {
+    return "Your host cancelled your stay";
+  }
+
+  if (cancelledBy === Canceller.GUEST && !asGuest) {
+    return "Your guest cancelled their stay";
+  }
+
+  if (cancelledBy === Canceller.ADMIN) {
+    return asGuest
+      ? "Your stay was cancelled by the site"
+      : "A stay was cancelled by the site";
+  }
+
+  return asGuest ? "Your stay was cancelled" : "A stay was cancelled";
+}

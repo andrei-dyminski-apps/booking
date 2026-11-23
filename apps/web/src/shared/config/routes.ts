@@ -1,5 +1,6 @@
 import {
   RefundFailureStatus,
+  notificationRoutes,
   Role,
   type FailedPaymentEventQuery,
   type RefundFailureQuery,
@@ -30,28 +31,22 @@ export const ACCOUNT_DELETED_PARAM = {
  * the id is encoded here, once, instead of at every link that carries one.
  */
 export const ROUTES = {
+  ...notificationRoutes,
   home: "/",
   accountDeleted: `/?${ACCOUNT_DELETED_PARAM.key}=${ACCOUNT_DELETED_PARAM.value}`,
   login: "/login",
   register: "/register",
   profile: "/profile",
   catalogue: "/listings",
-  listing: (id: string) => `/listings/${encodeURIComponent(id)}`,
-  bookings: "/bookings",
-  booking: (id: string) => `/bookings/${encodeURIComponent(id)}`,
   waitlist: "/waitlist",
   messages: "/messages",
   conversation: (id: string) => `/messages/${encodeURIComponent(id)}`,
   dashboard: "/dashboard",
   newListing: "/dashboard/listings/new",
   editListing: (id: string) => `/dashboard/listings/${encodeURIComponent(id)}`,
-  payouts: "/dashboard/payouts",
   admin: "/admin",
   adminListing: (id: string) => `/admin/listings/${encodeURIComponent(id)}`,
   adminUsers: "/admin/users",
-  adminUser: (id: string) => `/admin/users/${encodeURIComponent(id)}`,
-  adminPayments: "/admin/payments",
-  guestReviews: (id: string) => `/guests/${encodeURIComponent(id)}/reviews`,
   notifications: "/notifications",
 } as const;
 
