@@ -5,6 +5,7 @@ import { toIsoDate } from "../../common/iso-date";
 import {
   cancellationsWindowStart,
   countedCancellationsWhere,
+  lockHostFees,
   owedFeesWhere,
 } from "../../booking/infrastructure/booking-where";
 import { cents, currencySchema } from "../../payment/domain/money";
@@ -14,7 +15,6 @@ import {
   WaivingAccountNotAdminError,
 } from "../domain/payout.errors";
 import type { HostFeeReader } from "../domain/payout.types";
-import { lockHostFees } from "./payout.repository";
 
 const HOST_FEE_INCLUDE = {
   booking: {
@@ -33,7 +33,11 @@ const WAIVED_BY = {
 } satisfies Prisma.UserDefaultArgs;
 
 /** The admin's row in `waive`, raw SQL, so the columns keep their stored names. */
-type LockedAdmin = { role: Role; blocked_at: Date | null };
+type LockedAdmin = {
+  role: Role;
+  blocked_at: Date | null;
+  deleted_at: Date | null;
+};
 
 /**
  * The ledger of what hosts owe for their cancellations, as the screens read it and an admin
@@ -89,18 +93,22 @@ export class HostFeeRepository {
    * its account nothing. The role in the token is not trusted here: the API changes no
    * role and blocks no admin, but a write to `users` outside it does both, and the token
    * keeps its claim until the next refresh. So the row has to be an active admin's as well.
+   * An account its owner erased since is gone, as a missing row is: its access token
+   * outlives the erasure by up to `JWT_ACCESS_TTL`, and nobody stands behind it any more.
    * The lock keeps the row from being deleted before the waiver names it, and leaves the
    * account's other writes alone — a payout account's update takes no key lock.
    */
   async waive(id: string, reason: string, adminId: string): Promise<boolean> {
     return this.prismaService.$transaction(async (tx) => {
       const [admin] = await tx.$queryRaw<LockedAdmin[]>`
-        SELECT role, blocked_at FROM users
+        SELECT role, blocked_at, deleted_at FROM users
         WHERE id = ${adminId}::uuid
         FOR KEY SHARE
       `;
 
-      if (admin === undefined) throw new WaivingAccountGoneError(adminId);
+      if (admin === undefined || admin.deleted_at !== null) {
+        throw new WaivingAccountGoneError(adminId);
+      }
 
       if (admin.role !== Role.ADMIN || admin.blocked_at !== null) {
         throw new WaivingAccountNotAdminError(adminId);

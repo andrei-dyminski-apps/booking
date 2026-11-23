@@ -30,29 +30,49 @@ import type { NotificationCursor } from "./notification-cursor";
 export class NotificationRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
+  /**
+   * `null` when there is nobody to tell: the recipient's account is gone, or its owner
+   * erased it. Erasing an account deletes its notices, and a notice is a copy of what was
+   * true — a review's text, a listing's title — so writing new ones to it afterwards would go
+   * on keeping what the erasure removed, on a row nobody will ever read.
+   *
+   * The recipient's row is read `FOR KEY SHARE` first, the lock the insert's foreign key
+   * takes anyway, taken before the check rather than left to the insert: the erasure locks
+   * the row `FOR UPDATE`, so a notice written alongside it either commits first and is
+   * deleted with the rest, or waits and finds the account erased. A check inside the insert
+   * itself would read the snapshot from before the erasure committed, and slip past it.
+   */
   async create(
     userId: string,
     content: NotificationContent,
-  ): Promise<{ notification: Notification; count: UnreadCounts }> {
-    const { result, count } = await this.counted(userId, async (tx) =>
-      toNotification(
+  ): Promise<{ notification: Notification; count: UnreadCounts } | null> {
+    return this.prismaService.$transaction(async (tx) => {
+      const recipient = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM users
+        WHERE id = ${userId}::uuid AND deleted_at IS NULL
+        FOR KEY SHARE
+      `;
+
+      if (recipient.length === 0) return null;
+
+      const notification = toNotification(
         await tx.notification.create({
           data: { userId, type: content.type, data: content.data },
         }),
-      ),
-    );
+      );
 
-    return { notification: result, count };
+      return { notification, count: await countUnreadOfOne(tx, userId) };
+    });
   }
 
   /**
-   * Who hears what only a person can put right — the admins whose accounts are not
-   * blocked. A read of `users` rather than of this table, the one query here that is not
+   * Who hears what only a person can put right — the admins whose accounts are neither
+   * blocked nor erased. A read of `users` rather than of this table, the one query here that is not
    * scoped to a recipient: it is what picks the recipients.
    */
   async findAdminIds(): Promise<string[]> {
     const rows = await this.prismaService.user.findMany({
-      where: { role: Role.ADMIN, blockedAt: null },
+      where: { role: Role.ADMIN, blockedAt: null, deletedAt: null },
       select: { id: true },
       orderBy: { id: "asc" },
     });

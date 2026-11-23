@@ -69,6 +69,12 @@ export const conversationSchema = z.object({
   }),
   /** Whether the other side wrote something after the caller last opened the thread. */
   unread: z.boolean(),
+  /**
+   * Whether one of the two people deleted their account (`DELETE /users/me`). The thread
+   * stays readable — it is the other side's history too — and takes no new message: a
+   * `POST` to it is a `409` `CONVERSATION_CLOSED`.
+   */
+  closed: z.boolean(),
   createdAt: z.iso.datetime(),
 });
 

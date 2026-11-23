@@ -55,8 +55,8 @@ export class WaitlistOwnListingError extends Error {
 }
 
 /**
- * The account behind the token is gone — read under the same lock the cap is counted
- * under, so it costs no query of its own. See `GuestNotFoundError` for why that is a `401`.
+ * The account behind the token is gone or erased — read under the same lock the cap is
+ * counted under, so it costs no query of its own. See `GuestNotFoundError` for why that is a `401`.
  */
 export class WaiterNotFoundError extends Error {
   constructor(userId: string) {
@@ -179,7 +179,9 @@ export class WaitlistRepository {
       }
 
       const [user] = await tx.$queryRaw<LockedUser[]>`
-        SELECT id FROM users WHERE id = ${userId}::uuid FOR UPDATE
+        SELECT id FROM users
+        WHERE id = ${userId}::uuid AND deleted_at IS NULL
+        FOR UPDATE
       `;
 
       if (user === undefined) {

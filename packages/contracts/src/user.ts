@@ -14,6 +14,12 @@ import { blank, PAGING } from "./query.js";
  */
 export const managedUserSchema = userSchema.extend({
   blockedAt: z.iso.datetime().nullable(),
+  /**
+   * When the person erased their own account (`DELETE /users/me`). The row stays — the
+   * stays, the money and the other party's history point at it — under a placeholder name
+   * and an address nobody receives mail at, so this is what tells an admin why.
+   */
+  deletedAt: z.iso.datetime().nullable(),
 });
 
 export const managedUserListSchema = z.array(managedUserSchema);
@@ -33,11 +39,12 @@ export const managedUserDetailSchema = managedUserSchema.extend({
 });
 
 /**
- * Whether an account may sign in, as a filter. It is derived from `blockedAt` rather than
- * stored beside it, so the two cannot disagree; the names are the filter's own because "a
- * user whose `blockedAt` is not null" is not something anybody types into a box.
+ * Whether an account may sign in, as a filter. It is derived from `blockedAt` and
+ * `deletedAt` rather than stored beside them, so they cannot disagree; the names are the
+ * filter's own because "a user whose `blockedAt` is not null" is not something anybody
+ * types into a box. An erased account is neither active nor blocked: nobody can reopen it.
  */
-export const userStatusSchema = z.enum(["ACTIVE", "BLOCKED"]);
+export const userStatusSchema = z.enum(["ACTIVE", "BLOCKED", "DELETED"]);
 
 export const UserStatus = userStatusSchema.enum;
 

@@ -1220,6 +1220,102 @@ What was read and measured when the step was written (2026-11-20):
   late enough on the deployment for the accessibility check to read the page without one:
   the check now waits for the title, up to five seconds.
 
+## Phase 12 — Deleting an account
+
+Today an account can only be blocked, by an admin (phase 3): the row stays, and so does
+everything that points at it. That was the right answer to "an admin removes a user", and it
+leaves the other question open — a person asking for their own account to be gone. Privacy law
+expects that to be possible (the GDPR's right to erasure; the app stores have required it in
+apps since 2022), and the bookkeeping expects the opposite: payments, refunds, payouts and the
+fees withheld from them are records a marketplace has to keep. The industry's answer reconciles
+the two, and it is the one this phase follows: **deleting an account erases the person, not the
+history** — what identifies them is scrubbed, the rows the money and the other party's history
+rest on stay and point at an anonymous account.
+
+It is not a tool for the test suites. The hermetic stack and the API's e2e specs start from a
+fresh database every run, and the run against the live deployment (11.4) uses two accounts of
+its own and cleans up stays and listings, not users.
+
+- [x] **The person deletes their own account, never an admin.** `DELETE /users/me`, with the
+      password typed again: a stolen session alone must not be able to erase an account. An
+      admin still has the block for an account that has to stop; the last admin cannot delete
+      theirs.
+- [x] **Refused while something is still open**, each refusal with its code (phase 10): a stay
+      held, confirmed and not yet over, as a guest or as a host; a host fee still owed; money
+      owed to the host that no payout can reach once nobody can sign in; a refund not yet
+      settled; an open dispute.
+      The person is told what to finish first. Checked under the same locks the money paths
+      take, so a booking cannot land between the check and the erasure.
+- [x] **Anonymized in one transaction.** `users.deleted_at` is stamped; the name becomes a
+      placeholder, the address a unique one that cannot receive mail (which frees the real
+      one for a new registration), the password hash one nothing matches. Refresh tokens,
+      notifications and waitlist entries are deleted; listings are retired the way
+      `DELETE /listings/:id` retires them. Bookings, payments, refunds, host fees, payouts,
+      reviews and messages stay, and read as written by "Deleted user" — a review or a thread
+      belongs to the other party's history too; a thread with a deleted account stays to read
+      and takes no new message. Sign-in, refresh and `/auth/me` treat a deleted
+      account as one that does not exist.
+- [x] **What cannot be erased is said so.** The Stripe connected account is not closed by the
+      application (see 11.3); its id stays on the anonymized row, which is what Stripe's own
+      records are reconciled against, and a host's share still owed is paid to it after the
+      erasure. The structured logs keep request ids, not names.
+- [x] **Web:** "Delete account" at the end of `/profile`, with what will happen, the password
+      and a confirmation; a refusal names what is still open and links to it. After the
+      erasure the session is cleared and the visitor lands on the home page with a notice.
+- [x] **Specs:** e2e — every refusal; an erasure keeps the bookings, the payments and the
+      reviews, scrubs the user, frees the address and ends every session; a booking racing the
+      erasure does not survive it half-way. The browser suite: a guest with nothing open deletes
+      their account and can no longer sign in.
+
+Out of scope: exporting a person's data (the GDPR's right of access) and a grace period that
+lets a deletion be undone — both are their own change if they are ever wanted.
+
+As built: every matter still open has its code (`ACCOUNT_OPEN_MATTERS`), and a refusal answers
+with the first one open while `params.open` lists them all, so the page names everything to
+finish at once rather than one per attempt; `params.asGuest` and `params.asHost` say which side
+of the account's stays holds each, so its link opens the right tab of the stays page. A wrong password is a `403` `PASSWORD_INCORRECT`,
+not the login's `401`, which the browser would spend on a refresh. The locks are the host's
+fee lock, the account's row and its listings, in that order; a hold, a new listing and a
+waitlist entry and a new thread read the account's row under a lock of their own and refuse
+an erased one — a new thread after locking its listing and refusing one's own, so a host's
+erasure that retires it cannot slip between the read of the listing and the insert, and
+without locking the host's row, which their erasure holds while it waits for the listing —
+and a payout account is not opened for one, so an access token that outlives
+the erasure cannot open anything new. An erased admin's token still claims `ADMIN` until it
+runs out, so the routes that read the caller's row again — a fee's waiver, an admin's refund,
+a block — take an erased admin for one gone. A thread with an erased account is closed
+(`closed`, a `409` `CONVERSATION_CLOSED` for a message): nobody is left on that side to read a
+reply, and the page draws a notice where the reply box was. A notice is never written
+to an erased account afterwards — a review of a finished stay of theirs included — since it
+would keep a copy of what the erasure deleted. The admin's list shows an erased account under
+the status "Deleted", which nobody can block. A registration refuses any `.invalid` address:
+an account's id is public (the catalogue names owners), and one holding its placeholder first
+would fail the erasure on the unique key for good. A stay ended early counts as over, whatever
+its moved check-out says, its refund open until sent. A host's share still owed does not hold
+the erasure while a payout can reach it, which is what marketplaces do with money they owe
+rather than are owed — a share of a stay a guest cancelled months ahead would otherwise keep
+the account for months: the erasure keeps `payouts_enabled_at`, the sweep pays the share when
+it comes due, and Stripe's news about the account goes on switching the flag. What is refused
+is a share nothing could pay — owed while the host's payouts are off, or set aside after
+failing — since nobody can sign in to set them up any more; giving such a share up is not
+offered, because money a platform owes and cannot pay is not its to keep. A refund owed to the
+guest of a stay the account hosted holds the host back for nothing but the share it leaves:
+the refund goes back without them, and a stuck refund would otherwise keep a host waiting on
+an admin. A refund the account awaits as a guest, or one its bank sent back, does hold it, and
+the refusal says the money is on its way rather than asking for something the guest cannot do. The listings the erasure retired leave the
+frontend's cache the way a retired one does — their own reads and the catalogue — read
+before the erasure, since the API answers it with nothing.
+
+Known gap: a refund the bank sends back after the erasure (`refund.failed` arrives days after
+the refund left, and nothing open stopped the erasure meanwhile) still lands in
+`refund_failures` for an admin to resolve, but the guest it is owed to has no name or address
+left on the row. The admin goes by the stay and the payment, and the card's issuer is the
+remaining way to reach them; holding the erasure until every refund of the account is past its
+bounce window would be the fix, and is not built. The same goes for a host's share paid after
+the erasure: should the connected account stop taking transfers meanwhile, the payout run holds
+the share back and switches the flag off, nobody can finish onboarding again, and no admin is
+told — the share waits until Stripe's news switches the account back on.
+
 ## Decisions already made
 
 - **Prisma** (v7: `prisma.config.ts`, the `prisma-client` generator, the `@prisma/adapter-pg` driver adapter) — the most recognizable ORM; interactive transactions and raw migrations cover phase 4.
@@ -1252,7 +1348,7 @@ What was read and measured when the step was written (2026-11-20):
   before React has hydrated, and `refresh()` / `updateTag` are reachable only from there.
   The client path stays for what a round trip cannot express — a poll for a webhook — and
   phase 6 is what brings the first of those.
-- The order of the phases follows the dependencies: database → auth → roles → concurrency → catalogue → Stripe → cancellation policies → polish → deployment → error codes → frontend e2e. The frontend e2e suite comes last: it needs screens that have stopped changing, and it describes what a visitor sees rather than how the page is produced. The cancellation policies follow Stripe directly because they change the rules its refund machinery runs on, and they come before the error codes because they add refusals the codes would otherwise be written for twice. The catalogue comes before Stripe because the dependency runs one way only: Stripe Elements needs a booking to attach to, and a booking is created from the form on the listing page, which is the catalogue's. Nothing in the catalogue needs a payment — it is server-rendered from `searchParams`, and TanStack Query arrives with the polling of the webhook.
+- The order of the phases follows the dependencies: database → auth → roles → concurrency → catalogue → Stripe → cancellation policies → polish → deployment → error codes → frontend e2e → account deletion. The frontend e2e suite comes after the features it covers: it needs screens that have stopped changing, and it describes what a visitor sees rather than how the page is produced. Account deletion comes after it because its refusals are written in the codes of phase 10 and its erasure has to know every money path that can still be open. The cancellation policies follow Stripe directly because they change the rules its refund machinery runs on, and they come before the error codes because they add refusals the codes would otherwise be written for twice. The catalogue comes before Stripe because the dependency runs one way only: Stripe Elements needs a booking to attach to, and a booking is created from the form on the listing page, which is the catalogue's. Nothing in the catalogue needs a payment — it is server-rendered from `searchParams`, and TanStack Query arrives with the polling of the webhook.
 
 ## Decisions deliberately not taken
 

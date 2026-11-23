@@ -8,7 +8,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
-import { ROLE_LABELS, UserBlockedSince, UserJoined } from "#entities/user";
+import {
+  ROLE_LABELS,
+  UserBlockedSince,
+  UserDeletedSince,
+  UserJoined,
+} from "#entities/user";
 import { ROUTES } from "#shared/config";
 import { ButtonLink } from "#shared/ui";
 
@@ -40,12 +45,17 @@ export const UserCard = ({
           blockedAt={user.blockedAt}
           readerTimeZone={readerTimeZone}
         />
+        <UserDeletedSince
+          deletedAt={user.deletedAt}
+          readerTimeZone={readerTimeZone}
+        />
       </CardDescription>
       <CardAction className="flex items-center gap-2">
         {user.id === viewer.id && <Badge variant="secondary">You</Badge>}
         {user.blockedAt !== null && (
           <Badge variant="destructive">Blocked</Badge>
         )}
+        {user.deletedAt !== null && <Badge variant="secondary">Deleted</Badge>}
         <Badge variant="outline">{ROLE_LABELS[user.role]}</Badge>
       </CardAction>
     </CardHeader>

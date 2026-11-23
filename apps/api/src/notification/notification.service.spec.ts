@@ -50,6 +50,9 @@ class FakeNotificationRepository implements PublicOf<NotificationRepository> {
   /** The accounts `findAdminIds` answers: the admins who are not blocked. */
   admins: string[] = [];
 
+  /** The accounts whose owners erased them: a notice to one stores nothing. */
+  readonly erased = new Set<string>();
+
   findAdminIds(): Promise<string[]> {
     if (this.broken) return Promise.reject(new Error("connection refused"));
 
@@ -62,8 +65,10 @@ class FakeNotificationRepository implements PublicOf<NotificationRepository> {
   create(
     userId: string,
     content: NotificationContent,
-  ): Promise<{ notification: Notification; count: UnreadCounts }> {
+  ): Promise<{ notification: Notification; count: UnreadCounts } | null> {
     if (this.broken) return Promise.reject(new Error("connection refused"));
+
+    if (this.erased.has(userId)) return Promise.resolve(null);
 
     const notification: Notification = {
       ...content,
@@ -240,6 +245,14 @@ describe("NotificationService", () => {
     notificationRepository.broken = true;
 
     await expect(service.notify(ALICE, requested())).resolves.toBeUndefined();
+    expect(realtimeService.published).toEqual([]);
+  });
+
+  it("stores and pushes nothing for an account its owner erased", async () => {
+    notificationRepository.erased.add(ALICE);
+
+    await expect(service.notify(ALICE, requested())).resolves.toBeUndefined();
+    expect(notificationRepository.rows).toEqual([]);
     expect(realtimeService.published).toEqual([]);
   });
 

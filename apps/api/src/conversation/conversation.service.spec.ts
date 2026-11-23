@@ -20,6 +20,7 @@ import { RealtimeService } from "../realtime/realtime.service";
 import type { AccountUnread, UnreadCounts } from "../unread/unread.types";
 import {
   type AppendedMessage,
+  ConversationClosedError,
   ConversationNotFoundError,
   ConversationRepository,
   GuestNotFoundError,
@@ -91,6 +92,9 @@ class FakeConversationRepository implements PublicOf<ConversationRepository> {
 
   /** Set to have `start` fail on the guest key: the account behind the token is gone. */
   vanishingGuest = false;
+
+  /** The threads one of whose two people erased their account since. */
+  readonly closed = new Set<string>();
 
   /** Every write gets a moment of its own, so the orderings are never left to the id. */
   private clock = Date.parse("2026-08-17T12:00:00.000Z");
@@ -207,6 +211,10 @@ class FakeConversationRepository implements PublicOf<ConversationRepository> {
       return Promise.reject(new ConversationNotFoundError(conversationId));
     }
 
+    if (this.closed.has(conversationId)) {
+      return Promise.reject(new ConversationClosedError(conversationId));
+    }
+
     const message = this.write(thread, sender, body, this.tick());
 
     return Promise.resolve({ message, unread: this.unreadOf(thread) });
@@ -305,6 +313,7 @@ class FakeConversationRepository implements PublicOf<ConversationRepository> {
         createdAt: last.createdAt,
       },
       unread: readAt === null || readAt < thread.lastMessageAt,
+      closed: this.closed.has(thread.id),
       createdAt: thread.createdAt.toISOString(),
     };
   }
@@ -495,6 +504,20 @@ describe("ConversationService", () => {
   });
 
   describe("the two sides", () => {
+    it("keeps a thread readable and refuses a message once one side deleted their account", async () => {
+      const { id } = await service.start(GUEST_ID, about(LISTING_ID));
+
+      conversationRepository.closed.add(id);
+
+      await expect(service.findOne(id, owner)).resolves.toMatchObject({
+        closed: true,
+      });
+      expect(
+        await refusalOf(service.send(id, owner, { body: "Are you there?" })),
+      ).toEqual({ status: 409, code: "CONVERSATION_CLOSED" });
+      expect(realtimeService.published).toHaveLength(2);
+    });
+
     it("lets either side write, and makes it news to the other only", async () => {
       const started = await service.start(GUEST_ID, about(LISTING_ID));
       const { id } = started;

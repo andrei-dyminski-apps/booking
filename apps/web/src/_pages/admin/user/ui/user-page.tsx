@@ -14,6 +14,7 @@ import {
   anyUser,
   ROLE_LABELS,
   UserBlockedSince,
+  UserDeletedSince,
   UserJoined,
 } from "#entities/user";
 import { HostFees } from "#entities/host-fee";
@@ -56,6 +57,9 @@ export const UserPage = async ({ params }: PageProps<"/admin/users/[id]">) => {
             {user.blockedAt !== null && (
               <Badge variant="destructive">Blocked</Badge>
             )}
+            {user.deletedAt !== null && (
+              <Badge variant="secondary">Deleted</Badge>
+            )}
             <Badge variant="outline">{ROLE_LABELS[user.role]}</Badge>
           </div>
           <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
@@ -64,13 +68,19 @@ export const UserPage = async ({ params }: PageProps<"/admin/users/[id]">) => {
               blockedAt={user.blockedAt}
               readerTimeZone={zone}
             />
+            <UserDeletedSince
+              deletedAt={user.deletedAt}
+              readerTimeZone={zone}
+            />
           </p>
         </div>
       </div>
 
+      {/* An erased account has no access left to block — the API answers it 404 — and its
+          stays are still a link away from the activity. */}
       {user.role === Role.USER && (
         <>
-          <AccessCard user={user} />
+          {user.deletedAt === null && <AccessCard user={user} />}
           <ActivityCard user={user} />
         </>
       )}

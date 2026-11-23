@@ -11,61 +11,83 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
-import { ROUTES } from "#shared/config";
+import { ACCOUNT_DELETED_PARAM, ROUTES } from "#shared/config";
+import { singleParam } from "#shared/lib";
 import { ButtonLink } from "#shared/ui";
 
 /**
  * The one page with nothing to read from the API. What it explains is the rule the rest
  * of the site is built on — a booking is a hold before it is a stay — because that is the
  * thing a visitor is surprised by otherwise, fifteen minutes after they took one.
+ *
+ * It is also where an erased account lands (`ROUTES.accountDeleted`), and says so at the
+ * top: the session is gone by then, so a notice on the page is the one way left to tell
+ * the visitor it worked.
  */
-export const HomePage = () => (
-  <div className="flex flex-col gap-12">
-    <section className="flex flex-col items-start gap-6">
-      <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
-        One contract, two sides
-      </span>
+export const HomePage = async ({ searchParams }: PageProps<"/">) => {
+  const deleted =
+    singleParam((await searchParams)[ACCOUNT_DELETED_PARAM.key]) ===
+    ACCOUNT_DELETED_PARAM.value;
 
-      <div className="flex flex-col gap-3">
-        <h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
-          Rooms, dates and guests — settled by the API, not by the screen.
-        </h1>
-        <p className="max-w-2xl text-base text-muted-foreground">
-          Search the catalogue by the window you need, hold the nights while you
-          make up your mind, and see every stay you have taken in one place.
+  return (
+    <div className="flex flex-col gap-12">
+      {deleted && (
+        <p
+          role="status"
+          className="rounded-lg border bg-muted px-4 py-3 text-sm"
+        >
+          Your account has been deleted. Your past stays stay on record without
+          your name, and the email address is free to register again.
         </p>
-      </div>
+      )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <ButtonLink href={ROUTES.catalogue} size="lg">
-          Browse the stays
-        </ButtonLink>
-        <ButtonLink href={ROUTES.register} size="lg" variant="outline">
-          Create an account
-        </ButtonLink>
-      </div>
-    </section>
+      <section className="flex flex-col items-start gap-6">
+        <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
+          One contract, two sides
+        </span>
 
-    <section className="grid gap-4 sm:grid-cols-3">
-      {HIGHLIGHTS.map(({ title, description, icon: Icon }) => (
-        <Card key={title}>
-          <CardHeader>
-            <span
-              aria-hidden
-              className="mb-2 grid size-8 place-items-center rounded-lg bg-muted"
-            >
-              <Icon className="size-4" />
-            </span>
-            <CardTitle>{title}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <CardDescription>{description}</CardDescription>
-          </CardContent>
-        </Card>
-      ))}
-    </section>
-  </div>
-);
+        <div className="flex flex-col gap-3">
+          <h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
+            Rooms, dates and guests — settled by the API, not by the screen.
+          </h1>
+          <p className="max-w-2xl text-base text-muted-foreground">
+            Search the catalogue by the window you need, hold the nights while
+            you make up your mind, and see every stay you have taken in one
+            place.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <ButtonLink href={ROUTES.catalogue} size="lg">
+            Browse the stays
+          </ButtonLink>
+          <ButtonLink href={ROUTES.register} size="lg" variant="outline">
+            Create an account
+          </ButtonLink>
+        </div>
+      </section>
+
+      <section className="grid gap-4 sm:grid-cols-3">
+        {HIGHLIGHTS.map(({ title, description, icon: Icon }) => (
+          <Card key={title}>
+            <CardHeader>
+              <span
+                aria-hidden
+                className="mb-2 grid size-8 place-items-center rounded-lg bg-muted"
+              >
+                <Icon className="size-4" />
+              </span>
+              <CardTitle>{title}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CardDescription>{description}</CardDescription>
+            </CardContent>
+          </Card>
+        ))}
+      </section>
+    </div>
+  );
+};
 
 const HIGHLIGHTS: {
   title: string;

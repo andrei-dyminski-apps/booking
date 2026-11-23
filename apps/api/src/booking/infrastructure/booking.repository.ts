@@ -279,6 +279,21 @@ export class BookingRepository {
         throw new OwnListingError(input.listingId);
       }
 
+      // The guest's row, after the listing's — the order every path that locks both keeps.
+      // `FOR KEY SHARE` is the lock the insert's foreign key takes anyway, taken early so an
+      // account erased meanwhile (`AccountRepository.erase`, which locks the row `FOR
+      // UPDATE`) is read as gone rather than handed a hold: the erasure either commits first
+      // and this refuses, or waits for this hold and refuses the erasure for it.
+      const guest = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM users
+        WHERE id = ${guestId}::uuid AND deleted_at IS NULL
+        FOR KEY SHARE
+      `;
+
+      if (guest.length === 0) {
+        throw new GuestNotFoundError(guestId);
+      }
+
       // The version of the terms the guest was shown, against the row this hold is about
       // to be priced off and copy its policy from — both read under the lock a host's
       // save of the listing, prices included, has to wait for.
@@ -382,8 +397,8 @@ export class BookingRepository {
         }
 
         if (isPrismaError(error, PrismaErrorCode.ForeignKeyViolation)) {
-          // The listing key is unreachable from here — the `FOR UPDATE` read already
-          // refused a missing row. What is left is the guest, which nothing checks first.
+          // Neither key is reachable from here — the two locked reads above refused a
+          // missing listing and a missing guest. Kept for a row deleted around the API.
           switch (violatedForeignKey(error)) {
             case LISTING_FOREIGN_KEY:
               throw new ListingNotFoundError(input.listingId);

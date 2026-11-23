@@ -355,7 +355,9 @@ is the wrong shape for a list that keeps growing.
 - The error body is part of the contract too (`apiErrorSchema`): do not read
   `message`/`errors` out of an `unknown` body by hand.
   `ApiResponseError.code` (an `ErrorCode`, `UNKNOWN_ERROR` for a code this build has no word for
-  or an answer outside the contract) and each issue's `code`/`params` carry the rule that
+  or an answer outside the contract), its `params` (what the rule knew — parsed by whoever
+  reads them, as untrusted as the rest of the body: `openMattersParamsSchema` for what keeps
+  an account from being deleted) and each issue's `code`/`params` carry the rule that
   refused, for a client that words it itself; the interface still shows `message`, which is
   the English fallback. Where one status has several reasons, the code decides, not the
   status: a slice keeps its checks in `model/*-refusal.ts` as one-liners over
@@ -522,6 +524,29 @@ their refresh token, and only the browser can turn an expired session into a liv
   URL of the page it sits on — never receives it. An action would clear the cookies of a
   family nobody revoked, and a stolen token would outlive the "Sign out" by a week. So the
   logout is a browser call through the BFF, followed by `router.refresh()`.
+- **Deleting the account ends the session from a Server Action**
+  (`_pages/profile/api/delete-account-action.ts`), unlike a logout: the API needs only the
+  access token, which a page's action carries, and deletes every refresh token itself, so
+  nothing scoped to `/api/auth` has to be handed over. `authApi.deleteAccount` mirrors the
+  cleared pair into this origin's jar the way `login` mirrors an issued one. The erasure
+  retires the account's listings, so the action reads them first (`GET /listings/mine`, a
+  `USER`'s alone) and afterwards does what `deleteListingAction` does for each —
+  `updateTag(listingTag(id))` — and `revalidateTag(CATALOGUE_TAG, "max")` once: a listing's
+  read is cached with no lifetime, and nothing else would ever refresh it. An account with
+  no listing on offer revalidates nothing — neither cache holds anything of it. The action then
+  redirects to `ROUTES.accountDeleted` — the home page with `?account=deleted`, whose notice
+  is the one thing left to tell a visitor with no session (`ACCOUNT_DELETED_PARAM`; anybody
+  may type it, and all it does is repeat a sentence). The dialog sits at the end of
+  `/profile`, under a paragraph saying what is erased and what stays; it asks for the
+  password, a wrong one lands under its box (`PASSWORD_INCORRECT`, a `403` — not a `401`,
+  which the transport would spend on a refresh), and a refusal for something still open
+  lists every matter of `params.open` in the contract's words (`OPEN_MATTER_MESSAGES`) with a
+  link to where it is put right (`openMatterLinks` in `model/open-matter-links.ts`): the
+  payouts page for a host's share or fee, "Trips" for a refund owed (only ever the guest's),
+  and for a stay or a dispute the tab of the stays page the refusal says holds it
+  (`params.asGuest` → "Trips", `params.asHost` → "Hosting"), both when both do. A thread with a deleted account is drawn closed
+  (`conversation.closed`): its messages stay, and a notice takes the reply box's place — the
+  API refuses a message to it (`CONVERSATION_CLOSED`).
 - **The login form's inputs stay controlled** even though the action reads the request
   rather than the state. React resets an uncontrolled form once an action settles, which
   would wipe what the visitor typed at the moment the message explaining it appears. The
@@ -636,7 +661,9 @@ this side decided.
   was handed would be one more value to distrust. An admin's account page — the viewer's own
   included — carries no controls and no activity: the API refuses to block an admin, a
   control that could only reach that `403` is not worth drawing, and an admin neither books
-  nor lists.
+  nor lists. A deleted account's page draws a "Deleted" badge and when, and no access card —
+  there is nothing left to block, and the API answers a block of it `404`; the users list
+  filters such accounts under the status "Deleted", which "Active" and "Blocked" leave out.
 - **One link is current in the navigation**, the deepest one containing the path —
   `/admin` contains `/admin/users` as surely as the users link does.
 - **Ownership of a row is read, not guessed** (`_pages/dashboard/listing-edit/api/own-listing.ts`).
@@ -805,7 +832,8 @@ nothing else, so they stay a plain `action={submit}` with nothing to validate. A
 the dialog that cancels a stay was one and is not any more: it carries a reason, required
 of the host and optional for the guest and an admin, so it is `useActionForm` over
 `cancelFormSchema` (`features/cancel-booking/ui/cancel-stay-dialog.tsx`), the contract's
-body. Neither are the `GET` forms of the filter dialogs, which navigate rather than
+body. So is the dialog that deletes an account, over `deleteAccountSchema`: the password
+is its box. Neither are the `GET` forms of the filter dialogs, which navigate rather than
 mutate; those are the next section.
 
 ## Search, filters and the URL
@@ -1377,8 +1405,9 @@ A mutation nobody can undo — deleting a row, revoking access, anything the API
 with a `DELETE` — asks first, in an `AlertDialog` from `@repo/ui`
 (`features/delete-listing/ui/delete-listing-button.tsx`,
 `features/delete-review/ui/delete-review-button.tsx`,
-`features/cancel-booking/ui/cancel-stay-dialog.tsx` and
-`_pages/admin/user/ui/block-button.tsx`). Not a second button that takes the place of
+`features/cancel-booking/ui/cancel-stay-dialog.tsx`,
+`_pages/admin/user/ui/block-button.tsx` and
+`_pages/profile/ui/delete-account-dialog.tsx`, which asks for the password as well). Not a second button that takes the place of
 the first: a modal takes the focus and refuses a click outside itself, which is what stops
 the confirmation being hit by the hand that was already moving.
 
@@ -1760,7 +1789,8 @@ under test is the retry and locking logic, not a browser.
   guest on the deployment, whose demo accounts belong to its visitors — and its arranged
   host is the suite's own host there (`arrange.ts`); `ownGuest` (`session.ts`) is the
   guest of a scenario that changes the guest's account, registered locally and the
-  suite's guest there, where an account can never be deleted. Both accounts sign in with
+  suite's guest there, where an account registered for a scenario would leave its row
+  behind even once deleted. Both accounts sign in with
   `E2E_LIVE_PASSWORD`. A scenario that needs anything else — a demo account it changes, the
   admin, a second guest, an account registered for it — stays untagged. The global setup
   (`live-setup.ts`) asks `/api/health`: a `404` Railway's edge marks `x-railway-fallback`

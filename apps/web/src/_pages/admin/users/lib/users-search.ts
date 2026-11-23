@@ -83,6 +83,7 @@ export function usersHref(values: FilterValues, cursor?: string): string {
 export const STATUS_LABELS: Record<UserStatusName, string> = {
   [UserStatus.ACTIVE]: "Active",
   [UserStatus.BLOCKED]: "Blocked",
+  [UserStatus.DELETED]: "Deleted",
 };
 
 export const statusOptions = userStatusSchema.options.map((value) => ({

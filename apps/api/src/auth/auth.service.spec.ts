@@ -84,6 +84,11 @@ class FakeUserRepository implements PublicOf<UserRepository> {
     return Promise.resolve(row === undefined || row.blocked ? null : row.user);
   }
 
+  // The account's erasure reads it; AuthService never does.
+  findPasswordHashById(): Promise<string | null> {
+    return Promise.reject(new Error("AuthService confirms no passwords"));
+  }
+
   // The admin's half of the repository. AuthService never calls it, and a fake that
   // answered anyway would be a second implementation of rules `UserService` owns.
   findDetailById(): Promise<ManagedUserDetail | null> {
