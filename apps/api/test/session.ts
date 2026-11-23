@@ -1,17 +1,19 @@
+import * as argon2 from "argon2";
 import type { INestApplication } from "@nestjs/common";
 import { Role } from "@repo/contracts";
 import request from "supertest";
 import type { App } from "supertest/types";
 import { PrismaService } from "./../src/prisma/prisma.service";
+import { recordConfirmation } from "../src/mail/infrastructure/mail-outbox.repository";
 
-/** The credentials every e2e spec registers with; the tables are wiped before each test. */
+/** The credentials most e2e specs provision; the tables are wiped before each test. */
 export const testCredentials = {
   name: "E2E Guest",
   email: "e2e@example.com",
   password: "password123",
 };
 
-/** What registration takes; login reads the address and the password and ignores the name. */
+/** The name and credentials of a test account. */
 export type Credentials = typeof testCredentials;
 
 /**
@@ -47,13 +49,19 @@ export async function signIn(
 ): Promise<Agent> {
   const agent = request.agent(app.getHttpServer());
 
-  await agent.post("/auth/register").send(credentials).expect(201);
+  const { name, email, password } = credentials;
+  const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
+  await app.get(PrismaService).$transaction(async (tx) => {
+    const user = await tx.user.create({ data: { name, email, passwordHash } });
+    await recordConfirmation(tx, user.id);
+  });
+  await agent.post("/auth/login").send({ email, password }).expect(200);
 
   return agent;
 }
 
 /**
- * The same, for the role registration cannot produce: `/auth/register` always writes a USER,
+ * The same, for the role registration cannot produce: sign-up always writes a USER,
  * which is the only safe default for a public endpoint, and the API grants no other role. So
  * the role is written into the row directly, the way an admin account is made outside the
  * API, and the agent logs in again — the access token minted at registration still carries the

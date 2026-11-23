@@ -40,7 +40,7 @@ export type Account = { name: string; email: string; password?: string };
  * The guest a scenario signs in as: the demo guest on the local stacks, and on the
  * deployment the suite's own (`live.ts`) — the demo accounts there belong to its visitors,
  * whose list of stays a run must not fill. `joined` is the day the account was opened on
- * the reader's clock; the suite's guest was opened by its first run, so the global setup
+ * the reader's clock; the global setup
  * reads it off the account (`live-setup.ts`).
  */
 export const GUEST: Account & { joined: string } =

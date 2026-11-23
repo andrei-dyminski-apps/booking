@@ -10,6 +10,7 @@ import type { DeliverySnapshot } from "../application/mail-task";
 
 const request = z.object({ to: z.string(), body: z.string() });
 const snapshot = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("account"), request }),
   z.object({ kind: z.literal("confirm"), request, token: z.string() }),
   z.object({ kind: z.literal("notice"), request, group: mailGroupSchema }),
   z.object({

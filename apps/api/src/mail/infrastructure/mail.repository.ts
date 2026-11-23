@@ -1,22 +1,28 @@
 import { Injectable } from "@nestjs/common";
-import { addDays, addHours, addSeconds, subDays } from "date-fns";
+import { addDays, addHours, addMinutes, addSeconds, subDays } from "date-fns";
 import { notificationContentSchema, type MailGroup } from "@repo/contracts";
 import { RetryLaterError } from "../../common/retry-later.error";
 import { PrismaService } from "../../prisma/prisma.service";
 import { isLockUnavailable } from "../../prisma/prisma.errors";
 import { sessionNotFound } from "../../common/session-errors";
 import type { Prisma } from "../../generated/prisma/client";
-import type {
-  MailEvent,
-  StoredMailEventInput,
+import {
+  isSuppressionEvent,
+  type MailEvent,
+  type StoredMailEventInput,
 } from "../application/mail-event";
 import { hashMailToken } from "../application/mail-content";
 import {
+  MailAccountDeliveryStopped,
   MailRetryExpired,
   type DeliverySnapshot,
   type MailAttempt,
   type QueuedMail,
 } from "../application/mail-task";
+import {
+  MAIL_PROVIDER_TIMEOUT_MS,
+  MailDeliveryError,
+} from "../application/ports/mail-gateway";
 import { MailOutboxRepository } from "./mail-outbox.repository";
 
 const recipientSelect = {
@@ -64,16 +70,17 @@ export class MailRepository {
   }
   // Token writes and delivery start serialize with account changes.
   private async lockRecipient(tx: Prisma.TransactionClient, id: string) {
-    const [locked] = await tx.$queryRaw<{ id: string }[]>`
-      SELECT id FROM users
+    const [locked] = await tx.$queryRaw<{ sessionVersion: number }[]>`
+      SELECT session_version AS "sessionVersion" FROM users
       WHERE id = ${id}::uuid AND deleted_at IS NULL AND blocked_at IS NULL
       FOR SHARE
     `;
     if (!locked) return;
-    return tx.user.findUniqueOrThrow({
+    const user = await tx.user.findUniqueOrThrow({
       where: { id },
       select: recipientSelect,
     });
+    return { ...user, sessionVersion: locked.sessionVersion };
   }
 
   private withRecipient<T>(
@@ -83,6 +90,65 @@ export class MailRepository {
     return this.prismaService.$transaction(async (tx) => {
       const user = await this.lockRecipient(tx, id);
       if (user) return action(user, tx);
+    });
+  }
+
+  accountMail(id: string, db: Prisma.TransactionClient = this.prismaService) {
+    return db.accountMail.findFirst({
+      where: {
+        id,
+        OR: [{ userId: null }, { user: { deletedAt: null, blockedAt: null } }],
+      },
+    });
+  }
+
+  startAccountMail(
+    task: QueuedMail,
+    userId: string | null,
+    suppressionCheckedAt?: Date,
+  ) {
+    return this.prismaService.$transaction(async (tx) => {
+      const user = userId ? await this.lockRecipient(tx, userId) : undefined;
+      if (userId && !user) return;
+      await tx.$queryRaw`SELECT id FROM account_mail WHERE id = ${task.id}::uuid FOR UPDATE`;
+      const letter = await this.accountMail(task.id, tx);
+      if (!letter) return;
+      if (
+        (letter.kind === "reset" || letter.kind === "change") &&
+        user?.sessionVersion !== letter.sessionVersion
+      )
+        return;
+      if (letter.kind === "reset") {
+        if (!user?.emailVerifiedAt || user.email !== letter.email) return;
+        if (
+          user.emailUndeliverableAt &&
+          (!suppressionCheckedAt ||
+            user.emailUndeliverableAt >= suppressionCheckedAt)
+        )
+          throw new MailDeliveryError(
+            "Account recovery email needs a fresh suppression check",
+          );
+      }
+      const started = await this.outbox.startAttempt(tx, task);
+      if (!started) return;
+      if (started.attempt === 1) {
+        const expiresAt =
+          letter.kind === "reset"
+            ? addMinutes(started.startedAt, 30)
+            : addHours(started.startedAt, 24);
+        await tx.accountMail.update({
+          where: { id: letter.id },
+          data: { expiresAt },
+        });
+      } else if (
+        letter.expiresAt &&
+        letter.expiresAt.getTime() <= Date.now() + MAIL_PROVIDER_TIMEOUT_MS
+      ) {
+        throw new MailAccountDeliveryStopped(
+          "Account email expired before delivery could be retried",
+        );
+      }
+      return started;
     });
   }
 
@@ -378,7 +444,7 @@ export class MailRepository {
     if (!addresses.length) return [];
     const users = await this.prismaService.user.findMany({
       where: {
-        email: { in: addresses.map((address) => address.toLowerCase()) },
+        email: { in: addresses },
         deletedAt: null,
         createdAt: { lte: at },
       },
@@ -387,8 +453,32 @@ export class MailRepository {
     return users.map(({ id }) => id);
   }
 
+  async pruneHistory(now: Date) {
+    await this.prismaService.$transaction([
+      this.prismaService.$executeRaw`
+        DELETE FROM account_mail AS letter
+        WHERE (letter.expires_at <= ${now} OR
+          (letter.expires_at IS NULL AND letter.created_at <= ${subDays(now, 1)}))
+          AND NOT EXISTS (
+            SELECT 1 FROM mail_outbox AS task
+            WHERE task.id = letter.id AND task.kind = 'account' AND task.failed_at IS NULL
+          )
+      `,
+      this.prismaService.mailOutbox.deleteMany({
+        where: {
+          acceptedEmailId: { not: null },
+          failedAt: null,
+          availableAt: { lte: subDays(now, 7) },
+        },
+      }),
+      this.prismaService.mailEvent.deleteMany({
+        where: { processedAt: { lte: subDays(now, 90) } },
+      }),
+    ]);
+  }
+
   async record({ recipients, ...event }: StoredMailEventInput) {
-    const outgoing = event.kind !== "email.received";
+    const outgoing = isSuppressionEvent(event.kind);
     const recipientIds = outgoing
       ? await this.recipientIds(recipients, event.createdAt)
       : [];
@@ -417,6 +507,7 @@ export class MailRepository {
       )
       RETURNING id, kind, email_id AS "emailId", recipient_ids AS "recipientIds",
           lookup_recipients AS "lookupRecipients", reply_token_hash AS "replyTokenHash",
+          provider_failure_reason AS "providerFailureReason",
           created_at AS "createdAt", processed_at AS "processedAt",
           available_at AS "availableAt", attempts
     `;
@@ -453,6 +544,15 @@ export class MailRepository {
           data: { revokedAt: new Date() },
         });
       }
+      if (event.kind !== "email.complained")
+        await this.outbox.resolveDelivery(tx, event);
+    });
+  }
+
+  async processDeliveryOutcome(event: MailEvent) {
+    await this.prismaService.$transaction(async (tx) => {
+      if (await this.done(event, tx))
+        await this.outbox.resolveDelivery(tx, event);
     });
   }
   async done(

@@ -2,13 +2,18 @@ import { Inject, Injectable } from "@nestjs/common";
 import { PassportStrategy } from "@nestjs/passport";
 import type { Request } from "express";
 import { ExtractJwt, Strategy } from "passport-jwt";
+import { sessionNotFound } from "../common/session-errors";
+import { UserRepository } from "../user/user.repository";
 import { AUTH_CONFIG, type AuthConfig } from "./auth.config";
-import type { AccessTokenPayload, AuthenticatedUser } from "./auth.types";
+import type { AccessTokenPayload, AuthenticatedSession } from "./auth.types";
 import { ACCESS_TOKEN_COOKIE, readCookie } from "./cookies";
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, "jwt") {
-  constructor(@Inject(AUTH_CONFIG) authConfig: AuthConfig) {
+  constructor(
+    @Inject(AUTH_CONFIG) authConfig: AuthConfig,
+    private readonly users: UserRepository,
+  ) {
     super({
       // The token lives in an httpOnly cookie, so the Authorization header is not an
       // alternative source: accepting both would reopen the CSRF surface the cookie
@@ -21,12 +26,15 @@ export class JwtStrategy extends PassportStrategy(Strategy, "jwt") {
     });
   }
 
-  /**
-   * No database read per request — that is what a short-lived access token buys. A role
-   * change therefore takes effect at the next refresh, and `JWT_ACCESS_TTL` is the upper
-   * bound on that lag.
-   */
-  validate(payload: AccessTokenPayload): AuthenticatedUser {
-    return { id: payload.sub, email: payload.email, role: payload.role };
+  async validate(payload: AccessTokenPayload): Promise<AuthenticatedSession> {
+    const sessionVersion = payload.sessionVersion ?? 0;
+    if (!(await this.users.hasSessionVersion(payload.sub, sessionVersion)))
+      throw sessionNotFound();
+    return {
+      id: payload.sub,
+      email: payload.email,
+      role: payload.role,
+      sessionVersion,
+    };
   }
 }

@@ -1,5 +1,15 @@
 import { createZodDto } from "nestjs-zod";
-import { loginSchema, registerSchema, userSchema } from "@repo/contracts";
+import {
+  authRequestAcceptedSchema,
+  completeRegistrationSchema,
+  confirmEmailChangeSchema,
+  loginSchema,
+  registerSchema,
+  requestEmailChangeSchema,
+  requestPasswordResetSchema,
+  resetPasswordSchema,
+  userSchema,
+} from "@repo/contracts";
 import { withExample } from "../../common/api-example";
 
 /**
@@ -10,11 +20,35 @@ import { withExample } from "../../common/api-example";
  * controller itself keeps returning the contract type `User`.
  */
 export class RegisterDto extends createZodDto(
-  withExample(registerSchema, {
+  withExample(registerSchema, { email: "ada@example.com" }),
+) {}
+
+const exampleToken = "0".repeat(64);
+
+export class CompleteRegistrationDto extends createZodDto(
+  withExample(completeRegistrationSchema, {
+    token: exampleToken,
     name: "Ada Lovelace",
-    email: "ada@example.com",
     password: "correct-horse-battery",
   }),
+) {}
+export class RequestPasswordResetDto extends createZodDto(
+  withExample(requestPasswordResetSchema, { email: "ada@example.com" }),
+) {}
+export class ResetPasswordDto extends createZodDto(
+  withExample(resetPasswordSchema, {
+    token: exampleToken,
+    password: "correct-horse-battery",
+  }),
+) {}
+export class RequestEmailChangeDto extends createZodDto(
+  withExample(requestEmailChangeSchema, {
+    email: "ada@example.net",
+    password: "password123",
+  }),
+) {}
+export class ConfirmEmailChangeDto extends createZodDto(
+  withExample(confirmEmailChangeSchema, { token: exampleToken }),
 ) {}
 
 export class LoginDto extends createZodDto(
@@ -26,3 +60,7 @@ export class LoginDto extends createZodDto(
 ) {}
 
 export class UserDto extends createZodDto(userSchema) {}
+
+export class AuthRequestAcceptedDto extends createZodDto(
+  authRequestAcceptedSchema,
+) {}

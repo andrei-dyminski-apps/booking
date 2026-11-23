@@ -31,8 +31,7 @@ export const RegisterPage = async ({
       <CardHeader>
         <CardTitle>Create an account</CardTitle>
         <CardDescription>
-          Every account starts as a guest; the other two roles are granted in
-          the database.
+          Enter your email to get a link to finish creating your account.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">

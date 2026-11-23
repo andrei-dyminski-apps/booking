@@ -12,6 +12,7 @@ export type StoredRefreshToken = {
   expiresAt: Date;
   revokedAt: Date | null;
   user: User;
+  sessionVersion: number;
   /** Whether an admin has blocked the account since this token was issued. */
   userBlocked: boolean;
 };
@@ -20,9 +21,15 @@ export type StoredRefreshToken = {
 export class RefreshTokenRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
-  async create(userId: string, token: IssuedRefreshToken): Promise<void> {
-    await this.prismaService.refreshToken.create({
-      data: toRow(userId, token),
+  create(
+    userId: string,
+    token: IssuedRefreshToken,
+    version = 0,
+  ): Promise<boolean> {
+    return this.prismaService.$transaction(async (tx) => {
+      if (!(await currentSession(tx, userId, version))) return false;
+      await tx.refreshToken.create({ data: toRow(userId, token) });
+      return true;
     });
   }
 
@@ -45,6 +52,7 @@ export class RefreshTokenRepository {
       expiresAt: row.expiresAt,
       revokedAt: row.revokedAt,
       user: toUser(row.user),
+      sessionVersion: row.user.sessionVersion,
       userBlocked: row.user.blockedAt !== null,
     };
   }
@@ -62,8 +70,10 @@ export class RefreshTokenRepository {
     spentId: string,
     userId: string,
     next: IssuedRefreshToken,
+    version = 0,
   ): Promise<boolean> {
     return this.prismaService.$transaction(async (tx) => {
+      if (!(await currentSession(tx, userId, version))) return false;
       const { count } = await tx.refreshToken.updateMany({
         where: { id: spentId, revokedAt: null },
         data: { revokedAt: new Date() },
@@ -98,6 +108,18 @@ export class RefreshTokenRepository {
       where: { userId, expiresAt: { lt: new Date() } },
     });
   }
+}
+
+async function currentSession(
+  tx: Prisma.TransactionClient,
+  id: string,
+  version: number,
+) {
+  const [row] = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM users WHERE id = ${id}::uuid AND session_version = ${version}
+      AND blocked_at IS NULL AND deleted_at IS NULL FOR SHARE
+  `;
+  return row !== undefined;
 }
 
 function toRow(

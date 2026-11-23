@@ -52,9 +52,17 @@ export function setAuthCookies(
 
 /** The attributes have to repeat those of the original cookie, or the browser keeps it. */
 export function clearAuthCookies(res: Response, config: AuthConfig): void {
-  res.clearCookie(ACCESS_TOKEN_COOKIE, { ...config.cookie, path: "/" });
-  res.clearCookie(REFRESH_TOKEN_COOKIE, {
+  clearAuthCookie(res, config, ACCESS_TOKEN_COOKIE);
+  clearAuthCookie(res, config, REFRESH_TOKEN_COOKIE);
+}
+
+export function clearAuthCookie(
+  res: Response,
+  config: AuthConfig,
+  name: typeof ACCESS_TOKEN_COOKIE | typeof REFRESH_TOKEN_COOKIE,
+): void {
+  res.clearCookie(name, {
     ...config.cookie,
-    path: REFRESH_COOKIE_PATH,
+    path: name === ACCESS_TOKEN_COOKIE ? "/" : REFRESH_COOKIE_PATH,
   });
 }

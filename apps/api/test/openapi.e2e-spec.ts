@@ -219,6 +219,10 @@ describe("OpenAPI document (e2e)", () => {
     for (const [path, method] of [
       ["/", "get"],
       ["/auth/register", "post"],
+      ["/auth/register/complete", "post"],
+      ["/auth/password/reset/request", "post"],
+      ["/auth/password/reset/complete", "post"],
+      ["/auth/email/change/complete", "post"],
       ["/auth/login", "post"],
       // The catalogue and everything a browsing visitor reads of it.
       ["/listings", "get"],

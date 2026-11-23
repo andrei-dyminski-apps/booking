@@ -120,6 +120,34 @@ describe("Transactional mail", () => {
   function tokenFrom(text?: string) {
     return text?.match(/confirm-email#([a-f0-9]{64})/)?.[1];
   }
+
+  async function requestReset() {
+    const server = app.getHttpServer();
+    await request(server)
+      .post("/auth/password/reset/request")
+      .send({ email: address })
+      .expect(202, { accepted: true });
+    const link = await app.get(PrismaService).accountMail.findFirstOrThrow({
+      where: { kind: "reset", userId: hostId },
+      orderBy: { createdAt: "desc" },
+    });
+    await app.get(MailOutboxRelay).sweep();
+    return link;
+  }
+
+  async function completeReset(id: string) {
+    const key = "account-" + id;
+    await waitUntil(() => Promise.resolve(gateway.sent.has(key)));
+    const token = gateway.sent
+      .get(key)
+      ?.text.match(/reset-password#([a-f0-9]{64})/)?.[1];
+    if (!token) throw new Error("Missing password reset token");
+    await request(app.getHttpServer())
+      .post("/auth/password/reset/complete")
+      .send({ token, password: "replacement-password" })
+      .expect(204);
+  }
+
   function webhook(
     type: string,
     recipients:
@@ -135,6 +163,7 @@ describe("Transactional mail", () => {
     valid = true,
     createdAt = new Date(),
     receivedAt?: Date,
+    failureReason?: string,
   ) {
     const now = new Date();
     const payload = JSON.stringify({
@@ -146,6 +175,8 @@ describe("Transactional mail", () => {
         ...(Array.isArray(recipients) ? { to: recipients } : recipients),
         from: "stranger@mail.test",
         bounce: { type: "Permanent" },
+        failed:
+          failureReason === undefined ? undefined : { reason: failureReason },
       },
     });
     const signature = new Webhook(secret).sign(eventId, now, payload);
@@ -505,6 +536,292 @@ describe("Transactional mail", () => {
     expect(JSON.stringify(failed).toLowerCase()).not.toContain(address);
     expect(failed.recipientIds).toEqual([hostId]);
     suppress.mockRestore();
+  });
+
+  it("correlates provider acceptance with signed delivery events without pausing the recipient", async () => {
+    const db = app.get(PrismaService);
+    const providerId = randomUUID();
+    const send = gateway.send.bind(gateway);
+    jest.spyOn(gateway, "send").mockImplementation(async (letter, key) => {
+      await send(letter, key);
+      return key.startsWith("account-") ? providerId : undefined;
+    });
+    const email = "new@mail.test";
+    await request(app.getHttpServer())
+      .post("/auth/register")
+      .send({ email })
+      .expect(202);
+    const action = await db.accountMail.findFirstOrThrow({
+      where: { email, kind: "register" },
+    });
+    await waitForEvent("accepted/" + providerId);
+    expect(
+      await db.mailEvent.findUnique({
+        where: { id: "accepted/" + providerId },
+      }),
+    ).toMatchObject({
+      kind: "email.accepted",
+      emailId: providerId,
+      outboxId: action.id,
+      recipientIds: [],
+    });
+    for (const kind of [
+      "email.sent",
+      "email.delivery_delayed",
+      "email.delivered",
+      "email.failed",
+    ]) {
+      const eventId = randomUUID();
+      await webhook(kind, [address], providerId, eventId).expect(200);
+      await waitForEvent(eventId);
+      expect(
+        await db.mailEvent.findUnique({ where: { id: eventId } }),
+      ).toMatchObject({
+        kind,
+        emailId: providerId,
+        recipientIds: [],
+      });
+    }
+    expect(
+      (await db.user.findUniqueOrThrow({ where: { id: hostId } }))
+        .emailUndeliverableAt,
+    ).toBeNull();
+  });
+
+  it("can deliver a reset after support lifts suppression without a sign-in", async () => {
+    await confirm();
+    const db = app.get(PrismaService);
+    await db.user.update({
+      where: { id: hostId },
+      data: { emailUndeliverableAt: addMinutes(Date.now(), -1) },
+    });
+    gateway.suppressed.add(address);
+
+    const rejected = await requestReset();
+    await waitUntil(async () =>
+      Boolean(
+        await db.mailOutbox.findFirst({
+          where: { id: rejected.id, failedAt: { not: null } },
+        }),
+      ),
+    );
+    expect(gateway.sent.has("account-" + rejected.id)).toBe(false);
+    expect(
+      await db.mailOutbox.findUnique({ where: { id: rejected.id } }),
+    ).toMatchObject({
+      lastError: "Account recovery email is suppressed",
+    });
+
+    gateway.suppressed.delete(address);
+    await db.accountMail.update({
+      where: { id: rejected.id },
+      data: { createdAt: addMinutes(Date.now(), -3) },
+    });
+    const restored = await requestReset();
+    expect(restored.id).not.toBe(rejected.id);
+    await completeReset(restored.id);
+  });
+
+  it("records a permanent provider failure on an accepted confirmation", async () => {
+    await confirmationToken();
+    const db = app.get(PrismaService);
+    const providerId = randomUUID();
+    const send = jest.spyOn(gateway, "send").mockResolvedValueOnce(providerId);
+    await host.post("/mail/resend").expect(204);
+    await waitForEvent("accepted/" + providerId);
+
+    const reason = "invalid_recipient";
+    const eventId = randomUUID();
+    await webhook(
+      "email.failed",
+      [address],
+      providerId,
+      eventId,
+      true,
+      new Date(),
+      undefined,
+      reason,
+    ).expect(200);
+    await waitForEvent(eventId);
+    const failed = await db.mailOutbox.findUnique({
+      where: { acceptedEmailId: providerId },
+    });
+    expect(failed).toMatchObject({
+      kind: "confirm",
+      lastError: reason,
+      providerRetry: 0,
+    });
+    expect(failed?.failedAt).toBeInstanceOf(Date);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts the reset link's lifetime after a quota deferral", async () => {
+    await confirm();
+    const db = app.get(PrismaService);
+    const retryAt = addDays(new Date(), 8);
+    const send = jest
+      .spyOn(gateway, "send")
+      .mockRejectedValueOnce(new MailQuotaError(retryAt));
+    const link = await requestReset();
+    const key = "account-" + link.id;
+    await waitUntil(async () =>
+      Boolean(
+        await db.mailOutbox.findFirst({
+          where: { id: link.id, deliveryRound: 1 },
+        }),
+      ),
+    );
+    expect(
+      await db.accountMail.findUnique({ where: { id: link.id } }),
+    ).toMatchObject({
+      expiresAt: null,
+    });
+
+    await db.accountMail.update({
+      where: { id: link.id },
+      data: { createdAt: addMinutes(Date.now(), -3) },
+    });
+    expect((await requestReset()).id).toBe(link.id);
+    expect(
+      await db.accountMail.count({ where: { userId: hostId, kind: "reset" } }),
+    ).toBe(1);
+
+    await app.get(MailRepository).pruneHistory(retryAt);
+    await db.mailOutbox.update({
+      where: { id: link.id },
+      data: { availableAt: new Date() },
+    });
+    await app.get(MailOutboxRelay).sweep();
+    await completeReset(link.id);
+    const attempts = send.mock.calls.filter(([, jobKey]) => jobKey === key);
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]).toEqual(attempts[0]);
+  });
+
+  it("drops an unsent reset when the account version changes", async () => {
+    await confirm();
+    const db = app.get(PrismaService);
+    const pause = jest
+      .spyOn(app.get(MailOutboxRelay), "sweep")
+      .mockResolvedValue(undefined);
+    const link = await requestReset();
+    await db.user.update({
+      where: { id: hostId },
+      data: { sessionVersion: { increment: 1 } },
+    });
+    pause.mockRestore();
+    await app.get(MailOutboxRelay).sweep();
+    await waitUntil(
+      async () => (await db.mailOutbox.count({ where: { id: link.id } })) === 0,
+    );
+    expect(gateway.sent.has("account-" + link.id)).toBe(false);
+  });
+
+  it.each([true, false])(
+    "retries a signed quota failure with a new provider key (webhook first: %s)",
+    async (webhookFirst) => {
+      await confirm();
+      const db = app.get(PrismaService);
+      const providerId = randomUUID();
+      const eventId = randomUUID();
+      const reason = "reached_daily_quota";
+      const sendFailure = () =>
+        webhook(
+          "email.failed",
+          [address],
+          providerId,
+          eventId,
+          true,
+          new Date(),
+          undefined,
+          reason,
+        ).expect(200);
+      const send = jest
+        .spyOn(gateway, "send")
+        .mockImplementationOnce(async () => {
+          if (webhookFirst) {
+            await sendFailure();
+            await waitForEvent(eventId);
+          }
+          return providerId;
+        });
+
+      const link = await requestReset();
+      await waitForEvent("accepted/" + providerId);
+      if (!webhookFirst) await sendFailure();
+      await waitForEvent(eventId);
+      await waitUntil(
+        async () =>
+          (await db.mailOutbox.findUnique({ where: { id: link.id } }))
+            ?.providerRetry === 1,
+      );
+      expect(
+        await db.mailEvent.findUnique({ where: { id: eventId } }),
+      ).toMatchObject({
+        providerFailureReason: reason,
+      });
+      expect(
+        await db.mailOutbox.findUnique({ where: { id: link.id } }),
+      ).toMatchObject({
+        sendAttempts: 0,
+        acceptedEmailId: null,
+      });
+      expect(
+        await db.accountMail.findUnique({ where: { id: link.id } }),
+      ).toMatchObject({
+        expiresAt: null,
+      });
+
+      await sendFailure();
+      await db.mailOutbox.update({
+        where: { id: link.id },
+        data: { availableAt: new Date() },
+      });
+      await app.get(MailOutboxRelay).sweep();
+      await waitUntil(() =>
+        Promise.resolve(gateway.sent.has("account-" + link.id + "-retry-1")),
+      );
+      expect(send.mock.calls.map(([, key]) => key)).toEqual([
+        "account-" + link.id,
+        "account-" + link.id + "-retry-1",
+      ]);
+    },
+  );
+
+  it("records an expired reset when a previous send might already have reached the provider", async () => {
+    await confirm();
+    const db = app.get(PrismaService);
+    const send = jest
+      .spyOn(gateway, "send")
+      .mockRejectedValueOnce(new Error("Response lost"));
+    const link = await requestReset();
+    const key = "account-" + link.id;
+    await waitUntil(
+      async () => (await mailQueue().getJobState(key)) === "delayed",
+    );
+    await db.accountMail.update({
+      where: { id: link.id },
+      data: { expiresAt: addMinutes(Date.now(), -1) },
+    });
+    const replacement = await requestReset();
+    expect(replacement.id).not.toBe(link.id);
+    const job = await mailQueue().getJob(key);
+    if (!job) throw new Error("Missing reset retry");
+    await job.promote();
+    await waitUntil(
+      async () => (await mailQueue().getJobState(key)) === "failed",
+    );
+    expect(
+      await db.mailOutbox.findUnique({ where: { id: link.id } }),
+    ).toMatchObject({
+      lastError: "Account email expired before delivery could be retried",
+    });
+    expect(send.mock.calls.filter(([, jobKey]) => jobKey === key)).toHaveLength(
+      1,
+    );
+    await waitUntil(() =>
+      Promise.resolve(gateway.sent.has("account-" + replacement.id)),
+    );
   });
 
   it("refuses a resend for demo addresses and confirmed accounts", async () => {

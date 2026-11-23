@@ -13,6 +13,7 @@ import {
 } from "../application/ports/mail-gateway";
 import {
   MAIL_SEND_ATTEMPTS,
+  MailAccountDeliveryStopped,
   MailAttemptsExhausted,
   MailRetryExpired,
   mailDeliveryKey,
@@ -71,10 +72,11 @@ export class MailProcessor extends WorkerHost implements OnModuleDestroy {
       return this.setAside(job.data, "Stored mail delivery could not be read");
     }
 
+    let emailId: string | void;
     try {
-      await this.mailDeliveryService.deliver(
+      emailId = await this.mailDeliveryService.deliver(
         job.data,
-        mailDeliveryKey(job.data),
+        mailDeliveryKey(job.data, attempt.providerRetry),
         delivery,
       );
     } catch (error) {
@@ -86,7 +88,10 @@ export class MailProcessor extends WorkerHost implements OnModuleDestroy {
         return;
       }
       if (error instanceof RetryLaterError) throw error;
-      if (error instanceof MailRetryExpired)
+      if (
+        error instanceof MailRetryExpired ||
+        error instanceof MailAccountDeliveryStopped
+      )
         return this.setAside(job.data, error.message);
 
       const exhausted = error instanceof MailAttemptsExhausted;
@@ -108,7 +113,7 @@ export class MailProcessor extends WorkerHost implements OnModuleDestroy {
       }
       throw error;
     }
-    await this.outbox.complete(job.data);
+    await this.outbox.complete(job.data, emailId);
   }
 
   private async setAside(task: QueuedMail, reason: string) {

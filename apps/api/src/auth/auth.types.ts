@@ -16,8 +16,13 @@ export type AuthenticatedUser = {
   role: Role;
 };
 
+export type AuthenticatedSession = AuthenticatedUser & {
+  sessionVersion: number;
+};
+
 export type AccessTokenPayload = {
   sub: string;
+  sessionVersion?: number;
   email: string;
   role: Role;
 };

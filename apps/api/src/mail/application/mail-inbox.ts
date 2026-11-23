@@ -5,6 +5,7 @@ import {
   type OnApplicationBootstrap,
   type OnModuleDestroy,
 } from "@nestjs/common";
+import { addDays } from "date-fns";
 import { sendMessageSchema } from "@repo/contracts";
 import { ConversationService } from "../../conversation/conversation.service";
 import {
@@ -14,6 +15,7 @@ import {
 import {
   MAIL_EVENT_ATTEMPTS,
   inboundRecipients,
+  isSuppressionEvent,
   type MailEvent,
   type MailEventInput,
 } from "./mail-event";
@@ -37,6 +39,7 @@ export class MailInbox implements OnApplicationBootstrap, OnModuleDestroy {
   private timer?: NodeJS.Timeout;
   private running?: Promise<void>;
   private closing = false;
+  private pruneAfter = 0;
 
   constructor(
     private readonly mailRepository: MailRepository,
@@ -120,10 +123,14 @@ export class MailInbox implements OnApplicationBootstrap, OnModuleDestroy {
         }
       }
     }
+    const now = new Date();
+    if (now.getTime() < this.pruneAfter || this.closing) return;
+    await this.mailRepository.pruneHistory(now);
+    this.pruneAfter = addDays(now, 1).getTime();
   }
 
   private async process(event: MailEvent) {
-    if (event.kind !== "email.received") {
+    if (isSuppressionEvent(event.kind)) {
       const recipientIds = event.lookupRecipients
         ? await this.mailRepository.recipientIds(
             await this.mailGateway.sentRecipients(event.emailId),
@@ -134,7 +141,12 @@ export class MailInbox implements OnApplicationBootstrap, OnModuleDestroy {
       return;
     }
 
-    if (!(await this.receive(event))) this.logUnplaceable(event.id);
+    if (event.kind === "email.failed" || event.kind === "email.delivered") {
+      await this.mailRepository.processDeliveryOutcome(event);
+      return;
+    }
+    if (event.kind === "email.received" && !(await this.receive(event)))
+      this.logUnplaceable(event.id);
     await this.mailRepository.done(event);
   }
 

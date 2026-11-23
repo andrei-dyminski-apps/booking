@@ -15,6 +15,7 @@ import { formatDate, readerTimeZone } from "#shared/lib";
 import { ButtonLink } from "#shared/ui";
 import { readReviewSummaryOf } from "../api/read-review-summary-of";
 import { DeleteAccountDialog } from "./delete-account-dialog";
+import { EmailChangeForm } from "./email-change-form";
 import { EmailSettings } from "./email-settings";
 
 export const ProfilePage = async () => {
@@ -69,6 +70,7 @@ export const ProfilePage = async () => {
 
         <Suspense fallback={null}>
           <ProfileEmailSettings />
+          <EmailChangeForm />
         </Suspense>
         <LogoutButton />
 

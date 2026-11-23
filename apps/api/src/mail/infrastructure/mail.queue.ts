@@ -81,7 +81,7 @@ export class MailQueue implements OnApplicationShutdown {
       { id, kind, userId, requestId, fromOutbox: true, deliveryRound },
       {
         jobId,
-        priority: kind === "confirm" ? 1 : 2,
+        priority: kind === "confirm" || kind === "account" ? 1 : 2,
         attempts: MAIL_SEND_ATTEMPTS,
         backoff: { type: "exponential", delay: 5000 },
         delay:

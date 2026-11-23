@@ -16,6 +16,7 @@ import { liveAccount } from "./live";
 import { retireThroughPages } from "./live-demo";
 import { noteAnswer, signInSlot } from "./pace";
 import { WEB_ORIGIN } from "./stack";
+import { registrationLink } from "./inbox";
 import { TARGET } from "./target";
 
 /**
@@ -68,7 +69,7 @@ export function arrangement(
     ? liveAccount("host")
     : {
         name: `Host of ${name}`.slice(0, 50),
-        email: `host-${address.replaceAll(".", "-")}-${stamp}@e2e.example`,
+        email: `host-${address.replaceAll(".", "-")}-${stamp}@e2e.example.net`,
         password: HOST_PASSWORD,
       };
 
@@ -94,9 +95,16 @@ export function arrangement(
         );
       } else {
         await succeeded(
-          "registering the test's host",
+          "requesting the test host's sign-up link",
           await context.post("/api/auth/register", {
-            data: account,
+            data: { email: account.email },
+          }),
+        );
+        const link = await registrationLink(account.email);
+        await succeeded(
+          "registering the test's host",
+          await context.post("/api/auth/register/complete", {
+            data: { ...account, token: link.hash.slice(1) },
           }),
         );
       }

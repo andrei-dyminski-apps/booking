@@ -18,8 +18,10 @@ export class MailRetryExpired extends Error {
   }
 }
 
+export class MailAccountDeliveryStopped extends Error {}
+
 export type MailTask = {
-  kind: "confirm" | "notice" | "digest";
+  kind: "confirm" | "notice" | "digest" | "account";
   id: string;
   userId: string;
 };
@@ -51,6 +53,7 @@ export type MailAttempt = {
 };
 
 export type DeliverySnapshot =
+  | { kind: "account"; request: MailRequest }
   | { kind: "confirm"; request: MailRequest; token: string }
   | { kind: "notice"; request: MailRequest; group: MailGroup }
   | {
@@ -60,6 +63,10 @@ export type DeliverySnapshot =
       throughId?: string;
     };
 
-export function mailDeliveryKey({ kind, id }: MailTask): string {
-  return kind + "-" + id;
+export function mailDeliveryKey(
+  { kind, id }: MailTask,
+  providerRetry = 0,
+): string {
+  const key = kind + "-" + id;
+  return providerRetry === 0 ? key : key + "-retry-" + providerRetry;
 }

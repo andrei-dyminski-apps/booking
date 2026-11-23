@@ -23,7 +23,8 @@ export const metadata: Metadata = {
 
 export const LoginPage = async ({ searchParams }: PageProps<"/login">) => {
   // Where the proxy wanted to send this visitor before it found no session.
-  const next = toLocalPath((await searchParams).next, ROUTES.profile);
+  const { next: destination, passwordReset } = await searchParams;
+  const next = toLocalPath(destination, ROUTES.profile);
 
   return (
     <Card className="mx-auto w-full max-w-sm">
@@ -35,7 +36,19 @@ export const LoginPage = async ({ searchParams }: PageProps<"/login">) => {
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
+        {passwordReset === "1" && (
+          <p role="status" className="text-sm">
+            Password updated. Sign in with your new password.
+          </p>
+        )}
         <LoginForm next={next} />
+
+        <Link
+          href={ROUTES.forgotPassword}
+          className="text-sm underline underline-offset-4"
+        >
+          Forgot password?
+        </Link>
 
         <p className="text-sm text-muted-foreground">
           No account yet?{" "}

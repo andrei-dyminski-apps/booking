@@ -22,7 +22,7 @@ export type MailRequest = { to: string; body: string };
 
 export abstract class MailGateway {
   abstract prepare(letter: Letter): MailRequest;
-  abstract send(request: MailRequest, key: string): Promise<void>;
+  abstract send(request: MailRequest, key: string): Promise<string | void>;
   abstract receive(id: string): Promise<ReceivedLetter>;
   abstract sentRecipients(id: string): Promise<string[]>;
   abstract isSuppressed(email: string): Promise<boolean>;

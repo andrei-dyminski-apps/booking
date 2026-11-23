@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { RealtimeModule } from "../realtime/realtime.module";
 import { UnreadModule } from "../unread/unread.module";
+import { UserModule } from "../user/user.module";
 import { EventsController } from "./events.controller";
 
 /**
@@ -9,7 +10,7 @@ import { EventsController } from "./events.controller";
  * that pushes — the notifications and the threads, both counted by `UnreadModule`.
  */
 @Module({
-  imports: [RealtimeModule, UnreadModule],
+  imports: [RealtimeModule, UnreadModule, UserModule],
   controllers: [EventsController],
 })
 export class EventsModule {}

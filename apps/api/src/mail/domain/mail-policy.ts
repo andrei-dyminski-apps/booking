@@ -29,7 +29,7 @@ type Recipient = {
   emailUndeliverableAt: Date | null;
 };
 
-function canSendTo(email: string, production: boolean): boolean {
+export function canSendTo(email: string, production: boolean): boolean {
   return (
     !/@example\.(com|net|org)$/i.test(email) &&
     (!production || !/\.(example|invalid|test|localhost)$/i.test(email))

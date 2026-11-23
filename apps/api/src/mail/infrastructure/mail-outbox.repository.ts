@@ -5,6 +5,10 @@ import { mailRequestContext } from "../../common/mail-request-context";
 import type { Prisma } from "../../generated/prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 import {
+  MAIL_DELIVERY_OUTCOMES,
+  type MailDeliveryOutcome,
+} from "../application/mail-event";
+import {
   MAIL_PROCESSING_FAILURES,
   MAIL_SEND_ATTEMPTS,
   type DeliverySnapshot,
@@ -14,6 +18,7 @@ import {
   type QueuedMail,
 } from "../application/mail-task";
 import { openMailSnapshot, sealMailSnapshot } from "./mail-snapshot";
+import { resendQuotaRetryAt } from "./resend-quota";
 
 const digestSnapshotSchema = z.object({
   subject: z.string(),
@@ -76,8 +81,9 @@ export class MailOutboxRepository {
       SET available_at = CURRENT_TIMESTAMP + ${MAIL_RECHECK_SECONDS}::int * interval '1 second'
       WHERE task.id = (
         SELECT id FROM mail_outbox
-        WHERE failed_at IS NULL AND available_at <= CURRENT_TIMESTAMP
-        ORDER BY CASE WHEN kind = 'confirm' THEN 0 ELSE 1 END,
+        WHERE failed_at IS NULL AND accepted_email_id IS NULL
+          AND available_at <= CURRENT_TIMESTAMP
+        ORDER BY CASE WHEN kind IN ('confirm', 'account') THEN 0 ELSE 1 END,
             available_at, id LIMIT 1 FOR UPDATE SKIP LOCKED
       )
       RETURNING id, kind, user_id AS "userId", request_id AS "requestId",
@@ -92,6 +98,7 @@ export class MailOutboxRepository {
       where: {
         id: task.id,
         failedAt: null,
+        acceptedEmailId: null,
         availableAt: task.availableAt,
         deliveryRound: task.deliveryRound,
       },
@@ -118,18 +125,15 @@ export class MailOutboxRepository {
     });
   }
 
-  async begin({
-    id,
-    kind,
-    userId,
-    deliveryRound = 0,
-  }: QueuedMail): Promise<StoredMailAttempt | undefined> {
-    const [attempt] = await this.prismaService.$queryRaw<StoredMailAttempt[]>`
+  async begin({ id, kind, userId, deliveryRound = 0 }: QueuedMail) {
+    const [attempt] = await this.prismaService.$queryRaw<
+      (StoredMailAttempt & { providerRetry: number })[]
+    >`
       SELECT started_at AS "startedAt", send_attempts AS "sendAttempts",
-          digest_snapshot AS digest, delivery_snapshot AS delivery
+          digest_snapshot AS digest, delivery_snapshot AS delivery, provider_retry AS "providerRetry"
       FROM mail_outbox
       WHERE id = ${id}::uuid AND kind = ${kind} AND user_id = ${userId}::uuid
-          AND delivery_round = ${deliveryRound} AND failed_at IS NULL
+          AND delivery_round = ${deliveryRound} AND failed_at IS NULL AND accepted_email_id IS NULL
     `;
     return attempt;
   }
@@ -147,7 +151,7 @@ export class MailOutboxRepository {
             THEN ${encrypted} ELSE COALESCE(delivery_snapshot, ${encrypted}) END,
           digest_snapshot = NULL
       WHERE id = ${id}::uuid AND delivery_round = ${deliveryRound}
-          AND failed_at IS NULL
+          AND failed_at IS NULL AND accepted_email_id IS NULL
       RETURNING delivery_snapshot AS snapshot
     `;
     return row ? openMailSnapshot(id, row.snapshot) : undefined;
@@ -191,22 +195,33 @@ export class MailOutboxRepository {
           )
       WHERE id = ${id}::uuid AND kind = ${kind} AND user_id = ${userId}::uuid
           AND delivery_round = ${deliveryRound} AND send_attempts < ${MAIL_SEND_ATTEMPTS}
-          AND failed_at IS NULL
+          AND failed_at IS NULL AND accepted_email_id IS NULL
       RETURNING send_attempts AS attempt, started_at AS "startedAt"
     `;
     return row;
   }
 
-  async defer({ id, deliveryRound = 0 }: QueuedMail, retryAt: Date) {
+  async defer({ id, kind, deliveryRound = 0 }: QueuedMail, retryAt: Date) {
     // Remove this refusal from the count. Earlier attempts may still have reached Resend.
-    await this.prismaService.$executeRaw`
-      UPDATE mail_outbox
-      SET available_at = ${retryAt}, delivery_round = delivery_round + 1,
-          started_at = CASE WHEN send_attempts <= 1 THEN NULL ELSE started_at END,
-          send_attempts = GREATEST(send_attempts - 1, 0)
-      WHERE id = ${id}::uuid AND delivery_round = ${deliveryRound}
-          AND failed_at IS NULL
-    `;
+    await this.prismaService.$transaction(async (tx) => {
+      if (kind === "account")
+        await tx.$queryRaw`SELECT id FROM account_mail WHERE id = ${id}::uuid FOR UPDATE`;
+      const [deferred] = await tx.$queryRaw<{ sendAttempts: number }[]>`
+        UPDATE mail_outbox
+        SET available_at = ${retryAt}, delivery_round = delivery_round + 1,
+            started_at = CASE WHEN send_attempts <= 1 THEN NULL ELSE started_at END,
+            send_attempts = GREATEST(send_attempts - 1, 0)
+        WHERE id = ${id}::uuid AND delivery_round = ${deliveryRound}
+            AND failed_at IS NULL AND accepted_email_id IS NULL
+        RETURNING send_attempts AS "sendAttempts"
+      `;
+      if (kind === "account" && deferred?.sendAttempts === 0) {
+        await tx.accountMail.updateMany({
+          where: { id },
+          data: { expiresAt: null },
+        });
+      }
+    });
   }
 
   async recordFailure(
@@ -224,15 +239,132 @@ export class MailOutboxRepository {
             WHEN ${terminal} OR processing_failures + 1 >= ${MAIL_PROCESSING_FAILURES}
             THEN CURRENT_TIMESTAMP ELSE NULL END
       WHERE id = ${id}::uuid AND delivery_round = ${deliveryRound}
-          AND failed_at IS NULL
+          AND failed_at IS NULL AND accepted_email_id IS NULL
       RETURNING failed_at AS "failedAt"
     `;
     return row?.failedAt != null;
   }
 
-  async complete({ id, kind, userId, deliveryRound = 0 }: QueuedMail) {
-    await this.prismaService.mailOutbox.deleteMany({
-      where: { id, kind, userId, deliveryRound, failedAt: null },
+  async complete(
+    { id, kind, userId, deliveryRound = 0 }: QueuedMail,
+    emailId?: string | void,
+  ) {
+    await this.prismaService.$transaction(async (tx) => {
+      const pending = {
+        id,
+        kind,
+        userId,
+        deliveryRound,
+        failedAt: null,
+        acceptedEmailId: null,
+      };
+      if (emailId) {
+        await tx.mailEvent.createMany({
+          data: {
+            id: "accepted/" + emailId,
+            emailId,
+            outboxId: id,
+            kind: "email.accepted",
+            createdAt: new Date(),
+            processedAt: new Date(),
+          },
+          skipDuplicates: true,
+        });
+        // A signed webhook can be processed before the send response arrives.
+        await lockProviderReceipt(tx, emailId);
+        if (kind !== "account" || (await lockAccountLetter(tx, id))) {
+          const { count } = await tx.mailOutbox.updateMany({
+            where: pending,
+            data: { acceptedEmailId: emailId, availableAt: new Date() },
+          });
+          if (!count) return;
+          const outcome = await tx.mailEvent.findFirst({
+            where: { emailId, kind: { in: MAIL_DELIVERY_OUTCOMES } },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            select: {
+              emailId: true,
+              kind: true,
+              createdAt: true,
+              providerFailureReason: true,
+            },
+          });
+          if (outcome) await this.reconcileDelivery(tx, outcome);
+          return;
+        }
+      }
+      await tx.mailOutbox.deleteMany({ where: pending });
     });
   }
+
+  async resolveDelivery(
+    tx: Prisma.TransactionClient,
+    outcome: MailDeliveryOutcome,
+  ) {
+    await lockProviderReceipt(tx, outcome.emailId);
+    await this.reconcileDelivery(tx, outcome);
+  }
+
+  private async reconcileDelivery(
+    tx: Prisma.TransactionClient,
+    outcome: MailDeliveryOutcome,
+  ) {
+    const task = await tx.mailOutbox.findUnique({
+      where: { acceptedEmailId: outcome.emailId, failedAt: null },
+      select: { id: true, kind: true, providerRetry: true },
+    });
+    if (!task) return;
+    if (task.kind === "account" && !(await lockAccountLetter(tx, task.id)))
+      return;
+
+    const where = {
+      id: task.id,
+      acceptedEmailId: outcome.emailId,
+      failedAt: null,
+    };
+    if (outcome.kind === "email.delivered") {
+      await tx.mailOutbox.deleteMany({ where });
+      return;
+    }
+
+    const retryAt =
+      outcome.kind === "email.failed"
+        ? resendQuotaRetryAt(outcome.providerFailureReason, outcome.createdAt)
+        : undefined;
+    const { count } = await tx.mailOutbox.updateMany({
+      where,
+      data:
+        retryAt && task.providerRetry < MAIL_SEND_ATTEMPTS - 1
+          ? {
+              acceptedEmailId: null,
+              availableAt: retryAt,
+              deliveryRound: { increment: 1 },
+              providerRetry: { increment: 1 },
+              // The provider has confirmed this email was never sent.
+              sendAttempts: 0,
+              startedAt: null,
+            }
+          : {
+              failedAt: new Date(),
+              lastError: outcome.providerFailureReason ?? outcome.kind,
+            },
+    });
+    if (task.kind === "account" && count) {
+      await tx.accountMail.update({
+        where: { id: task.id },
+        data: { expiresAt: null },
+      });
+    }
+  }
+}
+
+function lockProviderReceipt(tx: Prisma.TransactionClient, emailId: string) {
+  const key = "mail-receipt/" + emailId;
+  return tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+}
+
+async function lockAccountLetter(tx: Prisma.TransactionClient, id: string) {
+  const [letter] = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM account_mail WHERE id = ${id}::uuid FOR UPDATE
+  `;
+  return letter;
 }

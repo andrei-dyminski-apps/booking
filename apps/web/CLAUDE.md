@@ -753,13 +753,10 @@ What `useActionForm` ties together, and what each third of it owns:
 **Every box is a `FormField`** (`shared/ui/form-field.tsx`), and it exists for the wiring
 rather than for the markup:
 
-- **`aria-invalid` and the message are linked by `aria-describedby`.** One says that a box
-  is wrong and the other says what is wrong with it, and without the link a screen reader
-  announces the first and never reaches the second. The ids are derived from the field name
-  rather than being it, for the reason `FilterField` gives; the error's is left out while
-  there is no error, because `FieldError` renders
-  nothing at all in that case and a reference to an element that is not there reads as no
-  description rather than as an empty one.
+- **`aria-invalid` and the message are linked by `aria-describedby`.** One says a box is
+  wrong, and without the link a screen reader sees an error it cannot identify. Each box
+  gets a React ID so fields with the same name in different forms keep their own labels,
+  descriptions and errors. `FieldError` renders only when there is an error to describe.
 - **A description is a hint beside the label, never a paragraph under the box.** Every
   box and every group of boxes that explains itself does it through
   `shared/ui/hint-label.tsx`: `HintLabel` for a box — `FormField`, `FilterField` and

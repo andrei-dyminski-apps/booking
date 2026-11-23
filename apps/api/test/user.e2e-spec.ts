@@ -161,17 +161,18 @@ describe("UserController (e2e)", () => {
     expect(emails(await page("?role=ADMIN"))).toEqual([
       credentialsFor.ADMIN.email,
     ]);
+    const mixedCaseEmail = "E2E-Owner@example.com";
+    await app.get(PrismaService).user.update({
+      where: { email: hostCredentials.email },
+      data: { email: mixedCaseEmail },
+    });
     // Any part of it, in any case: what an admin remembers of an address.
-    expect(emails(await page("?email=E2E-OWN"))).toEqual([
-      hostCredentials.email,
-    ]);
+    expect(emails(await page("?email=E2E-OWN"))).toEqual([mixedCaseEmail]);
     // Taken as written: `LIKE` would read these two as wildcards and match every address.
     expect(emails(await page("?email=%25"))).toEqual([]);
     expect(emails(await page("?email=e2e_"))).toEqual([]);
     // A name is stored as typed, so it is the match that ignores the case.
-    expect(emails(await page("?name=e2e%20own"))).toEqual([
-      hostCredentials.email,
-    ]);
+    expect(emails(await page("?name=e2e%20own"))).toEqual([mixedCaseEmail]);
     expect(emails(await page("?name=%25"))).toEqual([]);
 
     const guestId = await idOf(credentialsFor.USER.email);

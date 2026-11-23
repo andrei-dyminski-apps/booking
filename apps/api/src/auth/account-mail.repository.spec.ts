@@ -1,7 +1,7 @@
 import { Test } from "@nestjs/testing";
 import { Prisma } from "../generated/prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
-import { EmailAlreadyRegisteredError, UserRepository } from "./user.repository";
+import { AccountMailRepository } from "./account-mail.repository";
 
 const input = {
   name: "Guest",
@@ -33,8 +33,8 @@ function uniqueViolation(
   });
 }
 
-describe("UserRepository", () => {
-  let userRepository: UserRepository;
+describe("AccountMailRepository", () => {
+  let accountMailRepository: AccountMailRepository;
   let create: jest.Mock;
 
   beforeEach(async () => {
@@ -42,27 +42,41 @@ describe("UserRepository", () => {
 
     const moduleRef = await Test.createTestingModule({
       providers: [
-        UserRepository,
+        AccountMailRepository,
         {
           provide: PrismaService,
           useValue: {
             $transaction: (
-              write: (tx: { user: { create: jest.Mock } }) => unknown,
-            ) => write({ user: { create } }),
+              write: (tx: {
+                user: { create: jest.Mock };
+                accountMail: object;
+                mailOutbox: object;
+                $executeRaw: () => number;
+              }) => unknown,
+            ) =>
+              write({
+                user: { create },
+                $executeRaw: () => 0,
+                mailOutbox: { deleteMany: () => ({ count: 1 }) },
+                accountMail: {
+                  findUnique: () => ({ id: "pending", email: input.email }),
+                  deleteMany: () => ({ count: 1 }),
+                },
+              }),
           },
         },
       ],
     }).compile();
 
-    userRepository = moduleRef.get(UserRepository);
+    accountMailRepository = moduleRef.get(AccountMailRepository);
   });
 
-  it("translates a conflict on the email into an error the service understands", async () => {
+  it("returns no user when the verified email was claimed concurrently", async () => {
     create.mockRejectedValue(uniqueViolation("email"));
 
-    await expect(userRepository.create(input)).rejects.toThrow(
-      EmailAlreadyRegisteredError,
-    );
+    await expect(
+      accountMailRepository.register("token", input.name, input.passwordHash),
+    ).resolves.toBeNull();
   });
 
   it("leaves a conflict on another column alone", async () => {
@@ -72,9 +86,9 @@ describe("UserRepository", () => {
     // the fallback would answer "email" again and nothing else would notice.
     create.mockRejectedValue(uniqueViolation("username"));
 
-    await expect(userRepository.create(input)).rejects.not.toThrow(
-      EmailAlreadyRegisteredError,
-    );
+    await expect(
+      accountMailRepository.register("token", input.name, input.passwordHash),
+    ).rejects.toThrow();
   });
 
   it("counts a shape it cannot read as the email", async () => {
@@ -90,16 +104,16 @@ describe("UserRepository", () => {
       }),
     );
 
-    await expect(userRepository.create(input)).rejects.toThrow(
-      EmailAlreadyRegisteredError,
-    );
+    await expect(
+      accountMailRepository.register("token", input.name, input.passwordHash),
+    ).resolves.toBeNull();
   });
 
   it("does not dress up a failure that is not a unique violation", async () => {
     create.mockRejectedValue(new Error("the connection went away"));
 
-    await expect(userRepository.create(input)).rejects.not.toThrow(
-      EmailAlreadyRegisteredError,
-    );
+    await expect(
+      accountMailRepository.register("token", input.name, input.passwordHash),
+    ).rejects.toThrow();
   });
 });

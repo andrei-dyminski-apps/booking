@@ -2,6 +2,7 @@ import { Injectable, Logger, type OnModuleDestroy } from "@nestjs/common";
 import { serverEventSchema, type ServerEvent } from "@repo/contracts";
 import { Redis } from "ioredis";
 import { from, Observable, ReplaySubject, switchMap } from "rxjs";
+import { z } from "zod";
 import { RedisOutage } from "../common/redis-outage";
 import { requireRedisUrl } from "../common/redis-url";
 
@@ -10,7 +11,16 @@ const CHANNEL_PREFIX = "realtime:user:";
 
 const channelOf = (userId: string): string => `${CHANNEL_PREFIX}${userId}`;
 
-type Listener = (event: ServerEvent) => void;
+const realtimeEventSchema = z.union([
+  z.object({
+    type: z.literal("session.changed"),
+    sessionVersion: z.int().nonnegative(),
+  }),
+  serverEventSchema,
+]);
+
+type RealtimeEvent = z.infer<typeof realtimeEventSchema>;
+type Listener = (event: RealtimeEvent) => void;
 
 /**
  * The tabs of one account open on this instance, and the subscription of its channel they
@@ -113,7 +123,7 @@ export class RealtimeService implements OnModuleDestroy {
    * is down costs the recipient the live update and nothing else — the row is there, and
    * the next `sync` counts it.
    */
-  async publish(userId: string, event: ServerEvent): Promise<void> {
+  async publish(userId: string, event: RealtimeEvent): Promise<void> {
     try {
       await this.publisher.publish(channelOf(userId), JSON.stringify(event));
     } catch (error) {
@@ -151,8 +161,8 @@ export class RealtimeService implements OnModuleDestroy {
   eventsOf(
     userId: string,
     opening: Observable<ServerEvent>,
-  ): Observable<ServerEvent> {
-    return new Observable<ServerEvent>((subscriber) => {
+  ): Observable<RealtimeEvent> {
+    return new Observable<RealtimeEvent>((subscriber) => {
       const channel = this.join(userId);
       const listener: Listener = (event) => subscriber.next(event);
 
@@ -252,7 +262,7 @@ export class RealtimeService implements OnModuleDestroy {
       payload = undefined;
     }
 
-    const event = serverEventSchema.safeParse(payload);
+    const event = realtimeEventSchema.safeParse(payload);
 
     if (!event.success) {
       this.logger.warn(`Dropped an unreadable event on ${channel}`);

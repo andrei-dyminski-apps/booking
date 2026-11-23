@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  ConflictException,
+  BadRequestException,
   ForbiddenException,
   Logger,
   UnauthorizedException,
@@ -9,10 +9,11 @@ import { JwtModule } from "@nestjs/jwt";
 import { Test } from "@nestjs/testing";
 import type { ManagedUser, ManagedUserDetail, User } from "@repo/contracts";
 import type { Page } from "../common/paging";
-import * as argon2 from "argon2";
+import argon2 from "argon2";
 import type { PublicOf } from "../common/testing/public-of.fakes";
 import { refusalOf } from "../common/testing/refusal";
 import { AUTH_CONFIG, type AuthConfig } from "./auth.config";
+import { AccountMailRepository } from "./account-mail.repository";
 import { AuthService } from "./auth.service";
 import type { IssuedRefreshToken } from "./auth.types";
 import {
@@ -20,11 +21,8 @@ import {
   type StoredRefreshToken,
 } from "./refresh-token.repository";
 import { TokenService } from "./token.service";
-import {
-  EmailAlreadyRegisteredError,
-  UserRepository,
-  type UserCredentials,
-} from "../user/user.repository";
+import { UserRepository, type UserCredentials } from "../user/user.repository";
+import { RealtimeService } from "../realtime/realtime.service";
 
 const config: AuthConfig = {
   accessSecret: "access-secret",
@@ -38,6 +36,7 @@ const credentials = {
   name: "Guest",
   email: "guest@example.com",
   password: "password123",
+  token: "a".repeat(64),
 };
 
 /**
@@ -48,13 +47,17 @@ const credentials = {
 class FakeUserRepository implements PublicOf<UserRepository> {
   readonly rows = new Map<string, UserCredentials>();
 
+  hasSessionVersion(id: string, version: number): Promise<boolean> {
+    return Promise.resolve(this.rows.get(id)?.sessionVersion === version);
+  }
+
   create(input: {
     name: string;
     email: string;
     passwordHash: string;
-  }): Promise<User> {
+  }): Promise<User | null> {
     if (this.rowByEmail(input.email) !== undefined) {
-      return Promise.reject(new EmailAlreadyRegisteredError(input.email));
+      return Promise.resolve(null);
     }
 
     const user: User = {
@@ -68,6 +71,7 @@ class FakeUserRepository implements PublicOf<UserRepository> {
     this.rows.set(user.id, {
       user,
       passwordHash: input.passwordHash,
+      sessionVersion: 0,
       blocked: false,
     });
 
@@ -144,7 +148,7 @@ class FakeRefreshTokenRepository implements PublicOf<RefreshTokenRepository> {
 
   constructor(private readonly userRepository: FakeUserRepository) {}
 
-  create(userId: string, token: IssuedRefreshToken): Promise<void> {
+  create(userId: string, token: IssuedRefreshToken): Promise<boolean> {
     this.rows.push({
       id: token.jti,
       userId,
@@ -154,7 +158,7 @@ class FakeRefreshTokenRepository implements PublicOf<RefreshTokenRepository> {
       revokedAt: null,
     });
 
-    return Promise.resolve();
+    return Promise.resolve(true);
   }
 
   findByHash(tokenHash: string): Promise<StoredRefreshToken | null> {
@@ -171,6 +175,7 @@ class FakeRefreshTokenRepository implements PublicOf<RefreshTokenRepository> {
       revokedAt: row.revokedAt,
       user: this.userRepository.get(row.userId),
       userBlocked: this.userRepository.isBlocked(row.userId),
+      sessionVersion: 0,
     });
   }
 
@@ -234,8 +239,10 @@ describe("AuthService", () => {
   let tokenService: TokenService;
   let userRepository: FakeUserRepository;
   let refreshTokenRepository: FakeRefreshTokenRepository;
+  const hasActiveLink = jest.fn().mockResolvedValue(true);
 
   beforeEach(async () => {
+    hasActiveLink.mockReset().mockResolvedValue(true);
     userRepository = new FakeUserRepository();
     refreshTokenRepository = new FakeRefreshTokenRepository(userRepository);
 
@@ -246,6 +253,19 @@ describe("AuthService", () => {
         TokenService,
         { provide: AUTH_CONFIG, useValue: config },
         { provide: UserRepository, useValue: userRepository },
+        { provide: RealtimeService, useValue: { publish: jest.fn() } },
+        {
+          provide: AccountMailRepository,
+          useValue: {
+            hasActiveLink,
+            register: (_token: string, name: string, passwordHash: string) =>
+              userRepository.create({
+                name,
+                email: credentials.email,
+                passwordHash,
+              }),
+          },
+        },
         { provide: RefreshTokenRepository, useValue: refreshTokenRepository },
       ],
     }).compile();
@@ -274,9 +294,24 @@ describe("AuthService", () => {
     return row;
   }
 
+  it.each(["completeRegistration", "resetPassword"] as const)(
+    "%s refuses an invalid link before hashing the password",
+    async (complete) => {
+      hasActiveLink.mockResolvedValue(false);
+      const hash = jest.spyOn(argon2, "hash");
+
+      await expect(refusalOf(service[complete](credentials))).resolves.toEqual({
+        status: 400,
+        code: "ACCOUNT_LINK_INVALID",
+      });
+
+      expect(hash).not.toHaveBeenCalled();
+    },
+  );
+
   describe("register", () => {
     it("stores a verifiable argon2 hash instead of the password", async () => {
-      const result = await service.register(credentials);
+      const result = await service.completeRegistration(credentials);
 
       const { passwordHash } = storedCredentials();
 
@@ -295,7 +330,7 @@ describe("AuthService", () => {
     });
 
     it("stores only the hash of the refresh token, never the token", async () => {
-      const result = await service.register(credentials);
+      const result = await service.completeRegistration(credentials);
 
       const [row] = refreshTokenRepository.rows;
 
@@ -306,15 +341,17 @@ describe("AuthService", () => {
       expect(row?.tokenHash).not.toBe(result.tokens.refreshToken);
     });
 
-    it("turns the unique violation on the email into 409", async () => {
-      await service.register(credentials);
+    it("returns a generic invalid link response when registration cannot be completed", async () => {
+      await service.completeRegistration(credentials);
 
-      await expect(service.register(credentials)).rejects.toThrow(
-        ConflictException,
+      await expect(service.completeRegistration(credentials)).rejects.toThrow(
+        BadRequestException,
       );
-      await expect(refusalOf(service.register(credentials))).resolves.toEqual({
-        status: 409,
-        code: "EMAIL_ALREADY_REGISTERED",
+      await expect(
+        refusalOf(service.completeRegistration(credentials)),
+      ).resolves.toEqual({
+        status: 400,
+        code: "ACCOUNT_LINK_INVALID",
       });
     });
 
@@ -329,7 +366,7 @@ describe("AuthService", () => {
 
       // The user and the refresh row are already written by this point: answering the
       // request with a 500 would hide a registration that in fact succeeded.
-      const result = await service.register(credentials);
+      const result = await service.completeRegistration(credentials);
 
       expect(result.user.email).toBe(credentials.email);
       expect(refreshTokenRepository.rows).toHaveLength(1);
@@ -339,7 +376,7 @@ describe("AuthService", () => {
 
   describe("login", () => {
     it("answers the same way for an unknown email and a wrong password", async () => {
-      await service.register(credentials);
+      await service.completeRegistration(credentials);
 
       const sessions = refreshTokenRepository.rows.length;
 
@@ -392,7 +429,7 @@ describe("AuthService", () => {
     });
 
     it("refuses a blocked account only once the password is right", async () => {
-      const registered = await service.register(credentials);
+      const registered = await service.completeRegistration(credentials);
       const sessions = refreshTokenRepository.rows.length;
 
       userRepository.block(registered.user.id);
@@ -414,7 +451,7 @@ describe("AuthService", () => {
     });
 
     it("opens a session for the right password", async () => {
-      const registered = await service.register(credentials);
+      const registered = await service.completeRegistration(credentials);
 
       const result = await service.login(credentials);
 
@@ -425,7 +462,7 @@ describe("AuthService", () => {
 
   describe("refresh", () => {
     it("revokes the presented token and issues a successor in the same family", async () => {
-      const session = await service.register(credentials);
+      const session = await service.completeRegistration(credentials);
       const spent = refreshTokenRepository.rows[0];
 
       const result = await service.refresh(session.tokens.refreshToken);
@@ -444,7 +481,7 @@ describe("AuthService", () => {
     });
 
     it("kills the whole family when a token that was already rotated comes back", async () => {
-      const session = await service.register(credentials);
+      const session = await service.completeRegistration(credentials);
       const familyId = refreshTokenRepository.rows[0]?.familyId ?? "";
 
       await service.refresh(session.tokens.refreshToken);
@@ -464,7 +501,7 @@ describe("AuthService", () => {
     });
 
     it("fails a refresh that lost the race without ending the family", async () => {
-      const session = await service.register(credentials);
+      const session = await service.completeRegistration(credentials);
       const familyId = refreshTokenRepository.rows[0]?.familyId ?? "";
 
       // What a double-clicked button produces: the row was still live when it was read
@@ -496,7 +533,7 @@ describe("AuthService", () => {
     });
 
     it("rejects a valid signature with no row behind it", async () => {
-      const user = await service.register(credentials);
+      const user = await service.completeRegistration(credentials);
       // Signed by the real key, never stored — a session that was logged out, or a user
       // whose rows are gone.
       const orphan = await tokenService.issuePair(user.user);
@@ -507,7 +544,7 @@ describe("AuthService", () => {
     });
 
     it("ends the family of a token that outlived the block of its account", async () => {
-      const session = await service.register(credentials);
+      const session = await service.completeRegistration(credentials);
       const familyId = refreshTokenRepository.rows[0]?.familyId ?? "";
 
       // Blocking deletes the rows; one that is still here was written by a login that
@@ -534,7 +571,7 @@ describe("AuthService", () => {
     });
 
     it("rejects a row that expired early without ending the family", async () => {
-      const session = await service.register(credentials);
+      const session = await service.completeRegistration(credentials);
       const stored = storedToken();
 
       // A signature that is still valid over a row that is not: the JWT carries its own
@@ -551,7 +588,7 @@ describe("AuthService", () => {
     });
 
     it("deletes the expired rows of that user, and only the expired ones", async () => {
-      const session = await service.register(credentials);
+      const session = await service.completeRegistration(credentials);
       const userId = session.user.id;
       const familyId = refreshTokenRepository.rows[0]?.familyId ?? "";
 
@@ -580,6 +617,7 @@ describe("AuthService", () => {
         email: "other@example.com",
         passwordHash: "hash",
       });
+      if (!stranger) throw new Error("The fixture email is already taken");
       const strangersExpired = randomUUID();
 
       refreshTokenRepository.seed({
@@ -609,7 +647,7 @@ describe("AuthService", () => {
     });
 
     it("treats a blocked account as an ended session while its access token is still signed", async () => {
-      const session = await service.register(credentials);
+      const session = await service.completeRegistration(credentials);
 
       userRepository.block(session.user.id);
 
@@ -621,7 +659,7 @@ describe("AuthService", () => {
 
   describe("logout", () => {
     it("revokes the family the token belongs to", async () => {
-      const session = await service.register(credentials);
+      const session = await service.completeRegistration(credentials);
       const familyId = refreshTokenRepository.rows[0]?.familyId ?? "";
 
       await service.logout(session.tokens.refreshToken);
@@ -634,7 +672,7 @@ describe("AuthService", () => {
     });
 
     it("stays silent when there is no usable token — logging out cannot fail", async () => {
-      const session = await service.register(credentials);
+      const session = await service.completeRegistration(credentials);
       const familyId = refreshTokenRepository.rows[0]?.familyId ?? "";
 
       await expect(service.logout(null)).resolves.toBeUndefined();

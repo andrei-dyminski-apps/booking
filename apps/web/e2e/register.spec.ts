@@ -1,15 +1,17 @@
-import { z } from "zod";
 import { expect, test } from "./fixtures";
+import { mailLink, readMail } from "./inbox";
 import { fillRegistration } from "./session";
 
 test("a new visitor registers and lands signed in under their own name", async ({
-  request,
   page,
   pages,
 }) => {
+  await page.addInitScript(() => {
+    Reflect.deleteProperty(URL, "parse");
+  });
   // New on every attempt: an address once registered stays taken.
   const name = "Robin Ashdown";
-  const email = `robin-${String(Date.now())}@e2e.example`;
+  const email = `robin-${String(Date.now())}@e2e.example.net`;
 
   await page.goto("/");
   await expect(
@@ -22,11 +24,11 @@ test("a new visitor registers and lands signed in under their own name", async (
   await expect(page).toHaveURL("/register");
   await expect(page).toHaveTitle(/^Create an account · /);
   await expect(
-    page.getByRole("button", { name: "Create account" }),
+    page.getByRole("button", { name: "Send sign-up link" }),
   ).toBeVisible();
   await pages.check();
 
-  await fillRegistration(page, name, email, "a-new-password");
+  await fillRegistration(page, pages, name, email, "a-new-password");
 
   await expect(page).toHaveURL("/profile");
 
@@ -35,65 +37,67 @@ test("a new visitor registers and lands signed in under their own name", async (
   await expect(details.getByText(name, { exact: true })).toBeVisible();
   await expect(details.getByText(email, { exact: true })).toBeVisible();
   await expect(
-    details.getByRole("button", { name: "Resend confirmation" }),
+    details.getByText("Email confirmed", { exact: true }),
   ).toBeVisible();
+  await expect(
+    details.getByRole("button", { name: "Resend confirmation" }),
+  ).toHaveCount(0);
   // The shell's link to the account, named after it.
   await expect(
     page.getByRole("link", { name: new RegExp(name) }),
   ).toBeVisible();
   await pages.check();
+});
 
-  const inbox = "http://127.0.0.1:8026/api/v1";
-  let letterId: string | undefined;
-  await expect
-    .poll(async () => {
-      const response = await request.get(inbox + "/search", {
-        params: { query: "to:" + email },
-      });
-      const results = z
-        .object({ messages: z.array(z.object({ ID: z.string() })) })
-        .parse(await response.json());
-      letterId = results.messages[0]?.ID;
-      return letterId;
-    })
-    .toBeTruthy();
-  const response = await request.get(inbox + "/message/" + String(letterId));
-  const letter = z.object({ Text: z.string() }).parse(await response.json());
-  const link = letter.Text.match(
-    /https?:\/\/[^\s]+\/confirm-email#[a-f0-9]{64}/,
-  )?.[0];
-  if (!link) throw new Error("Confirmation email has no link");
-  await page.goto(link);
+test("a member changes their email and resets their password through the inbox", async ({
+  page,
+  pages,
+}) => {
+  const stamp = String(Date.now());
+  const email = `account-${stamp}@e2e.example.net`;
+  const newEmail = `New-${stamp}@e2e.example.net`;
+  const password = "a-new-password";
+
+  await page.goto("/register");
   await pages.check();
-  const confirm = page.getByRole("button", { name: "Confirm email" });
-  const status = page.getByRole("main").getByRole("status");
-  pages.expectResponse({ status: 503, path: "/api/mail/confirm" });
-  await page.route(
-    "**/api/mail/confirm",
-    (route) =>
-      route.fulfill({
-        status: 503,
-        json: {
-          statusCode: 503,
-          code: "SERVICE_UNAVAILABLE",
-          message: "Confirmation is temporarily unavailable.",
-        },
-      }),
-    { times: 1 },
-  );
-  await confirm.click();
-  await expect(status).toHaveText("Confirmation is temporarily unavailable.");
-  await confirm.click();
-  await expect(
-    page.getByRole("heading", { name: "Email confirmed" }),
-  ).toBeVisible();
-  await expect(status).toBeEmpty();
-  await page.getByRole("link", { name: "Go to profile" }).click();
+  await fillRegistration(page, pages, "Robin Ashdown", email, password);
   await expect(page).toHaveURL("/profile");
-  await expect(
-    page.getByText("Email confirmed", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Resend confirmation" }),
-  ).toHaveCount(0);
+
+  await pages.check();
+
+  await page.getByLabel("New email").fill(newEmail);
+  await page.getByLabel("Current password").fill(password);
+  await page.getByRole("button", { name: "Send confirmation link" }).click();
+  await expect(page.getByText(/Your current email stays active/)).toBeVisible();
+  const changeLink = await mailLink(
+    newEmail,
+    "Confirm your new StayDesk email address",
+    "/confirm-email",
+  );
+  await page.goto(changeLink.href);
+  await pages.check();
+  await page.getByRole("button", { name: "Confirm email" }).click();
+  await page.getByRole("link", { name: "Sign in with your new email" }).click();
+  await expect(page).toHaveURL("/login");
+  await pages.check();
+  await readMail(email, "Your StayDesk email address changed");
+
+  await page.getByRole("link", { name: "Forgot password?" }).click();
+  await pages.check();
+  await page.getByLabel("Email", { exact: true }).fill(newEmail);
+  await page.getByRole("button", { name: "Send reset link" }).click();
+  await expect(page.getByText(/you’ll receive a link shortly/)).toBeVisible();
+  const resetLink = await mailLink(
+    newEmail,
+    "Reset your StayDesk password",
+    "/reset-password",
+  );
+  await page.goto(resetLink.href);
+  await pages.check();
+  await page
+    .getByLabel("New password", { exact: true })
+    .fill("a-replacement-password");
+  await page.getByRole("button", { name: "Reset password" }).click();
+  await expect(page.getByText(/Password updated/)).toBeVisible();
+  await pages.check();
 });

@@ -24,7 +24,7 @@ const LISTING = {
 /** A second owner, with listings nobody has stayed in. */
 const otherOwner = {
   name: "E2E Other Owner",
-  email: "e2e-other-owner@example.com",
+  email: "E2E-Other-Owner@example.com",
   password: "password123",
 };
 

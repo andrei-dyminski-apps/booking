@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { INestApplication } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import request from "supertest";
 import { App } from "supertest/types";
 import { apiErrorSchema, userSchema } from "@repo/contracts";
+import { addHours } from "date-fns";
 import { AppModule } from "./../src/app.module";
 import { PrismaService } from "./../src/prisma/prisma.service";
 import {
@@ -10,7 +12,22 @@ import {
   REFRESH_TOKEN_COOKIE,
 } from "./../src/auth/cookies";
 import { resetDatabase } from "./database";
-import { readSetCookie, signIn, testCredentials } from "./session";
+import {
+  readSetCookie,
+  signIn,
+  signInAs,
+  testCredentials as fixtureCredentials,
+} from "./session";
+import { DEMO_EMAILS } from "../src/auth/demo-accounts";
+import {
+  accountMailToken,
+  hashMailToken,
+} from "../src/mail/application/mail-content";
+import { MailOutboxRelay } from "../src/mail/infrastructure/mail-outbox.relay";
+import { EventStream } from "./event-stream";
+import { waitUntil } from "./wait-until";
+
+const testCredentials = { ...fixtureCredentials, email: "e2e@mail.test" };
 
 describe("AuthController (e2e)", () => {
   let app: INestApplication<App>;
@@ -30,14 +47,45 @@ describe("AuthController (e2e)", () => {
     await resetDatabase(app);
   });
 
+  async function registrationToken(email = testCredentials.email) {
+    await request(server).post("/auth/register").send({ email }).expect(202);
+    return accountMailToken((await sentLink("register", email)).id);
+  }
+
+  async function sentLink(
+    kind: "register" | "reset" | "change",
+    email: string,
+  ) {
+    const db = app.get(PrismaService);
+    await app.get(MailOutboxRelay).sweep();
+    await waitUntil(async () => {
+      const link = await db.accountMail.findFirst({
+        where: { email, kind, expiresAt: { gt: new Date() } },
+      });
+      return link !== null;
+    });
+    return db.accountMail.findFirstOrThrow({ where: { email, kind } });
+  }
+
+  async function endsEventStream(updateCredentials: () => Promise<unknown>) {
+    const stream = await EventStream.openAs(app, testCredentials);
+    try {
+      await expect(stream.next()).resolves.toMatchObject({ type: "sync" });
+      await updateCredentials();
+      await expect(stream.next()).rejects.toThrow("The stream ended");
+    } finally {
+      stream.close();
+    }
+  }
+
   afterEach(async () => {
     await app.close();
   });
 
   it("registers and hands the session over as two httpOnly cookies", async () => {
     const response = await request(server)
-      .post("/auth/register")
-      .send(testCredentials)
+      .post("/auth/register/complete")
+      .send({ ...testCredentials, token: await registrationToken() })
       .expect(201);
 
     const user = userSchema.parse(response.body);
@@ -60,26 +108,55 @@ describe("AuthController (e2e)", () => {
     expect(String(cookies)).toContain("Path=/auth");
   });
 
-  it("rejects a second registration of the same email with 409", async () => {
+  it("responds uniformly and reserves no account before the email link is completed", async () => {
+    const invalidRegistration = { ...testCredentials, next: "/profile\0" };
+    const invalidForUnknown = await request(server)
+      .post("/auth/register")
+      .send(invalidRegistration)
+      .expect(400);
+    expect(apiErrorSchema.parse(invalidForUnknown.body).errors).toEqual([
+      expect.objectContaining({ path: ["next"] }),
+    ]);
+
+    const unknown = await request(server)
+      .post("/auth/register")
+      .send(testCredentials)
+      .expect(202);
+    expect(readSetCookie(unknown, ACCESS_TOKEN_COOKIE)).toBeNull();
+    expect(await app.get(PrismaService).user.count()).toBe(0);
+    const token = await registrationToken();
+
     await request(server)
-      .post("/auth/register")
-      .send(testCredentials)
+      .post("/auth/register/complete")
+      .send({ ...testCredentials, token })
       .expect(201);
-
-    const response = await request(server)
+    const existing = await request(server)
       .post("/auth/register")
       .send(testCredentials)
-      .expect(409);
-
-    expect(apiErrorSchema.parse(response.body).code).toBe(
-      "EMAIL_ALREADY_REGISTERED",
+      .expect(202);
+    expect(existing.text).toBe(unknown.text);
+    expect(readSetCookie(existing, ACCESS_TOKEN_COOKIE)).toBeNull();
+    const invalidForExisting = await request(server)
+      .post("/auth/register")
+      .send(invalidRegistration)
+      .expect(400);
+    expect(apiErrorSchema.parse(invalidForExisting.body).errors).toEqual(
+      apiErrorSchema.parse(invalidForUnknown.body).errors,
     );
+    await request(server)
+      .post("/auth/register/complete")
+      .send({ ...testCredentials, token })
+      .expect(400);
   });
 
   it("rejects a password the contract schema refuses", async () => {
     const response = await request(server)
-      .post("/auth/register")
-      .send({ ...testCredentials, password: "short" })
+      .post("/auth/register/complete")
+      .send({
+        ...testCredentials,
+        token: await registrationToken(),
+        password: "short",
+      })
       .expect(400);
 
     const error = apiErrorSchema.parse(response.body);
@@ -96,8 +173,12 @@ describe("AuthController (e2e)", () => {
 
   it("rejects a name that is only whitespace", async () => {
     const response = await request(server)
-      .post("/auth/register")
-      .send({ ...testCredentials, name: "   " })
+      .post("/auth/register/complete")
+      .send({
+        ...testCredentials,
+        token: await registrationToken(),
+        name: "   ",
+      })
       .expect(400);
 
     const error = apiErrorSchema.parse(response.body);
@@ -109,8 +190,12 @@ describe("AuthController (e2e)", () => {
 
   it("rejects a name with no letter in it, however long", async () => {
     const response = await request(server)
-      .post("/auth/register")
-      .send({ ...testCredentials, name: "\u200b\u200b\u200b" })
+      .post("/auth/register/complete")
+      .send({
+        ...testCredentials,
+        token: await registrationToken(),
+        name: "\u200b\u200b\u200b",
+      })
       .expect(400);
 
     const error = apiErrorSchema.parse(response.body);
@@ -118,24 +203,204 @@ describe("AuthController (e2e)", () => {
     expect(error.errors).toEqual([expect.objectContaining({ path: ["name"] })]);
   });
 
-  it("normalises the email, so the address is stored and matched in one shape", async () => {
+  it("preserves the delivery address while matching the account case-insensitively", async () => {
+    const email = "E2E@MAIL.TEST";
     await request(server)
-      .post("/auth/register")
-      .send({ ...testCredentials, email: "E2E@Example.COM" })
+      .post("/auth/register/complete")
+      .send({ ...testCredentials, token: await registrationToken(email) })
       .expect(201);
 
     const response = await request(server)
       .post("/auth/login")
       .send(testCredentials)
       .expect(200);
+    expect(userSchema.parse(response.body).email).toBe("E2E@mail.test");
+  });
 
+  it("reuses sign-up links only for the same spelling of the delivery address", async () => {
+    const firstEmail = "E2E@mail.test";
+    await registrationToken(firstEmail);
+    const { email } = testCredentials;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await request(server).post("/auth/register").send({ email }).expect(202);
+    }
+
+    const db = app.get(PrismaService);
+    const links = await db.accountMail.findMany({
+      where: { kind: "register" },
+    });
+    expect(links.map(({ email }) => email).sort()).toEqual([
+      firstEmail,
+      testCredentials.email,
+    ]);
+    const correctedLink = links.find((link) => link.email === email);
+    if (!correctedLink) throw new Error("Missing corrected sign-up letter");
+    await waitUntil(async () => {
+      const link = await db.accountMail.findUnique({
+        where: { id: correctedLink.id },
+      });
+      return link?.expiresAt != null;
+    });
+    const response = await request(server)
+      .post("/auth/register/complete")
+      .send({ ...testCredentials, token: accountMailToken(correctedLink.id) })
+      .expect(201);
     expect(userSchema.parse(response.body).email).toBe(testCredentials.email);
+    expect(await db.accountMail.count({ where: { kind: "register" } })).toBe(0);
+  });
+
+  it("resets a verified account once and ends its access and refresh sessions", async () => {
+    const agent = request.agent(server);
+    await agent
+      .post("/auth/register/complete")
+      .send({ ...testCredentials, token: await registrationToken() })
+      .expect(201);
+
+    const unknown = await request(server)
+      .post("/auth/password/reset/request")
+      .send({ email: "unknown@mail.test" })
+      .expect(202);
+    const known = await request(server)
+      .post("/auth/password/reset/request")
+      .send({ email: testCredentials.email.toUpperCase() })
+      .expect(202);
+    expect(known.text).toBe(unknown.text);
+
+    const db = app.get(PrismaService);
+    const pending = await sentLink("reset", testCredentials.email);
+    expect(pending.email).toBe(testCredentials.email);
+    const token = accountMailToken(pending.id);
+    const password = "a-different-password";
+    const other = await signIn(app, fixtureCredentials);
+    await endsEventStream(async () => {
+      const response = await other
+        .post("/auth/password/reset/complete")
+        .send({ token, password })
+        .expect(204);
+      expect(readSetCookie(response, ACCESS_TOKEN_COOKIE)).toBeNull();
+      expect(readSetCookie(response, REFRESH_TOKEN_COOKIE)).toBeNull();
+    });
+    await other.get("/auth/me").expect(200);
+    await other.post("/auth/refresh").expect(200);
+    await request(server)
+      .post("/auth/password/reset/complete")
+      .send({ token, password })
+      .expect(400);
+    await agent.get("/auth/me").expect(401);
+    await agent.post("/auth/refresh").expect(401);
+    await request(server).post("/auth/login").send(testCredentials).expect(401);
+    await request(server)
+      .post("/auth/login")
+      .send({ email: testCredentials.email, password })
+      .expect(200);
+    expect(
+      await db.accountMail.count({
+        where: { kind: "passwordChanged", email: testCredentials.email },
+      }),
+    ).toBe(1);
+  });
+
+  it("requires the current password and confirmation before replacing the email address", async () => {
+    const agent = request.agent(server);
+    await agent
+      .post("/auth/register/complete")
+      .send({ ...testCredentials, token: await registrationToken() })
+      .expect(201);
+
+    const email = "New+address@mail.test";
+    await agent
+      .post("/auth/email/change/request")
+      .send({ email, password: "incorrect" })
+      .expect(403);
+    const supersededEmail = "previous-request@mail.test";
+    await agent
+      .post("/auth/email/change/request")
+      .send({ email: supersededEmail, password: testCredentials.password })
+      .expect(202);
+    const superseded = await sentLink("change", supersededEmail);
+    await agent
+      .post("/auth/email/change/request")
+      .send({ email, password: testCredentials.password })
+      .expect(202);
+    const revoked = await request(server)
+      .post("/auth/email/change/complete")
+      .send({ token: accountMailToken(superseded.id) })
+      .expect(400);
+    expect(apiErrorSchema.parse(revoked.body).code).toBe(
+      "ACCOUNT_LINK_INVALID",
+    );
+    const current = await agent.get("/auth/me").expect(200);
+    expect(userSchema.parse(current.body).email).toBe(testCredentials.email);
+
+    const db = app.get(PrismaService);
+    const pending = await sentLink("change", email);
+    const token = accountMailToken(pending.id);
+    await endsEventStream(async () => {
+      const response = await agent
+        .post("/auth/email/change/complete")
+        .send({ token })
+        .expect(204);
+      expect(readSetCookie(response, ACCESS_TOKEN_COOKIE)).toBe("");
+      expect(readSetCookie(response, REFRESH_TOKEN_COOKIE)).toBe("");
+    });
+    await request(server)
+      .post("/auth/email/change/complete")
+      .send({ token })
+      .expect(400);
+    await agent.get("/auth/me").expect(401);
+    await agent.post("/auth/refresh").expect(401);
+    await request(server).post("/auth/login").send(testCredentials).expect(401);
+    const signedIn = await request(server)
+      .post("/auth/login")
+      .send({ email, password: testCredentials.password })
+      .expect(200);
+    expect(userSchema.parse(signedIn.body).email).toBe(email);
+    expect(
+      await db.accountMail.count({
+        where: { kind: "emailChanged", email: testCredentials.email },
+      }),
+    ).toBe(1);
+  });
+
+  it("refuses new email-change requests and previously issued links for the demo admin", async () => {
+    const credentials = { ...fixtureCredentials, email: DEMO_EMAILS.admin };
+    const agent = await signInAs(app, "ADMIN", credentials);
+    const email = "another-address@mail.test";
+    await agent
+      .post("/auth/email/change/request")
+      .send({ email, password: credentials.password })
+      .expect(403);
+    const db = app.get(PrismaService);
+    expect(await db.accountMail.count({ where: { kind: "change" } })).toBe(0);
+
+    const { id: userId, sessionVersion } = await db.user.findUniqueOrThrow({
+      where: { email: credentials.email },
+    });
+    const id = randomUUID();
+    const token = accountMailToken(id);
+    await db.accountMail.create({
+      data: {
+        id,
+        kind: "change",
+        email,
+        userId,
+        sessionVersion,
+        tokenHash: hashMailToken(token),
+        expiresAt: addHours(new Date(), 24),
+      },
+    });
+    await request(server)
+      .post("/auth/email/change/complete")
+      .send({ token })
+      .expect(400);
+    const current = await agent.get("/auth/me").expect(200);
+    expect(userSchema.parse(current.body).email).toBe(credentials.email);
   });
 
   it("answers a wrong password with 401 and the same message as an unknown email", async () => {
     await request(server)
-      .post("/auth/register")
-      .send(testCredentials)
+      .post("/auth/register/complete")
+      .send({ ...testCredentials, token: await registrationToken() })
       .expect(201);
 
     const wrongPassword = await request(server)
@@ -181,7 +446,7 @@ describe("AuthController (e2e)", () => {
     // The guard is Passport's, which names no code: the filter answers with the status's.
     expect(apiErrorSchema.parse(refused.body).code).toBe("UNAUTHORIZED");
 
-    const agent = await signIn(app);
+    const agent = await signIn(app, testCredentials);
     const response = await agent.get("/auth/me").expect(200);
 
     expect(userSchema.parse(response.body).email).toBe(testCredentials.email);
@@ -194,8 +459,8 @@ describe("AuthController (e2e)", () => {
   it("rotates the refresh token: the previous one stops working", async () => {
     const agent = request.agent(server);
     const registered = await agent
-      .post("/auth/register")
-      .send(testCredentials)
+      .post("/auth/register/complete")
+      .send({ ...testCredentials, token: await registrationToken() })
       .expect(201);
 
     const firstToken = readSetCookie(registered, REFRESH_TOKEN_COOKIE);
@@ -213,8 +478,8 @@ describe("AuthController (e2e)", () => {
   it("kills the whole chain when a spent refresh token is replayed", async () => {
     const agent = request.agent(server);
     const registered = await agent
-      .post("/auth/register")
-      .send(testCredentials)
+      .post("/auth/register/complete")
+      .send({ ...testCredentials, token: await registrationToken() })
       .expect(201);
 
     const stolenToken = readSetCookie(registered, REFRESH_TOKEN_COOKIE);
@@ -255,8 +520,8 @@ describe("AuthController (e2e)", () => {
     // row is gone (a logout only revokes the family, which reads as a replay instead).
     const agent = request.agent(server);
     const registered = await agent
-      .post("/auth/register")
-      .send(testCredentials)
+      .post("/auth/register/complete")
+      .send({ ...testCredentials, token: await registrationToken() })
       .expect(201);
     const token = readSetCookie(registered, REFRESH_TOKEN_COOKIE) ?? "";
 
@@ -273,7 +538,7 @@ describe("AuthController (e2e)", () => {
   });
 
   it("answers an ended session with SESSION_NOT_FOUND once the row behind a signed token is gone", async () => {
-    const agent = await signIn(app);
+    const agent = await signIn(app, testCredentials);
 
     await app
       .get(PrismaService)
@@ -286,8 +551,8 @@ describe("AuthController (e2e)", () => {
 
   it("tells a blocked account so only once the password is right", async () => {
     await request(server)
-      .post("/auth/register")
-      .send(testCredentials)
+      .post("/auth/register/complete")
+      .send({ ...testCredentials, token: await registrationToken() })
       .expect(201);
     await app.get(PrismaService).user.update({
       where: { email: testCredentials.email },
@@ -310,8 +575,8 @@ describe("AuthController (e2e)", () => {
   it("never mints two sessions out of two parallel refreshes", async () => {
     const agent = request.agent(server);
     const registered = await agent
-      .post("/auth/register")
-      .send(testCredentials)
+      .post("/auth/register/complete")
+      .send({ ...testCredentials, token: await registrationToken() })
       .expect(201);
 
     const token = readSetCookie(registered, REFRESH_TOKEN_COOKIE) ?? "";
@@ -333,7 +598,7 @@ describe("AuthController (e2e)", () => {
   });
 
   it("logs out: the cookies are cleared and the session cannot be refreshed", async () => {
-    const agent = await signIn(app);
+    const agent = await signIn(app, testCredentials);
 
     await agent.post("/auth/logout").expect(204);
     await agent.get("/auth/me").expect(401);
@@ -361,8 +626,8 @@ describe("AuthController (e2e)", () => {
   it("clears the cookies when a refresh fails, so the dead token is not retried forever", async () => {
     const agent = request.agent(server);
     const registered = await agent
-      .post("/auth/register")
-      .send(testCredentials)
+      .post("/auth/register/complete")
+      .send({ ...testCredentials, token: await registrationToken() })
       .expect(201);
 
     const spent = readSetCookie(registered, REFRESH_TOKEN_COOKIE);
@@ -382,8 +647,8 @@ describe("AuthController (e2e)", () => {
 
   it("limits the guesses: the eleventh login in a minute is a 429", async () => {
     await request(server)
-      .post("/auth/register")
-      .send(testCredentials)
+      .post("/auth/register/complete")
+      .send({ ...testCredentials, token: await registrationToken() })
       .expect(201);
 
     const attempt = () =>

@@ -4,12 +4,14 @@ import { describeNotification } from "@repo/contracts";
 import { canConfirm, canSendCopy, groupOf } from "../domain/mail-policy";
 import {
   hashMailToken,
+  accountMailToken,
   renderLetter,
   replyAddress,
   signature,
 } from "./mail-content";
 import {
   MAIL_SEND_ATTEMPTS,
+  MailAccountDeliveryStopped,
   MailAttemptsExhausted,
   MailRetryExpired,
   type DeliverySnapshot,
@@ -37,7 +39,9 @@ export class MailDeliveryService {
     const started =
       task.kind === "digest"
         ? await this.startDigest(task, attempt, production)
-        : await this.startMail(task, attempt, production);
+        : task.kind === "account"
+          ? await this.startAccountMail(task, attempt)
+          : await this.startMail(task, attempt, production);
     if (!started) return;
     // Account and conversation locks may have outlasted the worker's initial check.
     if (
@@ -47,7 +51,7 @@ export class MailDeliveryService {
     )
       throw new MailRetryExpired();
     try {
-      await this.mailGateway.send(started.delivery.request, key);
+      return await this.mailGateway.send(started.delivery.request, key);
     } catch (error) {
       if (
         started.attempt === MAIL_SEND_ATTEMPTS &&
@@ -56,6 +60,44 @@ export class MailDeliveryService {
         throw new MailAttemptsExhausted(error);
       throw error;
     }
+  }
+
+  private async startAccountMail(task: QueuedMail, attempt: MailAttempt) {
+    const action = await this.mailRepository.accountMail(task.id);
+    if (!action) return;
+
+    let suppressionCheckedAt: Date | undefined;
+    if (action.kind === "reset" && action.userId) {
+      const user = await this.mailRepository.user(action.userId);
+      if (!user?.emailVerifiedAt || user.email !== action.email) return;
+      if (user.emailUndeliverableAt) {
+        suppressionCheckedAt = new Date();
+        if (await this.mailGateway.isSuppressed(action.email))
+          throw new MailAccountDeliveryStopped(
+            "Account recovery email is suppressed",
+          );
+      }
+    }
+
+    let delivery = attempt.delivery;
+    if (!delivery) {
+      const token = accountMailToken(action.id);
+      if (action.tokenHash && hashMailToken(token) !== action.tokenHash) return;
+      const letter = accountLetter(action.kind, token, action.nextPath);
+      if (!letter) return;
+      delivery =
+        (await this.outbox.freezeDelivery(task, {
+          kind: "account",
+          request: this.mailGateway.prepare({ ...letter, to: action.email }),
+        })) ?? null;
+    }
+    if (delivery?.kind !== "account") return;
+    const started = await this.mailRepository.startAccountMail(
+      task,
+      action.userId,
+      suppressionCheckedAt,
+    );
+    if (started) return { delivery, ...started };
   }
 
   private async startMail(
@@ -69,7 +111,8 @@ export class MailDeliveryService {
       if (!candidate) return;
       delivery = (await this.outbox.freezeDelivery(task, candidate)) ?? null;
     }
-    if (!delivery || delivery.kind === "digest") return;
+    if (!delivery || delivery.kind === "digest" || delivery.kind === "account")
+      return;
     const started = await this.startSending(
       task,
       delivery,
@@ -123,7 +166,7 @@ export class MailDeliveryService {
 
   private async startSending(
     task: QueuedMail,
-    delivery: Exclude<DeliverySnapshot, { kind: "digest" }>,
+    delivery: Exclude<DeliverySnapshot, { kind: "digest" | "account" }>,
     issuedAt: Date,
     production: boolean,
   ) {
@@ -239,5 +282,44 @@ export class MailDeliveryService {
         };
       },
     );
+  }
+}
+
+function accountLetter(kind: string, token: string, nextPath: string | null) {
+  switch (kind) {
+    case "register": {
+      const next = nextPath
+        ? "?" + new URLSearchParams({ next: nextPath }).toString()
+        : "";
+      return renderLetter(
+        "Finish creating your StayDesk account",
+        "Open this link within 24 hours to choose your password and finish signing up.",
+        "/complete-registration" + next + "#" + token,
+      );
+    }
+    case "reset":
+      return renderLetter(
+        "Reset your StayDesk password",
+        "Open this link within 30 minutes to choose a new password. If you did not request a reset, you can ignore this email.",
+        "/reset-password#" + token,
+      );
+    case "change":
+      return renderLetter(
+        "Confirm your new StayDesk email address",
+        "Open this link within 24 hours to change your account email address.",
+        "/confirm-email?change=1#" + token,
+      );
+    case "emailChanged":
+      return renderLetter(
+        "Your StayDesk email address changed",
+        "Your account now uses a different email address. If you did not make this change, contact support@staydesk.dev.",
+        "/",
+      );
+    case "passwordChanged":
+      return renderLetter(
+        "Your StayDesk password changed",
+        "Your existing sessions have ended. If you did not make this change, contact support@staydesk.dev.",
+        "/login",
+      );
   }
 }

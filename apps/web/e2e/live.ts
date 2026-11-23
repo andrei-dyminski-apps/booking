@@ -7,13 +7,7 @@ import type { Account } from "./demo";
  */
 export const LIVE_ORIGIN = "https://booking-beige-five.vercel.app";
 
-/**
- * The suite's two accounts on the live demo. An account there can never be deleted, so the
- * suite registers these two once — on the first run that finds them missing — and signs in
- * to them on every run after; it registers nothing else. Their password is
- * `E2E_LIVE_PASSWORD`, a secret: one written here is one anybody could sign in with and
- * change.
- */
+/** The suite uses its dedicated accounts unless replacement inboxes are configured. */
 export const LIVE_ACCOUNTS = {
   guest: { name: "Ines Calder", email: "browser-suite-guest@e2e.example" },
   host: { name: "Oskar Lund", email: "browser-suite-host@e2e.example" },
@@ -40,6 +34,11 @@ export function livePassword(): string {
 export function liveAccount(role: keyof typeof LIVE_ACCOUNTS): Account {
   return {
     ...LIVE_ACCOUNTS[role],
+    email:
+      (role === "guest"
+        ? process.env.E2E_LIVE_GUEST_EMAIL
+        : process.env.E2E_LIVE_HOST_EMAIL
+      )?.trim() || LIVE_ACCOUNTS[role].email,
     get password() {
       return livePassword();
     },

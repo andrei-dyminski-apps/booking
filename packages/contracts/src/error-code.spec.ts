@@ -2,7 +2,12 @@ import { addDays, format, parseISO } from "date-fns";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { adminRefundSchema } from "./adjustment.js";
-import { loginSchema, registerFormSchema, registerSchema } from "./auth.js";
+import {
+  completeRegistrationSchema,
+  loginSchema,
+  registerFormSchema,
+  registerSchema,
+} from "./auth.js";
 import {
   bookingQuerySchema,
   cancelBookingSchema,
@@ -70,7 +75,7 @@ describe("rule", () => {
     expect(
       issuesOf(registerFormSchema, {
         name: "Ann",
-        email: "ann@example.com",
+        token: "a".repeat(64),
         password: "long enough",
         confirmPassword: "different",
       }),
@@ -97,19 +102,26 @@ describe("toApiIssue", () => {
 
   it("names the rule of every refusal in the auth schemas", () => {
     expect(
-      issuesOf(registerSchema, { name: "", email: "nope", password: "short" }),
+      issuesOf(completeRegistrationSchema, {
+        token: "a".repeat(64),
+        name: "",
+        password: "short",
+      }),
     ).toEqual([
       { path: ["name"], message: "Enter your name", code: "NAME_REQUIRED" },
-      {
-        path: ["email"],
-        message: "Invalid email address",
-        code: "EMAIL_INVALID",
-      },
       {
         path: ["password"],
         message: "Password must be at least 8 characters long",
         code: "PASSWORD_TOO_SHORT",
         params: { minimum: 8 },
+      },
+    ]);
+
+    expect(issuesOf(registerSchema, { email: "nope" })).toEqual([
+      {
+        path: ["email"],
+        message: "Invalid email address",
+        code: "EMAIL_INVALID",
       },
     ]);
 

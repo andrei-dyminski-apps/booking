@@ -11,19 +11,22 @@ describe("ResendGateway", () => {
   afterEach(() => jest.restoreAllMocks());
 
   it("sends both bodies and the reply address with the job's idempotency key", async () => {
+    const providerId = "8b146471-e88e-4322-86af-016cd36fd216";
     const fetch = jest
       .spyOn(globalThis, "fetch")
-      .mockResolvedValue(new Response("{}"));
+      .mockResolvedValue(Response.json({ id: providerId }));
     const letter = {
       to: "guest@mail.test",
       subject: "Stay",
       text: "Details",
       html: "<p>Details</p>",
     };
-    await gateway.send(
-      gateway.prepare({ ...letter, replyTo: "reply+signed@mail.test" }),
-      "notice-1",
-    );
+    await expect(
+      gateway.send(
+        gateway.prepare({ ...letter, replyTo: "reply+signed@mail.test" }),
+        "notice-1",
+      ),
+    ).resolves.toBe(providerId);
     const [url, options] = fetch.mock.calls[0] ?? [];
     expect(url).toBe("https://api.resend.com/emails");
     expect(options).toMatchObject({

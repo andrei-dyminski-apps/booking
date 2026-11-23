@@ -13,5 +13,7 @@ export function toLocalPath(
 ): string {
   if (typeof value !== "string") return fallback;
 
-  return /^\/(?![/\\])/.test(value) ? value : fallback;
+  return /^\/(?![/\\])/.test(value) && !/[\t\r\n]/u.test(value)
+    ? value
+    : fallback;
 }

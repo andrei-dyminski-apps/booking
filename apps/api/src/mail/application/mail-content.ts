@@ -12,6 +12,10 @@ export function signature(value: string): string {
     .update("staydesk-mail/" + value)
     .digest("hex");
 }
+export function accountMailToken(id: string) {
+  return signature("account/" + id);
+}
+
 export function replyAddress(messageId: string, deliveryRound = 0) {
   const domain = process.env.MAIL_REPLY_DOMAIN;
   if (!domain) return undefined;

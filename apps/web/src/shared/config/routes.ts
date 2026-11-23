@@ -36,6 +36,7 @@ export const ROUTES = {
   accountDeleted: `/?${ACCOUNT_DELETED_PARAM.key}=${ACCOUNT_DELETED_PARAM.value}`,
   login: "/login",
   register: "/register",
+  forgotPassword: "/forgot-password",
   profile: "/profile",
   catalogue: "/listings",
   waitlist: "/waitlist",

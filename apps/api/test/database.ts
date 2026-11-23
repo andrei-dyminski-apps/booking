@@ -24,6 +24,7 @@ export async function resetDatabase(app: INestApplication<App>): Promise<void> {
   // a later spec reuses would be skipped as already handled.
   await prismaService.paymentEvent.deleteMany();
   await prismaService.mailEvent.deleteMany();
+  await prismaService.accountMail.deleteMany();
   await prismaService.mailOutbox.deleteMany();
   // Lets go of its booking (`SetNull`) rather than going with it, and a refund id a later
   // spec reuses would be skipped as recorded.

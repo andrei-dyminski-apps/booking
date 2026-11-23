@@ -28,7 +28,7 @@ export async function liveSession(
   const context = await request.newContext({ baseURL: LIVE_ORIGIN });
 
   try {
-    await signInOrRegister(context, role);
+    await signIn(context, role);
   } catch (error) {
     await context.dispose();
     throw error;
@@ -37,13 +37,8 @@ export async function liveSession(
   return context;
 }
 
-/**
- * Signs in to one of the suite's accounts, and registers it the first time the demo has
- * none. An address taken by somebody else refuses the secret, and a blocked account
- * refuses the sign-in: both fail the run — a finding about an open demo, not a hole for the
- * suite to climb out of.
- */
-async function signInOrRegister(
+/** Signs in to a dedicated account provisioned for the live suite. */
+async function signIn(
   context: APIRequestContext,
   role: keyof typeof LIVE_ACCOUNTS,
 ): Promise<void> {
@@ -62,27 +57,8 @@ async function signInOrRegister(
     );
   }
 
-  if (signIn.status() !== 401) {
-    throw new Error(
-      `Signing in as the suite's ${role} was answered ${String(signIn.status())}: ${await signIn.text()}`,
-    );
-  }
-
-  await signInSlot();
-  const registration = await context.post("/api/auth/register", {
-    data: account,
-  });
-
-  if (registration.ok()) return;
-
-  if (registration.status() === 409) {
-    throw new Error(
-      `${account.email} is taken on the live demo and refuses E2E_LIVE_PASSWORD: the suite's ${role} is somebody else's account, or its password was changed`,
-    );
-  }
-
   throw new Error(
-    `Registering the suite's ${role} was answered ${String(registration.status())}: ${await registration.text()}`,
+    `Signing in as the suite's ${role} was answered ${String(signIn.status())}. Verify the provisioned account and E2E_LIVE_PASSWORD.`,
   );
 }
 

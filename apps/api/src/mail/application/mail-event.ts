@@ -11,6 +11,21 @@ export function inboundRecipients(
   ];
 }
 
+export function isSuppressionEvent(kind: string): boolean {
+  return (
+    kind === "email.bounced" ||
+    kind === "email.complained" ||
+    kind === "email.suppressed"
+  );
+}
+
+export const MAIL_DELIVERY_OUTCOMES = [
+  "email.delivered",
+  "email.failed",
+  "email.bounced",
+  "email.suppressed",
+];
+
 export const MAIL_EVENT_ATTEMPTS = 24;
 
 export type MailEventInput = {
@@ -19,7 +34,13 @@ export type MailEventInput = {
   emailId: string;
   createdAt: Date;
   recipients: string[];
+  providerFailureReason?: string | null;
 };
+
+export type MailDeliveryOutcome = Pick<
+  MailEventInput,
+  "emailId" | "kind" | "createdAt" | "providerFailureReason"
+>;
 
 export type StoredMailEventInput = MailEventInput & {
   replyTokenHash: string | null;

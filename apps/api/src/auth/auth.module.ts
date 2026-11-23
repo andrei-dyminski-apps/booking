@@ -2,7 +2,9 @@ import { Module } from "@nestjs/common";
 import { JwtModule } from "@nestjs/jwt";
 import { PassportModule } from "@nestjs/passport";
 import { PrismaModule } from "../prisma/prisma.module";
+import { RealtimeModule } from "../realtime/realtime.module";
 import { AUTH_CONFIG, loadAuthConfig } from "./auth.config";
+import { AccountMailRepository } from "./account-mail.repository";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { JwtStrategy } from "./jwt.strategy";
@@ -13,6 +15,7 @@ import { UserModule } from "../user/user.module";
 @Module({
   imports: [
     PrismaModule,
+    RealtimeModule,
     // The accounts a session is opened for; the table and its repository are that module's.
     UserModule,
     PassportModule,
@@ -24,6 +27,7 @@ import { UserModule } from "../user/user.module";
   providers: [
     { provide: AUTH_CONFIG, useFactory: loadAuthConfig },
     AuthService,
+    AccountMailRepository,
     TokenService,
     RefreshTokenRepository,
     JwtStrategy,

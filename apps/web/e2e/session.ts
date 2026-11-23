@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { expect, type Pages } from "./fixtures";
 import { DEMO_PASSWORD, GUEST, type Account } from "./demo";
 import { signInSlot } from "./pace";
+import { registrationLink } from "./inbox";
 import { TARGET } from "./target";
 
 /** Signs in through the form on the page that is open — `/login` or where a gate sent the visitor. */
@@ -68,13 +69,13 @@ export async function registerThroughForm(
   const password = "a-new-password";
   const account: Account = {
     name,
-    email: `${name.toLowerCase().replaceAll(/\W+/g, "-")}-${String(Date.now())}@e2e.example`,
+    email: `${name.toLowerCase().replaceAll(/\W+/g, "-")}-${String(Date.now())}@e2e.example.net`,
     password,
   };
 
   await page.goto("/register");
   await pages.check(page);
-  await fillRegistration(page, account.name, account.email, password);
+  await fillRegistration(page, pages, account.name, account.email, password);
 
   await expect(page).toHaveURL("/profile");
   await pages.check(page);
@@ -82,15 +83,23 @@ export async function registerThroughForm(
   return account;
 }
 
-/** On the sign-up page: fills the form in, the password twice, and creates the account. */
+/** Starts registration and follows the Mailpit link before choosing credentials. */
 export async function fillRegistration(
   page: Page,
+  pages: Pages,
   name: string,
   email: string,
   password: string,
 ): Promise<void> {
-  await page.getByLabel("Name", { exact: true }).fill(name);
   await page.getByLabel("Email", { exact: true }).fill(email);
+  await page.getByRole("button", { name: "Send sign-up link" }).click();
+  await expect(
+    page.getByText(/you’ll receive a sign-up link shortly/),
+  ).toBeVisible();
+  const link = await registrationLink(email);
+  await page.goto(link.href);
+  await pages.check(page);
+  await page.getByLabel("Name", { exact: true }).fill(name);
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByLabel("Repeat password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Create account" }).click();

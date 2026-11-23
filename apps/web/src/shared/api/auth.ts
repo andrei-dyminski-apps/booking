@@ -2,10 +2,14 @@ import { cache } from "react";
 import { z } from "zod";
 import { notFound, redirect } from "next/navigation";
 import {
+  authRequestAcceptedSchema,
   userSchema,
   type DeleteAccountInput,
   type LoginInput,
   type RegisterInput,
+  type CompleteRegistrationInput,
+  type RequestEmailChangeInput,
+  type ResetPasswordInput,
   type Role,
   type User,
 } from "@repo/contracts";
@@ -22,7 +26,7 @@ import { mirrorSessionCookies } from "./session-cookies";
  * Which side calls which route is decided by the scope of the cookie it needs, not by
  * taste:
  *
- * - `register` and `login` are handed a session rather than asked for one, so they can run
+ * - `completeRegistration` and `login` are handed a session rather than asked for one, so they can run
  *   anywhere a cookie can be written — that is the server, from the Server Actions of the
  *   forms that submit to them, and `mirrorSessionCookies` is passed the answer directly.
  * - `logout` needs the refresh token, and only the browser is ever handed one: it is
@@ -39,13 +43,58 @@ import { mirrorSessionCookies } from "./session-cookies";
  *   tokens it cannot see from there are deleted by the API, every family at once.
  */
 export const authApi = {
-  register: (input: RegisterInput): Promise<User> =>
+  register: (input: RegisterInput) =>
     apiRequest({
       method: "POST",
       path: "/auth/register",
+      schema: authRequestAcceptedSchema,
+      body: input,
+      retryOnUnauthorized: false,
+    }),
+
+  completeRegistration: (input: CompleteRegistrationInput): Promise<User> =>
+    apiRequest({
+      method: "POST",
+      path: "/auth/register/complete",
       schema: userSchema,
       body: input,
       onResponse: mirrorSessionCookies,
+      retryOnUnauthorized: false,
+    }),
+
+  requestPasswordReset: (email: string) =>
+    apiRequest({
+      method: "POST",
+      path: "/auth/password/reset/request",
+      schema: authRequestAcceptedSchema,
+      body: { email },
+      retryOnUnauthorized: false,
+    }),
+
+  resetPassword: (input: ResetPasswordInput) =>
+    apiRequest({
+      method: "POST",
+      path: "/auth/password/reset/complete",
+      schema: z.void(),
+      body: input,
+      onResponse: mirrorSessionCookies,
+      retryOnUnauthorized: false,
+    }),
+
+  requestEmailChange: (input: RequestEmailChangeInput) =>
+    apiRequest({
+      method: "POST",
+      path: "/auth/email/change/request",
+      schema: authRequestAcceptedSchema,
+      body: input,
+    }),
+
+  confirmEmailChange: (token: string) =>
+    apiRequest({
+      method: "POST",
+      path: "/auth/email/change/complete",
+      schema: z.void(),
+      body: { token },
       retryOnUnauthorized: false,
     }),
 

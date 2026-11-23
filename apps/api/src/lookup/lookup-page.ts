@@ -69,7 +69,7 @@ export function toLookupPage<Row>(
  * reason `lookupQuerySchema` states. Read with the contract's own rule for an id, so what
  * counts as "a uuid" here is what the filter it fills in will accept.
  */
-function idIn(q: string): string | null {
+export function idIn(q: string): string | null {
   const id = lookupOptionSchema.shape.id.safeParse(q);
 
   return id.success ? id.data : null;

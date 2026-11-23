@@ -17,6 +17,7 @@ const eventSchema = z.object({
     bcc: z.array(z.string()).nullish(),
     received_for: z.array(z.string()).nullish(),
     bounce: z.object({ type: z.string() }).optional(),
+    failed: z.object({ reason: z.string() }).optional().catch(undefined),
   }),
 });
 
@@ -34,6 +35,10 @@ export function readResendMailEvent(
   const { type, data, created_at } = eventSchema.parse(body);
   if (
     type !== "email.received" &&
+    type !== "email.sent" &&
+    type !== "email.delivered" &&
+    type !== "email.delivery_delayed" &&
+    type !== "email.failed" &&
     type !== "email.complained" &&
     type !== "email.suppressed" &&
     !(
@@ -51,5 +56,8 @@ export function readResendMailEvent(
       type === "email.received" ? (data.created_at ?? created_at) : created_at,
     ),
     recipients: type === "email.received" ? inboundRecipients(data) : data.to,
+    ...(type === "email.failed" && {
+      providerFailureReason: data.failed?.reason,
+    }),
   };
 }

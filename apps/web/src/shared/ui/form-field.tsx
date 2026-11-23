@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useId, useState, type ReactNode } from "react";
 import {
   useFormState,
   type FieldValues,
@@ -64,9 +64,7 @@ export type FormControl<Name extends string> = UseFormRegisterReturn<Name> & {
  * case, and a reference to an element that is not there is read as no description rather
  * than as an empty one.
  *
- * The ids are derived from the name rather than being it, for the reason `FilterField`
- * beside it gives: a label pointing at a bare `from` would follow whatever else on the
- * page ends up carrying that id.
+ * Fields with the same name can appear in different forms on the same page.
  */
 export const FormField = <
   Values extends FieldValues,
@@ -108,7 +106,7 @@ export const FormField = <
     return initial === undefined ? undefined : String(initial);
   });
 
-  const id = `field-${name}`;
+  const id = useId();
   const hint = hintOf(id, description);
   const countId = typeof limit === "number" ? `${id}-count` : undefined;
   const errorId = messages === undefined ? undefined : `${id}-error`;

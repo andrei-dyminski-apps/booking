@@ -1,11 +1,4 @@
-import { tz } from "@date-fns/tz";
-import {
-  addDays,
-  addMonths,
-  addSeconds,
-  startOfDay,
-  startOfMonth,
-} from "date-fns";
+import { addSeconds } from "date-fns";
 import { createTransport } from "nodemailer";
 import { z } from "zod";
 
@@ -22,6 +15,7 @@ import {
   type MailRequest,
   type ReceivedLetter,
 } from "../application/ports/mail-gateway";
+import { resendQuotaRetryAt } from "./resend-quota";
 
 const received = z.object({
   to: z.array(z.string()),
@@ -48,7 +42,6 @@ const wireLetter = z.object({
   headers: z.record(z.string(), z.string()),
 });
 const resendError = z.object({ name: z.string() });
-const utc = { in: tz("UTC") };
 
 async function resendErrorName(response: Response) {
   const result = resendError.safeParse(
@@ -93,7 +86,12 @@ export class ResendGateway extends MailGateway {
       headers: { "Idempotency-Key": key },
       body,
     });
-    await response.body?.cancel();
+    const receipt = z
+      .object({ id: z.uuid() })
+      .safeParse(await response.json().catch(() => undefined));
+    if (!receipt.success)
+      throw new MailDeliveryError("Resend returned no valid email ID");
+    return receipt.data.id;
   }
   async receive(id: string) {
     const response = await this.request(
@@ -146,18 +144,12 @@ export class ResendGateway extends MailGateway {
         response.status === 429
       ) {
         const name = await resendErrorName(response);
-        if (
-          name === "daily_quota_exceeded" ||
-          name === "monthly_quota_exceeded"
-        ) {
-          const providerTime = Date.parse(response.headers.get("date") ?? "");
-          const at = Number.isNaN(providerTime) ? Date.now() : providerTime;
-          throw new MailQuotaError(
-            name === "daily_quota_exceeded"
-              ? startOfDay(addDays(at, 1, utc), utc)
-              : startOfMonth(addMonths(at, 1, utc), utc),
-          );
-        }
+        const providerTime = Date.parse(response.headers.get("date") ?? "");
+        const at = new Date(
+          Number.isNaN(providerTime) ? Date.now() : providerTime,
+        );
+        const retryAt = resendQuotaRetryAt(name, at);
+        if (retryAt) throw new MailQuotaError(retryAt);
         if (name === "rate_limit_exceeded") {
           const seconds = ["retry-after", "ratelimit-reset"]
             .map((header) => Number(response.headers.get(header)))
@@ -240,7 +232,7 @@ export class InMemoryMailGateway extends MailGateway {
       process.env.MAIL_FROM || "staydesk@mail.test",
     );
   }
-  send(request: MailRequest, key: string) {
+  send(request: MailRequest, key: string): Promise<string | void> {
     const letter = readMailRequest(request);
     if (!this.suppressed.has(letter.to)) this.sent.set(key, letter);
     return Promise.resolve();

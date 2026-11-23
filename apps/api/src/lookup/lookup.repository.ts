@@ -2,21 +2,11 @@ import { Injectable } from "@nestjs/common";
 import type { LookupOption, LookupQuery } from "@repo/contracts";
 import { againstListingsOf } from "../booking/infrastructure/booking-where";
 import type { Page } from "../common/paging";
-import type { Prisma } from "../generated/prisma/client";
-import { STILL_OFFERED } from "../listing/listing.repository";
+import { Prisma } from "../generated/prisma/client";
 import { escapeLike } from "../prisma/escape-like";
 import { PrismaService } from "../prisma/prisma.service";
 import type { LookupCursor } from "./lookup-cursor";
-import { lookupConditions, toLookupPage } from "./lookup-page";
-
-/**
- * Whether a lookup of accounts may match and show their addresses: an admin's may, a
- * host's may not. Two named values rather than a bare boolean, so a call site says which.
- */
-const WITH_ADDRESS = "withAddress";
-const NAME_ONLY = "nameOnly";
-
-type Addresses = typeof WITH_ADDRESS | typeof NAME_ONLY;
+import { idIn, lookupConditions, toLookupPage } from "./lookup-page";
 
 /**
  * The queries behind the filter boxes: accounts by their name — and by their address, for
@@ -28,9 +18,8 @@ type Addresses = typeof WITH_ADDRESS | typeof NAME_ONLY;
  * each belongs to, because a lookup is a query of its own — two columns, a search and a
  * keyset — and nothing of the row mapping those repositories keep. Listings could not be
  * read there in any case: the lookup offers retired ones, and every read of
- * `ListingRepository` is narrowed to what is still on offer. What crosses in is the
- * `where` of other repositories — `STILL_OFFERED` and `againstListingsOf` — so "on offer"
- * and "an owner's stays" keep the one definition they already have.
+ * `ListingRepository` is narrowed to what is still on offer. `againstListingsOf` keeps
+ * the owner's lookups aligned with their stays.
  *
  * Every lookup is a named method rather than a `where` handed in by the service, for the
  * reason `BookingRepository` gives its three scopes: a role the service does not handle
@@ -46,8 +35,9 @@ export class LookupRepository {
     cursor: LookupCursor | null,
   ): Promise<Page<LookupOption>> {
     return this.findAccounts(
-      { listings: { some: STILL_OFFERED } },
-      WITH_ADDRESS,
+      Prisma.sql`EXISTS (
+        SELECT 1 FROM listings WHERE owner_id = u.id AND deleted_at IS NULL
+      )`,
       query,
       cursor,
     );
@@ -63,8 +53,10 @@ export class LookupRepository {
     cursor: LookupCursor | null,
   ): Promise<Page<LookupOption>> {
     return this.findAccounts(
-      { listings: { some: { bookings: { some: {} } } } },
-      WITH_ADDRESS,
+      Prisma.sql`EXISTS (
+        SELECT 1 FROM listings AS l JOIN bookings AS b ON b.listing_id = l.id
+        WHERE l.owner_id = u.id
+      )`,
       query,
       cursor,
     );
@@ -76,8 +68,7 @@ export class LookupRepository {
     cursor: LookupCursor | null,
   ): Promise<Page<LookupOption>> {
     return this.findAccounts(
-      { bookings: { some: {} } },
-      WITH_ADDRESS,
+      Prisma.sql`EXISTS (SELECT 1 FROM bookings WHERE guest_id = u.id)`,
       query,
       cursor,
     );
@@ -88,17 +79,32 @@ export class LookupRepository {
    * the address of a guest is not the host's to read, so it is neither matched nor handed
    * back (see `lookupOptionSchema`).
    */
-  findGuestsOfListingOwner(
+  async findGuestsOfListingOwner(
     ownerId: string,
     query: LookupQuery,
     cursor: LookupCursor | null,
   ): Promise<Page<LookupOption>> {
-    return this.findAccounts(
-      { bookings: { some: againstListingsOf(ownerId) } },
-      NAME_ONLY,
-      query,
-      cursor,
-    );
+    const rows = await this.prismaService.user.findMany({
+      where: {
+        AND: [
+          { bookings: { some: againstListingsOf(ownerId) } },
+          ...lookupConditions(
+            (name, id): Prisma.UserWhereInput => ({ name, id }),
+            { name: { contains: escapeLike(query.q), mode: "insensitive" } },
+            query,
+            cursor,
+          ),
+        ],
+      },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+      take: query.limit + 1,
+      select: { id: true, name: true },
+    });
+    return toLookupPage(rows, query.limit, (row) => ({
+      id: row.id,
+      label: row.name,
+      hint: null,
+    }));
   }
 
   /**
@@ -141,51 +147,34 @@ export class LookupRepository {
   }
 
   /**
-   * Accounts by a part of their name, regardless of case — a name is stored as its owner
-   * typed it — through `users_name_trgm_idx`, ordered by the name with the id behind it.
-   * Where the caller may read addresses, a part of one matches too and is handed back as
-   * the hint. That half is case-sensitive for the reason `userFilters` in
-   * `user.repository.ts` gives — every stored address is lower-case, so the term is
-   * lower-cased instead of the column — and `users_email_trgm_idx` serves it; Postgres
-   * reads an `OR` of the two as a union of the two indexes.
+   * Admins can match names and addresses through the two text trigram indexes.
    */
   private async findAccounts(
-    scope: Prisma.UserWhereInput,
-    addresses: Addresses,
+    scope: Prisma.Sql,
     query: LookupQuery,
     cursor: LookupCursor | null,
   ): Promise<Page<LookupOption>> {
-    const byName: Prisma.UserWhereInput = {
-      name: { contains: escapeLike(query.q), mode: "insensitive" },
-    };
-    const rows = await this.prismaService.user.findMany({
-      where: {
-        AND: [
-          scope,
-          ...lookupConditions(
-            (name, id): Prisma.UserWhereInput => ({ name, id }),
-            addresses === WITH_ADDRESS
-              ? {
-                  OR: [
-                    byName,
-                    { email: { contains: escapeLike(query.q.toLowerCase()) } },
-                  ],
-                }
-              : byName,
-            query,
-            cursor,
-          ),
-        ],
-      },
-      orderBy: [{ name: "asc" }, { id: "asc" }],
-      take: query.limit + 1,
-      select: { id: true, name: true, email: true },
-    });
+    const id = idIn(query.q);
+    const pattern = `%${escapeLike(query.q)}%`;
+    const matches = id
+      ? Prisma.sql`u.id = ${id}::uuid`
+      : Prisma.sql`(u.name ILIKE ${pattern} OR u.email::text ILIKE ${pattern})`;
+    const after = cursor
+      ? Prisma.sql`AND (u.name, u.id) > (${cursor.label}, ${cursor.id}::uuid)`
+      : Prisma.empty;
+    const rows = await this.prismaService.$queryRaw<
+      { id: string; name: string; email: string }[]
+    >`
+      SELECT u.id, u.name, u.email::text AS email FROM users AS u
+      WHERE ${scope} AND ${matches} ${after}
+      ORDER BY u.name, u.id
+      LIMIT ${query.limit + 1}
+    `;
 
     return toLookupPage(rows, query.limit, (row) => ({
       id: row.id,
       label: row.name,
-      hint: addresses === WITH_ADDRESS ? row.email : null,
+      hint: row.email,
     }));
   }
 
