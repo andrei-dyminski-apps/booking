@@ -280,6 +280,7 @@ describe("What the money paths set aside (e2e)", () => {
           where: { id: bookingId },
           include: { listing: true },
         });
+
       const refundIds = async (search: string) =>
         refundFailurePageSchema
           .parse(
@@ -322,6 +323,7 @@ describe("What the money paths set aside (e2e)", () => {
               .expect(200)
           ).body,
         );
+
       const first = await page("");
       const second = await page(`&cursor=${first.nextCursor ?? ""}`);
 
@@ -496,6 +498,7 @@ describe("What the money paths set aside (e2e)", () => {
           where: { id: bookingId },
           include: { listing: true },
         });
+
       const stuckIds = async (search: string) =>
         stuckStayPageSchema
           .parse(
@@ -536,6 +539,7 @@ describe("What the money paths set aside (e2e)", () => {
           where: { id: bookingId },
           include: { listing: true },
         });
+
       const stuckIds = async (search: string) =>
         stuckStayPageSchema
           .parse(

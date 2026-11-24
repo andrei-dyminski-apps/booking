@@ -239,6 +239,7 @@ async function openMatters(
 }> {
   const asGuest = { guestId: userId } satisfies Prisma.BookingWhereInput;
   const asHost = againstListingsOf(userId);
+
   const anyStay = async (where: Prisma.BookingWhereInput): Promise<boolean> =>
     (await tx.booking.count({ where })) > 0;
 

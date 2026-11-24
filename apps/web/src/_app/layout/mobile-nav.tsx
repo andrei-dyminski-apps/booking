@@ -34,9 +34,11 @@ import { UnreadConversationsDot } from "./unread-conversations-badge";
  */
 export const MobileNav = ({ user }: { user: User | null }) => {
   const [open, setOpen] = useState(false);
+
   const close = () => {
     setOpen(false);
   };
+
   const offersMessages = navigationFor(user).some(
     (item) => item.href === ROUTES.messages,
   );

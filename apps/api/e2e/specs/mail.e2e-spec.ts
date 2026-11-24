@@ -94,17 +94,20 @@ describe("Transactional mail", () => {
     if (initial.domain === undefined) delete process.env.MAIL_REPLY_DOMAIN;
     else process.env.MAIL_REPLY_DOMAIN = initial.domain;
   });
+
   async function confirm() {
     const token = await confirmationToken();
     await host.post("/mail/confirm").send({ token }).expect(204);
     await host.post("/mail/confirm").send({ token }).expect(400);
   }
+
   async function enableMail(...groups: MailGroup[]) {
     const muted = mailGroupSchema.options.filter(
       (group) => !groups.includes(group),
     );
     await host.patch("/mail/settings").send({ muted }).expect(204);
   }
+
   async function confirmationToken() {
     let token: string | undefined;
     await waitUntil(() => {
@@ -117,6 +120,7 @@ describe("Transactional mail", () => {
     if (!token) throw new Error("Missing confirmation token");
     return token;
   }
+
   function tokenFrom(text?: string) {
     return text?.match(/confirm-email#([a-f0-9]{64})/)?.[1];
   }
@@ -188,6 +192,7 @@ describe("Transactional mail", () => {
       .set("svix-signature", valid ? signature : "invalid")
       .send(payload);
   }
+
   async function waitForEvent(id: string) {
     const db = app.get(PrismaService);
     await waitUntil(
@@ -725,6 +730,7 @@ describe("Transactional mail", () => {
       const providerId = randomUUID();
       const eventId = randomUUID();
       const reason = "reached_daily_quota";
+
       const sendFailure = () =>
         webhook(
           "email.failed",
@@ -736,6 +742,7 @@ describe("Transactional mail", () => {
           undefined,
           reason,
         ).expect(200);
+
       const send = jest
         .spyOn(gateway, "send")
         .mockImplementationOnce(async () => {
@@ -948,7 +955,9 @@ describe("Transactional mail", () => {
   it("lets the account be erased while the provider is still sending", async () => {
     await confirm();
     await enableMail("waitlist");
+
     let release: () => void = () => undefined;
+
     const finish = new Promise<void>((resolve) => {
       release = resolve;
     });
@@ -1611,8 +1620,10 @@ describe("Transactional mail", () => {
     ).expect(200);
     await waitForEvent(eventId);
     const path = "/conversations/" + thread.id;
+
     const readThread = async () =>
       conversationSchema.parse((await host.get(path).expect(200)).body);
+
     expect(await readThread()).toMatchObject({
       unread: true,
       lastMessage: { sender: "HOST", body: "Noon works." },

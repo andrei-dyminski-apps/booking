@@ -214,8 +214,10 @@ export class MailDeliveryService {
     production: boolean,
   ) {
     const { id, deliveryRound } = task;
+
     const eligible = (user: Parameters<typeof canSendCopy>[0]) =>
       canSendCopy(user, "messages", production);
+
     const frozen = attempt.delivery;
     if (frozen && frozen.kind !== "digest") return;
     if (frozen && !attempt.rebuildDigest) {

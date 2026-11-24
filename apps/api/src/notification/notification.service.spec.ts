@@ -263,6 +263,7 @@ describe("NotificationService", () => {
     await service.notify(BOB, requested("not Alice's"));
 
     const first = await service.findPage(ALICE, searchFor({ limit: "2" }));
+
     const titles = (page: Notification[]): string[] =>
       page.map((notification) =>
         "listingTitle" in notification.data

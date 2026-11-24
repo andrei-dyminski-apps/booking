@@ -12,6 +12,7 @@ export function signature(value: string): string {
     .update("staydesk-mail/" + value)
     .digest("hex");
 }
+
 export function accountMailToken(id: string) {
   return signature("account/" + id);
 }
@@ -28,6 +29,7 @@ export function replyAddress(messageId: string, deliveryRound = 0) {
     hash: hashMailToken(token),
   };
 }
+
 export function replyTokenHash(address: string) {
   const match = /^reply\+([0-9a-f]{48})@([^@]+)$/i.exec(address);
   const token = match?.[1];
@@ -36,6 +38,7 @@ export function replyTokenHash(address: string) {
     ? hashMailToken(token.toLowerCase())
     : null;
 }
+
 export function mailSiteOrigin(): string {
   const origin =
     normalizeWebOrigin(process.env.SITE_ORIGIN) ??
@@ -64,6 +67,7 @@ export function renderLetter(subject: string, detail: string, path: string) {
       '">Open in StayDesk</a>',
   };
 }
+
 function escapeHtml(value: string) {
   return value
     .replaceAll("&", "&amp;")

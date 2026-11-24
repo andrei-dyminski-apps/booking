@@ -132,6 +132,7 @@ function useHoldMoment(now: string): string {
 
   useEffect(() => {
     const lead = serverLead(now);
+
     const tick = () => {
       setMoment(addMilliseconds(Date.now(), lead).toISOString());
     };

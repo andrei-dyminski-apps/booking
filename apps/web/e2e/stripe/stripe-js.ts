@@ -77,6 +77,7 @@ export function installStripeStandIn(train: string): void {
           if (type !== "payment") unplayed(`the ${type} element`)();
 
           const handlers = new Map<string, Set<Handler>>();
+
           const emit = (event: string, payload: unknown) => {
             handlers.get(event)?.forEach((handler) => {
               handler(payload);

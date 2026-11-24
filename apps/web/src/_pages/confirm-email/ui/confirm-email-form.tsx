@@ -13,6 +13,7 @@ export function ConfirmEmailForm({ change = false }: { change?: boolean }) {
   const [pending, setPending] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [refreshing, startTransition] = useTransition();
+
   async function confirm() {
     setMessage("");
     setPending(true);
@@ -40,6 +41,7 @@ export function ConfirmEmailForm({ change = false }: { change?: boolean }) {
       setPending(false);
     }
   }
+
   return (
     <section className="mx-auto grid max-w-md gap-4">
       <h1 className="text-2xl font-semibold">

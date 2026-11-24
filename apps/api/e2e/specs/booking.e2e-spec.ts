@@ -274,6 +274,7 @@ describe("BookingController (e2e)", () => {
   it("refuses a hold on terms other than the ones the guest was shown, and takes it on the ones they were", async () => {
     const versionOf = (body: unknown): string =>
       listingSchema.parse(body).updatedAt;
+
     const shown = versionOf(
       (await guest.get(`/listings/${input.listingId}`).expect(200)).body,
     );

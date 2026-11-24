@@ -18,3 +18,5 @@ Formatting is checked by ESLint itself: every preset ends with `eslint-plugin-pr
 The position matters: in a flat config the last entry wins, so `eslint-plugin-prettier/recommended` has to come after every rule set. A new rule set is added to a preset **before** it.
 
 A rule every package needs goes into `base.js`. A new preset is created per stack, not per package.
+
+The base preset uses ESLint Stylistic to require a blank line around function declarations, variables initialized with functions, and class methods. TypeScript overload signatures can stay together with their implementation. `pnpm lint:fix` adds the missing blank lines.

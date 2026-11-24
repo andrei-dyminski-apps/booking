@@ -16,6 +16,7 @@ export const notificationRoutes = {
   guestReviews: (id: string) =>
     "/guests/" + encodeURIComponent(id) + "/reviews",
 } as const;
+
 function setAsideHref(list: string, filter: Record<string, string>) {
   return (
     notificationRoutes.adminPayments +
@@ -26,15 +27,18 @@ function setAsideHref(list: string, filter: Record<string, string>) {
     }).toString()
   );
 }
+
 const dates = new Intl.DateTimeFormat("en-GB", {
   day: "numeric",
   month: "short",
   year: "numeric",
   timeZone: "UTC",
 });
+
 function formatDay(day: string) {
   return dates.format(parseISO(day, { in: tz("UTC") }));
 }
+
 function formatMoney(amount: Cents, currency: Currency) {
   const formatter = new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -44,9 +48,11 @@ function formatMoney(amount: Cents, currency: Currency) {
     amount / 10 ** (formatter.resolvedOptions().maximumFractionDigits ?? 2),
   );
 }
+
 function countOf(count: number, noun: string) {
   return String(count) + " " + noun + (count === 1 ? "" : "s");
 }
+
 /** A notification as a person reads it: what happened, the detail, and where to look. */
 export type NotificationText = {
   title: string;

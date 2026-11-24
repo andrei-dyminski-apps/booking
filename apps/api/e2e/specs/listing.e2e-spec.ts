@@ -698,6 +698,7 @@ describe("ListingController (e2e)", () => {
         }),
       );
     };
+
     const read = async (id: string) =>
       listingSchema.parse(
         (await anyone().get(`/listings/${id}`).expect(200)).body,

@@ -144,6 +144,7 @@ export class MailProcessor extends WorkerHost implements OnModuleDestroy {
       ),
     );
   }
+
   @OnWorkerEvent("error") error(error: Error) {
     this.outage.report(error, this.worker.getBackend());
   }

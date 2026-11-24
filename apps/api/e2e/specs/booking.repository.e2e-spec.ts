@@ -197,6 +197,7 @@ describe("BookingRepository foreign keys (e2e)", () => {
    */
   it("holds a stay's discount and a listing's rate to the contract's bounds", async () => {
     let week = 0;
+
     const stay = (
       amountCents: number,
       discountCents: number,

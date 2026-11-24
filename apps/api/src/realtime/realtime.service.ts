@@ -164,6 +164,7 @@ export class RealtimeService implements OnModuleDestroy {
   ): Observable<RealtimeEvent> {
     return new Observable<RealtimeEvent>((subscriber) => {
       const channel = this.join(userId);
+
       const listener: Listener = (event) => subscriber.next(event);
 
       channel.listeners.add(listener);

@@ -138,6 +138,7 @@ describe("PayoutRepository settlement lease (e2e)", () => {
 
   it("lets the lease go when the work is done, and when it throws", async () => {
     const bookingId = await stay(1);
+
     const lease = async () =>
       (
         await prismaService.booking.findUniqueOrThrow({
@@ -700,6 +701,7 @@ describe("The money columns of a paid stay (e2e)", () => {
         send: cents(40_800 - Math.min(40_800, owedFees)),
         withheld: cents(Math.min(40_800, owedFees)),
       });
+
       const reserved = () =>
         prismaService.booking.findUniqueOrThrow({
           where: { id: bookingId },

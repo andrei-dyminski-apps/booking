@@ -458,6 +458,7 @@ describe("StripePaymentGateway authorizations", () => {
 
   it("reads an authorization off its webhook, and one with nothing left to take as no news", () => {
     const signer = new Stripe(config.secretKey);
+
     const delivery = (status: string) => {
       const payload = JSON.stringify({
         id: `evt_${status}`,

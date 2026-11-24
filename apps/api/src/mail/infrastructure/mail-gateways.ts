@@ -77,9 +77,11 @@ export class ResendGateway extends MailGateway {
   ) {
     super();
   }
+
   prepare(letter: Letter) {
     return prepareRequest(letter, this.from);
   }
+
   async send({ body }: MailRequest, key: string) {
     const response = await this.request("/emails", {
       method: "POST",
@@ -93,6 +95,7 @@ export class ResendGateway extends MailGateway {
       throw new MailDeliveryError("Resend returned no valid email ID");
     return receipt.data.id;
   }
+
   async receive(id: string) {
     const response = await this.request(
       "/emails/receiving/" + encodeURIComponent(id) + "?html_format=cid",
@@ -100,6 +103,7 @@ export class ResendGateway extends MailGateway {
     );
     return received.parse(await response.json());
   }
+
   override async sentRecipients(id: string) {
     const response = await this.request(
       "/emails/" + encodeURIComponent(id),
@@ -108,6 +112,7 @@ export class ResendGateway extends MailGateway {
     return z.object({ to: z.array(z.string()) }).parse(await response.json())
       .to;
   }
+
   override async isSuppressed(email: string) {
     try {
       const response = await this.request(
@@ -123,6 +128,7 @@ export class ResendGateway extends MailGateway {
       throw error;
     }
   }
+
   private async request(
     path: string,
     init: RequestInit,
@@ -182,6 +188,7 @@ export class ResendGateway extends MailGateway {
 }
 export class MailpitGateway extends MailGateway {
   private readonly transport;
+
   constructor(
     url: string,
     private readonly from: string,
@@ -194,9 +201,11 @@ export class MailpitGateway extends MailGateway {
     smtp.searchParams.set("socketTimeout", "5000");
     this.transport = createTransport(smtp.href);
   }
+
   prepare(letter: Letter) {
     return prepareRequest(letter, this.from);
   }
+
   async send(request: MailRequest, key: string) {
     try {
       await this.transport.sendMail({
@@ -207,14 +216,17 @@ export class MailpitGateway extends MailGateway {
       throw new MailDeliveryError("Mailpit did not accept the message");
     }
   }
+
   receive(): Promise<ReceivedLetter> {
     return Promise.reject(
       new MailDeliveryError("Mailpit has no Resend inbox", 404),
     );
   }
+
   sentRecipients(): Promise<string[]> {
     return Promise.resolve([]);
   }
+
   isSuppressed(): Promise<boolean> {
     return Promise.resolve(false);
   }
@@ -223,20 +235,24 @@ export class InMemoryMailGateway extends MailGateway {
   readonly sent = new Map<string, ReturnType<typeof readMailRequest>>();
   readonly received = new Map<string, ReceivedLetter>();
   readonly suppressed = new Set<string>();
+
   isSuppressed(email: string) {
     return Promise.resolve(this.suppressed.has(email));
   }
+
   prepare(letter: Letter) {
     return prepareRequest(
       letter,
       process.env.MAIL_FROM || "staydesk@mail.test",
     );
   }
+
   send(request: MailRequest, key: string): Promise<string | void> {
     const letter = readMailRequest(request);
     if (!this.suppressed.has(letter.to)) this.sent.set(key, letter);
     return Promise.resolve();
   }
+
   receive(id: string) {
     const letter = this.received.get(id);
     if (!letter)
@@ -245,11 +261,13 @@ export class InMemoryMailGateway extends MailGateway {
       );
     return Promise.resolve(letter);
   }
+
   sentRecipients(id: string) {
     const letter = this.sent.get(id);
     return Promise.resolve(letter ? [letter.to] : []);
   }
 }
+
 export function mailGateway(): MailGateway {
   if (process.env.NODE_ENV === "test") return new InMemoryMailGateway();
   const from = process.env.MAIL_FROM || "staydesk@mail.local";

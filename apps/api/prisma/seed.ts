@@ -230,6 +230,7 @@ function moneyOf(index: number, from: Date, to: Date, nonRefundable = false) {
   }
 
   const day = (date: Date) => format(date, "yyyy-MM-dd", { in: tz("UTC") });
+
   const priced: PricedListing = {
     pricePerNightCents: cents(listing.pricePerNightCents),
     pricing: {

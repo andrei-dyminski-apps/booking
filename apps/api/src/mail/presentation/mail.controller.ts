@@ -30,6 +30,7 @@ export class MailController {
   settings(@CurrentUser() user: AuthenticatedUser) {
     return this.mailService.settings(user.id);
   }
+
   @Patch("settings")
   @HttpCode(204)
   @ApiOperation({ summary: "Change your email preferences" })
@@ -40,6 +41,7 @@ export class MailController {
   ) {
     return this.mailService.preferences(user.id, body.muted);
   }
+
   @Post("resend")
   @Throttle({ default: { ttl: minutes(10), limit: 3 } })
   @HttpCode(204)
@@ -53,6 +55,7 @@ export class MailController {
   resend(@CurrentUser() user: AuthenticatedUser) {
     return this.mailService.resend(user.id);
   }
+
   @Public()
   @Post("confirm")
   @HttpCode(204)

@@ -33,6 +33,7 @@ export function readCookie(req: Request, name: string): string | null {
 
   return parseCookie(header)[name] ?? null;
 }
+
 export function setAuthCookies(
   res: Response,
   config: AuthConfig,

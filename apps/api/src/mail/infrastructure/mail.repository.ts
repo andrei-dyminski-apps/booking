@@ -55,12 +55,14 @@ export class MailRepository {
     private readonly prismaService: PrismaService,
     private readonly outbox: MailOutboxRepository,
   ) {}
+
   user(id: string) {
     return this.prismaService.user.findFirst({
       where: { id, deletedAt: null, blockedAt: null },
       select: recipientSelect,
     });
   }
+
   async preferences(id: string, muted: MailGroup[]) {
     const result = await this.prismaService.user.updateMany({
       where: { id, deletedAt: null, blockedAt: null },
@@ -68,6 +70,7 @@ export class MailRepository {
     });
     if (!result.count) throw sessionNotFound();
   }
+
   // Token writes and delivery start serialize with account changes.
   private async lockRecipient(tx: Prisma.TransactionClient, id: string) {
     const [locked] = await tx.$queryRaw<{ sessionVersion: number }[]>`
@@ -347,12 +350,14 @@ export class MailRepository {
       return true;
     });
   }
+
   async notice(id: string, userId: string) {
     const row = await this.prismaService.notification.findFirst({
       where: { id, userId },
     });
     return row ? notificationContentSchema.parse(row) : null;
   }
+
   private async issueReply(
     tx: Prisma.TransactionClient,
     userId: string,
@@ -377,6 +382,7 @@ export class MailRepository {
       skipDuplicates: true,
     });
   }
+
   async replyTarget(hash: string, receivedAt: Date) {
     const reply = await this.prismaService.mailReplyToken.findFirst({
       where: {
@@ -400,6 +406,7 @@ export class MailRepository {
       ? { user: reply.user, threadId: reply.message.conversationId }
       : null;
   }
+
   // Under the conversation lock, summarize unread incoming messages through
   // the latest one, or through the original cutoff when retrying.
   private async digest(
@@ -440,6 +447,7 @@ export class MailRepository {
     `;
     return digest;
   }
+
   async recipientIds(addresses: string[], at: Date) {
     if (!addresses.length) return [];
     const users = await this.prismaService.user.findMany({
@@ -493,6 +501,7 @@ export class MailRepository {
       select: { processedAt: true, failedAt: true },
     });
   }
+
   async claim(): Promise<MailEvent | undefined> {
     const [event] = await this.prismaService.$queryRaw<MailEvent[]>`
       UPDATE mail_events AS event
@@ -513,6 +522,7 @@ export class MailRepository {
     `;
     return event;
   }
+
   async suppress(event: MailEvent, recipientIds: string[]) {
     await this.prismaService.$transaction(async (tx) => {
       if (!(await this.done(event, tx))) return;
@@ -555,6 +565,7 @@ export class MailRepository {
         await this.outbox.resolveDelivery(tx, event);
     });
   }
+
   async done(
     event: MailEvent,
     db: Prisma.TransactionClient = this.prismaService,
@@ -570,12 +581,14 @@ export class MailRepository {
     });
     return count === 1;
   }
+
   setAside(event: MailEvent, reason: string) {
     return this.prismaService.mailEvent.updateMany({
       where: activeMailClaim(event),
       data: { failedAt: new Date(), lastError: reason },
     });
   }
+
   retry(event: MailEvent) {
     return this.prismaService.mailEvent.updateMany({
       where: activeMailClaim(event),

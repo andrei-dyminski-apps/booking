@@ -502,6 +502,7 @@ describe("Payments (e2e)", () => {
             .expect(201)
         ).body as { id: string }
       ).id;
+
     const book = (listingId: string, from: number, rate?: string) =>
       guest
         .post("/bookings")

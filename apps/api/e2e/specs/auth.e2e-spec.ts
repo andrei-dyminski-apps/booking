@@ -580,6 +580,7 @@ describe("AuthController (e2e)", () => {
       .expect(201);
 
     const token = readSetCookie(registered, REFRESH_TOKEN_COOKIE) ?? "";
+
     const refresh = () =>
       request(server)
         .post("/auth/refresh")

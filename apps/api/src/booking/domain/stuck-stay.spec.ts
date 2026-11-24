@@ -121,6 +121,7 @@ describe("owedOnStuck", () => {
 describe("shareOutHostFees", () => {
   const OTHER_HOST = "8f2b4e3a-3c4d-4e5f-8a7b-1c2d3e4f5a62";
   const nothingReserved = { reservedCents: null, feeWithheldCents: NO_CENTS };
+
   const stayOf = (id: string, hostId = stay.hostId) => ({
     booking: { ...stay, id, hostId },
     payout: nothingReserved,

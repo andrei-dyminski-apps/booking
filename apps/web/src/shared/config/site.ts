@@ -44,4 +44,5 @@ export function siteOrigin(): string {
 export function siteUrl(path: string): string {
   return `${siteOrigin()}${path}`;
 }
+
 import { normalizeWebOrigin } from "@repo/contracts";

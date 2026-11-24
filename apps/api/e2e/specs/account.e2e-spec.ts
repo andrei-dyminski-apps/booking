@@ -754,6 +754,7 @@ describe("AccountController (e2e)", () => {
         .expect(204);
 
       const payoutRepository = app.get(PayoutRepository);
+
       const enabled = async (): Promise<boolean> =>
         (
           await prismaService.user.findUniqueOrThrow({
@@ -1029,6 +1030,7 @@ describe("AccountController (e2e)", () => {
           `Never saw ${String(count)} statements waiting on a lock`,
         );
       };
+
       let started: Promise<request.Response> | undefined;
       let erased: Promise<request.Response> | undefined;
 

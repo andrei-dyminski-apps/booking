@@ -27,9 +27,11 @@ export class MailQueue implements OnApplicationShutdown {
     const outage = new RedisOutage(this.logger, "Mail queue");
     queue.on("error", (error) => outage.report(error, queue.getBackend()));
   }
+
   async onApplicationShutdown() {
     await this.queue.disconnect();
   }
+
   async schedule(
     task: PendingMail,
   ): Promise<"pending" | "finished" | "unavailable"> {

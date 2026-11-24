@@ -93,6 +93,7 @@ export async function sweep(
   host: APIRequestContext,
 ): Promise<void> {
   const refusals: unknown[] = [];
+
   const attempt = async (step: () => Promise<unknown>) => {
     try {
       await step();
