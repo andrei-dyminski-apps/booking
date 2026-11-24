@@ -5,6 +5,7 @@
     "turbo": "node --env-file-if-exists=.env node_modules/turbo/bin/turbo",
     "build": "pnpm turbo run build",
     "dev": "pnpm turbo watch dev",
+    "preview": "pnpm turbo run @repo/api#start:prod @repo/web#start",
     "lint": "pnpm turbo run lint",
     "lint:fix": "pnpm turbo run lint:fix",
     "format": "prettier --write \"**/*.{ts,tsx,md,css}\"",

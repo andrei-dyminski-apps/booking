@@ -689,6 +689,7 @@ From the repository root, across all packages at once:
 ```sh
 pnpm dev            # web + api in parallel, deps rebuilt on change
 pnpm build          # build every package
+pnpm preview        # run the existing web and API builds locally after pnpm build
 pnpm lint           # ESLint (formatting check included) + Steiger over the FSD structure of apps/web
 pnpm lint:fix       # ESLint --fix: autofixes + reformatting by Prettier
 pnpm check-types    # tsc --noEmit
@@ -697,6 +698,8 @@ pnpm format         # Prettier over **/*.{ts,tsx,md}
 ```
 
 `pnpm dev` goes through `turbo watch dev`, so it is dependency-aware: edit a schema in `packages/contracts` and turbo rebuilds it and restarts `apps/api`, while `apps/web` picks the change up with its own watcher.
+
+`pnpm preview` runs `next start` and the compiled Nest API together using the root `.env`. Run `pnpm build` first and keep the local Compose services running with the database schema already migrated. Open the frontend at the port set by `WEB_PORT` (`http://localhost:3100` with `.env.example`).
 
 `pnpm format` stays the only way to format `.md` — ESLint does not parse them. It runs from the root only; packages have no local `format` scripts.
 
