@@ -1,4 +1,4 @@
-import type { BookingStatus } from "@repo/contracts";
+import type { ActorKind, BookingStatus } from "@repo/contracts";
 import type { ReleasedHold } from "../../booking/domain/booking.types";
 import type { Cents } from "../../payment/domain/money";
 import type { PayoutFacts } from "./payout";
@@ -35,7 +35,7 @@ export type SettledStay = PayoutFacts & {
 };
 
 /** Who reads a host's fees: only an admin is told which admin waived one. */
-export type HostFeeReader = "host" | "admin";
+export type HostFeeReader = (typeof ActorKind)["HOST" | "ADMIN"];
 
 export type PayoutAccountHolder = PayoutDestination & {
   email: string;

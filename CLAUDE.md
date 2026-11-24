@@ -96,6 +96,8 @@ The root scripts start turbo through `node --env-file-if-exists=.env`, so the va
 
 `.env` is in `.gitignore` — do not commit it and do not read its contents without being asked.
 
+The seed requires `DEMO_PASSWORD`. The web server reads the same value to prefill the public demo login and hides the shortcuts when it is empty. The browser suite supplies its own value to both.
+
 ## Rules
 
 The two that hold everywhere are imported here and are always in context:

@@ -18,7 +18,7 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from "@nestjs/swagger";
-import { Role, type HostFeeOverview } from "@repo/contracts";
+import { ActorKind, Role, type HostFeeOverview } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
 import { CurrentUser } from "../../auth/decorators/current-user.decorator";
 import { Roles } from "../../auth/decorators/roles.decorator";
@@ -45,7 +45,7 @@ export class HostFeeController {
   @Roles(Role.USER)
   @ApiOkResponse({ type: HostFeeOverviewDto })
   mine(@CurrentUser() user: AuthenticatedUser): Promise<HostFeeOverview> {
-    return this.hostFeeService.overviewOf(user.id, "host");
+    return this.hostFeeService.overviewOf(user.id, ActorKind.HOST);
   }
 
   @Get()
@@ -53,7 +53,7 @@ export class HostFeeController {
   @Roles(Role.ADMIN)
   @ApiOkResponse({ type: HostFeeOverviewDto })
   ofHost(@Query() query: HostFeeQueryDto): Promise<HostFeeOverview> {
-    return this.hostFeeService.overviewOf(query.hostId, "admin");
+    return this.hostFeeService.overviewOf(query.hostId, ActorKind.ADMIN);
   }
 
   @Post(":id/waive")

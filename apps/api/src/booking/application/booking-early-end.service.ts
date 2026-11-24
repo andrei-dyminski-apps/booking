@@ -8,7 +8,7 @@ import {
 import { isBefore } from "date-fns";
 import {
   BookingStatus,
-  Canceller,
+  ActorKind,
   checkInInstant,
   DisputeStatus,
   earlyCheckOut,
@@ -83,7 +83,7 @@ export class BookingEarlyEndService {
       await this.bookingRepository.findByIdWithListingOwner(id),
     );
 
-    if (reader === Canceller.HOST) {
+    if (reader === ActorKind.HOST) {
       throw apiException(
         ForbiddenException,
         "EARLY_END_NOT_FOR_HOST",
@@ -120,7 +120,7 @@ export class BookingEarlyEndService {
    */
   private async notifyEnded(
     { stay, guestId, listingOwnerId, ...notice }: EndedNotice,
-    endedBy: Canceller,
+    endedBy: ActorKind,
     actorId: string,
   ): Promise<void> {
     await notifyBothSidesOfEarlyEnd(

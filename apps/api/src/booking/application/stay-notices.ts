@@ -1,7 +1,7 @@
 import {
   NotificationType,
   type Booking,
-  type Canceller,
+  type ActorKind,
   StayParty,
   type NotificationContent,
   type StayNotice,
@@ -24,7 +24,7 @@ type Parties = { stay: StayNotice; guestId: string; listingOwnerId: string };
 export type CancellationNotice = {
   refundCents: Cents | null;
   currency: Currency;
-  cancelledBy: Canceller | null;
+  cancelledBy: ActorKind | null;
   reason: string | null;
 };
 
@@ -70,7 +70,7 @@ export async function notifyBothSidesOfCancellation(
  */
 export type EarlyEndNotice = {
   checkOut: string;
-  endedBy: Canceller;
+  endedBy: ActorKind;
   refundCents: Cents | null;
   currency: Currency;
 };

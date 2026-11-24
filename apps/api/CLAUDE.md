@@ -310,7 +310,7 @@ Two checks, and the split between them is the point.
   refresh.
 - **Reading and writing are separate rules over the same row.** Who may read a stay is
   `getReadable` (the guest, the host, an admin); who cancels it, and on what terms, is
-  `BookingCancellationService.mayCancel`, which answers a `Canceller` rather than a yes: the
+  `BookingCancellationService.mayCancel`, which returns the caller's `ActorKind`: the
   guest refunds by the policy, the host must give a reason (`400`), refunds the guest in full
   and owes a fee for a paid stay, an admin refunds in full. The reason is asked for before
   the cancellation's lease, and only of a row that could be cancelled at all: a stay cancelled

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ActorKind } from "./enums.js";
 import { checkInInstant } from "./check-in.js";
 import {
   cancellerOf,
@@ -32,7 +33,7 @@ const at = (iso: string): Date => new Date(iso);
 
 /** The share a guest is quoted at `iso`. */
 const shareAt = (stay: ReturnType<typeof stayUnder>, iso: string): number =>
-  refundQuote(stay, at(iso), "GUEST").shareBps;
+  refundQuote(stay, at(iso), ActorKind.GUEST).shareBps;
 
 describe("checkInInstant", () => {
   it("is midnight UTC of the check-in day for a stay from before the time zones", () => {
@@ -115,10 +116,12 @@ describe("refundSchedule in the listing's time zone", () => {
       { until: new Date("2030-10-13T01:00:00.000Z"), shareBps: 10_000 },
     ]);
     expect(
-      refundQuote(stay, at("2030-10-13T00:59:59.999Z"), "GUEST").shareBps,
+      refundQuote(stay, at("2030-10-13T00:59:59.999Z"), ActorKind.GUEST)
+        .shareBps,
     ).toBe(10_000);
     expect(
-      refundQuote(stay, at("2030-10-13T01:00:00.000Z"), "GUEST").shareBps,
+      refundQuote(stay, at("2030-10-13T01:00:00.000Z"), ActorKind.GUEST)
+        .shareBps,
     ).toBe(0);
   });
 
@@ -175,23 +178,32 @@ describe("refundQuote under each policy", () => {
       refundQuote(
         stayUnder("NON_REFUNDABLE"),
         at("2030-01-01T00:00:00.000Z"),
-        "GUEST",
+        ActorKind.GUEST,
       ),
     ).toEqual({ shareBps: 0, cents: 0, next: null, closed: null });
   });
 
   it("says when the share falls and to what", () => {
     expect(
-      refundQuote(stayUnder("LIMITED"), at("2030-09-01T00:00:00.000Z"), "GUEST")
-        .next,
+      refundQuote(
+        stayUnder("LIMITED"),
+        at("2030-09-01T00:00:00.000Z"),
+        ActorKind.GUEST,
+      ).next,
     ).toEqual({ until: at("2030-09-30T00:00:00.000Z"), shareBps: 5_000 });
     expect(
-      refundQuote(stayUnder("LIMITED"), at("2030-10-01T00:00:00.000Z"), "GUEST")
-        .next,
+      refundQuote(
+        stayUnder("LIMITED"),
+        at("2030-10-01T00:00:00.000Z"),
+        ActorKind.GUEST,
+      ).next,
     ).toEqual({ until: at("2030-10-07T00:00:00.000Z"), shareBps: 0 });
     expect(
-      refundQuote(stayUnder("LIMITED"), at("2030-10-08T00:00:00.000Z"), "GUEST")
-        .next,
+      refundQuote(
+        stayUnder("LIMITED"),
+        at("2030-10-08T00:00:00.000Z"),
+        ActorKind.GUEST,
+      ).next,
     ).toBeNull();
   });
 
@@ -199,13 +211,16 @@ describe("refundQuote under each policy", () => {
     const limited = stayUnder("LIMITED");
 
     expect(
-      refundQuote(limited, at("2030-09-01T00:00:00.000Z"), "GUEST").closed,
+      refundQuote(limited, at("2030-09-01T00:00:00.000Z"), ActorKind.GUEST)
+        .closed,
     ).toBeNull();
     expect(
-      refundQuote(limited, at("2030-10-01T00:00:00.000Z"), "GUEST").closed,
+      refundQuote(limited, at("2030-10-01T00:00:00.000Z"), ActorKind.GUEST)
+        .closed,
     ).toEqual({ until: at("2030-09-30T00:00:00.000Z"), shareBps: 10_000 });
     expect(
-      refundQuote(limited, at("2030-10-08T00:00:00.000Z"), "GUEST").closed,
+      refundQuote(limited, at("2030-10-08T00:00:00.000Z"), ActorKind.GUEST)
+        .closed,
     ).toEqual({ until: at("2030-10-07T00:00:00.000Z"), shareBps: 5_000 });
   });
 });
@@ -251,7 +266,7 @@ describe("the grace period", () => {
       refundQuote(
         stayUnder("FIRM", { createdAt: booked }),
         at("2030-10-04T13:00:00.000Z"),
-        "GUEST",
+        ActorKind.GUEST,
       ).next,
     ).toEqual({ until: at("2030-10-05T12:00:00.000Z"), shareBps: 5_000 });
   });
@@ -329,7 +344,7 @@ describe("refundQuote amounts", () => {
     const stay = stayUnder("LIMITED", { amountCents: 36_105 });
 
     expect(
-      refundQuote(stay, at("2030-10-01T00:00:00.000Z"), "GUEST").cents,
+      refundQuote(stay, at("2030-10-01T00:00:00.000Z"), ActorKind.GUEST).cents,
     ).toBe(18_053);
   });
 
@@ -338,16 +353,22 @@ describe("refundQuote amounts", () => {
     const stay = stayUnder("LIMITED", { amountCents: 36_105 });
 
     expect(
-      refundQuote({ ...stay, refundedAmountCents: cents(10_000) }, now, "GUEST")
-        .cents,
+      refundQuote(
+        { ...stay, refundedAmountCents: cents(10_000) },
+        now,
+        ActorKind.GUEST,
+      ).cents,
     ).toBe(8_053);
     expect(
-      refundQuote({ ...stay, refundedAmountCents: cents(20_000) }, now, "GUEST")
-        .cents,
+      refundQuote(
+        { ...stay, refundedAmountCents: cents(20_000) },
+        now,
+        ActorKind.GUEST,
+      ).cents,
     ).toBe(0);
   });
 
-  it.each(["ADMIN", "HOST"] as const)(
+  it.each([ActorKind.ADMIN, ActorKind.HOST])(
     "refunds a cancellation by %s of whatever is left in full, whatever the policy",
     (canceller) => {
       const stay = {
@@ -450,14 +471,24 @@ describe("cancellerOf", () => {
   const stay = { guestId: "guest", hostId: "host" };
 
   it("names the guest, the host and an admin on somebody else's stay", () => {
-    expect(cancellerOf(stay, { id: "guest", role: "USER" })).toBe("GUEST");
-    expect(cancellerOf(stay, { id: "host", role: "USER" })).toBe("HOST");
-    expect(cancellerOf(stay, { id: "admin", role: "ADMIN" })).toBe("ADMIN");
+    expect(cancellerOf(stay, { id: "guest", role: "USER" })).toBe(
+      ActorKind.GUEST,
+    );
+    expect(cancellerOf(stay, { id: "host", role: "USER" })).toBe(
+      ActorKind.HOST,
+    );
+    expect(cancellerOf(stay, { id: "admin", role: "ADMIN" })).toBe(
+      ActorKind.ADMIN,
+    );
     expect(cancellerOf(stay, { id: "stranger", role: "USER" })).toBeNull();
   });
 
   it("keeps an account promoted to admin to its side of its own stay", () => {
-    expect(cancellerOf(stay, { id: "guest", role: "ADMIN" })).toBe("GUEST");
-    expect(cancellerOf(stay, { id: "host", role: "ADMIN" })).toBe("HOST");
+    expect(cancellerOf(stay, { id: "guest", role: "ADMIN" })).toBe(
+      ActorKind.GUEST,
+    );
+    expect(cancellerOf(stay, { id: "host", role: "ADMIN" })).toBe(
+      ActorKind.HOST,
+    );
   });
 });

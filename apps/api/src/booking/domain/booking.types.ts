@@ -1,7 +1,7 @@
 import type {
   Booking,
   BookingAdjustment,
-  Canceller,
+  ActorKind,
   CheckIn,
   BookingStatus,
   PricedNight,
@@ -71,7 +71,7 @@ export type ConfirmedStay = ReleasedHold;
  * them (`null` when it costs nothing). The provider's news cancels with none of it.
  */
 export type CancellationBy = {
-  canceller: Canceller;
+  canceller: ActorKind;
   reason: string | null;
   feeCents: Cents | null;
 };

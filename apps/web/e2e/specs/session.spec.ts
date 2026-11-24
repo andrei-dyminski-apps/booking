@@ -1,4 +1,4 @@
-import { GUEST } from "../support/demo";
+import { DEMO, DEMO_PASSWORD, GUEST } from "../support/demo";
 import { expect, test } from "../support/fixtures";
 import { EVERY_TARGET } from "../target";
 import { signInThroughForm } from "../support/session";
@@ -9,15 +9,22 @@ test("guest account pages and links disappear after sign-in", async ({
 }) => {
   await page.goto("/");
   await expect(
-    page.getByRole("link", { name: "Create an account" }),
+    page
+      .getByRole("banner")
+      .getByRole("link", { name: "Sign up", exact: true }),
   ).toBeVisible();
   await pages.check();
 
-  await page.goto("/login");
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  await page.getByRole("link", { name: "Sign in as demo guest" }).click();
+  await expect(page.getByLabel("Email", { exact: true })).toHaveValue(
+    GUEST.email,
+  );
+  await expect(page.getByLabel("Password", { exact: true })).toHaveValue(
+    DEMO_PASSWORD,
+  );
   await pages.check();
-  await signInThroughForm(page, GUEST);
-  await expect(page).toHaveURL("/profile");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(page).toHaveURL("/listings");
   await pages.check();
 
   for (const path of [
@@ -29,13 +36,42 @@ test("guest account pages and links disappear after sign-in", async ({
     await page.goto(path);
     await expect(page).toHaveURL("/profile");
   }
+  await pages.check();
 
   await page.goto("/");
   await expect(
     page.locator('a[href="/login"], a[href="/register"]'),
   ).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /Sign in as demo/ })).toHaveCount(
+    0,
+  );
   await pages.check();
 });
+
+const demoShortcuts = [
+  { role: "host", account: DEMO.host, destination: "/dashboard" },
+  { role: "admin", account: DEMO.admin, destination: "/admin/payments" },
+] as const;
+
+for (const { role, account, destination } of demoShortcuts) {
+  test(`the demo ${role} signs in from the home page and reaches ${destination}`, async ({
+    page,
+    pages,
+  }) => {
+    await page.goto("/");
+    await pages.check();
+
+    await page.getByRole("link", { name: `Sign in as demo ${role}` }).click();
+    await expect(page.getByLabel("Email", { exact: true })).toHaveValue(
+      account.email,
+    );
+    await pages.check();
+
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await expect(page).toHaveURL(destination);
+    await pages.check();
+  });
+}
 
 test(
   "a demo account signs in, finds its details and signs out",

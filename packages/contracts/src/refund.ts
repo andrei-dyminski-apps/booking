@@ -1,7 +1,7 @@
 import { tz } from "@date-fns/tz";
 import { addHours, isAfter, isBefore, min, parseISO, subHours } from "date-fns";
-import { Role } from "./enums.js";
-import { BookingStatus, Canceller, type Booking } from "./booking.js";
+import { ActorKind, Role } from "./enums.js";
+import { BookingStatus, type Booking } from "./booking.js";
 import { checkInInstant } from "./check-in.js";
 import {
   CANCELLATION_TERMS,
@@ -131,9 +131,9 @@ type QuotedStay = ScheduledStay &
 export function refundQuote(
   stay: QuotedStay,
   now: Date,
-  canceller: Canceller,
+  canceller: ActorKind,
 ): RefundQuote {
-  if (canceller !== "GUEST") {
+  if (canceller !== ActorKind.GUEST) {
     return {
       shareBps: BASIS_POINTS,
       cents: notRefunded(stay.amountCents, stay.refundedAmountCents),
@@ -180,12 +180,12 @@ export function refundQuote(
 export function cancellerOf(
   stay: Pick<Booking, "guestId" | "hostId">,
   viewer: { id: string; role: Role },
-): Canceller | null {
-  if (viewer.id === stay.guestId) return Canceller.GUEST;
+): ActorKind | null {
+  if (viewer.id === stay.guestId) return ActorKind.GUEST;
 
-  if (viewer.id === stay.hostId) return Canceller.HOST;
+  if (viewer.id === stay.hostId) return ActorKind.HOST;
 
-  return viewer.role === Role.ADMIN ? Canceller.ADMIN : null;
+  return viewer.role === Role.ADMIN ? ActorKind.ADMIN : null;
 }
 
 /**

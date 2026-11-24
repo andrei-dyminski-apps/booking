@@ -2,6 +2,7 @@ import {
   RefundFailureStatus,
   notificationRoutes,
   Role,
+  type DemoAccountId,
   type FailedPaymentEventQuery,
   type RefundFailureQuery,
   type StuckStayQuery,
@@ -19,6 +20,8 @@ export const ACCOUNT_DELETED_PARAM = {
   value: "deleted",
 } as const;
 
+export const DEMO_LOGIN_PARAM = "demo";
+
 /**
  * Every path of this application in one place: the proxy guards them, the pages link to
  * them and the forms redirect to them, so a renamed route is a compile error rather than
@@ -35,6 +38,8 @@ export const ROUTES = {
   home: "/",
   accountDeleted: `/?${ACCOUNT_DELETED_PARAM.key}=${ACCOUNT_DELETED_PARAM.value}`,
   login: "/login",
+  demoLogin: (account: DemoAccountId) =>
+    `/login?${DEMO_LOGIN_PARAM}=${account}`,
   register: "/register",
   forgotPassword: "/forgot-password",
   profile: "/profile",

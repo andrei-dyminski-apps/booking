@@ -438,7 +438,7 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
 | 48 hours – 30 days    | 25%                    |
 | < 48 hours            | 50%                    |
 
-- [x] `@repo/contracts`: `Canceller` gains `HOST`; `hostCancellationFee(booking, now)` by the
+- [x] `@repo/contracts`: cancellations record the `ActorKind`; `hostCancellationFee(booking, now)` by the
       table, through `checkInInstant`, and nothing for a hold — declining an unpaid request
       is free. Both sides read it: the API charges by it, the host's dialog states it before
       the button. `cancelledBy` on `bookingSchema`; a `reason` the host has to give
@@ -473,7 +473,7 @@ loses Stripe's processing fee on every full refund and the guest loses their pla
 - [x] Visibility: the host's payouts page lists the fees still owed; the admin's account page
       shows the host's cancellations in the last 12 months and the fees; a third
       cancellation in 12 months tells every admin. Notices: `BOOKING_CANCELLED` with
-      `cancelledBy: HOST` and the reason to the guest, `HOST_CANCELLATION_FEE` to the host,
+      `cancelledBy: "host"` and the reason to the guest, `HOST_CANCELLATION_FEE` to the host,
       `HOST_CANCELLATIONS_THRESHOLD` to the admins.
 - [x] Web: "Cancel" on the Hosting tab and on the stay's page for its host, with the fee and
       the reason in the dialog; `may-cancel.ts` and its spec.

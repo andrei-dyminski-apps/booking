@@ -15,6 +15,15 @@ export const Role = {
 
 export type Role = (typeof Role)[keyof typeof Role];
 
+/** The capacity in which someone takes part in a scenario. */
+export const ActorKind = {
+  GUEST: "guest",
+  HOST: "host",
+  ADMIN: "admin",
+} as const;
+
+export type ActorKind = (typeof ActorKind)[keyof typeof ActorKind];
+
 /**
  * Open until a person has sent the money back some other way and said how; resolved after,
  * kept as the record of it.

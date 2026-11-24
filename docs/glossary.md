@@ -148,10 +148,10 @@ ceiling can still be paid for.
 
 ## Cancellations and fees
 
-**Canceller** — who cancelled a stay: `GUEST`, `HOST` or `ADMIN`. The relation comes before the
-role: a guest or host made admin outside the API after booking or listing still cancels their own
-stay as its guest or host; `ADMIN` is the role acting on somebody else's stay. Everybody who may
-read a stay may cancel it, each on their own terms.
+**Canceller** — who cancelled a stay, recorded as the `ActorKind` value `guest`, `host` or
+`admin`. An admin who is the guest or host of the stay cancels in that capacity. The `admin`
+value is for an admin acting on somebody else's stay. Everybody who may read a stay may cancel
+it, each on their own terms.
 
 **Cancellation policy** — the refund schedule a host picks for a listing. A booking copies the
 policy's _name_ when the hold is taken, so a later change to the listing restates no stay already
@@ -440,7 +440,7 @@ lapsed hold is still `PENDING_PAYMENT` even though its slot is already free.
 | Enum               | Values                                            |
 | ------------------ | ------------------------------------------------- |
 | `Role`             | `USER`, `ADMIN`                                   |
-| `Canceller`        | `GUEST`, `HOST`, `ADMIN`                          |
+| `ActorKind`        | `guest`, `host`, `admin`                          |
 | `ConversationSide` | `GUEST`, `HOST`                                   |
 | `ReviewKind`       | `LISTING` (guest → place), `GUEST` (host → guest) |
 | `DisputeStatus`    | `OPEN`, `WON`, `LOST`                             |

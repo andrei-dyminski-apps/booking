@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { Role, type HostFee } from "@repo/contracts";
+import { ActorKind, Role, type HostFee } from "@repo/contracts";
 import type { Prisma } from "../../generated/prisma/client";
 import { toIsoDate } from "../../common/iso-date";
 import {
@@ -69,7 +69,7 @@ export class HostFeeRepository {
           },
           include: {
             ...HOST_FEE_INCLUDE,
-            waivedBy: reader === "admin" ? WAIVED_BY : false,
+            waivedBy: reader === ActorKind.ADMIN ? WAIVED_BY : false,
           },
           orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         }),

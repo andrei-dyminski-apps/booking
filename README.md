@@ -58,7 +58,7 @@ The browser never talks to the API: it calls `/api` on the frontend's own origin
 
 ## Try it
 
-On the [live demo](https://staydesk.dev), or locally after the seed, there are demo logins, all with the password `password123`:
+The [live demo](https://staydesk.dev) and the local seed offer these demo accounts. All share the `DEMO_PASSWORD` configured for that environment (`password123` in `.env.example`).
 
 | Account             | What it is for                                            |
 | ------------------- | --------------------------------------------------------- |
@@ -67,6 +67,8 @@ On the [live demo](https://staydesk.dev), or locally after the seed, there are d
 | `admin@example.com` | Reads everything and works the money screens              |
 
 Pay for a hold with the Stripe test card `4242 4242 4242 4242` (any future expiry, any CVC); the other test cards are in [Payments](#payments). To see the double-booking race yourself, sign in as two different users in two browsers, open the same listing and press **Hold these dates** for the same nights together.
+
+When `DEMO_PASSWORD` is set on the frontend, the home page links to prefilled sign-in forms for all three demo accounts. After sign-in, the guest opens the catalogue, the host opens the dashboard, and the admin opens the payments screen.
 
 ## Requirements
 
@@ -172,7 +174,7 @@ Routing belongs to Next.js and everything else to Feature-Sliced Design, so each
 
 | Route                                     | What it is                                                                                                | Who sees it |
 | ----------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------- |
-| `/`                                       | the landing, one link into the catalogue                                                                  | everyone    |
+| `/`                                       | demo entry, catalogue link                                                                                | everyone    |
 | `/listings`                               | the catalogue: filters in the URL, keyset pages, cached and tagged                                        | everyone    |
 | `/listings/:id`                           | one listing, its calendar and the form that takes a hold or waits                                         | everyone    |
 | `/bookings`                               | Trips and Hosting (`?side=HOST`), keyset pages                                                            | signed in   |
@@ -639,6 +641,7 @@ All settings live in a single `.env` in the repository root — there are no per
 | `RESEND_WEBHOOK_SECRET`                       | Signing secret for the mail webhook endpoint                                 | production secret                                       |
 | `WEB_ORIGIN`                                  | origin(s) for CORS in Nest, several — comma-separated                        | `http://localhost:3000`                                 |
 | `SITE_ORIGIN`                                 | the frontend's public address: canonical links, `og:url`, JSON-LD            | `VERCEL_PROJECT_PRODUCTION_URL`, else `localhost`       |
+| `DEMO_PASSWORD`                               | Public demo account password for the seed and the frontend sign-in form      | Required for the seed, optional for the frontend        |
 | `POSTGRES_USER`                               | user inside the Postgres container                                           | `booking`                                               |
 | `POSTGRES_PASSWORD`                           | password inside the Postgres container                                       | `booking`                                               |
 | `POSTGRES_DB`                                 | database name inside the Postgres container                                  | `booking`                                               |
@@ -881,7 +884,7 @@ pnpm db:seed:railway
 
 The script is `railway ssh --service @repo/api -- pnpm --filter @repo/api db:seed`, so it needs the Railway CLI logged in and linked (see above), a running deployment of the API, and an SSH key registered with Railway (`railway ssh keys`). It asks for no confirmation. The seed runs from the dev dependencies (`prisma`, `ts-node`) that the image keeps unless `RAILPACK_PRUNE_DEPS` is turned on for the service.
 
-The seed deletes every review, booking, conversation, listing and user before writing, so anything visitors created goes too, and the demo logins (`password123`) come back. Payment events and refund failures are not touched — they carry no foreign key that would stop the delete, so a reseed neither fails on them nor clears them. The stays are dated from the day the seed runs — run it again when the demo bookings have aged into the past.
+The seed deletes every review, booking, conversation, listing and user before writing, so anything visitors created goes too, and restores the demo logins with `DEMO_PASSWORD`. Set the same value on the Railway API service and on Vercel to enable prefilled sign-in. Payment events and refund failures are not touched — they carry no foreign key that would stop the delete, so a reseed neither fails on them nor clears them. The stays are dated from the day the seed runs — run it again when the demo bookings have aged into the past.
 
 ## Build cache
 

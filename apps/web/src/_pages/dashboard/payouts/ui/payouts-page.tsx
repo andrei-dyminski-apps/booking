@@ -1,5 +1,6 @@
 import { Suspense, type ReactNode } from "react";
 import {
+  ActorKind,
   HostAccountStatus,
   BASIS_POINTS,
   PAYOUT_DELAY_HOURS,
@@ -59,7 +60,7 @@ export const PayoutsPage = async () => {
       <Suspense fallback={null}>
         <HostFees
           read={hostFeesApi.mine}
-          audience="host"
+          audience={ActorKind.HOST}
           readerTimeZone={zone}
         />
       </Suspense>

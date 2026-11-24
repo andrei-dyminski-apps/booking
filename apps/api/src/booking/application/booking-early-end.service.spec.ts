@@ -129,7 +129,7 @@ describe("BookingEarlyEndService", () => {
           to: fromToday(3),
           checkOut: fromToday(1),
           recipient: StayParty.HOST,
-          endedBy: "GUEST",
+          endedBy: "guest",
           refundCents: cents(2 * NIGHT),
         }) as unknown,
       },
@@ -157,7 +157,7 @@ describe("BookingEarlyEndService", () => {
         userId: GUEST_ID,
         data: expect.objectContaining({
           recipient: StayParty.GUEST,
-          endedBy: "ADMIN",
+          endedBy: "admin",
           refundCents: 0,
         }) as unknown,
       }),

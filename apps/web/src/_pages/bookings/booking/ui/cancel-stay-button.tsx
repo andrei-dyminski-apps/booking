@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import type { Booking, Canceller } from "@repo/contracts";
+import type { Booking, ActorKind } from "@repo/contracts";
 import { Button } from "@repo/ui/components/button";
 import { CancelStayDialog } from "#features/cancel-booking";
 import { bookingKey } from "../api/booking-query";
@@ -19,7 +19,7 @@ export const CancelStayButton = ({
 }: {
   booking: Booking;
   /** Who the viewer cancels as — `cancellerOf`. */
-  canceller: Canceller;
+  canceller: ActorKind;
   /** What the cancellation gives back or costs, worded for the viewer. */
   refundNote: string | null;
 }) => {

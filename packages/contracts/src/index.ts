@@ -16,7 +16,6 @@ export {
   HOST_REASON_REQUIRED,
   stayPartySchema,
   BookingStatus,
-  Canceller,
   MAX_CANCELLATION_REASON_LENGTH,
   DisputeStatus,
   StayParty,
@@ -244,7 +243,8 @@ export {
   type LoginInput,
 } from "./auth.js";
 
-export { Role } from "./enums.js";
+export { DEMO_ACCOUNT_EMAILS, type DemoAccountId } from "./demo-accounts.js";
+export { ActorKind, Role } from "./enums.js";
 
 export {
   ACCOUNT_OPEN_MATTERS,

@@ -2,7 +2,7 @@
 
 import type { UseFormReturn } from "react-hook-form";
 import {
-  Canceller,
+  ActorKind,
   MAX_CANCELLATION_REASON_LENGTH,
   type CancelBookingInput,
 } from "@repo/contracts";
@@ -11,10 +11,10 @@ import { FormField } from "#shared/ui";
 import type { CancelFormValues } from "../model/cancel-form";
 
 /** Who reads the reason, told to whoever writes it. */
-const READERS: Record<Canceller, string> = {
-  [Canceller.GUEST]: "The host reads it with the cancellation.",
-  [Canceller.HOST]: "The guest reads it with the cancellation.",
-  [Canceller.ADMIN]: "The guest and the host read it with the cancellation.",
+const READERS: Record<ActorKind, string> = {
+  [ActorKind.GUEST]: "The host reads it with the cancellation.",
+  [ActorKind.HOST]: "The guest reads it with the cancellation.",
+  [ActorKind.ADMIN]: "The guest and the host read it with the cancellation.",
 };
 
 /**
@@ -28,7 +28,7 @@ export const CancelReasonField = ({
   pending,
 }: {
   form: UseFormReturn<CancelFormValues, unknown, CancelBookingInput>;
-  canceller: Canceller;
+  canceller: ActorKind;
   /** The host turning down a hold nobody has paid for. */
   declining: boolean;
   pending: boolean;
@@ -37,7 +37,7 @@ export const CancelReasonField = ({
     form={form}
     name="reason"
     label={
-      canceller !== Canceller.HOST
+      canceller !== ActorKind.HOST
         ? "Reason (optional)"
         : declining
           ? "Why are you declining?"
