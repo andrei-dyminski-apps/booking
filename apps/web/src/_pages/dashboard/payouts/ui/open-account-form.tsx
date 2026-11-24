@@ -1,20 +1,21 @@
 "use client";
 
-import { useMemo } from "react";
 import { useController } from "react-hook-form";
 import {
   openPayoutAccountSchema,
   type OpenPayoutAccountInput,
 } from "@repo/contracts";
 import { Button } from "@repo/ui/components/button";
-import { Field, FieldError, FieldGroup } from "@repo/ui/components/field";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@repo/ui/components/select";
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+  ComboboxTrigger,
+} from "@repo/ui/components/combobox";
+import { Field, FieldError, FieldGroup } from "@repo/ui/components/field";
 import { fieldMessages, messagesOf, useActionForm } from "#shared/lib";
 import { HintLabel, hintOf } from "#shared/ui";
 import { openAccountAction } from "../api/open-account-action";
@@ -25,8 +26,8 @@ const ID = "field-country";
 /**
  * The step before Stripe's onboarding: the country the host's payout account is opened in.
  * Stripe fixes it when the account is opened and asks for that country's details, so the
- * host picks it here once. A controller rather than `FormField`'s `register`, for the reason
- * `PolicyField` gives: the design system's `Select` is a listbox, not a native box.
+ * host picks it here once. The combobox searches by name and the controller submits the
+ * selected country's code.
  */
 export const OpenAccountForm = ({
   countries,
@@ -49,14 +50,7 @@ export const OpenAccountForm = ({
     "Where you live, or where your business is registered. Stripe asks for that country's details, pays out in its currency, and it cannot be changed later.",
   );
   const errorId = messages === undefined ? undefined : `${ID}-error`;
-  // What the trigger shows for the value picked; built once, not on every keystroke's render.
-  const items = useMemo(
-    () =>
-      Object.fromEntries(
-        countries.map((country) => [country.value, country.label]),
-      ),
-    [countries],
-  );
+  const selected = countries.find((country) => country.value === value) ?? null;
 
   return (
     // `method` and `noValidate` for the reasons `booking-form.tsx` gives.
@@ -76,43 +70,57 @@ export const OpenAccountForm = ({
       <FieldGroup>
         <Field data-invalid={fieldState.invalid}>
           <HintLabel htmlFor={ID} label="Country" hint={hint} />
-          <Select
-            // A country the list has dropped since the pick (`refresh()` after the API's
-            // refusal) shows the placeholder, not its bare code, beside the refusal under it.
-            value={
-              value !== undefined && Object.hasOwn(items, value) ? value : null
-            }
-            // Judged as it is picked rather than on blur: opening the list takes the focus
-            // off the trigger, and `onBlur` would refuse the empty box while the list is open
-            // and keep refusing it after a pick, since the form re-judges on change only once
-            // submitted.
+          <Combobox
+            items={countries}
+            value={selected}
+            itemToStringLabel={(country) => country.label}
+            itemToStringValue={(country) => country.value}
             onValueChange={(picked) => {
               if (picked !== null) {
-                form.setValue("country", picked, { shouldValidate: true });
+                form.setValue("country", picked.value, {
+                  shouldValidate: true,
+                });
               }
             }}
-            items={items}
+            autoHighlight
             disabled={pending}
           >
-            <SelectTrigger
+            <ComboboxTrigger
               id={ID}
               ref={ref}
+              render={<Button variant="outline" />}
               aria-invalid={fieldState.invalid}
               aria-describedby={
                 [hint?.id, errorId].filter(Boolean).join(" ") || undefined
               }
-              className="h-10 w-full min-w-0 text-base sm:max-w-sm md:text-sm"
+              className="h-10 w-full justify-between text-base font-normal sm:max-w-sm md:text-sm"
             >
-              <SelectValue placeholder="Choose a country" />
-            </SelectTrigger>
-            <SelectContent>
-              {countries.map((country) => (
-                <SelectItem key={country.value} value={country.value}>
-                  {country.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              {selected?.label ?? (
+                <span className="text-muted-foreground">Choose a country</span>
+              )}
+            </ComboboxTrigger>
+            <ComboboxContent
+              aria-label="Choose a country"
+              className="min-w-(--anchor-width)"
+            >
+              <label htmlFor={`${ID}-search`} className="sr-only">
+                Search countries
+              </label>
+              <ComboboxInput
+                id={`${ID}-search`}
+                placeholder="Search countries"
+                showTrigger={false}
+              />
+              <ComboboxEmpty>No countries found</ComboboxEmpty>
+              <ComboboxList>
+                {(country: CountryOption) => (
+                  <ComboboxItem key={country.value} value={country}>
+                    {country.label}
+                  </ComboboxItem>
+                )}
+              </ComboboxList>
+            </ComboboxContent>
+          </Combobox>
           <FieldError id={errorId} errors={fieldMessages(messages)} />
         </Field>
 

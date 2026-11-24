@@ -36,11 +36,13 @@ test(
     await expect(
       page.getByRole("heading", { level: 2, name: "Set up payouts" }),
     ).toBeVisible();
-    await page.getByLabel("Country", { exact: true }).click();
-    await page.getByRole("option", { name: "United States" }).click();
-    await expect(page.getByLabel("Country", { exact: true })).toContainText(
-      "United States",
-    );
+    const country = page.getByLabel("Country", { exact: true });
+    await country.click();
+    const search = page.getByRole("combobox", { name: "Search countries" });
+    await search.fill("united stat");
+    await expect(page.getByRole("option")).toHaveText(["United States"]);
+    await search.press("Enter");
+    await expect(country).toHaveText("United States");
     await pages.check();
 
     await page.getByRole("button", { name: "Continue" }).click();
