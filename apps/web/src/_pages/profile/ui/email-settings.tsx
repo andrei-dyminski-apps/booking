@@ -7,6 +7,16 @@ import {
   type MailSettings,
 } from "@repo/contracts";
 import { Button } from "@repo/ui/components/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@repo/ui/components/dialog";
 import { mailApi } from "#shared/api";
 
 const labels: Record<MailGroup, string> = {
@@ -19,12 +29,16 @@ const labels: Record<MailGroup, string> = {
 export function EmailSettings({ settings }: { settings: MailSettings }) {
   const [status, setStatus] = useState("");
   const [pending, setPending] = useState(false);
+  const [savedMuted, setSavedMuted] = useState(settings.muted);
   const [muted, setMuted] = useState(settings.muted);
+
   async function submit(action: "save" | "resend") {
     setPending(true);
+    setStatus("");
     try {
       if (action === "save") {
         await mailApi.preferences(muted);
+        setSavedMuted(muted);
         setStatus("Email preferences saved.");
       } else {
         await mailApi.resend();
@@ -36,71 +50,76 @@ export function EmailSettings({ settings }: { settings: MailSettings }) {
       setPending(false);
     }
   }
+
   return (
-    <section
-      aria-labelledby="email-heading"
-      className="grid gap-3 border-t pt-5"
+    <Dialog
+      onOpenChange={(open, event) => {
+        if (pending) event.cancel();
+        else if (open) {
+          setMuted(savedMuted);
+          setStatus("");
+        }
+      }}
     >
-      <h2 id="email-heading" className="font-medium">
+      <DialogTrigger render={<Button variant="outline" />}>
         Email notifications
-      </h2>
-      <p className="text-sm">
-        {settings.undeliverable ? (
-          <>
-            Delivery paused. Contact{" "}
-            <a className="underline" href="mailto:support@staydesk.dev">
-              support@staydesk.dev
-            </a>{" "}
-            to restore delivery, then request another confirmation.
-          </>
-        ) : settings.verified ? (
-          "Email confirmed"
-        ) : settings.canRequestConfirmation ? (
-          "Email unconfirmed"
-        ) : (
-          "Email confirmation is unavailable for this address."
-        )}
-      </p>
-      {settings.canRequestConfirmation && (
-        <Button
-          variant="outline"
-          disabled={pending}
-          onClick={() => void submit("resend")}
-        >
-          Resend confirmation
-        </Button>
-      )}
-      <fieldset disabled={pending} className="grid gap-2">
-        <legend className="mb-2 text-sm font-medium">
-          Send me email about
-        </legend>
-        {mailGroupSchema.options.map((group) => (
-          <label className="flex gap-2 text-sm" key={group}>
-            <input
-              type="checkbox"
-              checked={!muted.includes(group)}
-              onChange={(e) =>
-                setMuted(
-                  e.target.checked
-                    ? muted.filter((g) => g !== group)
-                    : [...muted, group],
-                )
-              }
-            />
-            {labels[group]}
-          </label>
-        ))}
-      </fieldset>
-      <Button
-        variant="outline"
-        disabled={pending}
-        onClick={() => void submit("save")}
+      </DialogTrigger>
+      <DialogContent
+        className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
+        showCloseButton={false}
       >
-        Save email preferences
-      </Button>
-      <p role="status" className="text-sm">
-        {status}
-      </p>
-    </section>
+        <DialogHeader>
+          <DialogTitle>Email notifications</DialogTitle>
+          {settings.undeliverable && (
+            <DialogDescription>
+              Delivery paused. Contact{" "}
+              <a className="underline" href="mailto:support@staydesk.dev">
+                support@staydesk.dev
+              </a>{" "}
+              to restore delivery, then request another confirmation.
+            </DialogDescription>
+          )}
+        </DialogHeader>
+        {settings.undeliverable && settings.canRequestConfirmation && (
+          <Button
+            variant="outline"
+            disabled={pending}
+            onClick={() => void submit("resend")}
+          >
+            Resend confirmation
+          </Button>
+        )}
+        <fieldset disabled={pending} className="grid gap-2">
+          <legend className="mb-2 text-sm font-medium">
+            Send me email about
+          </legend>
+          {mailGroupSchema.options.map((group) => (
+            <label className="flex gap-2 text-sm" key={group}>
+              <input
+                type="checkbox"
+                checked={!muted.includes(group)}
+                onChange={(e) =>
+                  setMuted(
+                    e.target.checked
+                      ? muted.filter((g) => g !== group)
+                      : [...muted, group],
+                  )
+                }
+              />
+              {labels[group]}
+            </label>
+          ))}
+        </fieldset>
+        <p role="status">{status}</p>
+        <DialogFooter>
+          <DialogClose disabled={pending} render={<Button variant="outline" />}>
+            Close
+          </DialogClose>
+          <Button disabled={pending} onClick={() => void submit("save")}>
+            Save email preferences
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

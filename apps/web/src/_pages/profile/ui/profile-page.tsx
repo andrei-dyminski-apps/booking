@@ -15,8 +15,9 @@ import { formatDate, readerTimeZone } from "#shared/lib";
 import { ButtonLink } from "#shared/ui";
 import { readReviewSummaryOf } from "../api/read-review-summary-of";
 import { DeleteAccountDialog } from "./delete-account-dialog";
-import { EmailChangeForm } from "./email-change-form";
+import { EmailChangeDialog } from "./email-change-dialog";
 import { EmailSettings } from "./email-settings";
+import { PasswordChangeDialog } from "./password-change-dialog";
 
 export const ProfilePage = async () => {
   const user = await requireUser(ROUTES.profile);
@@ -68,9 +69,10 @@ export const ProfilePage = async () => {
           </ButtonLink>
         )}
 
+        <EmailChangeDialog />
+        <PasswordChangeDialog email={user.email} />
         <Suspense fallback={null}>
           <ProfileEmailSettings />
-          <EmailChangeForm />
         </Suspense>
         <LogoutButton />
 
