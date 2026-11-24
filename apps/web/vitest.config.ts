@@ -19,6 +19,7 @@ export default defineConfig({
   oxc: { jsx: { runtime: "automatic" } },
   test: {
     environment: "node",
-    include: ["src/**/*.spec.ts"],
+    // The one root module with a spec: Next.js requires `instrumentation-client.ts` there.
+    include: ["src/**/*.spec.ts", "instrumentation-client.spec.ts"],
   },
 });

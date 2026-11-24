@@ -1,22 +1,12 @@
 import { StayParty } from "./booking.js";
 import { ActorKind } from "./enums.js";
 import { HOST_CANCELLATIONS_WINDOW_DAYS } from "./host-fee.js";
+import { notificationRoutes } from "./notification-routes.js";
 import { NotificationType, type NotificationContent } from "./notification.js";
 import { ReviewKind } from "./review.js";
 import type { Cents, Currency } from "./money.js";
 import { parseISO } from "date-fns";
 import { tz } from "@date-fns/tz";
-
-export const notificationRoutes = {
-  bookings: "/bookings",
-  payouts: "/dashboard/payouts",
-  adminPayments: "/admin/payments",
-  booking: (id: string) => "/bookings/" + encodeURIComponent(id),
-  listing: (id: string) => "/listings/" + encodeURIComponent(id),
-  adminUser: (id: string) => "/admin/users/" + encodeURIComponent(id),
-  guestReviews: (id: string) =>
-    "/guests/" + encodeURIComponent(id) + "/reviews",
-} as const;
 
 function setAsideHref(list: string, filter: Record<string, string>) {
   return (
