@@ -32,6 +32,8 @@ import {
   GuestNotFoundError,
   ListingNotFoundError,
   OwnListingError,
+  SenderBlockedError,
+  type InboundReply,
 } from "./conversation.repository";
 import {
   decodeConversationCursor,
@@ -191,19 +193,26 @@ export class ConversationService {
     id: string,
     user: AuthenticatedUser,
     input: SendMessageInput,
+    inboundReply?: InboundReply,
   ): Promise<Message> {
     const side = await this.sideOf(id, user);
 
     let appended: AppendedMessage;
 
     try {
-      appended = await this.conversationRepository.append(id, side, input.body);
+      appended = await this.conversationRepository.append(
+        id,
+        side,
+        input.body,
+        inboundReply,
+      );
     } catch (error) {
       // The thread is gone since `sideOf` read it: nothing in the API deletes one, so only a
       // cleanup around it (the seed, the test reset) can get here.
       if (error instanceof ConversationNotFoundError) throw notFound(id);
 
       if (error instanceof ConversationClosedError) throw closed();
+      if (error instanceof SenderBlockedError) throw sessionNotFound();
 
       throw error;
     }

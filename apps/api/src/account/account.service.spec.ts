@@ -29,6 +29,12 @@ const guest: AuthenticatedUser = {
 
 /** The one read the erasure makes of `users` before it: the hash, or no session. */
 class FakeUserRepository implements PublicOf<UserRepository> {
+  hasSessionVersion(): Promise<boolean> {
+    return Promise.reject(
+      new Error("AccountService does not validate access tokens"),
+    );
+  }
+
   readonly hashes = new Map<string, string>();
 
   findPasswordHashById(id: string): Promise<string | null> {

@@ -60,7 +60,7 @@ Tests:
 
 ```sh
 pnpm test           # *.spec.ts next to the code: jest in apps/api, vitest in apps/web and packages/contracts
-pnpm test:e2e       # jest -c test/jest-e2e.json; needs the database, wipes tables
+pnpm test:e2e       # jest -c e2e/jest-e2e.json; needs the database, wipes tables
 pnpm test:browser   # Playwright in apps/web/e2e; starts a hermetic stack of its own in Docker
 pnpm test:browser:stripe   # the same suite with Stripe's side real, against the sandbox of .env
 pnpm test:browser:live     # the scenarios tagged @every-target, against the live demo
@@ -72,7 +72,7 @@ The runners differ because the packages do: `apps/api` is CommonJS with Nest's t
 
 `pnpm test:browser:stripe` is that suite on its second target: the same stack with Stripe's side real — the sandbox the root `.env` names (a live key is refused), its events brought back by `stripe listen` the suite starts itself — running the scenarios tagged `@every-target` and `@real-stripe-only`. The API runs in production mode there, so that sandbox has to be in `PAYOUT_PLATFORM_COUNTRY` or the API refuses to start (`PlatformCountryCheck`). It writes to that Stripe account (payments, refunds, a connected account per run), so like the probes it is run only when the user asks, and never in CI.
 
-`pnpm test:browser:live` is its third target: the scenarios tagged `@every-target` against the live demo, as the suite's own guest and host there (`apps/web/e2e/live.ts`, password `E2E_LIVE_PASSWORD`), at the pace the demo's rate limiter allows, cleaning up its stays and listings before and after. `.github/workflows/live.yml` runs it on a schedule and on demand, never as a pull request check. It writes to the live demo, so locally it is run only when the user asks.
+`pnpm test:browser:live` is its third target: the scenarios tagged `@every-target` against the live demo, as the suite's own guest and host there (`apps/web/e2e/live.ts`, password `E2E_LIVE_PASSWORD` and optional `E2E_LIVE_GUEST_EMAIL` / `E2E_LIVE_HOST_EMAIL`), at the pace the demo's rate limiter allows, cleaning up its stays and listings before and after. `.github/workflows/live.yml` runs it on a schedule and on demand, never as a pull request check. It writes to the live demo, so locally it is run only when the user asks.
 
 Every test task declares `dependsOn: ["^build"]`: the specs import `@repo/contracts` schemas as values, so `dist/` has to exist. Running `pnpm --filter @repo/api test` directly skips that and fails on a fresh clone.
 
@@ -85,6 +85,8 @@ Every package, `apps/api` included, inherits the shared presets from `packages/t
 ## API contract
 
 The shape of requests and responses is described by zod schemas in `packages/contracts` — that is the single source of truth. One schema yields validation in Nest (`nestjs-zod`), types for both sides and form validation in the browser. When the data format changes, change the schema rather than the two sides separately: `pnpm check-types` immediately shows what fell out of sync.
+
+Local email goes to the Compose Mailpit inbox. The production API sends through Resend over HTTPS and records acceptance IDs and signed webhooks for background processing. Registration completes after email verification. The same outbox sends password reset and email change links. Mail environment settings, including the encryption key for pending delivery requests, DNS and recovery for suppressed addresses are in the root README.
 
 ## Environment variables
 

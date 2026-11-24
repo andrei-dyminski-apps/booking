@@ -61,6 +61,7 @@ describe("the request log", () => {
   let server: Server;
   let origin: string;
   const { logger, lines } = capturingLogger();
+
   const lastLine = () => lastLineOf(lines);
 
   beforeAll(async () => {

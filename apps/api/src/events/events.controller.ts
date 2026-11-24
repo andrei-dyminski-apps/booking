@@ -3,20 +3,24 @@ import { ApiOkResponse, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { ServerEvent } from "@repo/contracts";
 import {
   catchError,
+  concatMap,
   defer,
   EMPTY,
+  filter,
   interval,
   map,
   merge,
   type Observable,
   takeUntil,
+  takeWhile,
   timer,
 } from "rxjs";
-import type { AuthenticatedUser } from "../auth/auth.types";
+import type { AuthenticatedSession } from "../auth/auth.types";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { RealtimeService } from "../realtime/realtime.service";
 import { UnreadService } from "../unread/unread.service";
 import { unreadFieldsOf } from "../unread/unread.types";
+import { UserRepository } from "../user/user.repository";
 
 /**
  * Often enough that no proxy between here and a browser takes the stream for idle and
@@ -30,12 +34,7 @@ const HEARTBEAT_MS = 25_000;
  * `EventSource` opens the next one by itself. The application closing ends every stream
  * sooner — see `RealtimeService.closing`.
  *
- * The guard checks the access token when the stream opens and never again, so without a
- * bound a stream would outlive the token it was opened with — and with it a block, which
- * the API otherwise enforces within `JWT_ACCESS_TTL`. Closing it is what
- * makes the reconnect pass the guard again: a live session reconnects unnoticed, an expired
- * token is a `401` the frontend answers with one refresh, and a blocked account is turned
- * away. Each reconnect starts with a `sync`, so nothing is lost across it.
+ * Each reconnect checks the access token's expiry and starts with a fresh sync.
  */
 const STREAM_LIFETIME_MS = 5 * 60 * 1000;
 
@@ -61,6 +60,7 @@ export class EventsController {
   constructor(
     private readonly realtimeService: RealtimeService,
     private readonly unreadService: UnreadService,
+    private readonly users: UserRepository,
   ) {}
 
   @Sse()
@@ -73,20 +73,31 @@ export class EventsController {
       "Server-Sent Events: each `data` line is one value of `serverEventSchema`, the first one a `sync`",
     content: { "text/event-stream": { schema: { type: "string" } } },
   })
-  stream(@CurrentUser() user: AuthenticatedUser): Observable<MessageEvent> {
-    const events = this.realtimeService
-      .eventsOf(user.id, this.syncOf(user.id))
-      .pipe(map((event): MessageEvent => ({ data: event })));
-
-    const heartbeat = interval(HEARTBEAT_MS).pipe(
-      map((): MessageEvent => ({ comment: "keep-alive" })),
+  stream(@CurrentUser() user: AuthenticatedSession): Observable<MessageEvent> {
+    const events = this.realtimeService.eventsOf(user.id, this.syncOf(user.id));
+    const heartbeat = interval(HEARTBEAT_MS).pipe(map(() => null));
+    const ending = merge(
+      timer(STREAM_LIFETIME_MS),
+      this.realtimeService.closing,
     );
 
-    // Ended rather than errored when the channel could not be subscribed: an error would
-    // reach the browser as an `error` event, and a plain end is what `EventSource` answers
-    // with a reconnect — which subscribes again. See `RealtimeService.eventsOf`.
     return merge(events, heartbeat).pipe(
-      takeUntil(merge(timer(STREAM_LIFETIME_MS), this.realtimeService.closing)),
+      filter(
+        (event) =>
+          event?.type !== "session.changed" ||
+          event.sessionVersion > user.sessionVersion,
+      ),
+      // Check the durable version before sending data even if Redis missed a revocation.
+      concatMap(async (event): Promise<MessageEvent | null> => {
+        if (
+          event?.type === "session.changed" ||
+          !(await this.users.hasSessionVersion(user.id, user.sessionVersion))
+        )
+          return null;
+        return event ? { data: event } : { comment: "keep-alive" };
+      }),
+      takeWhile((event) => event !== null),
+      takeUntil(ending),
       catchError(() => EMPTY),
     );
   }

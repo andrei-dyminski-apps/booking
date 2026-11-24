@@ -1,3 +1,4 @@
+import { mailRequestContext } from "./mail-request-context";
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Request } from "express";
@@ -221,6 +222,9 @@ export function useRequestLog(
   logger: Logger = theLogger(),
 ): void {
   app.use(pinoHttp({ ...requestLogOptions(), logger }));
+  app.use((req: Request, _res: ServerResponse, next: () => void) =>
+    typeof req.id === "string" ? mailRequestContext.run(req.id, next) : next(),
+  );
 }
 
 function lineOf(request: IncomingMessage, response: ServerResponse): string {

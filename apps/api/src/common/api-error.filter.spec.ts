@@ -9,7 +9,7 @@ import {
   ServiceUnavailableException,
   type ArgumentsHost,
 } from "@nestjs/common";
-import { registerSchema } from "@repo/contracts";
+import { completeRegistrationSchema } from "@repo/contracts";
 import { ZodValidationException } from "nestjs-zod";
 import { apiException } from "./api-exception";
 import { ApiErrorFilter, toApiError, toApiErrorOf } from "./api-error.filter";
@@ -52,9 +52,9 @@ describe("toApiError", () => {
   });
 
   it("writes the failed validation as VALIDATION_FAILED with a code on every issue", () => {
-    const result = registerSchema.safeParse({
+    const result = completeRegistrationSchema.safeParse({
       name: "Ann",
-      email: "ann@example.com",
+      token: "a".repeat(64),
       password: "short",
     });
 

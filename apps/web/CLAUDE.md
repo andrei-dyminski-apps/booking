@@ -753,13 +753,10 @@ What `useActionForm` ties together, and what each third of it owns:
 **Every box is a `FormField`** (`shared/ui/form-field.tsx`), and it exists for the wiring
 rather than for the markup:
 
-- **`aria-invalid` and the message are linked by `aria-describedby`.** One says that a box
-  is wrong and the other says what is wrong with it, and without the link a screen reader
-  announces the first and never reaches the second. The ids are derived from the field name
-  rather than being it, for the reason `FilterField` gives; the error's is left out while
-  there is no error, because `FieldError` renders
-  nothing at all in that case and a reference to an element that is not there reads as no
-  description rather than as an empty one.
+- **`aria-invalid` and the message are linked by `aria-describedby`.** One says a box is
+  wrong, and without the link a screen reader sees an error it cannot identify. Each box
+  gets a React ID so fields with the same name in different forms keep their own labels,
+  descriptions and errors. `FieldError` renders only when there is an error to describe.
 - **A description is a hint beside the label, never a paragraph under the box.** Every
   box and every group of boxes that explains itself does it through
   `shared/ui/hint-label.tsx`: `HintLabel` for a box — `FormField`, `FilterField` and
@@ -1242,7 +1239,7 @@ library. The reasons are two:
   — the API cancels the hold, tries to withdraw the intent and, when it has already
   succeeded, refunds it in full from its webhook and tells the guest (the "unheld" path,
   covered by `refunds a payment that lands on a cancelled hold` in
-  `apps/api/test/payment.e2e-spec.ts`). What the hidden button spares is a `Cancelled`
+  `apps/api/e2e/specs/payment.e2e-spec.ts`). What the hidden button spares is a `Cancelled`
   badge followed by a `Payment refunded` notice, nothing that is owed.
 - **`processing` counts as paid, and only because every method offered is instant.** A
   `redirect_status` or an intent in `processing` takes the form away until the webhook
@@ -1687,9 +1684,10 @@ under test is the retry and locking logic, not a browser.
 
 ### Browser suite
 
-`e2e/` holds the Playwright suite (`pnpm test:browser` from the root): the scenarios of
-`docs/e2e-scenarios.md`, in Chromium, against a hermetic stack the config starts itself —
-`e2e/stack.ts` states its whole environment, `e2e/compose.yml` its database and Redis.
+`e2e/specs/` holds the Playwright scenarios listed in `docs/e2e-scenarios.md`.
+`e2e/support/` holds their shared fixtures and helpers. Run `pnpm test:browser` from the
+root to run them in Chromium against the hermetic stack started by the Playwright config.
+`e2e/stack.ts` defines the environment and `e2e/compose.yml` defines the containers.
 
 - **A scenario's main path, never an edge case.** A test is a goal a visitor reaches when
   things go right; a refusal, a limit, a malformed input belongs to the API's e2e specs,
@@ -1699,7 +1697,7 @@ under test is the retry and locking logic, not a browser.
 - **Written as a visitor reads the page**: roles, labels, the visible English text
   (`getByRole`, `getByLabel`), never a class, a test id or how the page is rendered, so a
   rewrite of caching or rendering leaves the suite standing.
-- **Every page a test visits is checked**: `test` and `expect` come from `e2e/fixtures.ts`,
+- **Every page a test visits is checked**: `test` and `expect` come from `e2e/support/fixtures.ts`,
   never from `@playwright/test`. The fixture collects console errors, uncaught exceptions,
   failed requests and answers of `400` or more for the whole test, and fails a page reached
   and never passed to `pages.check()` — which runs axe and fails on serious and critical
@@ -1708,7 +1706,7 @@ under test is the retry and locking logic, not a browser.
   accounted for apart and a check of another visitor's says nothing of this one. A
   response the test provokes on purpose (a not-found page, a refusal) is declared first
   with `pages.expectResponse`.
-- **Tests do not depend on each other.** The demo accounts (`e2e/demo.ts`) are only ever
+- **Tests do not depend on each other.** The demo accounts (`e2e/support/demo.ts`) are only ever
   signed in to; a test that changes an account registers its own. Each attempt of each test
   sends an address of its own in `x-forwarded-for`, which the stack's API believes
   (`TRUST_PROXY=1` there, and nowhere else), so the rate limiter counts every test apart and
@@ -1729,14 +1727,14 @@ under test is the retry and locking logic, not a browser.
   `stripe.log`), not into the reporter's: Playwright empties that directory before it
   starts them, and CI keeps it as an artifact of its own when a run fails (the traces travel
   in the HTML report). An API that never came up says why in `api.log`.
-- **A CI run stops itself after six minutes** (`globalTimeout`), inside the job's ten, so a
+- **A CI run stops itself after eight minutes** (`globalTimeout`), inside the job's ten, so a
   hang still leaves its report and logs — a live run after forty, inside its workflow's
   fifty.
 - **Two projects: `desktop` runs every scenario, `phone` (a Pixel 7) only what a narrow
   screen changes** — the navigation and the catalogue up to a listing's page. Below `lg`
   the shell draws its navigation in a sheet behind the menu button instead of the sidebar,
   so a scenario that walks the menu goes through `openFromMenu`, `expectCurrentSection`,
-  `expectSignedInAs`, `checkMenu` and `signOutFromMenu` (`shell.ts`), which read the page's
+  `expectSignedInAs`, `checkMenu` and `signOutFromMenu` (`e2e/support/shell.ts`), which read the page's
   width and take the sidebar on a wide one and the sheet on a narrow one; `sidebarLink` is
   for a scenario that runs on the desktop alone. A new scenario joins the phone only when
   what it proves looks different on one.
@@ -1767,7 +1765,7 @@ under test is the retry and locking logic, not a browser.
   (`@real-stripe-only`), or none for the hermetic stack alone — the safe default for a new
   one. Against Stripe only the tagged scenarios run, on the desktop alone, with no retries;
   the stand-in, its route and its drain are left out (`TARGET === "hermetic"` in
-  `fixtures.ts`), and `stack.ts` takes the two Stripe keys from the root `.env` — test keys
+  `e2e/support/fixtures.ts`), and `stack.ts` takes the two Stripe keys from the root `.env` — test keys
   only — starts two `stripe listen` processes of the Stripe CLI (a dev dependency, run on
   the host since the API listens on 127.0.0.1), hands the API the secret the CLI keeps for
   the key, runs it with `NODE_ENV=production` and gives it a `STRIPE_SITE` new on every run.
@@ -1775,8 +1773,8 @@ under test is the retry and locking logic, not a browser.
   in `PAYOUT_PLATFORM_COUNTRY`; another one stops the API at start (`servers/api.log` says
   why).
   A stay is paid by typing the test card into Stripe's own form (`typeTestCard` in
-  `stay.ts`); the frames Stripe draws its forms in are left out of the accessibility check
-  (`STRIPE_FRAMES` in `fixtures.ts`), since their markup is Stripe's. A wait on Stripe's
+  `e2e/support/stay.ts`); the frames Stripe draws its forms in are left out of the accessibility check
+  (`STRIPE_FRAMES` in `e2e/support/fixtures.ts`), since their markup is Stripe's. A wait on Stripe's
   news — a payment confirmed, a refund recorded — goes through `providerWait` (`target.ts`),
   three times the hermetic one there, and a test gets two minutes rather than Playwright's
   thirty seconds (`timeout` in `playwright.config.ts`), or it would be cut off before its
@@ -1785,9 +1783,9 @@ under test is the retry and locking logic, not a browser.
 - **The live target runs the `EVERY_TARGET` scenarios against the deployment**
   (`e2e/live.ts`), on the desktop, with no retries, starting nothing: `WEB_ORIGIN`
   (`stack.ts`) is the deployment's origin there, and a test gets three minutes. A scenario
-  signs in as `GUEST` (`demo.ts`) — the demo guest on the local stacks, the suite's own
+  signs in as `GUEST` (`e2e/support/demo.ts`) — the demo guest on the local stacks, the suite's own
   guest on the deployment, whose demo accounts belong to its visitors — and its arranged
-  host is the suite's own host there (`arrange.ts`); `ownGuest` (`session.ts`) is the
+  host is the suite's own host there (`e2e/support/arrange.ts`); `ownGuest` (`e2e/support/session.ts`) is the
   guest of a scenario that changes the guest's account, registered locally and the
   suite's guest there, where an account registered for a scenario would leave its row
   behind even once deleted. Both accounts sign in with
@@ -1807,7 +1805,7 @@ under test is the retry and locking logic, not a browser.
   does not, and on the deployment a page cached with no lifetime would outlive the run and
   keep offering the retired stay.
   The whole run is one visitor to the rate limiter, since Vercel writes `x-forwarded-for`
-  itself: `prepare` in `fixtures.ts` routes nothing there, and the run keeps a pace
+  itself: `prepare` in `e2e/support/fixtures.ts` routes nothing there, and the run keeps a pace
   instead (`pace.ts`) — every sign-in, through a page (`signInThroughForm`), an
   arrangement or the global setup, first takes one of eight slots a minute, before the
   press rather than inside it so the wait never runs out an `expect`, and a test that
@@ -1824,7 +1822,7 @@ under test is the retry and locking logic, not a browser.
   earlier run's stays, threads and reviews. It runs from `.github/workflows/live.yml`, on a
   schedule and on demand, never as a pull request check.
 - **State a scenario should not click its way to is arranged first** (`arrange` in
-  `e2e/fixtures.ts`, `e2e/arrange.ts`), by the application's own HTTP surface through the
+  `e2e/support/fixtures.ts`, `e2e/support/arrange.ts`), by the application's own HTTP surface through the
   BFF and never by writing to the database, so the arrangement works on every target. It
   sends an address of its own, apart from the test's pages, so a scenario that arranges a
   lot does not spend the API's per-minute limit its pages count against.
@@ -1836,7 +1834,7 @@ under test is the retry and locking logic, not a browser.
   night and a retry never meets its failed attempt's hold; its title is new on every
   attempt too, since the stay a failed attempt left on a demo guest's list keeps its
   listing's title after the listing is retired. A stay that has begun rests on a
-  listing whose check-in is at midnight on its today (`begunStayListing` in `stay.ts`), and
+  listing whose check-in is at midnight on its today (`begunStayListing` in `e2e/support/stay.ts`), and
   a stay that is over is one of those ended early. A stay is always paid through the pages,
   never arranged.
 - **A scenario meets the catalogue at an address nobody else has read.** A catalogue page
@@ -1848,16 +1846,16 @@ under test is the retry and locking logic, not a browser.
   the deployment the cached pages outlive the run and visitors list stays of their own, so
   there a scenario that searches by price searches by the minute its attempt started,
   counted round a band of whole prices of its own far above what a visitor asks
-  (`livePrice` and `LIVE_PRICE_BANDS` in `catalogue.ts`). A
+  (`livePrice` and `LIVE_PRICE_BANDS` in `e2e/support/catalogue.ts`). A
   write marks the cached pages stale rather than emptying them, so the page served right
-  after a change may be the one before it: `expectInCatalogue` (`catalogue.ts`) reloads
+  after a change may be the one before it: `expectInCatalogue` (`e2e/support/catalogue.ts`) reloads
   until the change arrives, and so does a scenario reading a listing's calendar after
   somebody else's hold.
-- **Two people at once are two browsers**: `another()` (`fixtures.ts`) opens a page in a
+- **Two people at once are two browsers**: `another()` (`e2e/support/fixtures.ts`) opens a page in a
   fresh context with the project's options, its own address in `x-forwarded-for`, the same
   route to the Stripe stand-in and the same checks on every page — `pages.check(thatPage)`.
   A scenario that changes an account uses one of its own — the arranged host, or one
-  `registerThroughForm` (`session.ts`) signs up — never a demo one.
+  `registerThroughForm` (`e2e/support/session.ts`) signs up — never a demo one.
 - `e2e/*.spec.ts` are Playwright's, `src/**/*.spec.ts` Vitest's; neither runner picks up the
   other's files.
 

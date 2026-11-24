@@ -84,9 +84,11 @@ beforeEach(() => {
   vi.stubEnv("API_ORIGIN", "http://api.test");
   vi.stubEnv("NODE_ENV", "production");
   lines = [];
+
   const capture = (line: string): void => {
     lines.push(line);
   };
+
   vi.spyOn(console, "info").mockImplementation(capture);
   vi.spyOn(console, "error").mockImplementation(capture);
 });

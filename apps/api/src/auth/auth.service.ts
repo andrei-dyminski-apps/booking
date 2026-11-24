@@ -1,22 +1,32 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { randomBytes } from "node:crypto";
 import {
-  ConflictException,
+  BadRequestException,
   ForbiddenException,
   Injectable,
   Logger,
   UnauthorizedException,
 } from "@nestjs/common";
-import type { LoginInput, RegisterInput, User } from "@repo/contracts";
+import type {
+  CompleteRegistrationInput,
+  LoginInput,
+  RegisterInput,
+  RequestEmailChangeInput,
+  ResetPasswordInput,
+  User,
+} from "@repo/contracts";
 import * as argon2 from "argon2";
 import { isPast } from "date-fns";
 import { apiException } from "../common/api-exception";
 import { RefreshTokenRepository } from "./refresh-token.repository";
 import { TokenService, type TokenPair } from "./token.service";
+import { UserRepository } from "../user/user.repository";
 import {
-  EmailAlreadyRegisteredError,
-  UserRepository,
-} from "../user/user.repository";
+  AccountMailRepository,
+  DemoEmailChangeError,
+} from "./account-mail.repository";
 import { sessionNotFound } from "../common/session-errors";
+import { RealtimeService } from "../realtime/realtime.service";
 
 /**
  * What a blocked account is told when it tries to sign in or keep a session going — the
@@ -56,38 +66,90 @@ export class AuthService {
     private readonly userRepository: UserRepository,
     private readonly refreshTokenRepository: RefreshTokenRepository,
     private readonly tokenService: TokenService,
+    private readonly accountMail: AccountMailRepository,
+    private readonly realtime: RealtimeService,
   ) {}
 
-  async register(input: RegisterInput): Promise<AuthResult> {
-    // argon2id is the default of the library and the memory-hard variant OWASP recommends;
-    // spelling it out keeps a future change of that default from silently downgrading it.
+  async register(input: RegisterInput): Promise<void> {
+    await Promise.all([
+      delay(250),
+      this.accountMail.requestRegistration(input.email, input.next),
+    ]);
+  }
+
+  async completeRegistration(
+    input: CompleteRegistrationInput,
+  ): Promise<AuthResult> {
+    if (!(await this.accountMail.hasActiveLink("register", input.token)))
+      throw invalidAccountLink();
+
     const passwordHash = await argon2.hash(input.password, {
       type: argon2.argon2id,
     });
+    const user = await this.accountMail.register(
+      input.token,
+      input.name,
+      passwordHash,
+    );
+    if (!user) throw invalidAccountLink();
+    return this.startSession(user, 0);
+  }
 
-    let user: User;
+  async requestPasswordReset(email: string): Promise<void> {
+    await Promise.all([delay(250), this.accountMail.requestReset(email)]);
+  }
 
+  async resetPassword(input: ResetPasswordInput): Promise<string> {
+    if (!(await this.accountMail.hasActiveLink("reset", input.token)))
+      throw invalidAccountLink();
+
+    const passwordHash = await argon2.hash(input.password, {
+      type: argon2.argon2id,
+    });
+    const session = await this.accountMail.reset(input.token, passwordHash);
+    if (!session) throw invalidAccountLink();
+    await this.realtime.publish(session.userId, {
+      type: "session.changed",
+      sessionVersion: session.sessionVersion,
+    });
+    return session.userId;
+  }
+
+  async requestEmailChange(
+    userId: string,
+    input: RequestEmailChangeInput,
+  ): Promise<void> {
+    const credentials = await this.accountMail.credentials(userId);
+    if (!credentials) throw sessionNotFound();
+    if (!(await argon2.verify(credentials.passwordHash, input.password))) {
+      throw apiException(
+        ForbiddenException,
+        "PASSWORD_INCORRECT",
+        "The password is incorrect",
+      );
+    }
     try {
-      user = await this.userRepository.create({
-        name: input.name,
-        email: input.email,
-        passwordHash,
-      });
+      await this.accountMail.requestChange(
+        userId,
+        credentials.passwordHash,
+        credentials.sessionVersion,
+        input.email,
+      );
     } catch (error) {
-      if (error instanceof EmailAlreadyRegisteredError) {
-        // Deliberately not the message of the error: it names the address back, which is
-        // fine in a log and is a registered-address oracle in a response body.
-        throw apiException(
-          ConflictException,
-          "EMAIL_ALREADY_REGISTERED",
-          "Email is already registered",
-        );
-      }
-
+      if (error instanceof DemoEmailChangeError)
+        throw new ForbiddenException("Demo accounts cannot change email");
       throw error;
     }
+  }
 
-    return this.startSession(user);
+  async confirmEmailChange(token: string): Promise<string> {
+    const session = await this.accountMail.changeEmail(token);
+    if (!session) throw invalidAccountLink();
+    await this.realtime.publish(session.userId, {
+      type: "session.changed",
+      sessionVersion: session.sessionVersion,
+    });
+    return session.userId;
   }
 
   async login(input: LoginInput): Promise<AuthResult> {
@@ -116,7 +178,7 @@ export class AuthService {
       throw accountBlocked(ForbiddenException);
     }
 
-    return this.startSession(found.user);
+    return this.startSession(found.user, found.sessionVersion);
   }
 
   /**
@@ -187,11 +249,13 @@ export class AuthService {
     const issued = await this.tokenService.issuePair(
       stored.user,
       stored.familyId,
+      stored.sessionVersion,
     );
     const rotated = await this.refreshTokenRepository.rotate(
       stored.id,
       stored.user.id,
       issued.refresh,
+      stored.sessionVersion,
     );
 
     // Lost a race with a parallel refresh of the same token — a double-clicked button
@@ -242,10 +306,17 @@ export class AuthService {
     return user;
   }
 
-  private async startSession(user: User): Promise<AuthResult> {
-    const issued = await this.tokenService.issuePair(user);
+  private async startSession(user: User, version: number): Promise<AuthResult> {
+    const issued = await this.tokenService.issuePair(user, undefined, version);
 
-    await this.refreshTokenRepository.create(user.id, issued.refresh);
+    if (
+      !(await this.refreshTokenRepository.create(
+        user.id,
+        issued.refresh,
+        version,
+      ))
+    )
+      throw sessionNotFound();
     await this.sweepExpired(user.id);
 
     return { user, tokens: issued };
@@ -268,4 +339,12 @@ export class AuthService {
       );
     }
   }
+}
+
+function invalidAccountLink() {
+  return apiException(
+    BadRequestException,
+    "ACCOUNT_LINK_INVALID",
+    "This link is invalid or expired",
+  );
 }

@@ -31,5 +31,7 @@ export const ThemeToggle = () => {
 };
 
 const subscribeToNothing = () => () => {};
+
 const isClient = () => true;
+
 const isServer = () => false;

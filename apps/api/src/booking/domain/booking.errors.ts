@@ -11,7 +11,7 @@ import {
  * What `create` throws instead of letting a Prisma error code reach the service. The
  * listing key is now checked under the `FOR UPDATE` lock rather than at the insert, so an
  * insert only reaches this for the guest key — but the translation is kept whole, because
- * `test/booking.repository.e2e-spec.ts` still drives both sides directly.
+ * `e2e/specs/booking.repository.e2e-spec.ts` still drives both sides directly.
  */
 export class ListingNotFoundError extends Error {
   constructor(listingId: string) {

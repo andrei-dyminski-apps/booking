@@ -12,7 +12,7 @@ import {
   WEB_ENV,
   WEB_ORIGIN,
 } from "./e2e/stack";
-import { READER_TIME_ZONE } from "./e2e/demo";
+import { READER_TIME_ZONE } from "./e2e/support/demo";
 import { EVERY_TARGET, REAL_STRIPE_ONLY, TARGET } from "./e2e/target";
 
 const CI = process.env.CI !== undefined && process.env.CI !== "";
@@ -38,7 +38,7 @@ const DESKTOP = { name: "desktop", use: { ...devices["Desktop Chrome"] } };
  * (`e2e/live-setup.ts`, `e2e/live-teardown.ts`).
  */
 export default defineConfig({
-  testDir: "./e2e",
+  testDir: "./e2e/specs",
   globalSetup: LIVE ? "./e2e/live-setup.ts" : undefined,
   // The Stripe stand-in's last word: what the API did after the last test (`e2e/stripe`);
   // on the deployment, the clean-up after the run.
@@ -68,7 +68,7 @@ export default defineConfig({
   // a hang then ends as a failed run with its report written, rather than as a job GitHub
   // cancels with nothing kept. The live run is paced, so its budget is its own
   // (`.github/workflows/live.yml`).
-  globalTimeout: CI ? (LIVE ? 40 * 60_000 : 6 * 60_000) : 0,
+  globalTimeout: CI ? (LIVE ? 40 * 60_000 : 8 * 60_000) : 0,
   // On the deployment no HTML report either: it names every step with its arguments, the
   // password typed into the sign-in form among them (`Fill "…"`), and the live workflow
   // keeps its artifacts where anyone may read them. A failure there is read from the log,
@@ -80,7 +80,9 @@ export default defineConfig({
   ],
   use: {
     baseURL: WEB_ORIGIN,
-    // The reader's clock, the same on every machine (`e2e/demo.ts`).
+    // A notification can fade in and finish while axe is scanning its action button.
+    reducedMotion: "reduce",
+    // The reader's clock, the same on every machine (`e2e/support/demo.ts`).
     locale: "en-GB",
     timezoneId: READER_TIME_ZONE,
     // What a failure leaves behind, so it is read rather than rerun. On the deployment no

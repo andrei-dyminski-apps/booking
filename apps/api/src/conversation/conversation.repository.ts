@@ -15,6 +15,7 @@ import {
   type Message as MessageRow,
 } from "../generated/prisma/client";
 import { STILL_OFFERED } from "../listing/listing.repository";
+import { recordMailTask } from "../mail/infrastructure/mail-outbox.repository";
 import { isPrismaError, PrismaErrorCode } from "../prisma/prisma.errors";
 import { PrismaService } from "../prisma/prisma.service";
 import { countUnreadOf, countUnreadOfOne } from "../unread/unread.repository";
@@ -246,8 +247,8 @@ export class ConversationRepository {
    * `FOR UPDATE` while it waits for this listing, and a lock on it taken under the
    * listing's would close the cycle.
    *
-   * The guest's row is read next, `FOR KEY SHARE` — the lock the insert's foreign key takes
-   * anyway — and refused when erased: an access token outlives the erasure, and a thread it
+   * The guest's row is read next under `FOR SHARE`, so blocking the guest and writing
+   * a message are serialized. An erased guest is also refused: an access token outlives the erasure, and a thread it
    * opened would be a new conversation started by nobody. The erasure locks the row `FOR
    * UPDATE`, so a first message either commits before it or waits and is refused. It comes
    * after the refusal of one's own listing, as in a hold: an account's erasure locks its row
@@ -280,8 +281,8 @@ export class ConversationRepository {
 
         const guest = await tx.$queryRaw<{ id: string }[]>`
           SELECT id FROM users
-          WHERE id = ${guestId}::uuid AND deleted_at IS NULL
-          FOR KEY SHARE
+          WHERE id = ${guestId}::uuid AND deleted_at IS NULL AND blocked_at IS NULL
+          FOR SHARE
         `;
 
         if (guest.length === 0) throw new GuestNotFoundError(guestId);
@@ -347,6 +348,7 @@ export class ConversationRepository {
     conversationId: string,
     sender: ConversationSide,
     body: string,
+    inboundReply?: InboundReply,
   ): Promise<AppendedMessage> {
     return this.prismaService.$transaction(async (tx) => {
       const { message, participants } = await appendIn(
@@ -354,6 +356,7 @@ export class ConversationRepository {
         conversationId,
         sender,
         body,
+        { inboundReply },
       );
 
       return {
@@ -382,18 +385,33 @@ export class ConversationRepository {
     readerId: string,
   ): Promise<UnreadCounts | null> {
     return this.prismaService.$transaction(async (tx) => {
-      // `updateMany`, so a thread that went with its guest's account between the read that
-      // authorized this and here is a no-op rather than a 500.
-      const { count } = await tx.conversation.updateMany({
+      // A thread that went with its guest's account between the read that
+      // authorized this and here is a no-op.
+      const [updated] = await tx.conversation.updateManyAndReturn({
         where: {
           id: conversationId,
           lastMessageAt: { gte: upTo },
           ...readBefore(side, upTo),
         },
         data: readUpTo(side, upTo),
+        select: { lastMessageAt: true, lastMessageSender: true },
       });
 
-      if (count === 0) return null;
+      if (!updated) return null;
+      if (updated.lastMessageSender === side && updated.lastMessageAt > upTo) {
+        const marker = await readThroughOwnMessages(
+          tx,
+          conversationId,
+          side,
+          upTo,
+          updated.lastMessageAt,
+        );
+        if (marker > upTo)
+          await tx.conversation.update({
+            where: { id: conversationId },
+            data: readUpTo(side, marker),
+          });
+      }
 
       return countUnreadOfOne(tx, readerId);
     });
@@ -425,8 +443,8 @@ export class ConversationRepository {
 
 /**
  * One message, and the columns of its thread it moves: the thread's newest message is now
- * this one — its moment, its text and its side — and the sender has read everything up to
- * it.
+ * this one — its moment, its text and its side. An email reply acknowledges the digest it
+ * answers and preserves later unread messages.
  *
  * The thread row is locked first (`SELECT ... FOR UPDATE`), and the moment is taken only
  * after the lock is held, one millisecond past the thread's newest message at the least.
@@ -440,7 +458,7 @@ export class ConversationRepository {
  *
  * The two people of the thread are read by the same query as its newest moment — the host
  * through the listing, as everywhere else — so whoever counts after the message has them
- * without asking again. Their rows are then read `FOR KEY SHARE`, and a thread one of them
+ * without asking again. Their rows are then read `FOR SHARE`, and a thread one of them
  * erased their account from is refused (`ConversationClosedError`): the erasure locks its
  * row `FOR UPDATE`, so a message either commits before it or waits and finds the thread
  * closed. A reply holds no lock the erasure takes — neither the thread nor the listing — so
@@ -455,7 +473,10 @@ async function appendIn(
   conversationId: string,
   sender: ConversationSide,
   body: string,
-  { partiesLive = false }: { partiesLive?: boolean } = {},
+  {
+    partiesLive = false,
+    inboundReply,
+  }: { partiesLive?: boolean; inboundReply?: InboundReply } = {},
 ): Promise<{ message: Message; participants: ConversationParticipants }> {
   const locked = await tx.$queryRaw<LockedConversation[]>`
     SELECT id FROM conversations WHERE id = ${conversationId}::uuid FOR UPDATE
@@ -465,31 +486,87 @@ async function appendIn(
     throw new ConversationNotFoundError(conversationId);
   }
 
-  const { lastMessageAt, guestId, listing } =
-    await tx.conversation.findUniqueOrThrow({
-      where: { id: conversationId },
-      select: {
-        lastMessageAt: true,
-        guestId: true,
-        listing: { select: { ownerId: true } },
-      },
-    });
+  const thread = await tx.conversation.findUniqueOrThrow({
+    where: { id: conversationId },
+    select: {
+      lastMessageAt: true,
+      guestReadAt: true,
+      hostReadAt: true,
+      guestId: true,
+      listing: { select: { ownerId: true } },
+    },
+  });
+  const { lastMessageAt, guestId, listing } = thread;
+  const fromGuest = sender === ConversationSide.GUEST;
+  const senderId = fromGuest ? guestId : listing.ownerId;
   if (!partiesLive) {
     const parties = await tx.$queryRaw<LockedParty[]>`
-      SELECT deleted_at FROM users
+      SELECT id, deleted_at, blocked_at FROM users
       WHERE id IN (${guestId}::uuid, ${listing.ownerId}::uuid)
-      FOR KEY SHARE
+      FOR SHARE
     `;
 
     if (parties.some((party) => party.deleted_at !== null)) {
       throw new ConversationClosedError(conversationId);
     }
+    if (
+      parties.some(
+        (party) => party.id === senderId && party.blocked_at !== null,
+      )
+    ) {
+      throw new SenderBlockedError();
+    }
   }
 
   const at = max([new Date(), addMilliseconds(lastMessageAt, 1)]);
+  let senderReadAt: Date | null = at;
+  if (inboundReply) {
+    const existing = await tx.message.findUnique({
+      where: { inboundEmailId: inboundReply.id },
+    });
+    if (existing) throw new DuplicateReplyError();
+    // The token must have been valid at receipt and must still be unrevoked now.
+    const reply = await tx.mailReplyToken.findFirst({
+      where: {
+        hash: inboundReply.tokenHash,
+        userId: senderId,
+        message: { conversationId },
+        revokedAt: null,
+        expiresAt: { gt: inboundReply.receivedAt },
+      },
+      select: { message: { select: { createdAt: true } } },
+    });
+    if (!reply) throw new InvalidReplyError();
+    const previous = readMarkerOf(thread, sender);
+    const seen = reply.message.createdAt;
+    // The digest quotes one message. A read marker cannot skip older unseen ones.
+    const missed = await tx.message.findFirst({
+      where: {
+        conversationId,
+        sender: { not: sender },
+        createdAt: { gt: previous ?? undefined, lt: seen },
+      },
+      select: { id: true },
+    });
+    senderReadAt = missed
+      ? previous
+      : await readThroughOwnMessages(
+          tx,
+          conversationId,
+          sender,
+          previous && previous > seen ? previous : seen,
+          at,
+        );
+  }
 
   const row = await tx.message.create({
-    data: { conversationId, sender, body, createdAt: at },
+    data: {
+      conversationId,
+      sender,
+      body,
+      createdAt: at,
+      inboundEmailId: inboundReply?.id,
+    },
   });
 
   await tx.conversation.update({
@@ -498,8 +575,13 @@ async function appendIn(
       lastMessageAt: at,
       lastMessageBody: body,
       lastMessageSender: sender,
-      ...readUpTo(sender, at),
+      ...readUpTo(sender, senderReadAt),
     },
+  });
+  await recordMailTask(tx, {
+    id: row.id,
+    kind: "digest",
+    userId: fromGuest ? listing.ownerId : guestId,
   });
 
   return {
@@ -511,8 +593,12 @@ async function appendIn(
 /** One row of the `FOR UPDATE` read — raw SQL, so the column keeps its stored name. */
 type LockedConversation = { id: string };
 
-/** One of the thread's two people, read under a key-share lock — raw SQL, stored names. */
-type LockedParty = { deleted_at: Date | null };
+/** One of the thread's two people, read under a shared row lock — raw SQL, stored names. */
+type LockedParty = {
+  id: string;
+  deleted_at: Date | null;
+  blocked_at: Date | null;
+};
 
 /**
  * The most recently written-to thread first, the id behind it — the pair the index on
@@ -554,11 +640,27 @@ function afterCursor(
   };
 }
 
+// Under the conversation lock, own replies can advance the marker only if doing
+// so cannot acknowledge an unseen message from the other participant.
+async function readThroughOwnMessages(
+  tx: Prisma.TransactionClient,
+  conversationId: string,
+  side: ConversationSide,
+  seen: Date,
+  latest: Date,
+): Promise<Date> {
+  const unseen = await tx.message.findFirst({
+    where: { conversationId, sender: { not: side }, createdAt: { gt: seen } },
+    select: { id: true },
+  });
+  return unseen ? seen : latest;
+}
+
 /** The write that says this side has seen the thread up to `at`. */
 function readUpTo(
   side: ConversationSide,
-  at: Date,
-): { guestReadAt: Date } | { hostReadAt: Date } {
+  at: Date | null,
+): { guestReadAt: Date | null } | { hostReadAt: Date | null } {
   switch (side) {
     case ConversationSide.GUEST:
       return { guestReadAt: at };
@@ -582,7 +684,7 @@ function readBefore(
 
 /** When this side last opened the thread, or `null` for never. */
 function readMarkerOf(
-  row: ConversationRow,
+  row: Pick<ConversationRow, "guestReadAt" | "hostReadAt">,
   side: ConversationSide,
 ): Date | null {
   switch (side) {
@@ -633,3 +735,11 @@ function toConversation(
     createdAt: row.createdAt.toISOString(),
   };
 }
+
+export class SenderBlockedError extends Error {}
+
+export class DuplicateReplyError extends Error {}
+
+export class InvalidReplyError extends Error {}
+
+export type InboundReply = { id: string; tokenHash: string; receivedAt: Date };

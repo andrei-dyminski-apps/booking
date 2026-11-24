@@ -40,6 +40,7 @@ export class BookingCancellationRepository {
     by: CancellationBy | null = null,
   ): Promise<CancelledStay | null> {
     const feeCents = by?.feeCents ?? null;
+
     const write = async (
       client: Pick<Prisma.TransactionClient, "booking" | "hostFee">,
     ): Promise<CancelledStay | null> => {

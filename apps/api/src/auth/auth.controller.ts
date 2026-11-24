@@ -6,11 +6,12 @@ import {
   HttpStatus,
   Inject,
   Post,
+  Req,
   Res,
 } from "@nestjs/common";
 import { Throttle, minutes } from "@nestjs/throttler";
 import {
-  ApiConflictResponse,
+  ApiAcceptedResponse,
   ApiCookieAuth,
   ApiCreatedResponse,
   ApiForbiddenResponse,
@@ -20,21 +21,35 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from "@nestjs/swagger";
-import type { Response } from "express";
+import type { Request, Response } from "express";
 import type { User } from "@repo/contracts";
 import { ApiErrorDto } from "../common/dto/api-error.dto";
 import { AUTH_CONFIG, type AuthConfig } from "./auth.config";
 import { AuthService, type AuthResult } from "./auth.service";
 import type { AuthenticatedUser } from "./auth.types";
 import {
+  ACCESS_TOKEN_COOKIE,
   REFRESH_TOKEN_COOKIE,
+  clearAuthCookie,
   clearAuthCookies,
+  readCookie,
   setAuthCookies,
 } from "./cookies";
 import { CurrentUser } from "./decorators/current-user.decorator";
 import { Public } from "./decorators/public.decorator";
 import { RefreshToken } from "./decorators/refresh-token.decorator";
-import { LoginDto, RegisterDto, UserDto } from "./dto/auth.dto";
+import {
+  AuthRequestAcceptedDto,
+  CompleteRegistrationDto,
+  ConfirmEmailChangeDto,
+  LoginDto,
+  RegisterDto,
+  RequestEmailChangeDto,
+  RequestPasswordResetDto,
+  ResetPasswordDto,
+  UserDto,
+} from "./dto/auth.dto";
+import { TokenService } from "./token.service";
 
 /**
  * The tokens never appear in a response body — they leave only as httpOnly cookies, so
@@ -52,23 +67,90 @@ import { LoginDto, RegisterDto, UserDto } from "./dto/auth.dto";
 export class AuthController {
   constructor(
     private readonly authService: AuthService,
+    private readonly tokenService: TokenService,
     @Inject(AUTH_CONFIG) private readonly authConfig: AuthConfig,
   ) {}
 
   @Public()
   @Throttle({ default: { ttl: minutes(1), limit: 10 } })
   @Post("register")
-  @ApiOperation({ summary: "Create an account and start its session" })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: "Request an email link to create an account" })
+  @ApiAcceptedResponse({ type: AuthRequestAcceptedDto })
+  async register(@Body() dto: RegisterDto): Promise<AuthRequestAcceptedDto> {
+    await this.authService.register(dto);
+    return { accepted: true };
+  }
+
+  @Public()
+  @Throttle({ default: { ttl: minutes(1), limit: 10 } })
+  @Post("register/complete")
+  @ApiOperation({ summary: "Create an account after verifying its email" })
   @ApiCreatedResponse({ type: UserDto })
-  @ApiConflictResponse({
-    description: "Email is already registered",
-    type: ApiErrorDto,
-  })
-  async register(
-    @Body() dto: RegisterDto,
+  async completeRegistration(
+    @Body() dto: CompleteRegistrationDto,
     @Res({ passthrough: true }) res: Response,
   ): Promise<User> {
-    return this.respondWithSession(res, await this.authService.register(dto));
+    return this.respondWithSession(
+      res,
+      await this.authService.completeRegistration(dto),
+    );
+  }
+
+  @Public()
+  @Throttle({ default: { ttl: minutes(10), limit: 5 } })
+  @Post("password/reset/request")
+  @ApiOperation({ summary: "Request a password reset link" })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiAcceptedResponse({ type: AuthRequestAcceptedDto })
+  async requestPasswordReset(
+    @Body() dto: RequestPasswordResetDto,
+  ): Promise<AuthRequestAcceptedDto> {
+    await this.authService.requestPasswordReset(dto.email);
+    return { accepted: true };
+  }
+
+  @Public()
+  @Throttle({ default: { ttl: minutes(10), limit: 5 } })
+  @Post("password/reset/complete")
+  @ApiOperation({ summary: "Set a new password using the emailed reset link" })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiNoContentResponse()
+  async resetPassword(
+    @Body() dto: ResetPasswordDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const userId = await this.authService.resetPassword(dto);
+    await this.clearRevokedCookies(req, res, userId);
+  }
+
+  @Throttle({ default: { ttl: minutes(10), limit: 5 } })
+  @Post("email/change/request")
+  @ApiOperation({ summary: "Request confirmation at a new email address" })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiAcceptedResponse({ type: AuthRequestAcceptedDto })
+  async requestEmailChange(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: RequestEmailChangeDto,
+  ): Promise<AuthRequestAcceptedDto> {
+    await this.authService.requestEmailChange(user.id, dto);
+    return { accepted: true };
+  }
+
+  @Public()
+  @Throttle({ default: { ttl: minutes(10), limit: 5 } })
+  @Post("email/change/complete")
+  @ApiOperation({ summary: "Confirm a new email address and end old sessions" })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiNoContentResponse()
+  async confirmEmailChange(
+    @Body() dto: ConfirmEmailChangeDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<void> {
+    const userId = await this.authService.confirmEmailChange(dto.token);
+    await this.clearRevokedCookies(req, res, userId);
   }
 
   @Public()
@@ -152,6 +234,24 @@ export class AuthController {
   })
   me(@CurrentUser() user: AuthenticatedUser): Promise<User> {
     return this.authService.findById(user.id);
+  }
+
+  private async clearRevokedCookies(
+    req: Request,
+    res: Response,
+    userId: string,
+  ): Promise<void> {
+    // A public link may be opened in a browser signed in to another account.
+    const accessToken = readCookie(req, ACCESS_TOKEN_COOKIE);
+    const refreshToken = readCookie(req, REFRESH_TOKEN_COOKIE);
+    const [access, refresh] = await Promise.all([
+      accessToken && this.tokenService.verifyAccessToken(accessToken),
+      refreshToken && this.tokenService.verifyRefreshToken(refreshToken),
+    ]);
+    if (access && access.sub === userId)
+      clearAuthCookie(res, this.authConfig, ACCESS_TOKEN_COOKIE);
+    if (refresh && refresh.sub === userId)
+      clearAuthCookie(res, this.authConfig, REFRESH_TOKEN_COOKIE);
   }
 
   private respondWithSession(res: Response, result: AuthResult): User {

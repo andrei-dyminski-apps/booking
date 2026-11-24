@@ -2,50 +2,77 @@ import { z } from "zod";
 import { Role } from "./enums.js";
 import { rule } from "./error-code.js";
 
-/** Built from the runtime value in `enums.ts`, so `@Roles(Role.ADMIN)` and the schema share one list. */
 export const roleSchema = z.enum(Role);
 
-/**
- * Checks run in the order they are written, so the address is validated first and
- * lower-cased afterwards: the unique index in the database compares bytes, and
- * `User@example.com` has to reach the same row as `user@example.com`. 254 is the longest
- * address a mail server has to accept (RFC 5321).
- *
- * Normalising through a `.pipe()` would also trim whitespace, but it hides the format
- * behind an unconstrained input schema — and with it the `format: email` of the OpenAPI
- * document, which is generated from this very schema.
- */
 const emailFormat = rule("EMAIL_INVALID", "Invalid email address");
+const dotAtom =
+  /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/u;
+const domainLabel = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 
-const emailSchema = z
-  .email({
-    // `error` on a schema reaches every issue it raises, a missing or non-string value
-    // included, which would answer "expected string" with the code of a malformed address.
-    // Only the format check is the rule's; anything else falls through to zod's own
-    // sentence and `INVALID_INPUT`, as it does for the name and the password.
-    error: (issue) =>
-      issue.code === "invalid_format" ? emailFormat(issue) : undefined,
-  })
+function normalizeEmail(address: string): string | null {
+  const at = address.lastIndexOf("@");
+  const local = address.slice(0, at);
+  const domain = address.slice(at + 1);
+  if (
+    at < 1 ||
+    local.length > 64 ||
+    !dotAtom.test(local) ||
+    !/^[\p{L}\p{M}\p{N}.\-\u3002\uFF0E\uFF61]+$/u.test(domain)
+  )
+    return null;
+
+  let host: string;
+  try {
+    host = new URL("https://" + domain).hostname;
+  } catch {
+    return null;
+  }
+  const labels = host.split(".");
+  if (
+    labels.length < 2 ||
+    /^\d+$/.test(labels.at(-1) ?? "") ||
+    !labels.every((label) => domainLabel.test(label))
+  )
+    return null;
+  const email = local + "@" + host;
+  return email.length <= 254 ? email : null;
+}
+
+const boundedEmail = z
+  .string()
+  .trim()
   .max(254, {
     error: rule(
       "EMAIL_TOO_LONG",
       "An email address may not be longer than 254 characters",
-      {
-        maximum: 254,
-      },
+      { maximum: 254 },
     ),
-  })
-  .toLowerCase();
+  });
 
-/**
- * An address a new account may take: `emailSchema`, outside the reserved `.invalid` domain
- * (RFC 2606), which receives no mail anywhere. That domain is what an erased account's
- * address becomes (`deleted-<id>@deleted.invalid`, unique by the id), and a registration
- * holding it first would make that erasure fail on the unique key — for good, since the id
- * is the account's for life. Checked after `toLowerCase`, so no spelling of it slips past.
- * Login keeps `emailSchema`: no account can be signed in to there, and saying so takes the
- * same `401` as any address nobody registered.
- */
+// Resend delivery uses an ASCII mailbox local part. IDNA domains use their DNS form.
+export const emailSchema = boundedEmail
+  .refine((address) => normalizeEmail(address) !== null, {
+    error: emailFormat,
+    when: ({ value }) => boundedEmail.safeParse(value).success,
+  })
+  .transform((address) => normalizeEmail(address) ?? address)
+  .meta({ format: "email" });
+
+// Keep previously accepted addresses usable for sign-in during the transition.
+const legacyEmailSchema = z.email().max(254);
+const loginEmailSchema = boundedEmail
+  .refine(
+    (address) =>
+      normalizeEmail(address) !== null ||
+      legacyEmailSchema.safeParse(address).success,
+    {
+      error: emailFormat,
+      when: ({ value }) => boundedEmail.safeParse(value).success,
+    },
+  )
+  .transform((address) => normalizeEmail(address) ?? address)
+  .meta({ format: "email" });
+
 const registrableEmailSchema = emailSchema.refine(
   (email) => !email.endsWith(".invalid"),
   { error: emailFormat },
@@ -110,39 +137,55 @@ export const nameSchema = z
 export const userSchema = z.object({
   id: z.uuid(),
   name: z.string(),
-  email: z.email(),
+  email: z.string().meta({ format: "email" }),
   role: roleSchema,
   createdAt: z.iso.datetime(),
 });
 
+export const authRequestAcceptedSchema = z.object({
+  accepted: z.literal(true),
+});
+
 export const registerSchema = z.object({
-  name: nameSchema,
   email: registrableEmailSchema,
+  next: z
+    .string()
+    .max(2048)
+    .refine((value) => !value.includes("\0"), "Invalid return path")
+    .optional(),
+});
+export const accountTokenSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+export const completeRegistrationSchema = z.object({
+  token: accountTokenSchema,
+  name: nameSchema,
   password: passwordSchema,
 });
 
-/**
- * Registration as it is filled in, rather than as it is sent. `registerSchema` above is
- * the request body and stays it: the second box is a question about what was typed here
- * and never travels. The rule is written here anyway, because a sentence a visitor reads
- * is worded where every other one is, and because a form on this site parses against a
- * contract schema rather than against a copy assembled in a component.
- *
- * The confirmation is optional because it is only asked for while the password is behind
- * asterisks. A form that puts the characters on the screen has already answered what this
- * box asks, so it takes the box away — and its absence is how the schema reads that.
- */
-export const registerFormSchema = registerSchema
+export const registerFormSchema = completeRegistrationSchema
   .extend({ confirmPassword: z.string().optional() })
   .refine(
     (values) =>
       values.confirmPassword === undefined ||
       values.confirmPassword === values.password,
     {
-      error: rule("PASSWORDS_DO_NOT_MATCH", "Passwords do not match"),
       path: ["confirmPassword"],
+      error: rule("PASSWORDS_DO_NOT_MATCH", "Passwords do not match"),
     },
   );
+
+export const requestPasswordResetSchema = z.object({ email: emailSchema });
+export const resetPasswordSchema = z.object({
+  token: accountTokenSchema,
+  password: passwordSchema,
+});
+export const requestEmailChangeSchema = z.object({
+  email: registrableEmailSchema,
+  password: z
+    .string()
+    .min(1, { error: rule("PASSWORD_REQUIRED", "Password is required") }),
+});
+export const confirmEmailChangeSchema = z.object({ token: accountTokenSchema });
 
 /**
  * Login repeats the shape of registration but not its rules: the password policy may
@@ -150,7 +193,7 @@ export const registerFormSchema = registerSchema
  * to get its owner in. Hence a plain non-empty string here.
  */
 export const loginSchema = z.object({
-  email: emailSchema,
+  email: loginEmailSchema,
   password: z
     .string()
     .min(1, { error: rule("PASSWORD_REQUIRED", "Password is required") }),
@@ -158,6 +201,11 @@ export const loginSchema = z.object({
 
 export type User = z.infer<typeof userSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;
+export type CompleteRegistrationInput = z.infer<
+  typeof completeRegistrationSchema
+>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
+export type RequestEmailChangeInput = z.infer<typeof requestEmailChangeSchema>;
 export type RegisterFormInput = z.infer<typeof registerFormSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 

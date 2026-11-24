@@ -1,5 +1,5 @@
 import { request } from "@playwright/test";
-import { READER_TIME_ZONE } from "./demo";
+import { READER_TIME_ZONE } from "./support/demo";
 import {
   LIVE_GUEST_JOINED_ENV,
   LIVE_ORIGIN,

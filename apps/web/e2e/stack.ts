@@ -95,6 +95,12 @@ function realStripeEnv(): Record<string, string> {
 }
 
 const STACK_ENV: Record<string, string> = {
+  MAIL_SMTP_URL: "smtp://127.0.0.1:1026",
+  MAIL_FROM: "staydesk@mail.e2e.example",
+  MAIL_REPLY_DOMAIN: "mail.e2e.example",
+  MAIL_SNAPSHOT_SECRET: "",
+  RESEND_API_KEY: "",
+  RESEND_WEBHOOK_SECRET: "",
   WEB_PORT: String(WEB_PORT),
   API_PORT: String(API_PORT),
   API_HOST: "127.0.0.1",

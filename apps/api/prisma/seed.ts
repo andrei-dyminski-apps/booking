@@ -8,6 +8,7 @@ import {
   quoteStay,
   type PricedListing,
 } from "@repo/contracts";
+import { DEMO_EMAILS } from "../src/auth/demo-accounts";
 import {
   checkInData,
   stayMoneyData,
@@ -51,24 +52,24 @@ const DEMO_PASSWORD = "password123";
 const users = {
   guest: {
     name: "Maya Lindqvist",
-    email: "guest@example.com",
+    email: DEMO_EMAILS.guest,
     role: Role.USER,
     createdAt: new Date("2026-01-15T18:00:00Z"),
   },
-  owner: { name: "Tomas Berg", email: "owner@example.com", role: Role.USER },
-  admin: { name: "Nora Hale", email: "admin@example.com", role: Role.ADMIN },
-  host: { name: "Ines Duarte", email: "ines@example.com", role: Role.USER },
+  owner: { name: "Tomas Berg", email: DEMO_EMAILS.owner, role: Role.USER },
+  admin: { name: "Nora Hale", email: DEMO_EMAILS.admin, role: Role.ADMIN },
+  host: { name: "Ines Duarte", email: DEMO_EMAILS.host, role: Role.USER },
   alex: {
     name: "Alex Morgan",
-    email: "alex.morgan@example.com",
+    email: DEMO_EMAILS.alex,
     role: Role.USER,
   },
   otherAlex: {
     name: "Alex Morgan",
-    email: "amorgan@example.com",
+    email: DEMO_EMAILS.otherAlex,
     role: Role.USER,
   },
-  sam: { name: "Sam Ortega", email: "sam@example.com", role: Role.USER },
+  sam: { name: "Sam Ortega", email: DEMO_EMAILS.sam, role: Role.USER },
 } satisfies Record<
   string,
   { name: string; email: string; role: Role; createdAt?: Date }
@@ -229,6 +230,7 @@ function moneyOf(index: number, from: Date, to: Date, nonRefundable = false) {
   }
 
   const day = (date: Date) => format(date, "yyyy-MM-dd", { in: tz("UTC") });
+
   const priced: PricedListing = {
     pricePerNightCents: cents(listing.pricePerNightCents),
     pricing: {
@@ -428,6 +430,7 @@ async function main(): Promise<void> {
   await prisma.conversation.deleteMany();
   await prisma.listing.deleteMany();
   await prisma.user.deleteMany();
+  await prisma.mailOutbox.deleteMany();
 
   // One hash for every account: argon2 is deliberately slow, and the demo password is the same.
   const passwordHash = await argon2.hash(DEMO_PASSWORD, {

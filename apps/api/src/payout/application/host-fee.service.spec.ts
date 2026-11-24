@@ -34,9 +34,12 @@ class FakeHostFeeRepository implements PublicOf<HostFeeRepository> {
     now: Date,
   ): Promise<{ fees: HostFee[]; cancellationsInWindow: number }> {
     const since = cancellationsWindowStart(now);
+
     const recent = (fee: HostFee) => !isBefore(parseISO(fee.createdAt), since);
+
     const owed = (fee: HostFee) =>
       fee.waivedAt === null && fee.withheldCents < fee.amountCents;
+
     const ofHost = this.fees.filter((fee) => fee.hostId === hostId);
 
     return Promise.resolve({

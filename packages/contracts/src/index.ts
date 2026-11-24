@@ -225,11 +225,21 @@ export {
   roleSchema,
   nameSchema,
   userSchema,
+  emailSchema,
+  authRequestAcceptedSchema,
   registerSchema,
+  completeRegistrationSchema,
+  requestPasswordResetSchema,
+  resetPasswordSchema,
+  requestEmailChangeSchema,
+  confirmEmailChangeSchema,
   registerFormSchema,
   loginSchema,
   type User,
   type RegisterInput,
+  type CompleteRegistrationInput,
+  type ResetPasswordInput,
+  type RequestEmailChangeInput,
   type RegisterFormInput,
   type LoginInput,
 } from "./auth.js";
@@ -402,3 +412,7 @@ export {
   REQUEST_ID_HEADER,
   REQUEST_ID_PATTERN,
 } from "./request-id.js";
+
+export * from "./describe-notification.js";
+export * from "./mail.js";
+export * from "./site-origin.js";

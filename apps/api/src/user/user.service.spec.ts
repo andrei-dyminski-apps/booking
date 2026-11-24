@@ -65,6 +65,12 @@ class FakeUserRepository implements PublicOf<UserRepository> {
   }
 
   // AuthService's half of the repository. Nothing here calls it.
+  hasSessionVersion(): Promise<boolean> {
+    return Promise.reject(
+      new Error("UserService does not validate access tokens"),
+    );
+  }
+
   create(): Promise<User> {
     return Promise.reject(new Error("UserService does not register users"));
   }

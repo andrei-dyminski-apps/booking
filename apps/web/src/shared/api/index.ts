@@ -2,6 +2,7 @@ export {
   authApi,
   currentUser,
   redirectToListingsSection,
+  requireGuest,
   requireRole,
   requireUser,
 } from "./auth";
@@ -30,3 +31,4 @@ export {
   type ServerEventListener,
 } from "./server-events";
 export { mirrorSessionCookies } from "./session-cookies";
+export { mailApi } from "./mail";

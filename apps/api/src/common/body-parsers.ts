@@ -1,8 +1,9 @@
 import type { IncomingMessage } from "node:http";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 
-/** The Stripe webhooks: their signature is over the exact bytes, which parsed JSON loses. */
+/** The Stripe and Resend webhooks: their signature is over the exact bytes, which parsed JSON loses. */
 const SIGNED_BODY_PATHS: ReadonlySet<string> = new Set([
+  "/webhooks/mail",
   "/payments/webhook",
   "/payouts/webhook",
 ]);

@@ -175,6 +175,12 @@ export class AccountRepository {
           name: DELETED_USER_NAME,
           email: placeholderEmail(userId),
           passwordHash: placeholderHash,
+          emailVerifiedAt: null,
+          emailUndeliverableAt: null,
+          emailDeliveryRestoredAt: null,
+          confirmationHash: null,
+          confirmationExpiresAt: null,
+          mutedMailGroups: [],
           deletedAt: now,
           // `stripe_account_id` and `payouts_enabled_at` stay: the provider's records are
           // reconciled against the first, and a share still owed is paid out by both.
@@ -185,6 +191,10 @@ export class AccountRepository {
       // replay of one is not a theft to detect, it is a session of nobody.
       await tx.refreshToken.deleteMany({ where: { userId } });
       // What the account was told and what it waited for are its own and nobody's history.
+      await tx.accountMail.deleteMany({ where: { userId } });
+      await tx.mailConfirmation.deleteMany({ where: { userId } });
+      await tx.mailReplyToken.deleteMany({ where: { userId } });
+      await tx.mailOutbox.deleteMany({ where: { userId } });
       await tx.notification.deleteMany({ where: { userId } });
       await tx.waitlistEntry.deleteMany({ where: { userId } });
       // Retired the way `DELETE /listings/:id` retires one: off the catalogue, closed to new
@@ -229,6 +239,7 @@ async function openMatters(
 }> {
   const asGuest = { guestId: userId } satisfies Prisma.BookingWhereInput;
   const asHost = againstListingsOf(userId);
+
   const anyStay = async (where: Prisma.BookingWhereInput): Promise<boolean> =>
     (await tx.booking.count({ where })) > 0;
 

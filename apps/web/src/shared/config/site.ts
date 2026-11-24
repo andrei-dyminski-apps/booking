@@ -13,28 +13,6 @@ export const SITE_DESCRIPTION =
 export const SITE_LOGO = "/icon-512.png";
 
 /**
- * A configured address as an origin, or `null` when it cannot be one. A bare host is read
- * as `https` — Vercel's variable never carries a scheme, and somebody filling in
- * `SITE_ORIGIN` by hand may leave it off too — and anything past the host is dropped,
- * a trailing slash included, which would double up in front of every path.
- */
-function originOf(value: string | undefined): string | null {
-  if (!value) return null;
-
-  const withScheme = /^[a-z][a-z\d+.-]*:\/\//i.test(value)
-    ? value
-    : `https://${value}`;
-
-  if (!URL.canParse(withScheme)) return null;
-
-  const url = new URL(withScheme);
-
-  return url.protocol === "https:" || url.protocol === "http:"
-    ? url.origin
-    : null;
-}
-
-/**
  * The public address of this site, which every absolute URL it states about itself is
  * built on: the canonical link, the shared link's `og:url`, every `url` and `@id` of the
  * JSON-LD. A crawler reads those as the address the page belongs at, so they are an
@@ -56,8 +34,8 @@ function originOf(value: string | undefined): string | null {
  */
 export function siteOrigin(): string {
   return (
-    originOf(process.env.SITE_ORIGIN) ??
-    originOf(process.env.VERCEL_PROJECT_PRODUCTION_URL) ??
+    normalizeWebOrigin(process.env.SITE_ORIGIN) ??
+    normalizeWebOrigin(process.env.VERCEL_PROJECT_PRODUCTION_URL) ??
     `http://localhost:${process.env.WEB_PORT || "3000"}`
   );
 }
@@ -66,3 +44,5 @@ export function siteOrigin(): string {
 export function siteUrl(path: string): string {
   return `${siteOrigin()}${path}`;
 }
+
+import { normalizeWebOrigin } from "@repo/contracts";

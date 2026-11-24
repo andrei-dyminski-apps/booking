@@ -33,12 +33,17 @@ export class TokenService {
    * `familyId` is passed in when an existing chain is being rotated and omitted on a fresh
    * login — the two cases differ only by that.
    */
-  async issuePair(user: TokenSubject, familyId?: string): Promise<TokenPair> {
+  async issuePair(
+    user: TokenSubject,
+    familyId?: string,
+    sessionVersion = 0,
+  ): Promise<TokenPair> {
     const jti = randomUUID();
     const family = familyId ?? randomUUID();
 
     const accessPayload: AccessTokenPayload = {
       sub: user.id,
+      sessionVersion,
       email: user.email,
       role: user.role,
     };
@@ -70,6 +75,16 @@ export class TokenService {
         expiresAt: addSeconds(new Date(), this.authConfig.refreshTtl),
       },
     };
+  }
+
+  async verifyAccessToken(token: string): Promise<AccessTokenPayload | null> {
+    try {
+      return await this.jwtService.verifyAsync<AccessTokenPayload>(token, {
+        secret: this.authConfig.accessSecret,
+      });
+    } catch {
+      return null;
+    }
   }
 
   /** Returns null for a forged, tampered or expired token — the caller answers 401 either way. */

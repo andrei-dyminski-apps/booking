@@ -54,6 +54,8 @@ jobs:
       # Builds only what the suite imports (the contract); the deployment is the application.
       - run: pnpm test:browser:live
         env:
+          E2E_LIVE_GUEST_EMAIL: ${{ vars.E2E_LIVE_GUEST_EMAIL }}
+          E2E_LIVE_HOST_EMAIL: ${{ vars.E2E_LIVE_HOST_EMAIL }}
           E2E_LIVE_PASSWORD: ${{ secrets.E2E_LIVE_PASSWORD }}
 
       # What a failure left: its screenshot and video, where the password shows as dots. No

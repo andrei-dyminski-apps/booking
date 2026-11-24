@@ -7,32 +7,13 @@ import {
   type UpdateUserInput,
   type User,
   type UserQuery,
-  type UserSort,
 } from "@repo/contracts";
-import { z } from "zod";
-import { type Prisma, type User as UserRow } from "../generated/prisma/client";
-import { afterCreatedAt, CREATED_AT_ORDER, type Page } from "../common/paging";
+import { Prisma, type User as UserRow } from "../generated/prisma/client";
+import type { Page } from "../common/paging";
 import { STILL_OFFERED } from "../listing/listing.repository";
 import { escapeLike } from "../prisma/escape-like";
-import {
-  isPrismaError,
-  PrismaErrorCode,
-  violatedConstraint,
-} from "../prisma/prisma.errors";
 import { PrismaService } from "../prisma/prisma.service";
 import type { UserCursor } from "./user-cursor";
-
-/**
- * What `create` throws instead of letting a Prisma error code reach the service. Which
- * driver reports a unique violation, and under which code, is exactly the knowledge this
- * layer exists to keep on its own side.
- */
-export class EmailAlreadyRegisteredError extends Error {
-  constructor(email: string) {
-    super(`Email ${email} is already registered`);
-    this.name = "EmailAlreadyRegisteredError";
-  }
-}
 
 /**
  * What `update` throws for an admin's account: the API grants no role and takes none away,
@@ -82,6 +63,7 @@ type ManagedUserRow = Prisma.UserGetPayload<{ select: typeof MANAGED_USER }>;
 export type UserCredentials = {
   user: User;
   passwordHash: string;
+  sessionVersion: number;
   /** Whether an admin shut the account; the password is checked first either way. */
   blocked: boolean;
 };
@@ -90,25 +72,12 @@ export type UserCredentials = {
 export class UserRepository {
   constructor(private readonly prismaService: PrismaService) {}
 
-  async create(input: {
-    name: string;
-    email: string;
-    passwordHash: string;
-  }): Promise<User> {
-    try {
-      return toUser(await this.prismaService.user.create({ data: input }));
-    } catch (error) {
-      // The unique index decides, not a preceding SELECT: two simultaneous registrations
-      // of the same address would both pass such a check.
-      if (
-        isPrismaError(error, PrismaErrorCode.UniqueViolation) &&
-        conflictsOnEmail(error)
-      ) {
-        throw new EmailAlreadyRegisteredError(input.email);
-      }
-
-      throw error;
-    }
+  async hasSessionVersion(id: string, version: number): Promise<boolean> {
+    const user = await this.prismaService.user.findUnique({
+      where: { id },
+      select: { sessionVersion: true },
+    });
+    return user?.sessionVersion === version;
   }
 
   /**
@@ -126,6 +95,7 @@ export class UserRepository {
     return {
       user: toUser(row),
       passwordHash: row.passwordHash,
+      sessionVersion: row.sessionVersion,
       blocked: row.blockedAt !== null,
     };
   }
@@ -193,17 +163,26 @@ export class UserRepository {
     query: UserQuery,
     cursor: UserCursor | null,
   ): Promise<Page<ManagedUser>> {
-    const rows = await this.prismaService.user.findMany({
-      where: {
-        AND: [
-          userFilters(query),
-          ...(cursor === null ? [] : [afterCreatedAt(cursor)]),
-        ],
-      },
-      orderBy: ORDER_BY[query.sort],
-      take: query.limit + 1,
-      select: MANAGED_USER,
-    });
+    const filters = userFilters(query);
+    if (cursor) {
+      filters.push(
+        Prisma.sql`(created_at, id) ${cursor.sort === "newest" ? Prisma.sql`<` : Prisma.sql`>`}
+          (${cursor.createdAt}::timestamp, ${cursor.id}::uuid)`,
+      );
+    }
+    const where =
+      filters.length > 0
+        ? Prisma.sql`WHERE ${Prisma.join(filters, " AND ")}`
+        : Prisma.empty;
+    const order = query.sort === "newest" ? Prisma.sql`DESC` : Prisma.sql`ASC`;
+    const rows = await this.prismaService.$queryRaw<ManagedUserRow[]>`
+      SELECT id, name, email::text AS email, role, created_at AS "createdAt",
+        blocked_at AS "blockedAt", deleted_at AS "deletedAt"
+      FROM users
+      ${where}
+      ORDER BY created_at ${order}, id ${order}
+      LIMIT ${query.limit + 1}
+    `;
 
     return {
       items: rows.slice(0, query.limit).map(toManagedUser),
@@ -280,6 +259,10 @@ export class UserRepository {
 
       if (change.blocked) {
         await tx.refreshToken.deleteMany({ where: { userId: id } });
+        await tx.mailReplyToken.updateMany({
+          where: { userId: id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
       }
 
       return toManagedUser(row);
@@ -287,76 +270,35 @@ export class UserRepository {
   }
 }
 
-/**
- * The filters of `GET /users`, as a `where`. The address is a substring match — what an
- * admin remembers of somebody's address is a part of it — and a case-sensitive one: the
- * contract lower-cases the filter, and every stored address was lower-cased the same way
- * at registration, so an `ILIKE` would only add a `lower()` per row. The trigram index
- * `users_email_trgm_idx` serves the match, the same one the account lookups read.
- *
- * The name is the other way round: stored as its owner typed it, so it is matched with
- * `ILIKE`, which `users_name_trgm_idx` serves just as well.
- */
-function userFilters(query: UserQuery): Prisma.UserWhereInput {
-  return {
-    role: query.role,
-    name:
-      query.name === undefined
-        ? undefined
-        : { contains: escapeLike(query.name), mode: "insensitive" },
-    email:
-      query.email === undefined
-        ? undefined
-        : { contains: escapeLike(query.email) },
-    ...statusFilter(query.status),
-  };
+function userFilters(query: UserQuery): Prisma.Sql[] {
+  const filters: Prisma.Sql[] = [];
+  if (query.role !== undefined)
+    filters.push(Prisma.sql`role = ${query.role}::"Role"`);
+  if (query.name !== undefined)
+    filters.push(Prisma.sql`name ILIKE ${`%${escapeLike(query.name)}%`}`);
+  // The trigram index serves the text operator. Prisma emits ILIKE directly on citext.
+  if (query.email !== undefined)
+    filters.push(
+      Prisma.sql`email::text ILIKE ${`%${escapeLike(query.email)}%`}`,
+    );
+  if (query.status !== undefined) filters.push(statusFilter(query.status));
+  return filters;
 }
 
 /**
- * The status of an account, as a `where`. An erased account is neither of the other two —
+ * An erased account is neither of the other two —
  * nobody signs in to it and nobody can reopen it — so `ACTIVE` leaves it out as `BLOCKED`
  * does. The switch is exhaustive, so a fourth status stops compiling here.
  */
-function statusFilter(status: UserQuery["status"]): Prisma.UserWhereInput {
+function statusFilter(status: NonNullable<UserQuery["status"]>): Prisma.Sql {
   switch (status) {
-    case undefined:
-      return {};
     case UserStatus.ACTIVE:
-      return { blockedAt: null, deletedAt: null };
+      return Prisma.sql`blocked_at IS NULL AND deleted_at IS NULL`;
     case UserStatus.BLOCKED:
-      return { blockedAt: { not: null }, deletedAt: null };
+      return Prisma.sql`blocked_at IS NOT NULL AND deleted_at IS NULL`;
     case UserStatus.DELETED:
-      return { deletedAt: { not: null } };
+      return Prisma.sql`deleted_at IS NOT NULL`;
   }
-}
-
-/**
- * The ordering of each sort, and the index the migration `block_users_and_page_them`
- * declares (`created_at DESC, id DESC`) — the pair every list here shares, so changing it
- * means changing that index and `CREATED_AT_ORDER` in `common/paging.ts` with it.
- */
-const ORDER_BY: Record<UserSort, Prisma.UserOrderByWithRelationInput[]> =
-  CREATED_AT_ORDER;
-
-/** A unique violation names the columns it happened on; the path there is the shared one. */
-const uniqueConstraintSchema = z.object({ fields: z.array(z.string()) });
-
-/**
- * `email` is the only unique column on the model today, so this is not what makes the
- * answer right — it is what keeps it right once a second one arrives: a conflict on a
- * future `username` must not come back to its owner as a taken email address.
- *
- * A constraint this cannot read counts as the email: the model has no other unique column
- * to confuse it with, and answering a duplicate registration with a 500 would be a worse
- * mistake than naming the wrong field in a case that does not exist yet. `bookings` has
- * two candidate keys and therefore takes the opposite decision — see `violatedConstraint`.
- */
-function conflictsOnEmail(
-  error: Prisma.PrismaClientKnownRequestError,
-): boolean {
-  const constraint = violatedConstraint(error, uniqueConstraintSchema);
-
-  return constraint === null || constraint.fields.includes("email");
 }
 
 /** Exported for RefreshTokenRepository, which reads the user row through its relation. */
