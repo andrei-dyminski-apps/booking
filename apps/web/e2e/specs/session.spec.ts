@@ -5,15 +5,20 @@ import { signInThroughForm } from "../support/session";
 
 test("guest account pages and links disappear after sign-in", async ({
   page,
+  pages,
 }) => {
   await page.goto("/");
   await expect(
     page.getByRole("link", { name: "Create an account" }),
   ).toBeVisible();
+  await pages.check();
 
   await page.goto("/login");
+  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+  await pages.check();
   await signInThroughForm(page, GUEST);
   await expect(page).toHaveURL("/profile");
+  await pages.check();
 
   for (const path of [
     "/login?next=/bookings",
@@ -29,6 +34,7 @@ test("guest account pages and links disappear after sign-in", async ({
   await expect(
     page.locator('a[href="/login"], a[href="/register"]'),
   ).toHaveCount(0);
+  await pages.check();
 });
 
 test(

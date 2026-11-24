@@ -1727,7 +1727,7 @@ root to run them in Chromium against the hermetic stack started by the Playwrigh
   `stripe.log`), not into the reporter's: Playwright empties that directory before it
   starts them, and CI keeps it as an artifact of its own when a run fails (the traces travel
   in the HTML report). An API that never came up says why in `api.log`.
-- **A CI run stops itself after six minutes** (`globalTimeout`), inside the job's ten, so a
+- **A CI run stops itself after eight minutes** (`globalTimeout`), inside the job's ten, so a
   hang still leaves its report and logs — a live run after forty, inside its workflow's
   fifty.
 - **Two projects: `desktop` runs every scenario, `phone` (a Pixel 7) only what a narrow

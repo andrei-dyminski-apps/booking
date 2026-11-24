@@ -68,7 +68,7 @@ export default defineConfig({
   // a hang then ends as a failed run with its report written, rather than as a job GitHub
   // cancels with nothing kept. The live run is paced, so its budget is its own
   // (`.github/workflows/live.yml`).
-  globalTimeout: CI ? (LIVE ? 40 * 60_000 : 6 * 60_000) : 0,
+  globalTimeout: CI ? (LIVE ? 40 * 60_000 : 8 * 60_000) : 0,
   // On the deployment no HTML report either: it names every step with its arguments, the
   // password typed into the sign-in form among them (`Fill "…"`), and the live workflow
   // keeps its artifacts where anyone may read them. A failure there is read from the log,
@@ -80,6 +80,8 @@ export default defineConfig({
   ],
   use: {
     baseURL: WEB_ORIGIN,
+    // A notification can fade in and finish while axe is scanning its action button.
+    reducedMotion: "reduce",
     // The reader's clock, the same on every machine (`e2e/support/demo.ts`).
     locale: "en-GB",
     timezoneId: READER_TIME_ZONE,
