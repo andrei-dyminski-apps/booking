@@ -7,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
+import { requireGuest } from "#shared/api";
 import { ROUTES } from "#shared/config";
 import { toLocalPath } from "#shared/lib";
 import { RegisterForm } from "./register-form";
@@ -24,6 +25,8 @@ export const metadata: Metadata = {
 export const RegisterPage = async ({
   searchParams,
 }: PageProps<"/register">) => {
+  await requireGuest();
+
   const next = toLocalPath((await searchParams).next, ROUTES.profile);
 
   return (

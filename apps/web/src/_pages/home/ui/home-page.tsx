@@ -11,27 +11,27 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
+import { currentUser } from "#shared/api";
 import { ACCOUNT_DELETED_PARAM, ROUTES } from "#shared/config";
 import { singleParam } from "#shared/lib";
 import { ButtonLink } from "#shared/ui";
 
 /**
- * The one page with nothing to read from the API. What it explains is the rule the rest
- * of the site is built on — a booking is a hold before it is a stay — because that is the
- * thing a visitor is surprised by otherwise, fifteen minutes after they took one.
+ * Explains why a booking starts as a fifteen-minute hold.
  *
  * It is also where an erased account lands (`ROUTES.accountDeleted`), and says so at the
  * top: the session is gone by then, so a notice on the page is the one way left to tell
  * the visitor it worked.
  */
 export const HomePage = async ({ searchParams }: PageProps<"/">) => {
+  const user = await currentUser();
   const deleted =
     singleParam((await searchParams)[ACCOUNT_DELETED_PARAM.key]) ===
     ACCOUNT_DELETED_PARAM.value;
 
   return (
     <div className="flex flex-col gap-12">
-      {deleted && (
+      {user === null && deleted && (
         <p
           role="status"
           className="rounded-lg border bg-muted px-4 py-3 text-sm"
@@ -61,9 +61,11 @@ export const HomePage = async ({ searchParams }: PageProps<"/">) => {
           <ButtonLink href={ROUTES.catalogue} size="lg">
             Browse the stays
           </ButtonLink>
-          <ButtonLink href={ROUTES.register} size="lg" variant="outline">
-            Create an account
-          </ButtonLink>
+          {user === null && (
+            <ButtonLink href={ROUTES.register} size="lg" variant="outline">
+              Create an account
+            </ButtonLink>
+          )}
         </div>
       </section>
 

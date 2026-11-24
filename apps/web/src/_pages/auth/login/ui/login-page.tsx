@@ -7,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
+import { requireGuest } from "#shared/api";
 import { ROUTES } from "#shared/config";
 import { toLocalPath } from "#shared/lib";
 import { LoginForm } from "./login-form";
@@ -22,6 +23,8 @@ export const metadata: Metadata = {
 };
 
 export const LoginPage = async ({ searchParams }: PageProps<"/login">) => {
+  await requireGuest();
+
   // Where the proxy wanted to send this visitor before it found no session.
   const { next: destination, passwordReset } = await searchParams;
   const next = toLocalPath(destination, ROUTES.profile);

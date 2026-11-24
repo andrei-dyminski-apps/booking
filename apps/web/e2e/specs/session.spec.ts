@@ -3,6 +3,34 @@ import { expect, test } from "../support/fixtures";
 import { EVERY_TARGET } from "../target";
 import { signInThroughForm } from "../support/session";
 
+test("guest account pages and links disappear after sign-in", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(
+    page.getByRole("link", { name: "Create an account" }),
+  ).toBeVisible();
+
+  await page.goto("/login");
+  await signInThroughForm(page, GUEST);
+  await expect(page).toHaveURL("/profile");
+
+  for (const path of [
+    "/login?next=/bookings",
+    "/register",
+    "/complete-registration",
+    "/forgot-password",
+  ]) {
+    await page.goto(path);
+    await expect(page).toHaveURL("/profile");
+  }
+
+  await page.goto("/");
+  await expect(
+    page.locator('a[href="/login"], a[href="/register"]'),
+  ).toHaveCount(0);
+});
+
 test(
   "a demo account signs in, finds its details and signs out",
   { tag: EVERY_TARGET },

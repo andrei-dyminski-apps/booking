@@ -189,6 +189,10 @@ export async function requireUser(next: string): Promise<User> {
   redirect(`${ROUTES.login}?next=${encodeURIComponent(next)}`);
 }
 
+export async function requireGuest(): Promise<void> {
+  if ((await currentUser()) !== null) redirect(ROUTES.profile);
+}
+
 /**
  * The same read for a section that belongs to one role. It is not the access check — the
  * role is a claim of the access token and only the API holds the secret that verifies it,

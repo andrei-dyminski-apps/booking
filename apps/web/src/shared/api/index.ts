@@ -2,6 +2,7 @@ export {
   authApi,
   currentUser,
   redirectToListingsSection,
+  requireGuest,
   requireRole,
   requireUser,
 } from "./auth";
