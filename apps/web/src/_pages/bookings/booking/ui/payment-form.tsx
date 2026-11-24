@@ -22,6 +22,7 @@ import { stripeVariables } from "#shared/config";
 import { formatMoney, toFormErrors } from "#shared/lib";
 import { bookingPaymentKey } from "../api/booking-query";
 import { isBeingOpened, isHoldRefusal } from "../model/payment-refusal";
+import { TestCardDetails } from "./test-card-details";
 
 /**
  * Stripe.js for one key, held by the query cache for the life of the tab: `Elements`
@@ -178,6 +179,7 @@ export const PaymentForm = ({
         amountCents={payment.data.amountCents}
         currency={payment.data.currency}
         declined={declined}
+        testMode={publishableKey.startsWith("pk_test_")}
         onPaid={onPaid}
       />
     </Elements>
@@ -218,12 +220,14 @@ const PaymentFields = ({
   amountCents,
   currency,
   declined,
+  testMode,
   onPaid,
 }: {
   clientSecret: string;
   amountCents: Cents;
   currency: Currency;
   declined: boolean;
+  testMode: boolean;
   onPaid: () => void;
 }) => {
   const stripe = useStripe();
@@ -303,6 +307,7 @@ const PaymentFields = ({
   return (
     // `noValidate` for the reason every form here has it; the boxes are Stripe's anyway.
     <form onSubmit={submit} noValidate className="flex flex-col gap-4">
+      {testMode && <TestCardDetails />}
       <PaymentElement />
 
       {message !== null && <FieldError>{message}</FieldError>}
