@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import {
+  ActorKind,
   HOST_CANCELLATIONS_WINDOW_DAYS,
   stillOwed,
   type HostFee,
@@ -15,6 +16,7 @@ import {
 } from "@repo/ui/components/card";
 import { countOf, formatMomentIn, formatMoney } from "#shared/lib";
 import { DateRange } from "#shared/ui";
+import type { HostFeeAudience } from "../model/host-fee-audience";
 
 /**
  * What a host owes for cancelling paid stays, one line a fee: the stay, the fee, what was
@@ -31,7 +33,7 @@ export const HostFeesCard = ({
 }: {
   overview: HostFeeOverview;
   /** Who reads it: the host is told about their own payouts, an admin about the host's. */
-  audience: "host" | "admin";
+  audience: HostFeeAudience;
   /** The reader's zone, which the moments are stated in (`readerTimeZone`). */
   readerTimeZone: string;
   action?: (fee: HostFee) => ReactNode;
@@ -42,9 +44,10 @@ export const HostFeesCard = ({
   // The overview carries no currency of its own: the site charges in one, and its fees are
   // in it — so the total is spelled in theirs rather than in an assumed default.
   const currency = overview.fees[0]?.currency;
+  const isHost = audience === ActorKind.HOST;
   const owed =
     overview.owedCents > 0
-      ? `${formatMoney(overview.owedCents, currency)} is still owed and is kept back from ${audience === "host" ? "your" : "their"} next payouts.`
+      ? `${formatMoney(overview.owedCents, currency)} is still owed and is kept back from ${isHost ? "your" : "their"} next payouts.`
       : "Nothing is owed.";
   // `cancellationsInWindow` leaves out the stays whose fee an admin waived, while the list
   // below shows them, so the sentence says so rather than contradict the rows under it. A
@@ -55,17 +58,16 @@ export const HostFeesCard = ({
     waived === 0
       ? ""
       : `, not counting ${countOf(waived, "stay")} whose ${waived === 1 ? "fee was" : "fees were"} waived`;
-  const cancelled =
-    audience === "host"
-      ? `You cancelled ${counted} in ${period}${waivedAside}.`
-      : `${counted} cancelled by this host in ${period}${waivedAside}.`;
+  const cancelled = isHost
+    ? `You cancelled ${counted} in ${period}${waivedAside}.`
+    : `${counted} cancelled by this host in ${period}${waivedAside}.`;
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Cancellation fees</CardTitle>
         <CardDescription>
-          {audience === "host"
+          {isHost
             ? `Cancelling a paid stay refunds the guest in full and costs a fee. ${cancelled} ${owed}`
             : `${cancelled} ${owed}`}
         </CardDescription>

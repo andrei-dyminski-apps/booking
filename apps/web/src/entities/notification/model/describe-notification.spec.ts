@@ -106,7 +106,7 @@ describe("describeNotification", () => {
   it("tells the host a guest is leaving early, with the new check-out and the refund", () => {
     const ended = (
       recipient: StayParty,
-      endedBy: "GUEST" | "ADMIN",
+      endedBy: "guest" | "admin",
       refundCents: Cents | null,
     ) =>
       describeNotification({
@@ -122,17 +122,17 @@ describe("describeNotification", () => {
         },
       });
 
-    expect(ended(StayParty.HOST, "GUEST", cents(24_070))).toMatchObject({
+    expect(ended(StayParty.HOST, "guest", cents(24_070))).toMatchObject({
       title: "Your guest is leaving early",
       detail: expect.stringMatching(
         / · now .+ · \$240\.70 going back to the guest$/,
       ) as unknown,
     });
-    expect(ended(StayParty.GUEST, "ADMIN", cents(0))).toMatchObject({
+    expect(ended(StayParty.GUEST, "admin", cents(0))).toMatchObject({
       title: "Your stay was ended early by the site",
       detail: expect.stringMatching(/ · no refund$/) as unknown,
     });
-    expect(ended(StayParty.HOST, "ADMIN", null).detail).toMatch(
+    expect(ended(StayParty.HOST, "admin", null).detail).toMatch(
       /Cabin by the lake · now [^·]+$/,
     );
   });
@@ -146,7 +146,7 @@ describe("describeNotification", () => {
         recipient: StayParty.GUEST,
         refundCents: cents(36_105),
         currency: CURRENCY,
-        cancelledBy: "HOST",
+        cancelledBy: "host",
         reason: "A pipe burst",
       },
     });
@@ -179,7 +179,7 @@ describe("describeNotification", () => {
         recipient: StayParty.HOST,
         refundCents: null,
         currency: CURRENCY,
-        cancelledBy: "GUEST",
+        cancelledBy: "guest",
         reason: null,
       },
     });

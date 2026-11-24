@@ -1,5 +1,5 @@
 import { NotFoundException, type HttpException } from "@nestjs/common";
-import { Canceller, cancellerOf } from "@repo/contracts";
+import { ActorKind, cancellerOf } from "@repo/contracts";
 import type { AuthenticatedUser } from "../../auth/auth.types";
 import { apiException } from "../../common/api-exception";
 import type { BookingWithListingOwner } from "../domain/booking.types";
@@ -23,7 +23,7 @@ export function readerOf<Found extends BookingWithListingOwner>(
   user: AuthenticatedUser,
   id: string,
   found: Found | null,
-): { found: Found; reader: Canceller } {
+): { found: Found; reader: ActorKind } {
   const reader =
     found === null
       ? null

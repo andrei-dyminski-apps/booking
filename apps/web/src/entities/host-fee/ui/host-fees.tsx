@@ -7,6 +7,7 @@ import {
   CardTitle,
 } from "@repo/ui/components/card";
 import { ApiResponseError, ApiUnreachableError } from "#shared/api";
+import type { HostFeeAudience } from "../model/host-fee-audience";
 import { HostFeesCard } from "./host-fees-card";
 
 /**
@@ -27,7 +28,7 @@ export const HostFees = async ({
   action,
 }: {
   read: () => Promise<HostFeeOverview>;
-  audience: "host" | "admin";
+  audience: HostFeeAudience;
   /** The reader's zone, which the moments are stated in (`readerTimeZone`). */
   readerTimeZone: string;
   action?: (fee: HostFee) => ReactNode;

@@ -241,9 +241,9 @@ enum CancellationPolicy {
 
 /// Who cancelled a stay — the contract's `cancellerSchema`.
 enum Canceller {
-  GUEST
-  HOST
-  ADMIN
+  guest
+  host
+  admin
 }
 
 /// The three moments of a dispute this API acts on: opened, and closed one way or the other.

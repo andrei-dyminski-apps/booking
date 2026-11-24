@@ -715,7 +715,7 @@ describe("BookingController (e2e)", () => {
 
     expect(declined).toMatchObject({
       status: "CANCELLED",
-      cancelledBy: "HOST",
+      cancelledBy: "host",
       cancellationReason: "The heating has broken down",
     });
   });

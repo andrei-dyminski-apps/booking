@@ -1,6 +1,6 @@
 import { Suspense, type ReactNode } from "react";
 import { CalendarCheckIcon, WarehouseIcon } from "lucide-react";
-import { Role, type ManagedUserDetail } from "@repo/contracts";
+import { ActorKind, Role, type ManagedUserDetail } from "@repo/contracts";
 import { Badge } from "@repo/ui/components/badge";
 import {
   Card,
@@ -88,7 +88,7 @@ export const UserPage = async ({ params }: PageProps<"/admin/users/[id]">) => {
       <Suspense fallback={null}>
         <HostFees
           read={() => hostFeesApi.ofHost(id)}
-          audience="admin"
+          audience={ActorKind.ADMIN}
           readerTimeZone={zone}
           action={(fee) => <WaiveFeeButton feeId={fee.id} />}
         />

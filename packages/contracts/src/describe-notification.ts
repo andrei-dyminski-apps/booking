@@ -1,4 +1,5 @@
-import { Canceller, StayParty } from "./booking.js";
+import { StayParty } from "./booking.js";
+import { ActorKind } from "./enums.js";
 import { HOST_CANCELLATIONS_WINDOW_DAYS } from "./host-fee.js";
 import { NotificationType, type NotificationContent } from "./notification.js";
 import { ReviewKind } from "./review.js";
@@ -308,8 +309,8 @@ function cancellationRefund(
 }
 
 /** Who ended the stay early, as the side told about it reads it — the guest or an admin. */
-function endedEarlyTitle(asGuest: boolean, endedBy: Canceller): string {
-  if (endedBy === Canceller.ADMIN) {
+function endedEarlyTitle(asGuest: boolean, endedBy: ActorKind): string {
+  if (endedBy === ActorKind.ADMIN) {
     return asGuest
       ? "Your stay was ended early by the site"
       : "A stay was ended early by the site";
@@ -321,17 +322,17 @@ function endedEarlyTitle(asGuest: boolean, endedBy: Canceller): string {
 /** Who took the stay away, as the side told about it reads it. */
 function cancelledTitle(
   asGuest: boolean,
-  cancelledBy: Canceller | null,
+  cancelledBy: ActorKind | null,
 ): string {
-  if (cancelledBy === Canceller.HOST && asGuest) {
+  if (cancelledBy === ActorKind.HOST && asGuest) {
     return "Your host cancelled your stay";
   }
 
-  if (cancelledBy === Canceller.GUEST && !asGuest) {
+  if (cancelledBy === ActorKind.GUEST && !asGuest) {
     return "Your guest cancelled their stay";
   }
 
-  if (cancelledBy === Canceller.ADMIN) {
+  if (cancelledBy === ActorKind.ADMIN) {
     return asGuest
       ? "Your stay was cancelled by the site"
       : "A stay was cancelled by the site";

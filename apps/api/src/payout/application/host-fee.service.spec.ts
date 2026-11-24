@@ -1,5 +1,5 @@
 import { Test } from "@nestjs/testing";
-import type { HostFee } from "@repo/contracts";
+import { ActorKind, type HostFee } from "@repo/contracts";
 import { isBefore, parseISO } from "date-fns";
 import { cancellationsWindowStart } from "../../booking/infrastructure/booking-where";
 import type { PublicOf } from "../../common/testing/public-of.fakes";
@@ -47,7 +47,7 @@ class FakeHostFeeRepository implements PublicOf<HostFeeRepository> {
         .filter((fee) => recent(fee) || owed(fee))
         .map((fee) => ({
           ...fee,
-          waivedBy: reader === "admin" ? fee.waivedBy : null,
+          waivedBy: reader === ActorKind.ADMIN ? fee.waivedBy : null,
         })),
       cancellationsInWindow: ofHost.filter(
         (fee) => recent(fee) && fee.waivedAt === null,
@@ -137,7 +137,7 @@ describe("HostFeeService", () => {
     // Over a year old and still owed: counts towards the debt, not the window.
     fee("c", { createdAt: "2025-01-01T12:00:00.000Z" });
 
-    const overview = await service.overviewOf(HOST_ID, "admin", NOW);
+    const overview = await service.overviewOf(HOST_ID, ActorKind.ADMIN, NOW);
 
     // The waived fee is listed, but its cancellation is not counted — as the admins' notice.
     expect(overview).toMatchObject({
@@ -164,7 +164,7 @@ describe("HostFeeService", () => {
       refusalOf(service.waive("a", "Again", ADMIN_ID)),
     ).resolves.toEqual({ status: 409, code: "HOST_FEE_NOT_OWED" });
     await expect(
-      service.overviewOf(HOST_ID, "admin", NOW),
+      service.overviewOf(HOST_ID, ActorKind.ADMIN, NOW),
     ).resolves.toMatchObject({ owedCents: 0 });
   });
 
@@ -172,8 +172,10 @@ describe("HostFeeService", () => {
     fee("a");
     await service.waive("a", "A flood", ADMIN_ID);
 
-    const [forAdmin] = (await service.overviewOf(HOST_ID, "admin", NOW)).fees;
-    const [forHost] = (await service.overviewOf(HOST_ID, "host", NOW)).fees;
+    const [forAdmin] = (await service.overviewOf(HOST_ID, ActorKind.ADMIN, NOW))
+      .fees;
+    const [forHost] = (await service.overviewOf(HOST_ID, ActorKind.HOST, NOW))
+      .fees;
 
     expect(forAdmin?.waivedBy).toEqual({ id: ADMIN_ID, name: "Ada Admin" });
     expect(forHost).toMatchObject({ waiveReason: "A flood", waivedBy: null });

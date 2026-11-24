@@ -631,7 +631,7 @@ describe("The money columns of a paid stay (e2e)", () => {
         where: { id: cancelled },
         data: {
           status: "CANCELLED",
-          cancelledBy: "HOST",
+          cancelledBy: "host",
           cancelledAt: new Date(),
           paidOutAt: new Date(),
         },

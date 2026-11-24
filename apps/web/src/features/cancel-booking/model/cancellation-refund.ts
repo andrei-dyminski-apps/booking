@@ -2,7 +2,7 @@ import { parseISO } from "date-fns";
 import {
   BookingStatus,
   CANCELLATION_TERMS,
-  Canceller,
+  ActorKind,
   cancellerOf,
   DisputeStatus,
   hostCancellationFee,
@@ -60,7 +60,7 @@ export function cancellationRefundNote(
 ): string | null {
   const canceller = cancellerOf(booking, viewer);
 
-  if (canceller === Canceller.HOST) return hostCancellationNote(booking, now);
+  if (canceller === ActorKind.HOST) return hostCancellationNote(booking, now);
 
   if (booking.status !== BookingStatus.CONFIRMED || !booking.paid) return null;
 
@@ -73,7 +73,7 @@ export function cancellationRefundNote(
 
   if (canceller === null) return null;
 
-  const admin = canceller === Canceller.ADMIN;
+  const admin = canceller === ActorKind.ADMIN;
 
   if (booking.dispute === DisputeStatus.LOST) {
     return "The bank has returned the payment after a dispute: cancelling refunds nothing more.";
@@ -89,7 +89,7 @@ export function cancellationRefundNote(
     return `Cancelled by an admin, it refunds ${whatComesBack(booking, left)}.`;
   }
 
-  const quote = refundQuote(booking, moment, "GUEST");
+  const quote = refundQuote(booking, moment, ActorKind.GUEST);
 
   if (quote.next === null) {
     // The policy rather than the schedule: a stay booked after its windows closed has an

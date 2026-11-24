@@ -5,7 +5,7 @@ import { parseISO } from "date-fns";
 import { Loader2Icon } from "lucide-react";
 import {
   BookingStatus,
-  Canceller,
+  ActorKind,
   cancellerOf,
   DisputeStatus,
   isCancellableOn,
@@ -107,8 +107,8 @@ export const BookingLive = ({
   const canceller = cancellerOf(booking, viewer);
   // The guest's refund reads as part of the stay's state; what cancelling would cost the
   // host is a line of its own, so it is not read as a fee already charged.
-  const hostNote = canceller === Canceller.HOST ? refundNote : null;
-  const guestNote = canceller === Canceller.HOST ? null : refundNote;
+  const hostNote = canceller === ActorKind.HOST ? refundNote : null;
+  const guestNote = canceller === ActorKind.HOST ? null : refundNote;
   /*
     A lapsed hold waits only for the sweep to let its nights go, and a paid one for the
     webhook: neither is offered the button here. For a paid one that is this tab's
@@ -134,7 +134,7 @@ export const BookingLive = ({
   // stay with no nights recorded has nothing to measure a refund by, and the API refuses it,
   // as it refuses an open dispute.
   const endable =
-    (canceller === Canceller.GUEST || canceller === Canceller.ADMIN) &&
+    (canceller === ActorKind.GUEST || canceller === ActorKind.ADMIN) &&
     booking.nights.length > 0 &&
     booking.dispute !== DisputeStatus.OPEN &&
     mayEndEarly(booking, moment);

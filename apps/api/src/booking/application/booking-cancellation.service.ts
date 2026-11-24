@@ -6,7 +6,7 @@ import {
 } from "@nestjs/common";
 import {
   BookingStatus,
-  Canceller,
+  ActorKind,
   DisputeStatus,
   HOST_CANCELLATIONS_THRESHOLD,
   HOST_REASON_REQUIRED,
@@ -76,7 +76,7 @@ export class BookingCancellationService {
     // Before the lease, but only for a row that could be cancelled: one that cannot answers
     // its own `404` or `409` under the lease, and neither ever becomes cancellable again.
     if (
-      canceller === Canceller.HOST &&
+      canceller === ActorKind.HOST &&
       reason === null &&
       read.endedEarlyAt === null &&
       isCancellableOn(read, new Date())
@@ -139,7 +139,7 @@ export class BookingCancellationService {
   private async mayCancel(
     id: string,
     user: AuthenticatedUser,
-  ): Promise<{ canceller: Canceller; booking: Booking }> {
+  ): Promise<{ canceller: ActorKind; booking: Booking }> {
     const { found, reader } = readerOf(
       user,
       id,
@@ -152,7 +152,7 @@ export class BookingCancellationService {
   private async cancelReadable(
     id: string,
     user: AuthenticatedUser,
-    canceller: Canceller,
+    canceller: ActorKind,
     reason: string | null,
   ): Promise<{
     found: BookingWithListingOwner;
@@ -197,7 +197,7 @@ export class BookingCancellationService {
     const refundOwedCents =
       refundCents !== null && refundCents > 0 ? refundCents : null;
     const fee =
-      canceller === Canceller.HOST
+      canceller === ActorKind.HOST
         ? hostCancellationFee(booking, now).cents
         : NO_CENTS;
     const by: CancellationBy = {
@@ -243,7 +243,7 @@ export class BookingCancellationService {
    */
   private refundOnCancel(
     { booking, paymentId }: BookingWithListingOwner,
-    canceller: Canceller,
+    canceller: ActorKind,
     now: Date,
   ): Cents | null {
     if (booking.status !== BookingStatus.CONFIRMED || paymentId === null) {

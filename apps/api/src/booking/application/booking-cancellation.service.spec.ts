@@ -114,7 +114,7 @@ describe("BookingCancellationService", () => {
     await expect(seenBy(admin)).resolves.toHaveLength(3);
     await expect(service.findOne(third, guest)).resolves.toMatchObject({
       status: BookingStatus.CANCELLED,
-      cancelledBy: "HOST",
+      cancelledBy: "host",
       cancellationReason: "The roof leaks",
     });
   });
@@ -281,7 +281,7 @@ describe("BookingCancellationService", () => {
             data: expect.objectContaining({
               recipient: StayParty.GUEST,
               refundCents: AMOUNT,
-              cancelledBy: "HOST",
+              cancelledBy: "host",
               reason: why.reason,
             }) as unknown,
           }) as unknown,
@@ -609,7 +609,7 @@ describe("BookingCancellationService", () => {
       expect(paymentGateway.refunds.size).toBe(0);
       expect(bookingTable.rows.get(id)?.booking).toMatchObject({
         status: BookingStatus.CANCELLED,
-        cancelledBy: "GUEST",
+        cancelledBy: "guest",
       });
     });
 

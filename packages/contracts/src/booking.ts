@@ -8,6 +8,7 @@ import {
   type CheckIn,
 } from "./check-in.js";
 import { dayMessage, earliestToday, isDay } from "./day.js";
+import { ActorKind } from "./enums.js";
 import { rule } from "./error-code.js";
 import { listingSummarySchema } from "./listing.js";
 import { centsSchema, currencySchema } from "./money.js";
@@ -44,9 +45,7 @@ export const DisputeStatus = disputeStatusSchema.enum;
  * host of its listing, or an admin. It decides the refund (`refundQuote`) and, for the host,
  * the fee the cancellation costs them (`hostCancellationFee`).
  */
-export const cancellerSchema = z.enum(["GUEST", "HOST", "ADMIN"]);
-
-export const Canceller = cancellerSchema.enum;
+export const cancellerSchema = z.enum(ActorKind);
 
 /** The longest reason a cancellation may carry — a sentence or two, not a letter. */
 export const MAX_CANCELLATION_REASON_LENGTH = 500;
@@ -437,7 +436,6 @@ export const bookingPageSchema = z.object({
 export type StayParty = z.infer<typeof stayPartySchema>;
 export type BookingStatus = z.infer<typeof bookingStatusSchema>;
 export type DisputeStatus = z.infer<typeof disputeStatusSchema>;
-export type Canceller = z.infer<typeof cancellerSchema>;
 export type CancelBookingInput = z.infer<typeof cancelBookingSchema>;
 export type BookingSort = z.infer<typeof bookingSortSchema>;
 export type BookingQuery = z.infer<typeof bookingQuerySchema>;

@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactElement } from "react";
 import {
   BookingStatus,
-  Canceller,
+  ActorKind,
   type CancelBookingInput,
 } from "@repo/contracts";
 import {
@@ -49,7 +49,7 @@ export const CancelStayDialog = ({
   short = false,
 }: {
   /** Who the viewer cancels as — `cancellerOf`, as the API decides. */
-  canceller: Canceller;
+  canceller: ActorKind;
   status: BookingStatus;
   /** What the cancellation gives back or costs, worded for the viewer. */
   refundNote: string | null;
@@ -64,7 +64,7 @@ export const CancelStayDialog = ({
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const declining =
-    canceller === Canceller.HOST && status === BookingStatus.PENDING_PAYMENT;
+    canceller === ActorKind.HOST && status === BookingStatus.PENDING_PAYMENT;
 
   return (
     <AlertDialog
@@ -104,7 +104,7 @@ const CancelStayForm = ({
   onPendingChange,
   onSuccess,
 }: {
-  canceller: Canceller;
+  canceller: ActorKind;
   declining: boolean;
   refundNote: string | null;
   action: CancelAction;
@@ -116,7 +116,7 @@ const CancelStayForm = ({
     CancelBookingInput
   >({
     action,
-    schema: cancelFormSchema(canceller === Canceller.HOST),
+    schema: cancelFormSchema(canceller === ActorKind.HOST),
     defaultValues: { reason: "" },
     onSuccess,
   });
@@ -161,13 +161,13 @@ const CancelStayForm = ({
 };
 
 function triggerLabel(
-  canceller: Canceller,
+  canceller: ActorKind,
   declining: boolean,
   short: boolean,
 ): string {
   if (declining) return short ? "Decline" : "Decline the request";
 
-  if (canceller === Canceller.HOST) {
+  if (canceller === ActorKind.HOST) {
     return short ? "Cancel as host" : "Cancel the stay as host";
   }
 

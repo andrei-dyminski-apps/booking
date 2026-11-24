@@ -1,6 +1,6 @@
 "use client";
 
-import type { BookingStatus, Canceller } from "@repo/contracts";
+import type { BookingStatus, ActorKind } from "@repo/contracts";
 import { Button } from "@repo/ui/components/button";
 import { CancelStayDialog } from "#features/cancel-booking";
 import { cancelBookingAction } from "../api/cancel-booking-action";
@@ -25,7 +25,7 @@ export const CancelBookingButton = ({
   listingId: string;
   status: BookingStatus;
   /** Who the viewer cancels as — `cancellerOf`. */
-  canceller: Canceller;
+  canceller: ActorKind;
   /** What the cancellation gives back or costs, worded for the viewer. */
   refundNote: string | null;
 }) => (

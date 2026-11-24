@@ -1297,7 +1297,7 @@ describe("Payments (e2e)", () => {
       expect.objectContaining({
         bookingId: booking.id,
         recipient: "HOST",
-        endedBy: "GUEST",
+        endedBy: "guest",
         checkOut: inDays(1),
         to: inDays(3),
         refundCents: unused,
