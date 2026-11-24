@@ -736,7 +736,7 @@ Tests:
 
 ```sh
 pnpm test           # unit, *.spec.ts next to the code; no database needed
-pnpm test:e2e       # e2e, apps/api/test/*.e2e-spec.ts; needs the database from docker-compose running
+pnpm test:e2e       # e2e, apps/api/e2e/specs/*.e2e-spec.ts; needs the database from docker-compose running
 pnpm test:browser   # the browser suite, apps/web/e2e; starts a stack of its own, needs Docker
 pnpm test:browser:stripe   # the same suite with Stripe's side real, against the sandbox of .env
 pnpm test:browser:live     # the scenarios for every target, against the live demo

@@ -1,4 +1,4 @@
-import type { Account } from "./demo";
+import type { Account } from "./support/demo";
 
 /**
  * The live deployment the `live` target runs against (`target.ts`): the frontend on

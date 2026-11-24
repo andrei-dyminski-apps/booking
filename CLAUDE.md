@@ -60,7 +60,7 @@ Tests:
 
 ```sh
 pnpm test           # *.spec.ts next to the code: jest in apps/api, vitest in apps/web and packages/contracts
-pnpm test:e2e       # jest -c test/jest-e2e.json; needs the database, wipes tables
+pnpm test:e2e       # jest -c e2e/jest-e2e.json; needs the database, wipes tables
 pnpm test:browser   # Playwright in apps/web/e2e; starts a hermetic stack of its own in Docker
 pnpm test:browser:stripe   # the same suite with Stripe's side real, against the sandbox of .env
 pnpm test:browser:live     # the scenarios tagged @every-target, against the live demo

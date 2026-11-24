@@ -7,7 +7,7 @@ Installation, environment variables and the shared commands are described in the
 ```sh
 pnpm turbo run dev --filter=@repo/api     # nest start --watch
 pnpm --filter @repo/api test              # unit, *.spec.ts next to the code
-pnpm --filter @repo/api test:e2e          # e2e, test/*.e2e-spec.ts
+pnpm --filter @repo/api test:e2e          # e2e, e2e/specs/*.e2e-spec.ts
 pnpm --filter @repo/api test:cov          # coverage
 ```
 

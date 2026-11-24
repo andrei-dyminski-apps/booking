@@ -226,7 +226,7 @@ The backend is done. Three layers of protection, from UX down to a guarantee in 
 - [x] The layering step of "Layering inside `apps/api`": a `BookingRepository` in front of
       Prisma — done at the end of phase 3, see the note in "Layering inside `apps/api`".
 - [x] `booking/domain/` for the statuses, the transitions and the date range — pure functions, no Nest, no Prisma.
-- [x] The proof: `test/booking.concurrency.e2e-spec.ts` — `Promise.all` over 10 parallel requests for the same dates, exactly one `201`, the rest `409`.
+- [x] The proof: `e2e/specs/booking.concurrency.e2e-spec.ts` — `Promise.all` over 10 parallel requests for the same dates, exactly one `201`, the rest `409`.
 
 The frontend of this phase waits for phase 5, not for Stripe: nothing on this site creates a
 booking yet, because the form that would is on the listing page the catalogue has still to

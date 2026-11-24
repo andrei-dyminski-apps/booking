@@ -12,7 +12,7 @@ import {
   WEB_ENV,
   WEB_ORIGIN,
 } from "./e2e/stack";
-import { READER_TIME_ZONE } from "./e2e/demo";
+import { READER_TIME_ZONE } from "./e2e/support/demo";
 import { EVERY_TARGET, REAL_STRIPE_ONLY, TARGET } from "./e2e/target";
 
 const CI = process.env.CI !== undefined && process.env.CI !== "";
@@ -38,7 +38,7 @@ const DESKTOP = { name: "desktop", use: { ...devices["Desktop Chrome"] } };
  * (`e2e/live-setup.ts`, `e2e/live-teardown.ts`).
  */
 export default defineConfig({
-  testDir: "./e2e",
+  testDir: "./e2e/specs",
   globalSetup: LIVE ? "./e2e/live-setup.ts" : undefined,
   // The Stripe stand-in's last word: what the API did after the last test (`e2e/stripe`);
   // on the deployment, the clean-up after the run.
@@ -80,7 +80,7 @@ export default defineConfig({
   ],
   use: {
     baseURL: WEB_ORIGIN,
-    // The reader's clock, the same on every machine (`e2e/demo.ts`).
+    // The reader's clock, the same on every machine (`e2e/support/demo.ts`).
     locale: "en-GB",
     timezoneId: READER_TIME_ZONE,
     // What a failure leaves behind, so it is read rather than rerun. On the deployment no

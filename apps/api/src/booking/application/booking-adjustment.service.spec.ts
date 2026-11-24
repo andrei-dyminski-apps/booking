@@ -35,7 +35,7 @@ const PART = cents(10_000);
  * An admin's partial refund against fakes of its repositories and the gateway — see
  * `testing/booking.fakes.ts`. What Stripe answers to the keys and the amounts is
  * `stripe-payment.gateway.spec.ts`'s; the same rules against the real database and the
- * payout are `test/payment.e2e-spec.ts`'s.
+ * payout are `e2e/specs/payment.e2e-spec.ts`'s.
  */
 describe("BookingAdjustmentService", () => {
   let service: BookingService;

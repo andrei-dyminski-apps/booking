@@ -42,7 +42,7 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
 ## Priority 1 — the application does not work without these
 
 - [x] **Register.** A new visitor requests a sign-up link, opens it from Mailpit, chooses their name and password, and lands on their profile with a confirmed email. _Hermetic only. Medium._
-- [x] **Change email and recover a password.** A member re-enters their current password, confirms the new address from Mailpit, and receives a notice at the prior address. They then use a reset link to choose a new password and return to sign-in. _Hermetic only. Medium._
+- [x] **Change email and recover a password.** A member re-enters their current password, confirms the new address from Mailpit, and receives a notice at the prior address. They then use a reset link to choose a new password and sign in with their new address and password. _Hermetic only. Medium._
 - [x] **Sign in and out.** A demo account signs in and sees its own name; on its profile it
       finds its details, the dates among them in the visitor's own time zone; after signing
       out the account's pages are no longer reachable. _Every target. Cheap._
