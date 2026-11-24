@@ -2,6 +2,7 @@ import {
   RefundFailureStatus,
   notificationRoutes,
   Role,
+  type DemoAccountId,
   type FailedPaymentEventQuery,
   type RefundFailureQuery,
   type StuckStayQuery,
@@ -37,8 +38,8 @@ export const ROUTES = {
   home: "/",
   accountDeleted: `/?${ACCOUNT_DELETED_PARAM.key}=${ACCOUNT_DELETED_PARAM.value}`,
   login: "/login",
-  demoLogin: (role: "guest" | "host" | "admin") =>
-    `/login?${DEMO_LOGIN_PARAM}=${role}`,
+  demoLogin: (account: DemoAccountId) =>
+    `/login?${DEMO_LOGIN_PARAM}=${account}`,
   register: "/register",
   forgotPassword: "/forgot-password",
   profile: "/profile",

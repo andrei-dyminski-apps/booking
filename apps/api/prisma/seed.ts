@@ -3,12 +3,14 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import * as argon2 from "argon2";
 import { addDays, format } from "date-fns";
 import {
+  ActorKind,
   cents,
   checkInDayEnd,
+  DEMO_ACCOUNT_EMAILS,
   quoteStay,
   type PricedListing,
 } from "@repo/contracts";
-import { DEMO_EMAILS } from "../src/auth/demo-accounts";
+import { DEMO_FIXTURE_EMAILS } from "../src/auth/demo-accounts";
 import {
   checkInData,
   stayMoneyData,
@@ -24,17 +26,19 @@ import {
 } from "../src/generated/prisma/client";
 
 const connectionString = process.env.DATABASE_URL;
+const demoPassword = process.env.DEMO_PASSWORD;
 
 if (connectionString === undefined) {
   throw new Error("DATABASE_URL is not set — copy .env.example to .env");
 }
 
+if (!demoPassword) {
+  throw new Error("DEMO_PASSWORD is not set — copy it from .env.example");
+}
+
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString }),
 });
-
-/** Every demo login shares it. Documented in the README — they exist only in this seed. */
-const DEMO_PASSWORD = "password123";
 
 /**
  * A guest, a host and an admin to sign in as, plus the accounts that give the filter
@@ -52,24 +56,36 @@ const DEMO_PASSWORD = "password123";
 const users = {
   guest: {
     name: "Maya Lindqvist",
-    email: DEMO_EMAILS.guest,
+    email: DEMO_ACCOUNT_EMAILS[ActorKind.GUEST],
     role: Role.USER,
     createdAt: new Date("2026-01-15T18:00:00Z"),
   },
-  owner: { name: "Tomas Berg", email: DEMO_EMAILS.owner, role: Role.USER },
-  admin: { name: "Nora Hale", email: DEMO_EMAILS.admin, role: Role.ADMIN },
-  host: { name: "Ines Duarte", email: DEMO_EMAILS.host, role: Role.USER },
+  owner: {
+    name: "Tomas Berg",
+    email: DEMO_ACCOUNT_EMAILS[ActorKind.HOST],
+    role: Role.USER,
+  },
+  admin: {
+    name: "Nora Hale",
+    email: DEMO_ACCOUNT_EMAILS[ActorKind.ADMIN],
+    role: Role.ADMIN,
+  },
+  host: {
+    name: "Ines Duarte",
+    email: DEMO_FIXTURE_EMAILS.host,
+    role: Role.USER,
+  },
   alex: {
     name: "Alex Morgan",
-    email: DEMO_EMAILS.alex,
+    email: DEMO_FIXTURE_EMAILS.alex,
     role: Role.USER,
   },
   otherAlex: {
     name: "Alex Morgan",
-    email: DEMO_EMAILS.otherAlex,
+    email: DEMO_FIXTURE_EMAILS.otherAlex,
     role: Role.USER,
   },
-  sam: { name: "Sam Ortega", email: DEMO_EMAILS.sam, role: Role.USER },
+  sam: { name: "Sam Ortega", email: DEMO_FIXTURE_EMAILS.sam, role: Role.USER },
 } satisfies Record<
   string,
   { name: string; email: string; role: Role; createdAt?: Date }
@@ -416,7 +432,9 @@ const conversations: Array<{
 
 const MS_PER_MINUTE = 60_000;
 
-async function main(): Promise<void> {
+async function main(password: string): Promise<void> {
+  const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
+
   // Order matters, and both steps are refusals rather than cascades: bookings reference
   // listings with onDelete: Restrict, and listings reference their owner the same way, so
   // deleting the users first fails on the foreign key instead of taking the rows with it.
@@ -431,11 +449,6 @@ async function main(): Promise<void> {
   await prisma.listing.deleteMany();
   await prisma.user.deleteMany();
   await prisma.mailOutbox.deleteMany();
-
-  // One hash for every account: argon2 is deliberately slow, and the demo password is the same.
-  const passwordHash = await argon2.hash(DEMO_PASSWORD, {
-    type: argon2.argon2id,
-  });
 
   const created = await Promise.all(
     Object.values(users).map((user) =>
@@ -611,14 +624,14 @@ async function main(): Promise<void> {
   console.log(
     `Seeded users: ${Object.values(users)
       .map((user) => `${user.name} <${user.email}>`)
-      .join(", ")} — password "${DEMO_PASSWORD}"`,
+      .join(", ")}`,
   );
   console.log(
     `Seeded listings: ${listings.length}, bookings: ${bookings.length + pastStays.length} (${pastStays.length} of them over, some reviewed), conversations: ${conversations.length}, waitlist entries: ${waitlist.length}`,
   );
 }
 
-void main()
+void main(demoPassword)
   .then(() => prisma.$disconnect())
   .catch(async (error: unknown) => {
     console.error(error);

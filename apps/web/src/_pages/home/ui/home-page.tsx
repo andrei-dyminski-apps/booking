@@ -1,4 +1,5 @@
 import { ArrowRightIcon } from "lucide-react";
+import { ActorKind } from "@repo/contracts";
 import { currentUser } from "#shared/api";
 import { ACCOUNT_DELETED_PARAM, ROUTES, SITE_NAME } from "#shared/config";
 import { singleParam } from "#shared/lib";
@@ -33,17 +34,17 @@ export const HomePage = async ({ searchParams }: PageProps<"/">) => {
           </p>
         </div>
 
-        {user === null && (
+        {user === null && process.env.DEMO_PASSWORD && (
           <div className="flex flex-wrap items-center gap-3">
-            <ButtonLink href={ROUTES.demoLogin("guest")} size="lg">
+            <ButtonLink href={ROUTES.demoLogin(ActorKind.GUEST)} size="lg">
               Sign in as demo guest
               <ArrowRightIcon />
             </ButtonLink>
-            <ButtonLink href={ROUTES.demoLogin("host")} size="lg">
+            <ButtonLink href={ROUTES.demoLogin(ActorKind.HOST)} size="lg">
               Sign in as demo host
               <ArrowRightIcon />
             </ButtonLink>
-            <ButtonLink href={ROUTES.demoLogin("admin")} size="lg">
+            <ButtonLink href={ROUTES.demoLogin(ActorKind.ADMIN)} size="lg">
               Sign in as demo admin
               <ArrowRightIcon />
             </ButtonLink>

@@ -243,6 +243,7 @@ export {
   type LoginInput,
 } from "./auth.js";
 
+export { DEMO_ACCOUNT_EMAILS, type DemoAccountId } from "./demo-accounts.js";
 export { ActorKind, Role } from "./enums.js";
 
 export {

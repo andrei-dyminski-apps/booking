@@ -1,4 +1,5 @@
 import { LIVE_ORIGIN } from "./live";
+import { DEMO_PASSWORD } from "./support/demo";
 import { TARGET } from "./target";
 
 /**
@@ -108,6 +109,7 @@ const STACK_ENV: Record<string, string> = {
   WEB_ORIGIN: LOCAL_WEB_ORIGIN,
   API_ORIGIN,
   SITE_ORIGIN: LOCAL_WEB_ORIGIN,
+  DEMO_PASSWORD,
 
   POSTGRES_USER: POSTGRES.user,
   POSTGRES_PASSWORD: POSTGRES.password,

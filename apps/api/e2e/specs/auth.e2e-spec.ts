@@ -3,7 +3,11 @@ import { INestApplication } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import request from "supertest";
 import { App } from "supertest/types";
-import { apiErrorSchema, userSchema } from "@repo/contracts";
+import {
+  apiErrorSchema,
+  DEMO_ACCOUNT_EMAILS,
+  userSchema,
+} from "@repo/contracts";
 import { addHours } from "date-fns";
 import { AppModule } from "../../src/app.module";
 import { PrismaService } from "../../src/prisma/prisma.service";
@@ -18,7 +22,6 @@ import {
   signInAs,
   testCredentials as fixtureCredentials,
 } from "../support/session";
-import { DEMO_EMAILS } from "../../src/auth/demo-accounts";
 import {
   accountMailToken,
   hashMailToken,
@@ -363,7 +366,10 @@ describe("AuthController (e2e)", () => {
   });
 
   it("refuses new email-change requests and previously issued links for the demo admin", async () => {
-    const credentials = { ...fixtureCredentials, email: DEMO_EMAILS.admin };
+    const credentials = {
+      ...fixtureCredentials,
+      email: DEMO_ACCOUNT_EMAILS.admin,
+    };
     const agent = await signInAs(app, "ADMIN", credentials);
     const email = "another-address@mail.test";
     await agent

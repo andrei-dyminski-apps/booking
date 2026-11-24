@@ -6,6 +6,7 @@ export {
   listingReviewsTag,
   listingTag,
 } from "./cache-tags";
+export { findDemoLogin } from "./demo-login";
 export { HTTP_STATUS } from "./http-status";
 export { NONCE_HEADER } from "./nonce";
 export { REQUEST_TIMEOUT_MS } from "./request-timeout";

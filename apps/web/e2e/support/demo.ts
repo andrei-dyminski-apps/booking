@@ -1,3 +1,4 @@
+import { ActorKind, DEMO_ACCOUNT_EMAILS } from "@repo/contracts";
 import { LIVE_GUEST_JOINED_ENV, liveAccount } from "../live";
 import { TARGET } from "../target";
 
@@ -5,7 +6,7 @@ import { TARGET } from "../target";
  * The demo accounts the seed writes (`apps/api/prisma/seed.ts`). Shared by every test, so a
  * test only ever signs in to one — never changes it (`docs/e2e-scenarios.md`).
  */
-export const DEMO_PASSWORD = "password123";
+export const DEMO_PASSWORD = "browser-suite-demo-password";
 
 /**
  * The reader's clock, the same on every machine (`timezoneId` in `playwright.config.ts`):
@@ -17,7 +18,7 @@ export const READER_TIME_ZONE = "Pacific/Auckland";
 export const DEMO = {
   guest: {
     name: "Maya Lindqvist",
-    email: "guest@example.com",
+    email: DEMO_ACCOUNT_EMAILS[ActorKind.GUEST],
     // The seed's 2026-01-15T18:00Z, a day later on the reader's clock (`READER_TIME_ZONE`)
     // than on UTC's.
     joined: "16 Jan 2026",
@@ -25,11 +26,11 @@ export const DEMO = {
   /** The host of six of the seed's listings, which their dashboard lists. */
   host: {
     name: "Tomas Berg",
-    email: "owner@example.com",
+    email: DEMO_ACCOUNT_EMAILS[ActorKind.HOST],
   },
   admin: {
     name: "Nora Hale",
-    email: "admin@example.com",
+    email: DEMO_ACCOUNT_EMAILS[ActorKind.ADMIN],
   },
 } as const;
 
