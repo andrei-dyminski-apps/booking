@@ -1,6 +1,7 @@
 import { randomInt } from "node:crypto";
 import { livePrice } from "../support/catalogue";
 import { expect, test } from "../support/fixtures";
+import { openFromMenu } from "../support/shell";
 import { EVERY_TARGET, TARGET } from "../target";
 import type { Page } from "@playwright/test";
 
@@ -50,7 +51,7 @@ test(
 
     await page.goto("/");
     await pages.check();
-    await page.getByRole("link", { name: "Browse the stays" }).click();
+    await openFromMenu(page, "Stays");
 
     await expect(page).toHaveURL("/listings");
     await expect(
