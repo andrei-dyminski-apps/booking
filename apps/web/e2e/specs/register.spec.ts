@@ -14,11 +14,14 @@ test("a new visitor registers and lands signed in under their own name", async (
 
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { level: 1, name: /Rooms, dates and guests/ }),
+    page.getByRole("heading", { level: 1, name: "Book a stay on StayDesk" }),
   ).toBeVisible();
   await pages.check();
 
-  await page.getByRole("link", { name: "Create an account" }).click();
+  await page
+    .getByRole("banner")
+    .getByRole("link", { name: "Sign up", exact: true })
+    .click();
 
   await expect(page).toHaveURL("/register");
   await expect(page).toHaveTitle(/^Create an account · /);

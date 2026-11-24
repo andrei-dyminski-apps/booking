@@ -46,6 +46,9 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
 - [x] **Sign in and out.** A demo account signs in and sees its own name; on its profile it
       finds its details, the dates among them in the visitor's own time zone; after signing
       out the account's pages are no longer reachable. _Every target. Cheap._
+- [x] **Demo host and admin sign-in.** From the home page, the host signs in to the
+      dashboard and the admin signs in to the payments screen using the prefilled forms.
+      _Hermetic only. Cheap._
 - [x] **Protected page.** An anonymous visitor opening a page behind the session is sent to
       the sign-in page and, once signed in, arrives on the page they asked for.
       _Every target. Cheap._

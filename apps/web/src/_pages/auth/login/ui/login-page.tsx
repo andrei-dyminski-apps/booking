@@ -8,9 +8,18 @@ import {
   CardTitle,
 } from "@repo/ui/components/card";
 import { requireGuest } from "#shared/api";
-import { ROUTES } from "#shared/config";
-import { toLocalPath } from "#shared/lib";
+import { DEMO_LOGIN_PARAM, ROUTES } from "#shared/config";
+import { singleParam, toLocalPath } from "#shared/lib";
+import { loginAction } from "../api/login-action";
 import { LoginForm } from "./login-form";
+
+// Public demo accounts from the seed and the README.
+const DEMO_PASSWORD = "password123";
+const DEMO_LOGINS = {
+  guest: { email: "guest@example.com", next: ROUTES.catalogue },
+  host: { email: "owner@example.com", next: ROUTES.dashboard },
+  admin: { email: "admin@example.com", next: ROUTES.adminPayments },
+} as const;
 
 /**
  * A form rather than content, and every `?next=` is another address of it: kept out of
@@ -25,26 +34,38 @@ export const metadata: Metadata = {
 export const LoginPage = async ({ searchParams }: PageProps<"/login">) => {
   await requireGuest();
 
-  // Where the proxy wanted to send this visitor before it found no session.
-  const { next: destination, passwordReset } = await searchParams;
-  const next = toLocalPath(destination, ROUTES.profile);
+  const params = await searchParams;
+  const role = singleParam(params[DEMO_LOGIN_PARAM]);
+  const demo =
+    role === "guest" || role === "host" || role === "admin"
+      ? DEMO_LOGINS[role]
+      : undefined;
+  const next = toLocalPath(params.next, ROUTES.profile);
 
   return (
     <Card className="mx-auto w-full max-w-sm">
       <CardHeader>
         <CardTitle>Sign in</CardTitle>
         <CardDescription>
-          Welcome back. Your session is a pair of httpOnly cookies — nothing is
-          kept in this tab.
+          {demo
+            ? `The demo ${role} account is prefilled. Sign in to continue.`
+            : "Welcome back. Your session is a pair of httpOnly cookies — nothing is kept in this tab."}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
-        {passwordReset === "1" && (
+        {params.passwordReset === "1" && (
           <p role="status" className="text-sm">
             Password updated. Sign in with your new password.
           </p>
         )}
-        <LoginForm next={next} />
+        <LoginForm
+          key={demo?.email ?? "regular"}
+          next={next}
+          action={loginAction.bind(null, next, demo)}
+          initialCredentials={
+            demo ? { email: demo.email, password: DEMO_PASSWORD } : undefined
+          }
+        />
 
         <Link
           href={ROUTES.forgotPassword}

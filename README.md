@@ -68,6 +68,8 @@ On the [live demo](https://staydesk.dev), or locally after the seed, there are d
 
 Pay for a hold with the Stripe test card `4242 4242 4242 4242` (any future expiry, any CVC); the other test cards are in [Payments](#payments). To see the double-booking race yourself, sign in as two different users in two browsers, open the same listing and press **Hold these dates** for the same nights together.
 
+The home page links to prefilled sign-in forms for all three demo accounts. After sign-in, the guest opens the catalogue, the host opens the dashboard, and the admin opens the payments screen.
+
 ## Requirements
 
 - Node.js 26 (CI, Railway and Vercel run it too)
@@ -172,7 +174,7 @@ Routing belongs to Next.js and everything else to Feature-Sliced Design, so each
 
 | Route                                     | What it is                                                                                                | Who sees it |
 | ----------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------- |
-| `/`                                       | the landing, one link into the catalogue                                                                  | everyone    |
+| `/`                                       | demo entry, catalogue link                                                                                | everyone    |
 | `/listings`                               | the catalogue: filters in the URL, keyset pages, cached and tagged                                        | everyone    |
 | `/listings/:id`                           | one listing, its calendar and the form that takes a hold or waits                                         | everyone    |
 | `/bookings`                               | Trips and Hosting (`?side=HOST`), keyset pages                                                            | signed in   |

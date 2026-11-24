@@ -12,20 +12,27 @@ import {
 import { Input } from "@repo/ui/components/input";
 import { PasswordInput } from "@repo/ui/components/password-input";
 import { fieldMessages, NO_FORM_ERRORS, type FormErrors } from "#shared/lib";
-import { loginAction } from "../api/login-action";
 import { useSessionResume } from "../model/use-session-resume";
 
-export const LoginForm = ({ next }: { next: string }) => {
+export const LoginForm = ({
+  next,
+  action,
+  initialCredentials,
+}: {
+  next: string;
+  action: (state: FormErrors, formData: FormData) => Promise<FormErrors>;
+  initialCredentials?: { email: string; password: string };
+}) => {
   const resume = useSessionResume(next);
   const [errors, submit, pending] = useActionState<FormErrors, FormData>(
-    loginAction.bind(null, next),
+    action,
     NO_FORM_ERRORS,
   );
   // Controlled on purpose, though the action reads the request rather than these: React
   // resets an uncontrolled form once an action settles, which would wipe what the visitor
   // typed at the same moment as the message explaining what was wrong with it appears.
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState(initialCredentials?.email ?? "");
+  const [password, setPassword] = useState(initialCredentials?.password ?? "");
 
   return (
     // The browser's own validation would preempt the contract with messages of its own.

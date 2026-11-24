@@ -24,6 +24,7 @@ import {
  */
 export async function loginAction(
   next: string,
+  demo: { email: string; next: string } | undefined,
   _state: FormErrors,
   formData: FormData,
 ): Promise<FormErrors> {
@@ -36,8 +37,10 @@ export async function loginAction(
     return { message: null, fields: toFieldErrors(parsed.error.issues) };
   }
 
+  let user;
+
   try {
-    await authApi.login(parsed.data);
+    user = await authApi.login(parsed.data);
   } catch (error) {
     return toFormErrors(error);
   }
@@ -46,7 +49,9 @@ export async function loginAction(
   // it does not re-render — it would go on offering "Sign in" to somebody who just used it.
   refresh();
 
+  const destination = demo?.email === user.email ? demo.next : next;
+
   // Checked once more even though the page already narrowed it: an action is an endpoint
   // of its own, and this one ends in a redirect.
-  redirect(toLocalPath(next, ROUTES.profile));
+  redirect(toLocalPath(destination, ROUTES.profile));
 }
