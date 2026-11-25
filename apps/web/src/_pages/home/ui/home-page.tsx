@@ -21,11 +21,14 @@ import {
   CardTitle,
 } from "@repo/ui/components/card";
 import { currentUser } from "#shared/api";
-import { ACCOUNT_DELETED_PARAM, ROUTES, SITE_NAME } from "#shared/config";
+import {
+  ACCOUNT_DELETED_PARAM,
+  REPOSITORY_URL,
+  ROUTES,
+  SITE_NAME,
+} from "#shared/config";
 import { singleParam } from "#shared/lib";
 import { ButtonLink } from "#shared/ui";
-
-const REPOSITORY = "https://github.com/andrei-dyminski-apps/booking";
 
 export const HomePage = async ({ searchParams }: PageProps<"/">) => {
   const user = await currentUser();
@@ -85,7 +88,7 @@ export const HomePage = async ({ searchParams }: PageProps<"/">) => {
           >
             Under the hood, click for details
           </h2>
-          <ButtonLink href={REPOSITORY} variant="outline">
+          <ButtonLink href={REPOSITORY_URL} variant="outline">
             Source on GitHub
             <ExternalLinkIcon />
           </ButtonLink>
@@ -95,7 +98,7 @@ export const HomePage = async ({ searchParams }: PageProps<"/">) => {
           {HIGHLIGHTS.map(({ title, description, section, icon: Icon }) => (
             <a
               key={title}
-              href={`${REPOSITORY}#${section}`}
+              href={`${REPOSITORY_URL}#${section}`}
               target="_blank"
               className="flex rounded-xl ring-ring/50 transition-shadow duration-200 outline-none hover:ring-3 focus-visible:ring-3"
               rel="noreferrer"

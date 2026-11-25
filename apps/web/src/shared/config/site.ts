@@ -12,6 +12,9 @@ export const SITE_DESCRIPTION =
  */
 export const SITE_LOGO = "/icon-512.png";
 
+/** Where the source lives: the home page links to it and to the sections of its README. */
+export const REPOSITORY_URL = "https://github.com/andrei-dyminski-apps/booking";
+
 /**
  * The public address of this site, which every absolute URL it states about itself is
  * built on: the canonical link, the shared link's `og:url`, every `url` and `@id` of the

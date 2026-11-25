@@ -11,6 +11,7 @@ export { HTTP_STATUS } from "./http-status";
 export { NONCE_HEADER } from "./nonce";
 export { REQUEST_TIMEOUT_MS } from "./request-timeout";
 export {
+  REPOSITORY_URL,
   SITE_DESCRIPTION,
   SITE_LOGO,
   SITE_NAME,
