@@ -60,7 +60,7 @@ export const HomePage = async ({ searchParams }: PageProps<"/">) => {
         </div>
 
         {user === null && process.env.DEMO_PASSWORD && (
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex w-full gap-3 max-sm:flex-col">
             <ButtonLink href={ROUTES.demoLogin(ActorKind.GUEST)} size="lg">
               Sign in as demo guest
               <ArrowRightIcon />
