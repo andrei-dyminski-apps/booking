@@ -106,7 +106,7 @@ export const BookingAdjustments = ({
                   </>
                 )}
               </span>
-              <span className="break-words text-muted-foreground">
+              <span className="wrap-break-word text-muted-foreground">
                 “{adjustment.reason}”
               </span>
               {adjustment.refundId === null && (

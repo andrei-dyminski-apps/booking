@@ -39,7 +39,7 @@ export const TestCardDetails = () => {
         </div>
       </div>
 
-      <ul role="list" className="grid md:grid-cols-4 grid-cols-2 gap-2">
+      <ul role="list" className="grid grid-cols-2 gap-2 md:grid-cols-4">
         {fields.map(({ label, copyLabel, display, value, wide }) => (
           <li
             key={label}

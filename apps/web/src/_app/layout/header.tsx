@@ -22,7 +22,7 @@ import { TimeZoneCookie } from "./time-zone-cookie";
  * can settle. `TimeZoneCookie` is the other thing only the browser knows: its own clock.
  */
 export const Header = ({ user }: { user: User | null }) => (
-  <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+  <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur-sm supports-backdrop-filter:bg-background/60">
     <div className="flex h-14 items-center gap-2 px-4 sm:px-6">
       <div className="lg:hidden">
         <MobileNav user={user} />

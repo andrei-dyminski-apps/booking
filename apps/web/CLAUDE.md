@@ -1574,6 +1574,14 @@ The lint is two tools in one script, and both have to pass:
   The `field` of `useController` carries a `ref`: once `field.ref` reaches a `ref` prop, the
   rule reports every `field.*` read during render. Every field destructures it
   (`field: { ref, value, onChange, onBlur }`), including the ones the rule does not flag.
+- **Tailwind classes** are linted by `eslint-plugin-better-tailwindcss`, wired in by the
+  shared presets (`packages/eslint-config/tailwind.js`) with `packages/ui/src/styles/globals.css`
+  as its entry point — a token added there is a known class at once. It orders classes,
+  rejects duplicates, conflicts, unknown classes and deprecated or non-canonical spellings,
+  and `pnpm lint:fix` repairs the ordering and spelling. Generated shadcn files are subject to
+  it too, so run `pnpm lint:fix` after `shadcn add`. A class that is a hook rather than a
+  utility (Sonner's `toaster`) goes into the `ignore` of `no-unknown-classes` there, not
+  into an inline disable. Line wrapping of class lists is off on purpose.
 - **Steiger** (`steiger.config.js`) owns the architecture entirely: the layer boundaries
   above, cross-imports between sibling slices, sidesteps of a public API, and the shape of
   the tree that no per-file linter can see (a slice without a public API, a segment in the

@@ -5,6 +5,7 @@ import pluginReactHooks from "eslint-plugin-react-hooks";
 import pluginReact from "eslint-plugin-react";
 import globals from "globals";
 import { config as baseConfig } from "./base.js";
+import { tailwindConfig } from "./tailwind.js";
 
 /**
  * A custom ESLint configuration for libraries that use React.
@@ -38,5 +39,6 @@ export const config = [
       "react/prop-types": "off",
     },
   },
+  ...tailwindConfig,
   eslintPluginPrettierRecommended,
 ];

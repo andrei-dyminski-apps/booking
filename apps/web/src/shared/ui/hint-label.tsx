@@ -96,7 +96,7 @@ const HintPopover = ({ label, hint }: { label: string; hint: Hint }) => (
             type="button"
             variant="ghost"
             size="icon-sm"
-            className="text-muted-foreground -my-1.5"
+            className="-my-1.5 text-muted-foreground"
             aria-label={`About ${label}`}
           />
         }

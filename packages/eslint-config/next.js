@@ -7,6 +7,7 @@ import pluginReact from "eslint-plugin-react";
 import globals from "globals";
 import pluginNext from "@next/eslint-plugin-next";
 import { config as baseConfig } from "./base.js";
+import { tailwindConfig } from "./tailwind.js";
 
 /**
  * A custom ESLint configuration for libraries that use Next.js.
@@ -56,5 +57,6 @@ export const nextJsConfig = [
       "react/prop-types": "off",
     },
   },
+  ...tailwindConfig,
   eslintPluginPrettierRecommended,
 ];

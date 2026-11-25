@@ -51,7 +51,7 @@ export const CharacterCount = <
     <FieldDescription
       id={id}
       className={cn(
-        "text-right tabular-nums text-xs",
+        "text-right text-xs tabular-nums",
         used > limit && "text-destructive",
       )}
     >

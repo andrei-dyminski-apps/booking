@@ -762,6 +762,8 @@ The e2e tests wipe the tables before every test — do not run them against a da
 
 Linting is strict: `--max-warnings 0` combined with `eslint-plugin-only-warn` means any remark fails the check. Formatting falls under the same umbrella through `eslint-plugin-prettier` — a file that drifted from `.prettierrc` fails `pnpm lint`. One command fixes it: `pnpm lint:fix`. Both `pnpm lint` and `pnpm check-types` must pass before a push.
 
+The shared presets also lint Tailwind class lists with [`eslint-plugin-better-tailwindcss`](https://github.com/schoero/eslint-plugin-better-tailwindcss) (`packages/eslint-config/tailwind.js`, in `apps/web` and `packages/ui`): class order, duplicate or conflicting classes, unknown classes and deprecated or non-canonical spellings (`break-words` → `wrap-break-word`) are remarks, and `pnpm lint:fix` repairs all but the unknown and conflicting ones. The plugin reads the design tokens and `@source` directives from `packages/ui/src/styles/globals.css`, so a class from a custom `@theme` token is known to it. Line wrapping of class lists is off: Prettier does not wrap strings, and re-wrapping would rewrite every shadcn primitive on each `shadcn add`.
+
 In `apps/web` the same script runs [Steiger](https://github.com/feature-sliced/steiger) after ESLint: the frontend is organized by Feature-Sliced Design, and Steiger owns that half of the checks entirely — layer boundaries, cross-imports between slices, sidesteps of a public API and the shape of the tree. ESLint keeps only the ordinary rules; it resolves nothing, and duplicating architecture rules there would just give them a second place to drift. The layout is described in [apps/web/README.md](apps/web/README.md).
 
 ## Continuous integration

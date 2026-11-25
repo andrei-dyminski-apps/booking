@@ -53,7 +53,7 @@ export const ConversationCard = ({
         )}
       </CardHeader>
       <CardContent>
-        <p className="line-clamp-2 text-sm break-words text-muted-foreground">
+        <p className="line-clamp-2 text-sm wrap-break-word text-muted-foreground">
           <span className="font-medium text-foreground">
             {authorLabel(conversation, lastMessage.sender)}:
           </span>{" "}

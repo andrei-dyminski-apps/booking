@@ -97,7 +97,7 @@ export const HomePage = async ({ searchParams }: PageProps<"/">) => {
               key={title}
               href={`${REPOSITORY}#${section}`}
               target="_blank"
-              className="flex rounded-xl outline-none focus-visible:ring-3 ring-ring/50 hover:ring-3 transition-shadow duration-200"
+              className="flex rounded-xl ring-ring/50 transition-shadow duration-200 outline-none hover:ring-3 focus-visible:ring-3"
               rel="noreferrer"
             >
               <Card className="w-full">
