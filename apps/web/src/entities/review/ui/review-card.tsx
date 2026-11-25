@@ -34,7 +34,7 @@ export const ReviewCard = ({
         </div>
         {action}
       </div>
-      <p className="text-sm whitespace-pre-line break-words">
+      <p className="text-sm wrap-break-word whitespace-pre-line">
         {review.comment}
       </p>
     </CardContent>

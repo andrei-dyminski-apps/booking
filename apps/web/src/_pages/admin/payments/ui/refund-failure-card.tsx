@@ -83,7 +83,7 @@ export const RefundFailureCard = ({
           <span className="text-xs text-muted-foreground">
             Resolved {formatMomentIn(failure.resolvedAt, readerTimeZone)}
           </span>
-          <p className="break-words whitespace-pre-wrap">
+          <p className="wrap-break-word whitespace-pre-wrap">
             {failure.resolution}
           </p>
         </div>

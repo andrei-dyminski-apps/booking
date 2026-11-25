@@ -102,13 +102,13 @@ const HostFeeRow = ({
   return (
     <li className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between">
       <div className="flex min-w-0 flex-col gap-1 text-sm">
-        <span className="font-medium break-words">{fee.listingTitle}</span>
+        <span className="font-medium wrap-break-word">{fee.listingTitle}</span>
         <span className="flex flex-wrap items-center gap-x-4 gap-y-1 text-muted-foreground">
           <DateRange from={fee.from} to={fee.to} />
           <span>cancelled {formatMomentIn(fee.createdAt, readerTimeZone)}</span>
         </span>
         {fee.cancellationReason !== null && (
-          <span className="break-words text-muted-foreground">
+          <span className="wrap-break-word text-muted-foreground">
             “{fee.cancellationReason}”
           </span>
         )}
@@ -119,7 +119,7 @@ const HostFeeRow = ({
           {left > 0 && `, ${formatMoney(left, fee.currency)} still owed`}
         </span>
         {fee.waivedAt !== null && (
-          <span className="break-words text-muted-foreground">
+          <span className="wrap-break-word text-muted-foreground">
             Waived {formatMomentIn(fee.waivedAt, readerTimeZone)}
             {/* Only an admin's overview names who waived it. */}
             {fee.waivedBy !== null && ` by ${fee.waivedBy.name}`}

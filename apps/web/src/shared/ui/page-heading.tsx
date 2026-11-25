@@ -13,9 +13,11 @@ export const PageHeading = ({
   description: ReactNode;
 }) => (
   <div className="flex flex-col gap-1">
-    <h1 className="text-2xl font-semibold tracking-tight text-balance break-words">
+    <h1 className="text-2xl font-semibold tracking-tight text-balance wrap-break-word">
       {title}
     </h1>
-    <p className="text-sm break-words text-muted-foreground">{description}</p>
+    <p className="text-sm wrap-break-word text-muted-foreground">
+      {description}
+    </p>
   </div>
 );

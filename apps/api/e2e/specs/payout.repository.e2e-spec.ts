@@ -161,10 +161,12 @@ describe("PayoutRepository settlement lease (e2e)", () => {
 
   it("keeps a lease past its length while the work under it still runs", async () => {
     const bookingId = await stay(1);
-    // A lease a fifth of the work's length, renewed every third of it.
+    // A lease a third of the work's length, renewed every third of it. The renewal beats the
+    // lease with margin to spare, so a runner that stalls the event loop for a few hundred
+    // milliseconds does not let a rival take it legitimately.
     const timing: LeaseTiming = {
-      leaseMs: 300,
-      waitMs: 900,
+      leaseMs: 900,
+      waitMs: 300,
       pollMs: 50,
       pollMaxMs: 100,
     };
@@ -173,10 +175,11 @@ describe("PayoutRepository settlement lease (e2e)", () => {
       "settling_until",
       bookingId,
       timing,
-      () => new Promise((resolve) => setTimeout(resolve, 1_500)),
+      () => new Promise((resolve) => setTimeout(resolve, 2_700)),
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Past the length the lease was taken for, so only its renewals keep it.
+    await new Promise((resolve) => setTimeout(resolve, timing.leaseMs + 100));
 
     await expect(
       whileLeased(prismaService, "settling_until", bookingId, timing, () =>
@@ -191,7 +194,7 @@ describe("PayoutRepository settlement lease (e2e)", () => {
     });
 
     expect(settlingUntil).toBeNull();
-  });
+  }, 15_000);
 
   it("takes a lease whose holder died once it has run out", async () => {
     const bookingId = await stay(1);

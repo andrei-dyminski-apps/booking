@@ -45,7 +45,7 @@ export const UserPage = async ({ params }: PageProps<"/admin/users/[id]">) => {
 
         <div className="flex flex-col gap-2">
           <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-semibold tracking-tight break-words">
+            <h1 className="text-2xl font-semibold tracking-tight wrap-break-word">
               {user.name}
             </h1>
             <p className="text-sm break-all text-muted-foreground">

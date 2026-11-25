@@ -17,6 +17,7 @@ Everything runs **from the repository root**, through turbo:
 ```sh
 pnpm dev            # turbo watch dev: web + api, deps rebuilt on change
 pnpm build          # build every package
+pnpm preview        # run the existing web and API builds locally after pnpm build
 pnpm lint           # ESLint across all packages (Prettier included; plus Steiger over the FSD structure of apps/web)
 pnpm lint:fix       # eslint --fix across all packages: autofixes + formatting
 pnpm check-types    # tsc --noEmit across all packages

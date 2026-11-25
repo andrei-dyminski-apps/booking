@@ -132,7 +132,7 @@ export const ConversationPage = async ({
                     </span>
                     <p
                       className={cn(
-                        "rounded-xl px-3 py-2 text-sm break-words whitespace-pre-wrap",
+                        "rounded-xl px-3 py-2 text-sm wrap-break-word whitespace-pre-wrap",
                         mine
                           ? "bg-primary text-primary-foreground"
                           : "bg-muted text-foreground",

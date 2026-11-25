@@ -24,7 +24,7 @@ import { formatMoney } from "#shared/lib";
  * announces its price and description as part of the link text.
  */
 export const CatalogueCard = ({ listing }: { listing: Listing }) => (
-  <Card className="relative h-full transition-colors hover:bg-accent/40 focus-within:ring-2 focus-within:ring-ring">
+  <Card className="relative h-full transition-colors focus-within:ring-2 focus-within:ring-ring hover:bg-accent/40">
     <CardHeader>
       <CardTitle>
         <Link

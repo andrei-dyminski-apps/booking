@@ -114,7 +114,7 @@ export const FormField = <
 
   return (
     <Field data-invalid={invalid}>
-      <div className="flex justify-between gap-6 items-end">
+      <div className="flex items-end justify-between gap-6">
         <HintLabel htmlFor={id} label={label} hint={hint} />
 
         {typeof limit === "number" && (

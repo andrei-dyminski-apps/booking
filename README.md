@@ -174,7 +174,7 @@ Routing belongs to Next.js and everything else to Feature-Sliced Design, so each
 
 | Route                                     | What it is                                                                                                | Who sees it |
 | ----------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------- |
-| `/`                                       | demo entry, catalogue link                                                                                | everyone    |
+| `/`                                       | demo entry and tiles of the project's highlights, each linking to its README section                      | everyone    |
 | `/listings`                               | the catalogue: filters in the URL, keyset pages, cached and tagged                                        | everyone    |
 | `/listings/:id`                           | one listing, its calendar and the form that takes a hold or waits                                         | everyone    |
 | `/bookings`                               | Trips and Hosting (`?side=HOST`), keyset pages                                                            | signed in   |
@@ -689,6 +689,7 @@ From the repository root, across all packages at once:
 ```sh
 pnpm dev            # web + api in parallel, deps rebuilt on change
 pnpm build          # build every package
+pnpm preview        # run the existing web and API builds locally after pnpm build
 pnpm lint           # ESLint (formatting check included) + Steiger over the FSD structure of apps/web
 pnpm lint:fix       # ESLint --fix: autofixes + reformatting by Prettier
 pnpm check-types    # tsc --noEmit
@@ -697,6 +698,8 @@ pnpm format         # Prettier over **/*.{ts,tsx,md}
 ```
 
 `pnpm dev` goes through `turbo watch dev`, so it is dependency-aware: edit a schema in `packages/contracts` and turbo rebuilds it and restarts `apps/api`, while `apps/web` picks the change up with its own watcher.
+
+`pnpm preview` runs `next start` and the compiled Nest API together using the root `.env`. Run `pnpm build` first and keep the local Compose services running with the database schema already migrated. Open the frontend at the port set by `WEB_PORT` (`http://localhost:3100` with `.env.example`).
 
 `pnpm format` stays the only way to format `.md` — ESLint does not parse them. It runs from the root only; packages have no local `format` scripts.
 
@@ -758,6 +761,8 @@ The e2e tests wipe the tables before every test — do not run them against a da
 `pnpm test:browser:live` runs the scenarios marked for every target against the live demo (`E2E_TARGET=live`, [`apps/web/e2e/live.ts`](apps/web/e2e/live.ts)), on the desktop, starting nothing and building only the contract. It signs in as two accounts of the suite's own there, a guest and a host, whose password is `E2E_LIVE_PASSWORD` — in the root `.env` locally, a repository secret for [`.github/workflows/live.yml`](.github/workflows/live.yml), which runs it every morning and on demand, apart from the pull request checks. The suite reuses its dedicated accounts. To replace either account, verify a real mailbox through sign-up and configure its address through `E2E_LIVE_GUEST_EMAIL` or `E2E_LIVE_HOST_EMAIL`. A missing or blocked account fails the run. The demo's own accounts are never used, so a visitor's lists stay theirs. A scenario creates its listing as the suite's host and pays with the test card in Stripe's own form, through the demo's Stripe sandbox; before the scenarios and after them the suite cancels every stay of its guest that can still be cancelled and retires every listing of its host, so the demo is left as the run found it — a stay that has begun, ended early or been reviewed cannot be taken back and stays, on a retired listing. A stopped demo (Railway's edge answering for the API, `x-railway-fallback`) skips every scenario with a notice; a demo that is up and answers badly fails the run. The whole run is one visitor to the rate limiter — Vercel writes the address itself — so it keeps a pace ([`apps/web/e2e/pace.ts`](apps/web/e2e/pace.ts)): eight sign-ins a minute of the API's ten, and a pause before a test whenever a route's budget the answers report runs low, kept in one file for the machine across runs, since the limiter remembers the address rather than the run. The password stays out of everything a run keeps: there is no trace and no HTML report on this target — a failure is read from the log and its screenshot and video in `apps/web/test-results`, which the workflow uploads without the error context, whose page snapshot reads every field. It writes to the live demo, so locally it is run on purpose.
 
 Linting is strict: `--max-warnings 0` combined with `eslint-plugin-only-warn` means any remark fails the check. Formatting falls under the same umbrella through `eslint-plugin-prettier` — a file that drifted from `.prettierrc` fails `pnpm lint`. One command fixes it: `pnpm lint:fix`. Both `pnpm lint` and `pnpm check-types` must pass before a push.
+
+The shared presets also lint Tailwind class lists with [`eslint-plugin-better-tailwindcss`](https://github.com/schoero/eslint-plugin-better-tailwindcss) (`packages/eslint-config/tailwind.js`, in `apps/web` and `packages/ui`): class order, duplicate or conflicting classes, unknown classes and deprecated or non-canonical spellings (`break-words` → `wrap-break-word`) are remarks, and `pnpm lint:fix` repairs all but the unknown and conflicting ones. The plugin reads the design tokens and `@source` directives from `packages/ui/src/styles/globals.css`, so a class from a custom `@theme` token is known to it. Line wrapping of class lists is off: Prettier does not wrap strings, and re-wrapping would rewrite every shadcn primitive on each `shadcn add`.
 
 In `apps/web` the same script runs [Steiger](https://github.com/feature-sliced/steiger) after ESLint: the frontend is organized by Feature-Sliced Design, and Steiger owns that half of the checks entirely — layer boundaries, cross-imports between slices, sidesteps of a public API and the shape of the tree. ESLint keeps only the ordinary rules; it resolves nothing, and duplicating architecture rules there would just give them a second place to drift. The layout is described in [apps/web/README.md](apps/web/README.md).
 

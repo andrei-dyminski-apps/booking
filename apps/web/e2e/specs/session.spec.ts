@@ -79,6 +79,15 @@ test(
   async ({ page, pages }) => {
     const guest = GUEST;
 
+    // Zod catches its eval probe failure, so it only surfaces as a CSP event.
+    await page.addInitScript(() => {
+      document.addEventListener("securitypolicyviolation", (event) => {
+        if (event.blockedURI === "eval") {
+          console.error("An eval probe violated the Content Security Policy");
+        }
+      });
+    });
+
     await page.goto("/login");
     await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
     await pages.check();

@@ -34,7 +34,7 @@ export const UserCard = ({
 }) => (
   <Card>
     <CardHeader>
-      <CardTitle className="break-words">{user.name}</CardTitle>
+      <CardTitle className="wrap-break-word">{user.name}</CardTitle>
       <CardDescription className="flex flex-wrap items-center gap-x-4 gap-y-1">
         <span className="break-all">{user.email}</span>
         <UserJoined

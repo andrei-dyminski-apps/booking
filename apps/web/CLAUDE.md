@@ -190,8 +190,11 @@ is the wrong shape for a list that keeps growing.
   built from, the zone rules are a module of their own on both sides (`time-zone.ts`),
   the refresh is a bare `fetch` (`session-refresh.ts`), the logout button is loaded with
   `next/dynamic` (`account-logout.tsx`), and the stream is imported when its first
-  listener mounts. A new import into the shell is checked the same way: `next build`,
-  then the chunks of the home page's entries in `page_client-reference-manifest.js`.
+  listener mounts. `ROUTES` gets notification links from a schema-free module in
+  `@repo/contracts`. The `#shared/*` barrels cost nothing there — Turbopack drops what a
+  page does not use, and measured, the first load of `/` came out byte for byte the same
+  as with each file imported directly. A new import into the shell is checked with a
+  production build and the scripts Chrome requests for `/`.
 
 ## Data and API
 
@@ -1318,9 +1321,13 @@ policy, and a new inline script needs the nonce, or the browser refuses it.
 
 The policy has no `'unsafe-eval'`, so zod's `new Function` probe (made when the first
 object schema is built) would be refused and logged in Chrome's Issues panel — a Lighthouse
-finding even though zod swallows the error. `instrumentation-client.ts` (Next.js runs it in
-the browser before any application code) sets `config({ jitless: true })` to skip the probe.
-It has to stay ahead of every schema, so it is not a component's job.
+finding even though zod swallows the error. Next.js runs `instrumentation-client.ts` before
+the application. It sets `jitless` on the shared object that Zod 4 reads when its core
+loads, so the policy applies even on a direct visit to a form and pages without schemas
+can skip loading Zod. Zod documents `z.config({ jitless: true })` instead, and the global
+is not part of its API, but importing `config` would put Zod's core into every page's
+first load (`import { z }` puts all of Zod there). `instrumentation-client.spec.ts`
+fails if an upgrade stops reading the global.
 
 The secret Elements pays with is asked for by the form, from the browser
 (`bookingsApi.payment`, `POST /bookings/:id/payment`), never by a render: opening it is a
@@ -1546,7 +1553,7 @@ belongs in the same step.
   is not redundant — Tailwind's preflight drops the marker from every `ul` and Safari drops the
   list semantics along with it, so the attribute is what puts them back.
 - **What is not a collection is not marked as one.** A set written down in the code is a
-  composition rather than a list: the toolbar's controls, the home page's three
+  composition rather than a list: the toolbar's controls, the home page's
   highlights, the weekday headings of the calendar. So is the row of chips under the
   toolbar — each one is a control that takes a filter off, and it belongs with the
   controls beside it rather than in a collection of its own. Their number is not something
@@ -1567,6 +1574,14 @@ The lint is two tools in one script, and both have to pass:
   The `field` of `useController` carries a `ref`: once `field.ref` reaches a `ref` prop, the
   rule reports every `field.*` read during render. Every field destructures it
   (`field: { ref, value, onChange, onBlur }`), including the ones the rule does not flag.
+- **Tailwind classes** are linted by `eslint-plugin-better-tailwindcss`, wired in by the
+  shared presets (`packages/eslint-config/tailwind.js`) with `packages/ui/src/styles/globals.css`
+  as its entry point — a token added there is a known class at once. It orders classes,
+  rejects duplicates, conflicts, unknown classes and deprecated or non-canonical spellings,
+  and `pnpm lint:fix` repairs the ordering and spelling. Generated shadcn files are subject to
+  it too, so run `pnpm lint:fix` after `shadcn add`. A class that is a hook rather than a
+  utility (Sonner's `toaster`) goes into the `ignore` of `no-unknown-classes` there, not
+  into an inline disable. Line wrapping of class lists is off on purpose.
 - **Steiger** (`steiger.config.js`) owns the architecture entirely: the layer boundaries
   above, cross-imports between sibling slices, sidesteps of a public API, and the shape of
   the tree that no per-file linter can see (a slice without a public API, a segment in the

@@ -256,7 +256,7 @@ export const BookingLive = ({
 
           {/* Who took the stay away and why — the guest of a host's cancellation is owed it. */}
           {booking.cancelledBy !== null && booking.cancelledAt !== null && (
-            <p className="rounded-lg bg-muted px-3 py-2 text-sm break-words text-muted-foreground">
+            <p className="rounded-lg bg-muted px-3 py-2 text-sm wrap-break-word text-muted-foreground">
               Cancelled by {CANCELLER_NAMES[booking.cancelledBy]} on{" "}
               {formatMomentIn(booking.cancelledAt, booking.timeZone)}
               {booking.cancellationReason === null
