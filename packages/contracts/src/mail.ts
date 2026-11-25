@@ -18,3 +18,11 @@ export type MailSettings = z.infer<typeof mailSettingsSchema>;
 export const confirmMailSchema = z.object({
   token: z.string().regex(/^[a-f0-9]{64}$/),
 });
+
+/**
+ * Addresses on the domains reserved for examples (RFC 2606), such as the demo accounts'.
+ * No mail is ever sent to them, so a screen can say so instead of promising an email.
+ */
+export function isExampleMailAddress(email: string): boolean {
+  return /@example\.(com|net|org)$/i.test(email);
+}

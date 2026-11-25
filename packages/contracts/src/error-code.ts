@@ -73,6 +73,7 @@ export const ERROR_CODES = [
   // Auth schema rules.
   "EMAIL_INVALID",
   "EMAIL_TOO_LONG",
+  "EMAIL_RECEIVES_NO_MAIL",
   "PASSWORD_TOO_SHORT",
   "PASSWORD_TOO_LONG",
   "PASSWORD_REQUIRED",

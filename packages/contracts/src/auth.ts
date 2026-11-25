@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { Role } from "./enums.js";
 import { rule } from "./error-code.js";
+import { isExampleMailAddress } from "./mail.js";
 
 export const roleSchema = z.enum(Role);
 
@@ -174,7 +175,15 @@ export const registerFormSchema = completeRegistrationSchema
     },
   );
 
-export const requestPasswordResetSchema = z.object({ email: emailSchema });
+// The rule hangs on the domain alone, so refusing it says nothing about which accounts exist.
+export const requestPasswordResetSchema = z.object({
+  email: emailSchema.refine((email) => !isExampleMailAddress(email), {
+    error: rule(
+      "EMAIL_RECEIVES_NO_MAIL",
+      "Demo accounts cannot change password",
+    ),
+  }),
+});
 export const resetPasswordSchema = z.object({
   token: accountTokenSchema,
   password: passwordSchema,
