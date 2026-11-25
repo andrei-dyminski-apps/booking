@@ -84,7 +84,7 @@ cp .env.example .env
 # put the three STRIPE_* keys of a Stripe test account into .env (see Payments below)
 docker compose --profile stripe up -d   # PostgreSQL + Redis + `stripe listen`
 pnpm --filter @repo/api db:migrate      # create the schema
-pnpm --filter @repo/api db:seed         # demo data
+pnpm db:seed                            # demo data
 pnpm dev
 ```
 
@@ -687,7 +687,7 @@ Never set it higher than the truth. One entry too many and `req.ip` stops being 
 From the repository root, across all packages at once:
 
 ```sh
-pnpm dev            # web + api in parallel, deps rebuilt on change
+pnpm dev            # Compose services up, then web + api in parallel, deps rebuilt on change
 pnpm build          # build every package
 pnpm preview        # run the existing web and API builds locally after pnpm build
 pnpm lint           # ESLint (formatting check included) + Steiger over the FSD structure of apps/web
@@ -697,7 +697,7 @@ pnpm test           # unit tests: jest in apps/api, vitest in apps/web and packa
 pnpm format         # Prettier over **/*.{ts,tsx,md}
 ```
 
-`pnpm dev` goes through `turbo watch dev`, so it is dependency-aware: edit a schema in `packages/contracts` and turbo rebuilds it and restarts `apps/api`, while `apps/web` picks the change up with its own watcher.
+`pnpm dev` first runs `docker compose up -d` (Postgres, Redis, Mailpit — the `stripe` profile stays opt-in, and Ctrl+C leaves the containers running; `docker compose down` stops them), then `turbo watch dev`, so it is dependency-aware: edit a schema in `packages/contracts` and turbo rebuilds it and restarts `apps/api`, while `apps/web` picks the change up with its own watcher.
 
 `pnpm preview` runs `next start` and the compiled Nest API together using the root `.env`. Run `pnpm build` first and keep the local Compose services running with the database schema already migrated. Open the frontend at the port set by `WEB_PORT` (`http://localhost:3100` with `.env.example`).
 
@@ -715,7 +715,7 @@ Database (`apps/api`, Prisma 7; the CLI picks up the root `.env` itself through 
 
 ```sh
 pnpm --filter @repo/api db:migrate    # create/apply migrations (dev)
-pnpm --filter @repo/api db:seed       # load demo data
+pnpm db:seed                          # load demo data (shortcut for `pnpm --filter @repo/api db:seed`, run from the root)
 pnpm --filter @repo/api db:generate   # regenerate the client (also runs in postinstall)
 pnpm --filter @repo/api db:deploy     # apply committed migrations (production; never `migrate dev`)
 ```
