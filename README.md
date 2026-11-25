@@ -174,7 +174,7 @@ Routing belongs to Next.js and everything else to Feature-Sliced Design, so each
 
 | Route                                     | What it is                                                                                                | Who sees it |
 | ----------------------------------------- | --------------------------------------------------------------------------------------------------------- | ----------- |
-| `/`                                       | demo entry, catalogue link                                                                                | everyone    |
+| `/`                                       | demo entry and tiles of the project's highlights, each linking to its README section                      | everyone    |
 | `/listings`                               | the catalogue: filters in the URL, keyset pages, cached and tagged                                        | everyone    |
 | `/listings/:id`                           | one listing, its calendar and the form that takes a hold or waits                                         | everyone    |
 | `/bookings`                               | Trips and Hosting (`?side=HOST`), keyset pages                                                            | signed in   |
