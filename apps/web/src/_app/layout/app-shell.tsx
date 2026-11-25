@@ -34,7 +34,7 @@ export const AppShell = async ({ children }: { children: React.ReactNode }) => {
           {children}
         </main>
 
-        <SiteFooter user={user} />
+        <SiteFooter />
       </div>
     </div>
   );

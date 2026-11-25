@@ -1,6 +1,7 @@
 export { BackLink } from "./back-link";
 export { ButtonLink } from "./button-link";
 export { DateRange } from "./date-range";
+export { ExternalLink } from "./external-link";
 export { FilterChips, type FilterChip } from "./filter-chips";
 export { FilterField } from "./filter-field";
 export { FilterForm } from "./filter-form";

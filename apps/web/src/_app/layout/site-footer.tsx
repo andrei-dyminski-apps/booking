@@ -1,34 +1,43 @@
-import Link from "next/link";
-import type { User } from "@repo/contracts";
-import { ROUTES, SITE_NAME } from "#shared/config";
+import {
+  AUTHOR_NAME,
+  AUTHOR_URL,
+  REPOSITORY_URL,
+  SITE_NAME,
+  TECH_STACK,
+} from "#shared/config";
+import { ExternalLink } from "#shared/ui";
+
+const LINK_CLASS = "inline-flex items-center gap-1 hover:text-foreground";
 
 /**
- * The quiet end of every page: what this is, and the links a visitor might want from it.
+ * The quiet end of every page: what this is, what it is built on, where to read the code
+ * and who signed it. It is a portfolio piece, so it says so, and it says that the
+ * payments are a sandbox before anybody reaches a card form.
  *
- * It is handed the session for the same reason the sidebar is, and it offers the same
- * thing the sidebar offers: the catalogue to everybody, the stays only to somebody who
- * has any. `navigationFor` already drops that link for a stranger, and a footer that
- * kept it would send them to a `/login?next=/bookings` they never asked for — the two
- * halves of the shell would then disagree about the same section.
+ * It carries no navigation: the sidebar already offers every section, and a second list
+ * would be one more place for the role rules to drift.
  */
-export const SiteFooter = ({ user }: { user: User | null }) => (
+export const SiteFooter = () => (
   <footer className="border-t border-border">
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-2 px-4 py-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
-      <p>{SITE_NAME} — a demo built on one shared zod contract.</p>
-      <nav className="flex items-center gap-4">
-        <Link href={ROUTES.catalogue} className="hover:text-foreground">
-          Stays
-        </Link>
-        {user === null ? (
-          <Link href={ROUTES.login} className="hover:text-foreground">
-            Sign in
-          </Link>
-        ) : (
-          <Link href={ROUTES.bookings} className="hover:text-foreground">
-            Bookings
-          </Link>
-        )}
-      </nav>
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-3 px-4 py-6 text-xs text-muted-foreground sm:flex-row sm:items-start sm:justify-between sm:px-6">
+      <div className="flex flex-col gap-1">
+        <p>
+          {SITE_NAME} — a portfolio project. Payments run in Stripe test mode:
+          no real money moves.
+        </p>
+        <p>{TECH_STACK.join(" · ")}</p>
+      </div>
+      <div className="flex flex-col gap-1 sm:items-end">
+        <ExternalLink href={REPOSITORY_URL} icon className={LINK_CLASS}>
+          Source code
+        </ExternalLink>
+        <p>
+          © {new Date().getFullYear()}{" "}
+          <ExternalLink href={AUTHOR_URL} icon className={LINK_CLASS}>
+            {AUTHOR_NAME}
+          </ExternalLink>
+        </p>
+      </div>
     </div>
   </footer>
 );

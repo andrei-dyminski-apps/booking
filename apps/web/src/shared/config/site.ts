@@ -15,6 +15,24 @@ export const SITE_LOGO = "/icon-512.png";
 /** Where the source lives: the home page links to it and to the sections of its README. */
 export const REPOSITORY_URL = "https://github.com/andrei-dyminski-apps/booking";
 
+/** Who built it, as the footer signs it. */
+export const AUTHOR_NAME = "Andrei Dyminski";
+
+/** Where a visitor can read more about the author: a GitHub profile, a LinkedIn page, a site. */
+export const AUTHOR_URL =
+  "https://www.linkedin.com/in/andrei-dyminski-4a9508202";
+
+/** The stack the footer names in one line, in the order a reader should meet it. */
+export const TECH_STACK = [
+  "Next.js",
+  "NestJS",
+  "Prisma",
+  "PostgreSQL",
+  "Redis",
+  "Stripe",
+  "Turborepo",
+] as const;
+
 /**
  * The public address of this site, which every absolute URL it states about itself is
  * built on: the canonical link, the shared link's `og:url`, every `url` and `@id` of the

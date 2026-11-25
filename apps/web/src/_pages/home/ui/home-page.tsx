@@ -28,7 +28,7 @@ import {
   SITE_NAME,
 } from "#shared/config";
 import { singleParam } from "#shared/lib";
-import { ButtonLink } from "#shared/ui";
+import { ButtonLink, ExternalLink } from "#shared/ui";
 
 export const HomePage = async ({ searchParams }: PageProps<"/">) => {
   const user = await currentUser();
@@ -96,12 +96,10 @@ export const HomePage = async ({ searchParams }: PageProps<"/">) => {
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {HIGHLIGHTS.map(({ title, description, section, icon: Icon }) => (
-            <a
+            <ExternalLink
               key={title}
               href={`${REPOSITORY_URL}#${section}`}
-              target="_blank"
               className="flex rounded-xl ring-ring/50 transition-shadow duration-200 outline-none hover:ring-3 focus-visible:ring-3"
-              rel="noreferrer"
             >
               <Card className="w-full">
                 <CardHeader className="flex items-center gap-3">
@@ -117,7 +115,7 @@ export const HomePage = async ({ searchParams }: PageProps<"/">) => {
                   <CardDescription>{description}</CardDescription>
                 </CardContent>
               </Card>
-            </a>
+            </ExternalLink>
           ))}
         </div>
       </section>
