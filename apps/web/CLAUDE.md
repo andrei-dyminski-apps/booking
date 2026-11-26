@@ -161,11 +161,14 @@ is the wrong shape for a list that keeps growing.
   `ReadOptions`, unlike every other read of that segment: the session is personal, so
   `no-store` is the only answer a call site could give — and a function with no arguments
   is one `cache()` can key.
-- **The footer is handed the session too**, and offers what the navigation offers: the
-  catalogue to everybody, the stays only to somebody who has any. A link to `/bookings`
-  left standing for a stranger is a click into `/login?next=/bookings` they never asked
-  for, and the two halves of the shell disagreeing about one section is exactly the drift
-  the single list below exists to stop.
+- **The footer is the portfolio's signature, and it has no navigation.** It says that this
+  is a portfolio project with Stripe in test mode, names the stack in one line and links
+  to the source and to the author beside a copyright. It takes no session: a second list
+  of links next to the sidebar's is a second set of role rules to drift, so it offers
+  none. Every fact in it is a constant of `shared/config/site.ts` (`TECH_STACK`,
+  `REPOSITORY_URL`, `AUTHOR_NAME`, `AUTHOR_URL`), so changing who signs it or what it
+  names is an edit there and not in the markup. It stays two lines tall on a desktop — it
+  is on every page, the signed-in ones included.
 - **One list of links, drawn twice** (`navigation.ts`): the sidebar from `lg` up, the
   sheet below it. Two lists would be two sets of role rules to keep in step, and those are
   exactly the rules that drift. It offers, it does not permit — every section behind a
@@ -1479,11 +1482,14 @@ rather than in `src/shared`.
 component that knows this application's `FieldErrors`, or one whose whole job is to
 navigate with `useRouter`. The test is the dependency, not the size — anything that would
 have to import from `#shared/*` or from `next/*` is not a primitive and does not go into
-the package. Twenty-one are exported from there: `PageHeading` — the title and the line
+the package. Twenty-two are exported from there: `PageHeading` — the title and the line
 under it at the top of a list screen —, `BackLink` — the ghost arrow link above a detail
 screen's heading, back to the list it was opened from —, `ButtonLink` — a `<Link>`
 wearing the button classes, the one spelling of "a link that looks like a button" (see
-below) —, `FormField`, the one box every form that submits is made of, `HintLabel` (with
+below) —, `ExternalLink` — an anchor to another site that opens in a new tab with
+`noopener noreferrer` and saying so to a screen reader, spelled once, for the footer's
+links and the home page's tiles —,
+`FormField`, the one box every form that submits is made of, `HintLabel` (with
 `hintOf`, the id of its hidden copy), the label and hint of a box `FormField` cannot wrap
 because no `register` reaches it — the listing form's policy `Select` under a controller —,
 `HintFieldSet`, a group of boxes labelled the way a single box is, `LiveRefresh`, which re-renders a

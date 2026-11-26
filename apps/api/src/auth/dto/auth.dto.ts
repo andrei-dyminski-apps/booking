@@ -33,7 +33,7 @@ export class CompleteRegistrationDto extends createZodDto(
   }),
 ) {}
 export class RequestPasswordResetDto extends createZodDto(
-  withExample(requestPasswordResetSchema, { email: "ada@example.com" }),
+  withExample(requestPasswordResetSchema, { email: "ada@mail.test" }),
 ) {}
 export class ResetPasswordDto extends createZodDto(
   withExample(resetPasswordSchema, {

@@ -11,11 +11,15 @@ export { HTTP_STATUS } from "./http-status";
 export { NONCE_HEADER } from "./nonce";
 export { REQUEST_TIMEOUT_MS } from "./request-timeout";
 export {
+  AUTHOR_NAME,
+  AUTHOR_URL,
+  REPOSITORY_URL,
   SITE_DESCRIPTION,
   SITE_LOGO,
   SITE_NAME,
   siteOrigin,
   siteUrl,
+  TECH_STACK,
 } from "./site";
 export { stripePublishableKey, stripeVariables } from "./stripe";
 export { TIME_ZONE_COOKIE, TIME_ZONE_COOKIE_MAX_AGE } from "./time-zone";

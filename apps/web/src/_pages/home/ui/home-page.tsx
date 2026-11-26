@@ -21,11 +21,14 @@ import {
   CardTitle,
 } from "@repo/ui/components/card";
 import { currentUser } from "#shared/api";
-import { ACCOUNT_DELETED_PARAM, ROUTES, SITE_NAME } from "#shared/config";
+import {
+  ACCOUNT_DELETED_PARAM,
+  REPOSITORY_URL,
+  ROUTES,
+  SITE_NAME,
+} from "#shared/config";
 import { singleParam } from "#shared/lib";
-import { ButtonLink } from "#shared/ui";
-
-const REPOSITORY = "https://github.com/andrei-dyminski-apps/booking";
+import { ButtonLink, ExternalLink } from "#shared/ui";
 
 export const HomePage = async ({ searchParams }: PageProps<"/">) => {
   const user = await currentUser();
@@ -57,7 +60,7 @@ export const HomePage = async ({ searchParams }: PageProps<"/">) => {
         </div>
 
         {user === null && process.env.DEMO_PASSWORD && (
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex w-full gap-3 max-sm:flex-col">
             <ButtonLink href={ROUTES.demoLogin(ActorKind.GUEST)} size="lg">
               Sign in as demo guest
               <ArrowRightIcon />
@@ -85,7 +88,7 @@ export const HomePage = async ({ searchParams }: PageProps<"/">) => {
           >
             Under the hood, click for details
           </h2>
-          <ButtonLink href={REPOSITORY} variant="outline">
+          <ButtonLink href={REPOSITORY_URL} variant="outline">
             Source on GitHub
             <ExternalLinkIcon />
           </ButtonLink>
@@ -93,12 +96,10 @@ export const HomePage = async ({ searchParams }: PageProps<"/">) => {
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {HIGHLIGHTS.map(({ title, description, section, icon: Icon }) => (
-            <a
+            <ExternalLink
               key={title}
-              href={`${REPOSITORY}#${section}`}
-              target="_blank"
+              href={`${REPOSITORY_URL}#${section}`}
               className="flex rounded-xl ring-ring/50 transition-shadow duration-200 outline-none hover:ring-3 focus-visible:ring-3"
-              rel="noreferrer"
             >
               <Card className="w-full">
                 <CardHeader className="flex items-center gap-3">
@@ -114,7 +115,7 @@ export const HomePage = async ({ searchParams }: PageProps<"/">) => {
                   <CardDescription>{description}</CardDescription>
                 </CardContent>
               </Card>
-            </a>
+            </ExternalLink>
           ))}
         </div>
       </section>

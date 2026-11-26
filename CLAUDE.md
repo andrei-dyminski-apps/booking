@@ -15,7 +15,7 @@ Node 26 (`engines` and `devEngines.runtime`), the same in CI, on Railway and on 
 Everything runs **from the repository root**, through turbo:
 
 ```sh
-pnpm dev            # turbo watch dev: web + api, deps rebuilt on change
+pnpm dev            # docker compose up -d, then turbo watch dev: web + api, deps rebuilt on change
 pnpm build          # build every package
 pnpm preview        # run the existing web and API builds locally after pnpm build
 pnpm lint           # ESLint across all packages (Prettier included; plus Steiger over the FSD structure of apps/web)
@@ -36,7 +36,7 @@ The database is PostgreSQL from `docker-compose.yml` in the root (`docker compos
 
 ```sh
 pnpm --filter @repo/api db:migrate    # prisma migrate dev — schema only
-pnpm --filter @repo/api db:seed       # demo data (Prisma 7 never seeds automatically)
+pnpm db:seed                          # demo data (Prisma 7 never seeds automatically); wipes the demo tables first
 pnpm --filter @repo/api db:deploy     # prisma migrate deploy — production only, applies committed migrations
 ```
 

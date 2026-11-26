@@ -11,6 +11,8 @@ export async function requestPasswordChangeAction(): Promise<string | null> {
     await authApi.requestPasswordReset(user.email);
     return null;
   } catch (error) {
-    return toFormErrors(error).message ?? "Could not request a reset link.";
+    const { message, fields } = toFormErrors(error);
+    // The dialog has no email box, so a refusal of the address is the dialog's own message.
+    return fields.email?.[0] ?? message ?? "Could not request a reset link.";
   }
 }

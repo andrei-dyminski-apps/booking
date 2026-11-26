@@ -1,4 +1,8 @@
-import type { MailGroup, NotificationType } from "@repo/contracts";
+import {
+  isExampleMailAddress,
+  type MailGroup,
+  type NotificationType,
+} from "@repo/contracts";
 
 export function groupOf(type: NotificationType): MailGroup | null {
   switch (type) {
@@ -31,7 +35,7 @@ type Recipient = {
 
 export function canSendTo(email: string, production: boolean): boolean {
   return (
-    !/@example\.(com|net|org)$/i.test(email) &&
+    !isExampleMailAddress(email) &&
     (!production || !/\.(example|invalid|test|localhost)$/i.test(email))
   );
 }

@@ -7,6 +7,7 @@ import {
   loginSchema,
   registerFormSchema,
   registerSchema,
+  requestPasswordResetSchema,
 } from "./auth.js";
 import {
   bookingQuerySchema,
@@ -169,6 +170,25 @@ describe("the email rule", () => {
         },
       ]);
     }
+  });
+});
+
+describe("the reset request rule", () => {
+  it("refuses an example address by its own code and leaves a real one alone", () => {
+    expect(
+      issuesOf(requestPasswordResetSchema, { email: "Guest@Example.com" }),
+    ).toEqual([
+      {
+        path: ["email"],
+        message: "Demo accounts cannot change password",
+        code: "EMAIL_RECEIVES_NO_MAIL",
+      },
+    ]);
+
+    expect(
+      requestPasswordResetSchema.safeParse({ email: "me@example.com.au" })
+        .success,
+    ).toBe(true);
   });
 });
 

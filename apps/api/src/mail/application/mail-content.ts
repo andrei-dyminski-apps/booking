@@ -53,7 +53,11 @@ export function mailSiteOrigin(): string {
 }
 
 export function renderLetter(subject: string, detail: string, path: string) {
-  const href = new URL(path, mailSiteOrigin()).href;
+  const origin = mailSiteOrigin();
+  const url = new URL(path, origin);
+  // A path such as "/\host" resolves to another host; a letter only ever links to the site.
+  if (url.origin !== origin) throw new Error("Email links stay on the site");
+  const href = url.href;
   return {
     subject,
     text: subject + "\n\n" + detail + "\n\n" + href,

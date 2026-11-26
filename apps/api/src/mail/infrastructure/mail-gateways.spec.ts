@@ -1,10 +1,18 @@
+import { createTransport } from "nodemailer";
 import {
   InboundMailAboveQuotaError,
+  MailDeliveryError,
   MailQuotaError,
   isPermanentMailFailure,
   MailRateLimitError,
 } from "../application/ports/mail-gateway";
-import { ResendGateway } from "./mail-gateways";
+import { MailpitGateway, ResendGateway } from "./mail-gateways";
+
+const sendMail = jest.fn();
+
+jest.mock("nodemailer", () => ({
+  createTransport: jest.fn(() => ({ sendMail })),
+}));
 
 describe("ResendGateway", () => {
   const gateway = new ResendGateway("test-api-key", "host@mail.test");
@@ -170,5 +178,72 @@ describe("ResendGateway", () => {
     expect(
       fetch.mock.calls.every(([, init]) => init?.method === undefined),
     ).toBe(true);
+  });
+});
+
+describe("MailpitGateway", () => {
+  const gateway = new MailpitGateway(
+    "smtp://localhost:1025",
+    "staydesk@mail.test",
+  );
+  afterEach(() => sendMail.mockReset());
+
+  it("bounds every SMTP wait so a stopped Mailpit cannot hold a job", () => {
+    const options = jest.mocked(createTransport).mock.calls[0]?.[0];
+    if (typeof options !== "string") throw new Error("Expected an SMTP URL");
+    const url = new URL(options);
+    expect(url.host).toBe("localhost:1025");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      dnsTimeout: "3000",
+      connectionTimeout: "3000",
+      greetingTimeout: "3000",
+      socketTimeout: "5000",
+    });
+  });
+
+  it("sends the prepared letter from the configured sender under the job's key", async () => {
+    sendMail.mockResolvedValue({});
+    const letter = {
+      to: "guest@mail.test",
+      subject: "Reset your StayDesk password",
+      text: "Open the link",
+      html: "<p>Open the link</p>",
+      replyTo: "reply+signed@mail.test",
+    };
+    await gateway.send(gateway.prepare(letter), "account-1");
+    expect(sendMail).toHaveBeenCalledWith({
+      ...letter,
+      from: "staydesk@mail.test",
+      headers: {
+        "Auto-Submitted": "auto-generated",
+        "X-Auto-Response-Suppress": "All",
+      },
+      messageId: "<account-1@mailpit.local>",
+    });
+  });
+
+  it("reports a refused connection as a delivery failure the job retries", async () => {
+    sendMail.mockRejectedValue(
+      new Error("connect ECONNREFUSED 127.0.0.1:1025"),
+    );
+    const request = gateway.prepare({
+      to: "guest@mail.test",
+      subject: "Stay",
+      text: "Details",
+      html: "<p>Details</p>",
+    });
+    const sent = gateway.send(request, "notice-1");
+    await expect(sent).rejects.toBeInstanceOf(MailDeliveryError);
+    await expect(sent).rejects.toThrow("Mailpit did not accept the message");
+    await expect(sent).rejects.not.toThrow(/ECONNREFUSED|guest@mail\.test/);
+    expect(
+      isPermanentMailFailure(await sent.catch((error: unknown) => error)),
+    ).toBe(false);
+  });
+
+  it("has no inbox and no suppression list of its own", async () => {
+    await expect(gateway.receive()).rejects.toMatchObject({ status: 404 });
+    await expect(gateway.sentRecipients()).resolves.toEqual([]);
+    await expect(gateway.isSuppressed()).resolves.toBe(false);
   });
 });

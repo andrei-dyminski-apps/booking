@@ -15,8 +15,10 @@ import {
   ACCESS_TOKEN_COOKIE,
   REFRESH_TOKEN_COOKIE,
 } from "../../src/auth/cookies";
+import { issueCodesOf } from "../support/api-error";
 import { resetDatabase } from "../support/database";
 import {
+  hostCredentials,
   readSetCookie,
   signIn,
   signInAs,
@@ -250,6 +252,30 @@ describe("AuthController (e2e)", () => {
       .expect(201);
     expect(userSchema.parse(response.body).email).toBe(testCredentials.email);
     expect(await db.accountMail.count({ where: { kind: "register" } })).toBe(0);
+  });
+
+  it("refuses a reset link for an example address, whether or not an account holds it", async () => {
+    const { name, email: held } = hostCredentials;
+    await app
+      .get(PrismaService)
+      .user.create({ data: { name, email: held, passwordHash: "unused" } });
+    const answers = await Promise.all(
+      [held, "nobody@example.net"].map((email) =>
+        request(server)
+          .post("/auth/password/reset/request")
+          .send({ email })
+          .expect(400),
+      ),
+    );
+    for (const answer of answers) {
+      expect(issueCodesOf(answer)).toEqual(["EMAIL_RECEIVES_NO_MAIL"]);
+    }
+    expect(answers[0]?.text).toBe(answers[1]?.text);
+    expect(
+      await app.get(PrismaService).accountMail.count({
+        where: { kind: "reset" },
+      }),
+    ).toBe(0);
   });
 
   it("resets a verified account once and ends its access and refresh sessions", async () => {

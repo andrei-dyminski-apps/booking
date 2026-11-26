@@ -1,6 +1,6 @@
 import { DEMO, DEMO_PASSWORD, GUEST } from "../support/demo";
 import { expect, test } from "../support/fixtures";
-import { EVERY_TARGET } from "../target";
+import { EVERY_TARGET, TARGET } from "../target";
 import { signInThroughForm } from "../support/session";
 
 test("guest account pages and links disappear after sign-in", async ({
@@ -111,6 +111,28 @@ test(
       details.getByText(guest.joined, { exact: true }),
     ).toBeVisible();
     await pages.check();
+
+    // A demo address never receives mail: the contract refuses the link, and the dialog says why.
+    // On the deployment the guest is the suite's own, whose address does get a link.
+    if (TARGET !== "live") {
+      await details.getByRole("button", { name: "Change password" }).click();
+
+      const passwordDialog = page.getByRole("dialog", {
+        name: "Change password",
+      });
+
+      await passwordDialog
+        .getByRole("button", { name: "Send reset link" })
+        .click();
+      await expect(passwordDialog.getByRole("alert")).toContainText(
+        "Demo accounts cannot change password",
+      );
+      await expect(passwordDialog.getByRole("status")).toHaveCount(0);
+      await pages.check();
+
+      await passwordDialog.getByRole("button", { name: "Close" }).click();
+      await expect(passwordDialog).toHaveCount(0);
+    }
 
     await details.getByRole("button", { name: "Sign out" }).click();
 
