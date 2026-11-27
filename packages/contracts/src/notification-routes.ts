@@ -4,6 +4,7 @@ export const notificationRoutes = {
   payouts: "/dashboard/payouts",
   adminPayments: "/admin/payments",
   booking: (id: string) => "/bookings/" + encodeURIComponent(id),
+  conversation: (id: string) => "/messages/" + encodeURIComponent(id),
   listing: (id: string) => "/listings/" + encodeURIComponent(id),
   adminUser: (id: string) => "/admin/users/" + encodeURIComponent(id),
   guestReviews: (id: string) =>

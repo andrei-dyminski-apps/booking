@@ -17,6 +17,7 @@ import type { UnreadCounts } from "../unread/unread.types";
 import type { NotificationCursor } from "./notification-cursor";
 import { groupOf } from "../mail/domain/mail-policy";
 import { recordMailTask } from "../mail/infrastructure/mail-outbox.repository";
+import { recordPushTask } from "../push/infrastructure/push-outbox.repository";
 
 /**
  * Every query over `notifications`. Each one is scoped to the recipient by a `userId` in
@@ -69,6 +70,8 @@ export class NotificationRepository {
           userId,
         });
       }
+      // Every notice is pushed, muting or not: what the account muted is read when it is sent.
+      await recordPushTask(tx, { kind: "notice", id: notification.id, userId });
 
       return { notification, count: await countUnreadOfOne(tx, userId) };
     });

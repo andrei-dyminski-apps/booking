@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <meta name="color-scheme" content="light dark" />
+    <title>You are offline · StayDesk</title>
+    <!--
+      Shown by the service worker in place of a page the network could not bring. Static and
+      self-contained on purpose: it is cached once and served with no connection, so it can
+      lean on no script, stylesheet, image or session of the site.
+    -->
+    <style>
+      :root {
+        --background: #fafafa;
+        --foreground: #171717;
+        --muted: #525252;
+        --border: #e5e5e5;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --background: #0a0a0a;
+          --foreground: #fafafa;
+          --muted: #a3a3a3;
+          --border: #262626;
+        }
+      }
+      body {
+        margin: 0;
+        min-height: 100svh;
+        display: grid;
+        place-items: center;
+        padding: 1.5rem;
+        box-sizing: border-box;
+        background: var(--background);
+        color: var(--foreground);
+        font-family:
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          Roboto,
+          sans-serif;
+      }
+      main {
+        max-width: 24rem;
+        text-align: center;
+      }
+      svg {
+        width: 4rem;
+        height: 4rem;
+      }
+      h1 {
+        margin: 1.25rem 0 0.5rem;
+        font-size: 1.5rem;
+        letter-spacing: -0.01em;
+      }
+      p {
+        margin: 0 0 1.5rem;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      a {
+        display: inline-block;
+        padding: 0.625rem 1.25rem;
+        border-radius: 0.5rem;
+        background: var(--foreground);
+        color: var(--background);
+        font-weight: 500;
+        text-decoration: none;
+      }
+      a:focus-visible {
+        outline: 2px solid var(--foreground);
+        outline-offset: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <!-- The logo of app/icon.svg, inline: nothing but this document is there offline. -->
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <rect width="32" height="32" rx="7" fill="#171717" />
+        <g fill="#fafafa">
+          <path
+            d="M6.5 14.5 16 6.5l9.5 8"
+            fill="none"
+            stroke="#fafafa"
+            stroke-width="2.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+          <circle cx="16" cy="14.6" r="1.4" />
+          <path d="M10 22.4a6 6 0 0 1 12 0Z" />
+          <rect x="7" y="23.6" width="18" height="2.6" rx="1.3" />
+        </g>
+      </svg>
+      <h1>You are offline</h1>
+      <p>
+        StayDesk could not reach the network. Check your connection, then try
+        again.
+      </p>
+      <!-- An empty href is the address the visitor asked for, which is what to retry. -->
+      <a href="">Try again</a>
+    </main>
+  </body>
+</html>

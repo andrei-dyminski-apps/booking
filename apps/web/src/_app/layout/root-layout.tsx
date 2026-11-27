@@ -36,6 +36,9 @@ export const generateMetadata = (): Metadata => ({
     title: SITE_NAME,
     description: SITE_DESCRIPTION,
   },
+  // Safari on an iPhone reads its own tags rather than the manifest: added to the Home
+  // Screen, the site opens as an app under this name (`apple-icon.png` is its icon).
+  appleWebApp: { capable: true, title: SITE_NAME, statusBarStyle: "default" },
 });
 
 /**

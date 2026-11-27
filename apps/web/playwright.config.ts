@@ -82,6 +82,10 @@ export default defineConfig({
     baseURL: WEB_ORIGIN,
     // A notification can fade in and finish while axe is scanning its action button.
     reducedMotion: "reduce",
+    // The site's service worker answers page loads itself, and what a worker fetches
+    // passes no route of the context — not the address of each test, not the Stripe
+    // stand-in. Off everywhere but the scenario that proves the worker (`offline.spec.ts`).
+    serviceWorkers: "block",
     // The reader's clock, the same on every machine (`e2e/support/demo.ts`).
     locale: "en-GB",
     timezoneId: READER_TIME_ZONE,

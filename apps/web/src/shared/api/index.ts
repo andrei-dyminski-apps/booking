@@ -30,5 +30,11 @@ export {
   subscribeToServerEvents,
   type ServerEventListener,
 } from "./server-events";
-export { mirrorSessionCookies } from "./session-cookies";
+export { mirrorSessionCookies, pushDeviceAccount } from "./session-cookies";
 export { mailApi } from "./mail";
+export { pushApi } from "./push";
+export {
+  flushPushRemovals,
+  isDevicePushAccount,
+  reconcileDevicePush,
+} from "./device-push";

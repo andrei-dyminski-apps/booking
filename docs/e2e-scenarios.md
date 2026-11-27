@@ -148,6 +148,14 @@ contract's Vitest suite and the frontend's own specs, so none of them belongs he
       Stripe's own onboarding; what is inside it is Stripe's, not tested. _Real Stripe only:
       the account is opened with Stripe. Cheap._
 
+- [x] **Push preferences.** A member opens "Push notifications" on their profile, mutes a
+      group, sets quiet hours on their browser's clock and an hourly limit, and finds all
+      three kept after a reload. Whether a push then waits or is dropped is the API's e2e
+      specs'. _Hermetic only. Cheap._
+- [x] **Offline.** A visitor whose connection drops while browsing reloads the page and is
+      shown the site's own offline page instead of the browser's error; once the
+      connection is back, "Try again" brings the page back. _Hermetic only. Cheap._
+
 ## Cross-cutting
 
 - [x] **No errors, no accessibility violations.** Every page any scenario visits opens with

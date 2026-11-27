@@ -26,6 +26,9 @@ export async function resetDatabase(app: INestApplication<App>): Promise<void> {
   await prismaService.mailEvent.deleteMany();
   await prismaService.accountMail.deleteMany();
   await prismaService.mailOutbox.deleteMany();
+  // No foreign key to `users`, as the mail outbox; the deliveries go with their task.
+  await prismaService.pushTask.deleteMany();
+  await prismaService.pushEndpointHold.deleteMany();
   // Lets go of its booking (`SetNull`) rather than going with it, and a refund id a later
   // spec reuses would be skipped as recorded.
   await prismaService.refundFailure.deleteMany();

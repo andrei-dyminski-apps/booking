@@ -128,12 +128,13 @@ export const authApi = {
       onResponse: mirrorSessionCookies,
     }),
 
-  me: (read: ReadOptions): Promise<User> =>
+  me: (read: ReadOptions, signal?: AbortSignal): Promise<User> =>
     apiRequest({
       method: "GET",
       path: "/auth/me",
       schema: userSchema,
       read,
+      signal,
     }),
 };
 

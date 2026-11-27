@@ -37,6 +37,56 @@ const COOKIE_ATTRIBUTES = {
   secure: process.env.NODE_ENV === "production",
 } as const;
 
+const PUSH_ACCOUNT_COOKIE = "staydesk_push_account";
+const PUSH_ACCOUNT_MAX_AGE_SECONDS = 34_560_000;
+
+const PUSH_ACCOUNT_COOKIE_ATTRIBUTES = {
+  ...COOKIE_ATTRIBUTES,
+  path: "/",
+  maxAge: PUSH_ACCOUNT_MAX_AGE_SECONDS,
+};
+
+/**
+ * A device ownership hint only. Authentication always uses the API's session guard.
+ *
+ * It may write the cookie, so it runs only where Next.js lets a cookie be set — a Route
+ * Handler (`/api/push/device-owner`) or a Server Action, never a render.
+ */
+export async function pushDeviceAccount(
+  existingAccount: () => Promise<string | null>,
+): Promise<string | null> {
+  const { cookies } = await import("next/headers");
+  const store = await cookies();
+
+  const saved = store.get(PUSH_ACCOUNT_COOKIE)?.value;
+  if (saved !== undefined) return saved;
+  if (!store.has(ACCESS_TOKEN_COOKIE)) return null;
+
+  const owner = await existingAccount();
+  if (owner !== null)
+    store.set(PUSH_ACCOUNT_COOKIE, owner, PUSH_ACCOUNT_COOKIE_ATTRIBUTES);
+  return owner;
+}
+
+function accessTokenSubject(token: string | undefined): string | null {
+  const payload = token?.split(".")[1];
+  if (payload === undefined) return null;
+
+  try {
+    const claims: unknown = JSON.parse(
+      Buffer.from(payload, "base64url").toString("utf8"),
+    );
+    return typeof claims === "object" &&
+      claims !== null &&
+      "sub" in claims &&
+      typeof claims.sub === "string"
+      ? claims.sub
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Server-only, like everything that touches the cookie jar of the answer Next.js is
  * building. The import is dynamic for the same reason it is in `http-client.ts`: this
@@ -64,6 +114,9 @@ export async function mirrorSessionCookies(response: Response): Promise<void> {
 
     if (parsed.expired) {
       store.delete({ name: parsed.name, path });
+      if (parsed.name === ACCESS_TOKEN_COOKIE) {
+        store.delete({ name: PUSH_ACCOUNT_COOKIE, path: "/" });
+      }
       continue;
     }
 
@@ -74,6 +127,11 @@ export async function mirrorSessionCookies(response: Response): Promise<void> {
       ...COOKIE_ATTRIBUTES,
       ...(parsed.maxAge === null ? {} : { maxAge: parsed.maxAge }),
     });
+    if (parsed.name === ACCESS_TOKEN_COOKIE) {
+      const owner = accessTokenSubject(parsed.value);
+      if (owner !== null)
+        store.set(PUSH_ACCOUNT_COOKIE, owner, PUSH_ACCOUNT_COOKIE_ATTRIBUTES);
+    }
   }
 }
 

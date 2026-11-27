@@ -271,6 +271,13 @@ of the catalogue and a listing's reviews is behind the global `JwtAuthGuard` and
 | `POST`   | `/notifications/:id/read`          | mark one read, answers the unread count; `404` — not one of the caller's                                       |
 | `POST`   | `/notifications/read`              | mark all read, answers the unread count                                                                        |
 | `GET`    | `/events`                          | the caller's event stream (Server-Sent Events): a `sync`, then whatever happens                                |
+| `GET`    | `/push/config`                     | the key a browser subscribes to push with, `null` while push is off; public                                    |
+| `POST`   | `/push/subscriptions`              | subscribe the caller's browser, `204`; `409` — create a new subscription; `503` — push is off                  |
+| `POST`   | `/push/subscriptions/status`       | check the caller's subscription (body: its `endpoint`)                                                         |
+| `DELETE` | `/push/subscriptions`              | stop pushing to this browser (body: its `endpoint`), `204`                                                     |
+| `GET`    | `/push/settings`                   | the account's push preferences: muted groups, quiet hours, hourly limit                                        |
+| `PATCH`  | `/push/settings`                   | update the supplied preferences, `204`                                                                         |
+| `POST`   | `/push/receipts`                   | the service worker's receipt of a push (`received` or `clicked`, by the delivery's id), `204`; public          |
 
 The three lookups fill in the id filters of the admin's listings and of the stays: `q` is at
 least three characters, matched anywhere in the name regardless of case — or, when it is a
@@ -313,6 +320,61 @@ users are meant to arrive as new members of the same union, not as a second conn
 
 On the frontend a bell in the header shows the count and the latest notices, a new one is
 announced with a toast, and `/notifications` is the whole feed.
+
+### Push notifications and the installed app
+
+The site is a Progressive Web App. The manifest makes it installable — "Install app" in the
+"This device" section of `/profile` where the browser offers it, the Share sheet's "Add to
+Home Screen" on an iPhone or an iPad — and a service worker (`apps/web/public/sw.js`) shows a
+page of its own instead of the browser's error when a page load finds no network. It caches
+nothing else: every page is personal or live.
+
+The same section turns on Web Push for that browser. While it is on, every notice and every
+message that is news to the account is also sent to it as a system notification, worded as
+the bell words it and opening the page it is about — even with no tab open. The API keeps one
+row per browser (`push_subscriptions`, at most ten per account, the oldest dropped first).
+
+A push is delivered at least once. The notice or the message writes a task into Postgres in
+its own transaction (`push_tasks`, with the current subscription ids), and a relay
+hands every due task to a BullMQ queue of its own (`push`) — again after its lease runs out if
+Redis lost the job. The worker reads the notice or the message when it decides: one read in an
+open tab meanwhile is not pushed. It then applies the account's own rules and fans the task
+out into one delivery per browser from that snapshot that is still subscribed (`push_deliveries`). Before each attempt the worker checks
+the current subscription, unread state and preferences again. The delivery keeps its receipt
+across retries. Message pushes use the sender's current display name. The worker records
+acceptance and permanent refusals and removes expired subscriptions. A `429` pauses new
+requests to the same endpoint until `Retry-After`, a day at most, and does not count against
+the hourly limit. The worker retries unavailable providers
+after 15 s, 1 min, 4 min and 16 min before giving up. Nothing older
+than a day is sent, including time the push service keeps it for an offline browser. The
+service worker shows every push and keeps the newest visible message per thread. It posts a
+receipt when a push arrives and when it is clicked (`POST /push/receipts`). The profile checks
+that the browser's endpoint is registered to the signed-in account, and the signed-in shell
+reconciles replacements made by the browser. The service worker can renew an existing
+subscription without open tabs using its previous secret. Finished tasks and their deliveries are kept for
+30 days. Successful sign-out, account deletion and switching accounts clear this browser's
+subscription and visible notifications. The service worker can retire the endpoint at the
+API after sign-out. The worker verifies the device account before showing private content.
+Deleting the account removes all its subscriptions
+from the API.
+A different account needs a fresh browser subscription because the provider may still hold
+pushes for the old endpoint. Only the push
+services the browsers use are accepted as endpoints — the API posts to them, so an address of
+the caller's choosing would be a request to a host of their choosing.
+
+"Push notifications" on `/profile` holds the account's preferences, for all its browsers
+(`GET`/`PATCH /push/settings`): the groups it is told about (bookings, payments, messages,
+reviews, waitlist openings and, for an admin, the admin alerts), quiet hours on the clock of
+the browser that last changed the quiet window, and how many distinct push tasks the API can
+attempt in a rolling hour. Pushes held for quiet hours are reconsidered when the window ends
+or changes. Devices
+and retries of the same task share a slot in that hour. A retry outside that window needs a slot in the
+current one. News suppressed by muting or the limit remains on the bell and in the inbox.
+
+Push is optional: it needs a VAPID key pair (`VAPID_SUBJECT`, `VAPID_PUBLIC_KEY`,
+`VAPID_PRIVATE_KEY`, made by `pnpm --filter @repo/api push:keys`). The API checks that the keys
+match at startup. With none of the three set
+it is off and the profile page offers no switch.
 
 ### The waitlist
 
@@ -599,7 +661,7 @@ Registration always writes a `USER` — the only safe default for a public endpo
 
 An admin manages accounts instead of deleting them. **Blocking** stamps `users.blocked_at` and deletes every refresh token of the account in the same transaction, so no session can be refreshed; login answers `403` once the password is right, `/auth/me` answers `401`, and the access token left in a browser lapses within `JWT_ACCESS_TTL`. Only a `USER` account can be blocked — an admin's cannot, the caller's own included, so no admin can shut another out.
 
-**Deleting an account** is its owner's alone, from the end of `/profile`, with the password typed again (`DELETE /users/me`). It erases the person, not the history: the name becomes "Deleted user", the address one at `.invalid` that receives no mail (the real one is free to register again), the password one nothing matches; every session, notification and waitlist entry goes, and the listings are retired. The stays, payments, refunds, payouts, fees, reviews and threads stay — they are the other party's history and the money's record too — and read as written by "Deleted user"; a thread with a deleted account stays to read and takes no new message. The Stripe connected account is not closed by the application; its id stays on the row. It is refused (`409`) while something is still open — a stay held or not yet over, an open dispute, a refund not settled, a host's share no payout account can receive, or a host fee still owed — the refusal naming every one, and for the site's last admin. A share a payout can still reach holds nothing back: it is paid to the connected account after the erasure.
+**Deleting an account** is its owner's alone, from the end of `/profile`, with the password typed again (`DELETE /users/me`). It erases the person, not the history: the name becomes "Deleted user", the address one at `.invalid` that receives no mail (the real one is free to register again), the password one nothing matches; every session, notification, push subscription, push preference, push task and waitlist entry goes, and the listings are retired. The stays, payments, refunds, payouts, fees, reviews and threads stay — they are the other party's history and the money's record too — and read as written by "Deleted user"; a thread with a deleted account stays to read and takes no new message. The Stripe connected account is not closed by the application; its id stays on the row. It is refused (`409`) while something is still open — a stay held or not yet over, an open dispute, a refund not settled, a host's share no payout account can receive, or a host fee still owed — the refusal naming every one, and for the site's last admin. A share a payout can still reach holds nothing back: it is paid to the connected account after the erasure.
 
 The admin's screens are `/admin` (every listing on offer, each editable and retirable through the owner's own form) and `/admin/users` (the accounts, filtered in the URL like the stays). Each account has a page of its own, `/admin/users/[id]`, where a user's account is blocked, with links to its stays and its listings.
 
@@ -639,6 +701,9 @@ All settings live in a single `.env` in the repository root — there are no per
 | `MAIL_SNAPSHOT_SECRET`                        | Stable secret that encrypts pending delivery requests                        | `JWT_REFRESH_SECRET`                                    |
 | `RESEND_API_KEY`                              | Resend API key with send, inbound read and suppression read access           | production secret                                       |
 | `RESEND_WEBHOOK_SECRET`                       | Signing secret for the mail webhook endpoint                                 | production secret                                       |
+| `VAPID_SUBJECT`                               | Contact address the push services are given (`mailto:` or `https:`)          | unset: push off                                         |
+| `VAPID_PUBLIC_KEY`                            | Public VAPID key browsers subscribe to push with (`push:keys` makes a pair)  | unset: push off                                         |
+| `VAPID_PRIVATE_KEY`                           | Private VAPID key every push is signed with — all three or none              | unset: push off                                         |
 | `WEB_ORIGIN`                                  | origin(s) for CORS in Nest, several — comma-separated                        | `http://localhost:3000`                                 |
 | `SITE_ORIGIN`                                 | the frontend's public address: canonical links, `og:url`, JSON-LD            | `VERCEL_PROJECT_PRODUCTION_URL`, else `localhost`       |
 | `DEMO_PASSWORD`                               | Public demo account password for the seed and the frontend sign-in form      | Required for the seed, optional for the frontend        |
@@ -695,6 +760,7 @@ pnpm lint:fix       # ESLint --fix: autofixes + reformatting by Prettier
 pnpm check-types    # tsc --noEmit
 pnpm test           # unit tests: jest in apps/api, vitest in apps/web and packages/contracts
 pnpm format         # Prettier over **/*.{ts,tsx,md}
+pnpm --filter @repo/api push:keys   # a VAPID key pair for Web Push (prints both keys)
 ```
 
 `pnpm dev` first runs `docker compose up -d` (Postgres, Redis, Mailpit — the `stripe` profile stays opt-in, and Ctrl+C leaves the containers running; `docker compose down` stops them), then `turbo watch dev`, so it is dependency-aware: edit a schema in `packages/contracts` and turbo rebuilds it and restarts `apps/api`, while `apps/web` picks the change up with its own watcher.

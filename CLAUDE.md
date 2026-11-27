@@ -46,6 +46,9 @@ in `README.md`. Both act on a live deployment: run them only when the user asks.
 `pnpm db:seed:railway` reseeds the deployed database — the seed deletes every demo table
 first — so it is run only when the user asks, too.
 
+`pnpm --filter @repo/api push:keys` prints a VAPID key pair for Web Push — the three
+`VAPID_*` variables; with none of them set push is off and the profile offers no switch.
+
 The payout countries are a snapshot in the repository (`payout-countries.snapshot.ts`,
 generated — never edited by hand), rewritten by `pnpm --filter @repo/api stripe:sync-countries`,
 which only reads Stripe, and proposed weekly as a pull request by

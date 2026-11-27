@@ -214,6 +214,9 @@ export class AccountMailRepository {
         return null;
       await update(tx, user, link.email);
       await tx.refreshToken.deleteMany({ where: { userId: user.id } });
+      // A browser subscribed under a stolen session would go on being pushed the account's
+      // notices and messages. The endpoint holds keep another account off the endpoints.
+      await tx.pushSubscription.deleteMany({ where: { userId: user.id } });
       await tx.mailReplyToken.updateMany({
         where: { userId: user.id, revokedAt: null },
         data: { revokedAt: new Date() },

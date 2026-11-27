@@ -16,6 +16,7 @@ import {
 } from "../generated/prisma/client";
 import { STILL_OFFERED } from "../listing/listing.repository";
 import { recordMailTask } from "../mail/infrastructure/mail-outbox.repository";
+import { recordPushTask } from "../push/infrastructure/push-outbox.repository";
 import { isPrismaError, PrismaErrorCode } from "../prisma/prisma.errors";
 import { PrismaService } from "../prisma/prisma.service";
 import { countUnreadOf, countUnreadOfOne } from "../unread/unread.repository";
@@ -581,6 +582,11 @@ async function appendIn(
   await recordMailTask(tx, {
     id: row.id,
     kind: "digest",
+    userId: fromGuest ? listing.ownerId : guestId,
+  });
+  await recordPushTask(tx, {
+    id: row.id,
+    kind: "message",
     userId: fromGuest ? listing.ownerId : guestId,
   });
 
