@@ -9,8 +9,9 @@ export { proxy } from "#_app/proxy";
  *
  * Every page, because every page carries the Content-Security-Policy and its nonce; which
  * of them a stranger is sent away from is decided in the function (`PROTECTED`). Left out
- * are the BFF, Next's own static files and the router's prefetches, none of which is a
- * document a policy applies to. `api` is the segment, not the prefix: `/apiary` would be a
+ * are the BFF, Next's own static files, the service worker — whose policy is its own, in
+ * `next.config.js` — and the router's prefetches, none of which is a document the page's
+ * policy applies to. `api` is the segment, not the prefix: `/apiary` would be a
  * page like any other.
  *
  * A prefetch therefore skips the cookie gate as well, and costs a render instead of a
@@ -20,7 +21,8 @@ export { proxy } from "#_app/proxy";
 export const config = {
   matcher: [
     {
-      source: "/((?!api(?:/|$)|_next/static|_next/image|favicon.ico).*)",
+      source:
+        "/((?!api(?:/|$)|_next/static|_next/image|favicon.ico|sw\\.js$).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },

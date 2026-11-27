@@ -5,6 +5,7 @@ import type { App } from "supertest/types";
 import { BOOKING_EXPIRY_QUEUE } from "../../src/booking/infrastructure/booking-expiry.queue";
 import { PAYMENT_EVENT_QUEUE } from "../../src/payment/infrastructure/payment-event.queue";
 import { HOST_PAYOUT_QUEUE } from "../../src/payout/infrastructure/host-payout.queue";
+import { PUSH_QUEUE } from "../../src/push/application/ports/push-jobs";
 import { MailOutboxRelay } from "../../src/mail/infrastructure/mail-outbox.relay";
 import { MailProcessor } from "../../src/mail/infrastructure/mail.processor";
 
@@ -32,6 +33,7 @@ export async function resetQueue(app: INestApplication<App>): Promise<void> {
   await app
     .get<Queue>(getQueueToken(PAYMENT_EVENT_QUEUE))
     .obliterate({ force: true });
+  await app.get<Queue>(getQueueToken(PUSH_QUEUE)).obliterate({ force: true });
 }
 
 /** The queue itself, for the spec that drives a job rather than the API in front of it. */

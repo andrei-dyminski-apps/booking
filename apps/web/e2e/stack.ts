@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from "node:crypto";
 import { LIVE_ORIGIN } from "./live";
 import { DEMO_PASSWORD } from "./support/demo";
 import { TARGET } from "./target";
@@ -95,6 +96,24 @@ function realStripeEnv(): Record<string, string> {
   };
 }
 
+/**
+ * A VAPID pair minted for the run, so push is on in the stack — the profile offers it —
+ * without a key in the repository. Nothing is pushed: Chromium's subscriptions go to
+ * Google's service, which the suite never reaches.
+ */
+function vapidKeys(): { VAPID_PUBLIC_KEY: string; VAPID_PRIVATE_KEY: string } {
+  const { publicKey, privateKey } = generateKeyPairSync("ec", {
+    namedCurve: "prime256v1",
+  });
+  const raw = publicKey.export({ format: "der", type: "spki" }).subarray(-65);
+  const { d } = privateKey.export({ format: "jwk" });
+
+  return {
+    VAPID_PUBLIC_KEY: raw.toString("base64url"),
+    VAPID_PRIVATE_KEY: d ?? "",
+  };
+}
+
 const STACK_ENV: Record<string, string> = {
   MAIL_SMTP_URL: "smtp://127.0.0.1:1026",
   MAIL_FROM: "staydesk@mail.e2e.example",
@@ -130,6 +149,9 @@ const STACK_ENV: Record<string, string> = {
   // bucket of its own in the rate limiter, so one test's sign-ins never get another's
   // refused. A value nobody should copy — anywhere else it lets a client pick its own bucket.
   TRUST_PROXY: "1",
+
+  VAPID_SUBJECT: "mailto:push@mail.e2e.example",
+  ...vapidKeys(),
 
   ...(TARGET === "stripe" ? realStripeEnv() : STAND_IN_STRIPE_ENV),
 

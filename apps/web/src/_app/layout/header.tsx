@@ -6,6 +6,7 @@ import { ButtonLink } from "#shared/ui";
 import { AccountNotifications } from "./account-notifications";
 import { BrandMark } from "./brand-mark";
 import { MobileNav } from "./mobile-nav";
+import { ServiceWorker } from "./service-worker";
 import { SessionRecovery } from "./session-recovery";
 import { ThemeToggle } from "./theme-toggle";
 import { TimeZoneCookie } from "./time-zone-cookie";
@@ -19,7 +20,8 @@ import { TimeZoneCookie } from "./time-zone-cookie";
  * It is handed the session instead of reading one — `AppShell` asks once for the whole
  * shell. `null` there means "no live access token", which is not the same as signed out,
  * hence `SessionRecovery` beside it: the one thing about a session that only the browser
- * can settle. `TimeZoneCookie` is the other thing only the browser knows: its own clock.
+ * can settle. `TimeZoneCookie` is the other thing only the browser knows: its own clock,
+ * and `ServiceWorker` the worker only a browser can install.
  */
 export const Header = ({ user }: { user: User | null }) => (
   <header className="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur-sm supports-backdrop-filter:bg-background/60">
@@ -38,6 +40,7 @@ export const Header = ({ user }: { user: User | null }) => (
 
       <SessionRecovery signedIn={user !== null} />
       <TimeZoneCookie signedIn={user !== null} />
+      <ServiceWorker userId={user?.id ?? null} />
 
       <div className="ml-auto flex items-center gap-2">
         {/*

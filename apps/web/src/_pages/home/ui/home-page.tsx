@@ -29,6 +29,7 @@ import {
 } from "#shared/config";
 import { singleParam } from "#shared/lib";
 import { ButtonLink, ExternalLink } from "#shared/ui";
+import { RetireDevicePush } from "./retire-device-push";
 
 export const HomePage = async ({ searchParams }: PageProps<"/">) => {
   const user = await currentUser();
@@ -45,6 +46,7 @@ export const HomePage = async ({ searchParams }: PageProps<"/">) => {
         >
           Your account has been deleted. Your past stays stay on record without
           your name, and the email address is free to register again.
+          <RetireDevicePush />
         </p>
       )}
 

@@ -8,7 +8,7 @@ import { FieldError } from "@repo/ui/components/field";
 import { cn } from "@repo/ui/lib/utils";
 import { authApi } from "#shared/api";
 import { ROUTES } from "#shared/config";
-import { toFormErrors } from "#shared/lib";
+import { clearDevicePush, toFormErrors, withDevicePushLock } from "#shared/lib";
 
 /**
  * A feature rather than a piece of the profile page, because the shell offers it too: the
@@ -48,7 +48,12 @@ export const LogoutButton = ({
   const signOut = () => {
     startTransition(async () => {
       try {
-        await authApi.logout();
+        await withDevicePushLock(async () => {
+          await authApi.logout();
+          // A failed logout leaves push alone. The provider retires the endpoint
+          // when the browser unsubscribes, and the API drops it on the next 410/404.
+          await clearDevicePush().catch(() => undefined);
+        });
       } catch (error) {
         // The endpoint answers the same way with or without a session, so the only way to
         // fail is a request that never arrived — and then the cookies are still here.

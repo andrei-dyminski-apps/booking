@@ -401,8 +401,9 @@ other browsers are following. Behind the proxy the question does not arise.
 
 - **It decides nothing.** Authentication, authorization and validation stay in Nest. What
   the handler does is forward a request and re-scope two cookies; a rule that appears in
-  it is a rule in the wrong place. The one answer it gives on its own — a refresh with no
-  session cookie at all, below — is not a rule: the API could only refuse it.
+  it is a rule in the wrong place. The two answers it gives on its own — a refresh with no
+  session cookie at all, and who this browser's push belongs to, both below — are not
+  rules: the first the API could only refuse, the second is a hint read off a cookie.
 - **The session is taken over, not passed through** (`shared/api/session-cookies.ts`). The
   API still answers with `Set-Cookie` for its own host; the proxy drops those headers and
   writes the same two tokens again for this origin. `Max-Age` is copied rather than
@@ -451,6 +452,18 @@ other browsers are following. Behind the proxy the question does not arise.
   already reads as "nothing restored". An access cookie without its refresh cookie still
   goes to the API: its refused refresh clears the leftover, which `proxy.ts` would
   otherwise keep reading as a session.
+- **Who this browser's push belongs to is answered here too** (`GET /api/push/device-owner`,
+  its own route beside the catch-all, over `_app/bff/push-device-owner.ts`). The service
+  worker asks it before showing a push and has no session of its own to ask the API with.
+  The answer is a hint and nothing more: an HttpOnly `staydesk_push_account` cookie
+  (`pushDeviceAccount` in `shared/api/session-cookies.ts`) that the cookie mirroring writes
+  from the subject of every access token it issues on this origin and deletes with the
+  access token whenever the API clears it, so it lives past an access token's fifteen
+  minutes and dies with a sign-out or a refused refresh. A browser with a session from before the hint existed gets one from
+  `/auth/me` on its first ask. It authorizes nothing — every request of the account still
+  goes through the API's guard — and the subject is read without checking the token's
+  signature, which only the API can do: the token is the one the API's own answer has just
+  handed over.
 - **The API's answer headers are passed on, all but the hop's own and two more**: its
   `Set-Cookie`, re-issued above, and its `Strict-Transport-Security`. The API sends Helmet's
   headers; the rest of them are harmless on a JSON answer, but HSTS with `includeSubDomains`
@@ -1195,6 +1208,99 @@ stream.
   Server Action plus `refresh()`. Either way the API publishes the new count, and every tab
   of the account hears it.
 
+## The installed app
+
+The site is a Progressive Web App: the manifest (`_app/seo/manifest.ts`), a service worker,
+and the "This device" section of `/profile`.
+
+- **The worker is `public/sw.js`, plain JavaScript and never bundled** — a worker is fetched
+  by its URL. It caches one thing, `public/offline.html`, shown in place of a page load the
+  network failed; every other page is personal or live, so a copy served from the worker
+  would be somebody's stale screen. The offline page is self-contained — inline styles, the
+  logo inline — because nothing but that document is there offline, and a change to it
+  bumps the version in `OFFLINE_CACHE`, or installed copies keep the old one. Activation
+  removes only older caches of the same prefix.
+- **A page load does not wait for the worker to boot.** Activation turns on navigation
+  preload, so the request leaves while the worker starts and the worker answers with
+  `preloadResponse`; without it every navigation of an installed site would pay the boot
+  first.
+- **The worker is served with a policy of its own** (`next.config.js`: no cache, its own
+  CSP), and `proxy.ts` leaves `/sw.js` out of its matcher so one policy applies, not two.
+  `ServiceWorker` in the shell registers it on every page with `updateViaCache: "none"`, so
+  a deploy reaches every installed copy on its next visit.
+- **The install offer is caught on whichever page a visit starts** — `beforeinstallprompt`
+  fires once, early — by the same shell component, kept in `shared/lib/pwa` and read by the
+  profile's button through `useSyncExternalStore`. The browser's own offer is left alone. An
+  iPhone fires nothing, so the section says how to add the site from the Share sheet, and
+  `appleWebApp` in the root metadata is what Safari reads in place of the manifest.
+- **Whether this browser is pushed to is the device's; how is the account's.** The "This
+  device" section (`ui/device-settings.tsx`, its operations in `model/device-push.ts`)
+  subscribes and unsubscribes this browser; the "Push notifications" dialog beside the email
+  settings (`ui/push-settings.tsx`) edits the account's muted groups, quiet hours and hourly
+  limit on every browser at once. The server reads `GET /push/config` behind a Suspense
+  boundary: a key draws both, `null` draws neither, and an API that could not answer draws
+  a retry while a subscription already here can still be turned off. The dialog reads the
+  saved values when it opens and patches only what changed, checking only what it sends:
+  the stored zone arrives unchecked (`storedPushPreferencesSchema`), since a browser with
+  older zone data may not know it, and must not stop the dialog loading or saving anything
+  else. A changed quiet window takes the zone of the browser that edits it, any other save
+  keeps the stored zone, and a saved limit outside the offered ones is offered beside them. Every request names the account
+  the page was rendered for (`?accountId=`), and the API refuses it for another session's
+  (`PUSH_ACCOUNT_CHANGED`), so a stale tab reads and writes nobody else's settings.
+- **The browser remembers what it subscribed, and for whom.** `localStorage` keeps the
+  confirmed endpoint and its account for the pages; Cache Storage keeps the subscription
+  with its secret for the worker, which has no session and proves itself to
+  `POST /push/subscriptions/maintenance` with the secret instead. On
+  `pushsubscriptionchange` the worker registers the successor with its predecessor's
+  secret, all tabs closed included, and subscribes again itself when a browser expired the
+  old one without a successor. A renewal is kept until the API confirms it, so a lost reply
+  is retried with the same pair. A renewal the API refuses for good
+  (`PUSH_SUBSCRIPTION_REUSE`) drops the worker's copy and tells open pages, since only a
+  page with the session can register the browser again. The signed-in shell reconciles on
+  mount, on focus at most once a minute, on reconnect and on the worker's message; the
+  profile's section re-reads the device on the same triggers and the same minute
+  (`DEVICE_PUSH_FOCUS_INTERVAL_MS`).
+- **A push shows its text only to the account it was sent to.** Before every push the
+  worker asks the BFF who this browser belongs to (`/api/push/device-owner`, below) and
+  compares the delivery's `subscriptionFingerprint` — the SHA-256 of the subscription's
+  secret, which the API's gateway puts inside the encrypted payload — with its own
+  subscription. Either failing, an answer that does not come within five seconds
+  included, shows a generic silent "Open StayDesk" in its place: browsers require a visible
+  notification for every push, and a cached owner would show one account's message to the
+  next one after a sign-out the worker had not heard of. That is the trade: a slow BFF costs
+  the text of a push, never its privacy. **Only another account retires the
+  subscription; no owner at all only hides the text.** The hint goes with the access cookie
+  whenever the API clears it, a refresh refused after a block or a reused token included,
+  and such a session ended without anybody signing out here: retiring on it would switch
+  push off for good on a device whose owner simply signs in again. So the subscription
+  stays, renewals go on with its secret, the pushes arrive generic until the same account
+  is back, and another account signing in retires it then. What has to stop on a revoked
+  session the API stops itself — a password reset or an email change deletes the account's
+  subscriptions, a blocked account is pushed nothing, an erasure deletes them. An older message of a thread keeps the newer
+  notification in its slot without a second alert, and a click opens the same-origin
+  destination in a new window rather than taking an existing tab away from its work.
+- **Every push carries a receipt, and the worker posts it back** — `received` when the push
+  arrives, and `clicked` from the notification (`POST /api/push/receipts`,
+  `credentials: "omit"`: the API takes it without a session, by the delivery's id). A
+  receipt that fails is lost; the notification is shown either way.
+- **One lock orders everything that touches the subscription.** Web Locks span the pages
+  and the worker, so subscribing, unsubscribing, signing in and out and showing a push run
+  one at a time across all of them (`withDevicePushLock` and its twin in the worker). The
+  worker intercepts the sign-in posts (`ACCOUNT_CHANGE_PATHS`): the page gets its answer as
+  soon as it arrives, while the lock stays held until the device is checked against the
+  new account, so a push landing in between waits instead of showing the previous
+  account's text.
+- **Cleanup follows a confirmed sign-out, an erasure or another account.** A sign-out
+  clears the device once the API has confirmed it. An erasure ends in the action's
+  redirect, so the home page's notice clears it (`RetireDevicePush`) — only on the
+  short-lived cookie the action sets (`ACCOUNT_DELETED_COOKIE`), never on the address
+  alone, which anybody may send to a visitor whose access token has merely lapsed. Clearing
+  closes the notifications on the screen, marks the opt-out in Cache Storage, unsubscribes
+  and has the worker retire the subscription at the API with its secret; what fails is
+  queued and retried on reconnect and focus, and the profile offers it as a button.
+- **The browser suite blocks the worker** except in `offline.spec.ts` (see "Browser
+  suite"), and its stack mints a VAPID pair per run (`vapidKeys` in `e2e/stack.ts`).
+
 ## Mutations and revalidation
 
 Where a mutation goes:
@@ -1751,6 +1857,10 @@ root to run them in Chromium against the hermetic stack started by the Playwrigh
 - **A CI run stops itself after eight minutes** (`globalTimeout`), inside the job's ten, so a
   hang still leaves its report and logs — a live run after forty, inside its workflow's
   fifty.
+- **The service worker is blocked** (`serviceWorkers: "block"` in `playwright.config.ts`):
+  what a worker fetches passes no route of the context — neither the address of each test nor
+  the Stripe stand-in — and it answers every page load. `offline.spec.ts`, the scenario that
+  proves the worker, is the one that lets it in.
 - **Two projects: `desktop` runs every scenario, `phone` (a Pixel 7) only what a narrow
   screen changes** — the navigation and the catalogue up to a listing's page. Below `lg`
   the shell draws its navigation in a sheet behind the menu button instead of the sidebar,

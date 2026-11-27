@@ -110,6 +110,12 @@ describe("the proxy's matcher", () => {
     expect(matches("/_next/static/chunk.js")).toBe(false);
   });
 
+  it("leaves the service worker to the policy of its own", () => {
+    expect(matches("/sw.js")).toBe(false);
+    expect(matches("/sw.json")).toBe(true);
+    expect(matches("/offline.html")).toBe(true);
+  });
+
   it("excludes the `api` segment rather than every path that starts with it", () => {
     expect(matches("/apiary")).toBe(true);
   });

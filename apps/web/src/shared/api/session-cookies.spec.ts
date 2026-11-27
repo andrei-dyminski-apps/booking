@@ -114,10 +114,34 @@ describe("mirrorSessionCookies", () => {
       name: ACCESS_TOKEN_COOKIE,
       path: "/",
     });
+    // The push account hint goes with the session it names.
     expect(store.delete).toHaveBeenNthCalledWith(2, {
+      name: "staydesk_push_account",
+      path: "/",
+    });
+    expect(store.delete).toHaveBeenNthCalledWith(3, {
       name: REFRESH_TOKEN_COOKIE,
       path: "/api/auth",
     });
+  });
+
+  it("names the push account after the subject of an issued access token", async () => {
+    const claims = Buffer.from(
+      JSON.stringify({ sub: "8c0e2f1a-4b3d-4e5f-9a6b-7c8d9e0f1a2b" }),
+    ).toString("base64url");
+
+    await mirrorSessionCookies(
+      answerWith(
+        issued(ACCESS_TOKEN_COOKIE, `header.${claims}.signature`, 900),
+      ),
+    );
+
+    expect(store.set).toHaveBeenNthCalledWith(
+      2,
+      "staydesk_push_account",
+      "8c0e2f1a-4b3d-4e5f-9a6b-7c8d9e0f1a2b",
+      expect.objectContaining({ path: "/", httpOnly: true }),
+    );
   });
 
   it("reads the other spelling of forgetting, Max-Age=0", async () => {

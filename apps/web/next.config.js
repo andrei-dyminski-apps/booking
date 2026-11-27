@@ -16,6 +16,31 @@ const nextConfig = {
   experimental: {
     isrFlushToDisk: process.env.DATA_CACHE_IN_MEMORY !== "true",
   },
+  // The service worker is fetched by its URL and checked for an update on every visit, so
+  // no cache may hold a copy: a stale worker keeps the offline page and the push handling
+  // of the build that cached it. The policy is the worker's own — it loads no script, and
+  // the page's nonce means nothing to it.
+  async headers() {
+    return [
+      {
+        source: "/sw.js",
+        headers: [
+          {
+            key: "Content-Type",
+            value: "application/javascript; charset=utf-8",
+          },
+          {
+            key: "Cache-Control",
+            value: "no-cache, no-store, must-revalidate",
+          },
+          {
+            key: "Content-Security-Policy",
+            value: "default-src 'self'; script-src 'self'",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

@@ -197,6 +197,9 @@ export class AccountRepository {
       await tx.mailOutbox.deleteMany({ where: { userId } });
       await tx.notification.deleteMany({ where: { userId } });
       await tx.waitlistEntry.deleteMany({ where: { userId } });
+      await tx.pushSubscription.deleteMany({ where: { userId } });
+      await tx.pushPreference.deleteMany({ where: { userId } });
+      await tx.pushTask.deleteMany({ where: { userId } });
       // Retired the way `DELETE /listings/:id` retires one: off the catalogue, closed to new
       // stays, the stays already taken against it keeping their record.
       await tx.listing.updateMany({

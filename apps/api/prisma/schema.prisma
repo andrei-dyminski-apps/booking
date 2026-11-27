@@ -575,15 +575,17 @@ model User {
   /// selects a payout, read locally so the sweep asks Stripe nothing.
   payoutsEnabledAt DateTime? @map("payouts_enabled_at")
 
-  refreshTokens RefreshToken[]
-  listings      Listing[]
-  bookings      Booking[]
-  conversations Conversation[]
-  notifications Notification[]
-  waitlist      WaitlistEntry[]
-  hostFees      HostFee[]           @relation("HostFeeHost")
-  waivedFees    HostFee[]           @relation("HostFeeWaivedBy")
-  adjustments   BookingAdjustment[]
+  refreshTokens     RefreshToken[]
+  listings          Listing[]
+  bookings          Booking[]
+  conversations     Conversation[]
+  notifications     Notification[]
+  pushSubscriptions PushSubscription[]
+  pushPreference    PushPreference?
+  waitlist          WaitlistEntry[]
+  hostFees          HostFee[]           @relation("HostFeeHost")
+  waivedFees        HostFee[]           @relation("HostFeeWaivedBy")
+  adjustments       BookingAdjustment[]
 
   /// `GET /users` is a keyset page ordered by `created_at` with `id` behind it — the pair
   /// `user-cursor.ts` encodes. One index serves both directions, the same arithmetic as the
@@ -740,6 +742,161 @@ model Notification {
   /// (partial on `read_at IS NULL`), in the raw SQL of the migration that made the table.
   @@index([userId, createdAt(sort: Desc), id(sort: Desc)])
   @@map("notifications")
+}
+
+/// A browser that asked to be told about this account's notices and messages while no tab
+/// is open (Web Push). One row per browser: the push service's `endpoint` is what names it,
+/// and is specific to one account while it can still receive that account's pushes.
+/// `p256dh` and `auth` are the browser's keys each push is encrypted to.
+model PushSubscription {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// Cascade: a browser told about an account that no longer exists is told nothing.
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries PushDelivery[]
+
+  /// The browsers of one account, oldest first — the order the cap drops them in.
+  @@index([userId, createdAt])
+  @@map("push_subscriptions")
+}
+
+/// An endpoint may still have pushes buffered at its provider after it is removed locally.
+/// Only its hash survives removal, until no previously sent push can still arrive; while
+/// it does, the endpoint is refused to every account but `user_id`, whose pushes those are.
+/// No foreign key: the hold outlives the subscription and must outlive the account too.
+/// A provider's backoff can outlast that hold and also applies to replacement subscriptions.
+model PushEndpointHold {
+  endpointHash String    @id @map("endpoint_hash")
+  userId       String?   @map("user_id") @db.Uuid
+  expiresAt    DateTime  @map("expires_at")
+  retryAfter   DateTime? @map("retry_after")
+
+  @@index([expiresAt])
+  @@map("push_endpoint_holds")
+}
+
+/// How an account wants to be pushed to; no row is the defaults (every group, any hour, no
+/// limit). The quiet hours are minutes after midnight on the clock of `time_zone`, which the
+/// browser that saved them sent: an account has no zone of its own. The contract's bounds are
+/// `CHECK`s too, raw SQL in the migration, for the writes that go around the API: the three
+/// quiet columns set together or not at all, each minute within a day and the two apart
+/// (`push_preferences_quiet_hours_*`), and the limit from 1 to `MAX_PUSH_HOURLY_LIMIT`
+/// (`push_preferences_hourly_limit_within_contract`) — a row outside them would answer
+/// `GET /push/settings` with what the frontend's parse refuses.
+model PushPreference {
+  userId      String   @id @map("user_id") @db.Uuid
+  mutedGroups String[] @default([]) @map("muted_groups")
+  quietFrom   Int?     @map("quiet_from")
+  quietTo     Int?     @map("quiet_to")
+  timeZone    String?  @map("time_zone")
+  hourlyLimit Int?     @map("hourly_limit")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("push_preferences")
+}
+
+enum PushTaskKind {
+  notice
+  message
+}
+
+/// Why a task stopped: `dispatched` handed it to the account's browsers, every other value
+/// is a push that was not sent and says why.
+enum PushTaskOutcome {
+  dispatched
+  read
+  muted
+  limited
+  stale
+  untargeted
+  off
+  failed
+}
+
+/// One piece of news to push to an account: a notice, or a message to the side that did not
+/// write it. Written in the transaction that writes the notice or the message, and only for
+/// an account with a browser to push to, so a push survives a Redis that lost its job — the
+/// relay queues every task still due. The id is the notice's or the message's. No foreign
+/// key to `users`, for the reason `mail_outbox` has none: a message writes the other side's
+/// task without taking that account's row lock. Finished rows are kept a while, because the
+/// hourly limit counts the tasks with a delivery attempt in the last hour.
+model PushTask {
+  id                   String           @id @db.Uuid
+  kind                 PushTaskKind
+  userId               String           @map("user_id") @db.Uuid
+  createdAt            DateTime         @default(now()) @map("created_at")
+  availableAt          DateTime         @default(now()) @map("available_at")
+  waitingForQuietHours Boolean          @default(false) @map("waiting_for_quiet_hours")
+  leasedUntil          DateTime?        @map("leased_until")
+  generation           Int              @default(0)
+  subscriptionIds      String[]         @default([]) @map("subscription_ids") @db.Uuid
+  outcome              PushTaskOutcome?
+  finishedAt           DateTime?        @map("finished_at")
+  lastAttemptAt        DateTime?        @map("last_attempt_at")
+  failures             Int              @default(0)
+  lastError            String?          @map("last_error")
+
+  deliveries PushDelivery[]
+
+  /// The relay claims by `push_tasks_due_idx` (`available_at`, partial on `outcome IS NULL`)
+  /// and the hourly prune deletes by `push_tasks_finished_idx` (`finished_at`, partial on
+  /// `outcome IS NOT NULL`), both in the raw SQL of the migration that made the table.
+  @@index([userId, lastAttemptAt])
+  @@map("push_tasks")
+}
+
+enum PushDeliveryStatus {
+  pending
+  sent
+  gone
+  rejected
+  expired
+  failed
+  skipped
+}
+
+/// One task to one browser. The wording is read from the source before each attempt.
+/// The delivery's id is the receipt the service worker posts
+/// back when the push arrives and when it is clicked. The browser's row may be gone by the
+/// time a retry runs — unsubscribed, or dropped by its push service — and the delivery stays
+/// as the record of what happened.
+model PushDelivery {
+  id                   String             @id @db.Uuid
+  taskId               String             @map("task_id") @db.Uuid
+  subscriptionId       String?            @map("subscription_id") @db.Uuid
+  createdAt            DateTime           @default(now()) @map("created_at")
+  availableAt          DateTime           @default(now()) @map("available_at")
+  waitingForQuietHours Boolean            @default(false) @map("waiting_for_quiet_hours")
+  leasedUntil          DateTime?          @map("leased_until")
+  generation           Int                @default(0)
+  status               PushDeliveryStatus @default(pending)
+  attempts             Int                @default(0)
+  /// Processing failures before a send is reserved, independent of provider attempts.
+  failures             Int                @default(0)
+  lastAttemptAt        DateTime?          @map("last_attempt_at")
+  /// The push service's last HTTP answer, `null` when it gave none (a timeout, a refused
+  /// connection).
+  responseStatus       Int?               @map("response_status")
+  lastError            String?            @map("last_error")
+  sentAt               DateTime?          @map("sent_at")
+  receivedAt           DateTime?          @map("received_at")
+  clickedAt            DateTime?          @map("clicked_at")
+
+  task         PushTask          @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  subscription PushSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  /// The relay claims by `push_deliveries_due_idx` (`available_at`, partial on
+  /// `status = 'pending'`), in the raw SQL of the migration that made the table.
+  @@index([taskId])
+  @@index([subscriptionId])
+  @@map("push_deliveries")
 }
 
 /// Nights somebody else holds, which one account wants to hear about when they come free.

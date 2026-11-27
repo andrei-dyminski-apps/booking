@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidateTag, updateTag } from "next/cache";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import {
   Role,
@@ -15,7 +16,12 @@ import {
   currentUser,
   listingsApi,
 } from "#shared/api";
-import { CATALOGUE_TAG, listingTag, ROUTES } from "#shared/config";
+import {
+  ACCOUNT_DELETED_COOKIE,
+  CATALOGUE_TAG,
+  listingTag,
+  ROUTES,
+} from "#shared/config";
 import { toFieldErrors, toFormErrors, type FormErrors } from "#shared/lib";
 import { isWrongPassword } from "../model/delete-refusal";
 
@@ -86,6 +92,14 @@ export async function deleteAccountAction(
 
   for (const id of retired) updateTag(listingTag(id));
   if (retired.length > 0) revalidateTag(CATALOGUE_TAG, "max");
+
+  // The notice it lands on retires this browser's push only on this proof of the erasure.
+  (await cookies()).set(ACCOUNT_DELETED_COOKIE.name, "1", {
+    maxAge: ACCOUNT_DELETED_COOKIE.maxAge,
+    path: "/",
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+  });
 
   redirect(ROUTES.accountDeleted);
 }

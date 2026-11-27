@@ -1472,6 +1472,78 @@ Out of scope: two-factor authentication and passkeys — their own phase, if eve
 the email address, which needs the confirmation of phase 13 for the new address and a notice to
 the old one, and is a step of its own.
 
+## Phase 15 — Push notifications and the installed app ✅
+
+Email (phase 13) reaches a person who is away, but only with the notices that matter most,
+only once the address is confirmed, and never with the demo accounts. A notice on the bell and
+a message in a thread reach a person only while a tab is open. Web Push closes that gap for
+every account on the browsers it chooses, and the same service worker makes the site an
+installable app with a page of its own when the network is gone.
+
+The `push` module follows the `mail` module's layout: `domain/push-policy.ts` holds the
+groups, the quiet hours, the hourly limit, the lifetime and the retry schedule as pure
+functions; `application/` the routes' service, the worker's `PushDispatcher` and the two
+ports; `infrastructure/` the Web Push adapter, the repositories, the queue, the worker and the
+outbox relay.
+
+- [x] **The installed app.** The manifest makes the site installable — "Install app" in the
+      "This device" section of `/profile` where the browser offers it, the Share sheet's
+      instructions on an iPhone. The service worker (`apps/web/public/sw.js`, plain JavaScript,
+      never bundled) caches only `public/offline.html` and shows it in place of a page load
+      the network failed; every other page is personal or live. Navigation preload keeps a
+      page load from waiting for the worker to boot. The worker is served with its own cache
+      and CSP policy and is left out of `proxy.ts`'s matcher.
+- [x] **Optional, behind a VAPID key pair.** `VAPID_SUBJECT`, `VAPID_PUBLIC_KEY` and
+      `VAPID_PRIVATE_KEY` — all three or none, checked to match at startup, made by
+      `pnpm --filter @repo/api push:keys`. With none set push is off and the profile offers no
+      switch. The new variables go into `.env.example`, `globalEnv` and the README's table.
+- [x] **One row per browser.** `push_subscriptions`, at most ten per account, the oldest
+      dropped first. Only the endpoints of the push services browsers use are accepted — the
+      API posts to them, so an address of the caller's choosing would be a request to a host
+      of their choosing. A removed endpoint leaves a hold (`push_endpoint_holds`) that refuses
+      it to every other account while pushes buffered at the provider can still arrive.
+- [x] **Delivered at least once, and Postgres is the schedule.** The transaction that writes a
+      notice or a message also writes a `push_tasks` row with the account's current
+      subscription ids. A relay hands every due task to a BullMQ queue of its own (`push`),
+      again after its lease runs out if Redis lost the job. The worker reads the record when
+      it decides — news already read in an open tab is not pushed — applies the account's
+      rules and fans the task out into one `push_deliveries` row per browser, each checked
+      again before every attempt. Providers that are unavailable are retried after 15 s,
+      1 min, 4 min and 16 min; a `429` pauses the endpoint until `Retry-After`, a day at most;
+      expired subscriptions are removed; nothing older than a day is sent. Finished tasks are
+      kept for 30 days.
+- [x] **The account decides how it is pushed to.** "Push notifications" on `/profile`
+      (`GET`/`PATCH /push/settings`): the muted groups (bookings, payments, messages, reviews,
+      waitlist openings and, for an admin, the admin alerts), quiet hours on the clock of the
+      browser that last changed them, and how many distinct tasks may be attempted in a
+      rolling hour. Pushes held for quiet hours are reconsidered when the window ends or
+      changes. The contract's bounds are repeated as `CHECK`s in the migration. Every request
+      names the account the page was rendered for and is refused for another session's
+      (`PUSH_ACCOUNT_CHANGED`).
+- [x] **A push shows its text only to the account it was sent to.** The BFF answers who this
+      browser belongs to (`GET /api/push/device-owner`, from an HttpOnly hint cookie written
+      beside every access token), and the worker compares the delivery's subscription
+      fingerprint with its own subscription. Anything else, a slow answer included, shows a
+      generic "Open StayDesk". The worker keeps the newest message per thread visible and
+      posts a receipt when a push arrives and when it is clicked (`POST /push/receipts`).
+- [x] **The browser keeps its subscription in step.** The worker renews a replaced
+      subscription with its predecessor's secret even with no tab open
+      (`POST /push/subscriptions/maintenance`); the signed-in shell reconciles on mount, focus,
+      reconnect and the worker's message. One Web Lock orders subscribing, unsubscribing,
+      signing in and out and showing a push across pages and the worker.
+- [x] **Cleanup.** A confirmed sign-out, an account deletion and another account signing in
+      clear this browser's subscription and its visible notifications; what fails is retried.
+      Deleting the account removes all its subscriptions, preferences and tasks; a password
+      reset or an email change deletes the subscriptions too.
+- [x] **Specs:** unit — the policy, the content, the dispatcher, the service, the Web Push
+      gateway, the contracts, the PWA helpers; e2e — `push.e2e-spec.ts` over the routes, the
+      relay, the worker and the cleanup; the browser suite — push preferences kept after a
+      reload, and the offline page with "Try again" (`offline.spec.ts`, the one scenario that
+      lets the service worker in). The browser stack mints a VAPID pair per run.
+
+Out of scope: caching pages for offline use (every page is personal or live), background sync
+of actions taken offline, and push on the real-Stripe and live targets of the browser suite.
+
 ## Decisions already made
 
 - **Prisma** (v7: `prisma.config.ts`, the `prisma-client` generator, the `@prisma/adapter-pg` driver adapter) — the most recognizable ORM; interactive transactions and raw migrations cover phase 4.
@@ -1504,7 +1576,7 @@ the old one, and is a step of its own.
   before React has hydrated, and `refresh()` / `updateTag` are reachable only from there.
   The client path stays for what a round trip cannot express — a poll for a webhook — and
   phase 6 is what brings the first of those.
-- The order of the phases follows the dependencies: database → auth → roles → concurrency → catalogue → Stripe → cancellation policies → polish → deployment → error codes → frontend e2e → account deletion → email → password change. The frontend e2e suite comes after the features it covers: it needs screens that have stopped changing, and it describes what a visitor sees rather than how the page is produced. Account deletion comes after it because its refusals are written in the codes of phase 10 and its erasure has to know every money path that can still be open. Email follows the erasure, which decides who is never written to, and the password change follows email, because a reset is a link sent by mail and a change has to be announced by one. The cancellation policies follow Stripe directly because they change the rules its refund machinery runs on, and they come before the error codes because they add refusals the codes would otherwise be written for twice. The catalogue comes before Stripe because the dependency runs one way only: Stripe Elements needs a booking to attach to, and a booking is created from the form on the listing page, which is the catalogue's. Nothing in the catalogue needs a payment — it is server-rendered from `searchParams`, and TanStack Query arrives with the polling of the webhook.
+- The order of the phases follows the dependencies: database → auth → roles → concurrency → catalogue → Stripe → cancellation policies → polish → deployment → error codes → frontend e2e → account deletion → email → password change → push notifications. The frontend e2e suite comes after the features it covers: it needs screens that have stopped changing, and it describes what a visitor sees rather than how the page is produced. Account deletion comes after it because its refusals are written in the codes of phase 10 and its erasure has to know every money path that can still be open. Email follows the erasure, which decides who is never written to, and the password change follows email, because a reset is a link sent by mail and a change has to be announced by one. Push comes last: it is a third road for the news the bell and the mail already carry, and it reuses their outbox pattern and the erasure's cleanup. The cancellation policies follow Stripe directly because they change the rules its refund machinery runs on, and they come before the error codes because they add refusals the codes would otherwise be written for twice. The catalogue comes before Stripe because the dependency runs one way only: Stripe Elements needs a booking to attach to, and a booking is created from the form on the listing page, which is the catalogue's. Nothing in the catalogue needs a payment — it is server-rendered from `searchParams`, and TanStack Query arrives with the polling of the webhook.
 
 ## Decisions deliberately not taken
 

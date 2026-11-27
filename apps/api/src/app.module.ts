@@ -23,6 +23,7 @@ import { LookupModule } from "./lookup/lookup.module";
 import { NotificationModule } from "./notification/notification.module";
 import { PaymentModule } from "./payment/payment.module";
 import { PayoutModule } from "./payout/payout.module";
+import { PushModule } from "./push/push.module";
 import { ReviewModule } from "./review/review.module";
 import { UserModule } from "./user/user.module";
 import { WaitlistModule } from "./waitlist/waitlist.module";
@@ -59,6 +60,7 @@ import { WaitlistModule } from "./waitlist/waitlist.module";
     NotificationModule,
     PaymentModule,
     PayoutModule,
+    PushModule,
     ReviewModule,
     UserModule,
     WaitlistModule,

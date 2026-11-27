@@ -26,4 +26,5 @@ export const exampleDay = (days: number): string =>
 export const EXAMPLE_ID = {
   listing: "3f2b8c1e-6d4a-4f7b-9a2e-5c8d1b7e4a60",
   request: "9b1d4e7a-2c3f-4a8b-8e6d-1f5a7c9b3d20",
+  pushDelivery: "5e7c2a9d-8b1f-4d3e-a6c4-2f9b7d1e8a35",
 } as const;

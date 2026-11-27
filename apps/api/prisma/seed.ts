@@ -449,6 +449,8 @@ async function main(password: string): Promise<void> {
   await prisma.listing.deleteMany();
   await prisma.user.deleteMany();
   await prisma.mailOutbox.deleteMany();
+  await prisma.pushTask.deleteMany();
+  await prisma.pushEndpointHold.deleteMany();
 
   const created = await Promise.all(
     Object.values(users).map((user) =>

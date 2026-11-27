@@ -65,6 +65,7 @@ const TAGS: [name: string, description: string][] = [
   ["Conversations", "Messages between a guest and a host"],
   ["Notifications", "The bell: notices about an account's stays and money"],
   ["Events", "The live stream that tells a browser something changed"],
+  ["Push", "Web Push: the browsers told about an account with no tab open"],
   ["Payouts", "A host's Stripe account, where their share is sent"],
   ["Host fees", "What a host owes for cancelling a paid stay"],
   [

@@ -703,6 +703,39 @@ describe("Transactional mail", () => {
     expect(attempts[1]).toEqual(attempts[0]);
   });
 
+  it("stops pushing to the account's browsers once its password is reset", async () => {
+    await confirm();
+    const endpoint = "https://fcm.googleapis.com/fcm/send/before-reset";
+    await host
+      .post("/push/subscriptions")
+      .send({
+        endpoint,
+        keys: {
+          p256dh:
+            "BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM",
+          auth: "tBHItJI5svbpez7KI4CCXg",
+        },
+      })
+      .expect(204);
+
+    await completeReset((await requestReset()).id);
+
+    expect(
+      await app
+        .get(PrismaService)
+        .pushSubscription.count({ where: { userId: hostId } }),
+    ).toBe(0);
+    const again = request.agent(app.getHttpServer());
+    await again
+      .post("/auth/login")
+      .send({ email: address, password: "replacement-password" })
+      .expect(200);
+    await again
+      .post("/push/subscriptions/status")
+      .send({ endpoint })
+      .expect(200, { registered: false });
+  });
+
   it("drops an unsent reset when the account version changes", async () => {
     await confirm();
     const db = app.get(PrismaService);

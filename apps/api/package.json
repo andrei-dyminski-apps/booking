@@ -24,6 +24,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio",
+    "push:keys": "web-push generate-vapid-keys",
     "stripe:probe-countries": "node --env-file-if-exists=../../.env -r ts-node/register scripts/probe-payout-countries.ts",
     "stripe:probe-transfer": "node --env-file-if-exists=../../.env -r ts-node/register scripts/probe-payout-transfer.ts",
     "stripe:sync-countries": "node --env-file-if-exists=../../.env -r ts-node/register scripts/sync-payout-countries.ts",
@@ -61,6 +62,7 @@
     "rxjs": "^7.8.1",
     "stripe": "^23.1.0",
     "svix": "^2.11.0",
+    "web-push": "^3.6.7",
     "zod": "^4.6.7"
   },
   "devDependencies": {
@@ -76,6 +78,7 @@
     "@types/nodemailer": "^8.0.2",
     "@types/passport-jwt": "^4.0.1",
     "@types/supertest": "^7.0.0",
+    "@types/web-push": "^3.6.4",
     "eslint": "^9.39.5",
     "jest": "^30.5.2",
     "pino-pretty": "^13.2.0",

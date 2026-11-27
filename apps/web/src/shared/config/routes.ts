@@ -20,6 +20,18 @@ export const ACCOUNT_DELETED_PARAM = {
   value: "deleted",
 } as const;
 
+/**
+ * What tells this browser that it erased the account itself, which the query cannot: a
+ * link anybody may send. The delete action sets it for a few minutes, and the deleted
+ * notice reads it once in the browser before it retires this device's push — so only an
+ * erasure retires it, never a typed `?account=deleted`. Not HttpOnly, since the browser
+ * reads and clears it; it holds nothing but its presence.
+ */
+export const ACCOUNT_DELETED_COOKIE = {
+  name: "staydesk_account_deleted",
+  maxAge: 300,
+} as const;
+
 export const DEMO_LOGIN_PARAM = "demo";
 
 /**
@@ -46,7 +58,6 @@ export const ROUTES = {
   catalogue: "/listings",
   waitlist: "/waitlist",
   messages: "/messages",
-  conversation: (id: string) => `/messages/${encodeURIComponent(id)}`,
   dashboard: "/dashboard",
   newListing: "/dashboard/listings/new",
   editListing: (id: string) => `/dashboard/listings/${encodeURIComponent(id)}`,

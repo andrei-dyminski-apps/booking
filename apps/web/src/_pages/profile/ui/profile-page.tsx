@@ -6,18 +6,26 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/ui/components/card";
-import { DELETED_USER_NAME } from "@repo/contracts";
+import { DELETED_USER_NAME, Role } from "@repo/contracts";
 import { ReviewSummary } from "#entities/review";
 import { LogoutButton } from "#features/logout";
-import { mailApi, requireUser } from "#shared/api";
+import {
+  ApiResponseError,
+  ApiUnreachableError,
+  mailApi,
+  pushApi,
+  requireUser,
+} from "#shared/api";
 import { ROUTES } from "#shared/config";
 import { formatDate, readerTimeZone } from "#shared/lib";
 import { ButtonLink } from "#shared/ui";
 import { readReviewSummaryOf } from "../api/read-review-summary-of";
 import { DeleteAccountDialog } from "./delete-account-dialog";
+import { DeviceSettings } from "./device-settings";
 import { EmailChangeDialog } from "./email-change-dialog";
 import { EmailSettings } from "./email-settings";
 import { PasswordChangeDialog } from "./password-change-dialog";
+import { PushSettings } from "./push-settings";
 
 export const ProfilePage = async () => {
   const user = await requireUser(ROUTES.profile);
@@ -74,6 +82,12 @@ export const ProfilePage = async () => {
         <Suspense fallback={null}>
           <ProfileEmailSettings />
         </Suspense>
+        <Suspense fallback={null}>
+          <ProfileDeviceSettings
+            userId={user.id}
+            admin={user.role === Role.ADMIN}
+          />
+        </Suspense>
         <LogoutButton />
 
         {/* At the end, under everything that can be undone. What it erases and what it
@@ -117,5 +131,41 @@ async function ProfileEmailSettings() {
       </h2>
       <p className="text-sm">Email settings are temporarily unavailable.</p>
     </section>
+  );
+}
+
+async function ProfileDeviceSettings({
+  userId,
+  admin,
+}: {
+  userId: string;
+  admin: boolean;
+}) {
+  // An API that cannot answer costs the push controls, not the page; a drift from the
+  // contract is still thrown. `undefined` tells the device section the key is unknown.
+  const publicKey = await pushApi.config().then(
+    (config) => config.publicKey,
+    (error: unknown) => {
+      if (
+        error instanceof ApiResponseError ||
+        error instanceof ApiUnreachableError
+      ) {
+        return undefined;
+      }
+      throw error;
+    },
+  );
+
+  return (
+    <>
+      {typeof publicKey === "string" && (
+        <PushSettings key={`push-${userId}`} userId={userId} admin={admin} />
+      )}
+      <DeviceSettings
+        key={`device-${userId}`}
+        userId={userId}
+        pushKey={publicKey}
+      />
+    </>
   );
 }
